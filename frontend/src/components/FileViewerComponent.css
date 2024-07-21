@@ -1,0 +1,68 @@
+/* FileViewerComponent.css */
+
+.file-viewer-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 999;
+}
+
+.file-viewer-content {
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    position: relative;
+}
+
+.file-viewer-content h4 {
+    margin-bottom: 15px;
+}
+
+.file-viewer-content pre {
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
+.file-viewer-content button {
+    background-color: #007bff;
+    color: #fff;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+
+.file-viewer-content button:hover {
+    background-color: #0056b3;
+}
+
+/* Dark Mode Styles specific to FileViewerComponent */
+.file-viewer-dark-mode .file-viewer-content {
+    background-color: #333;
+    /* Adjust background color for dark mode */
+    color: #fff;
+    /* Adjust text color for dark mode */
+}
+
+.file-viewer-dark-mode .file-viewer-content button {
+    background-color: #555;
+    /* Adjust button background color for dark mode */
+}
+
+.file-viewer-dark-mode .file-viewer-content button:hover {
+    background-color: #333;
+    /* Adjust button hover background color for dark mode */
+}

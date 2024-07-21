@@ -1,0 +1,34 @@
+/* KnowledgeBaseComponent.css */
+
+.file-list {
+    list-style-type: none;
+    padding: 0;
+}
+
+.file-list li {
+    margin-bottom: 10px;
+}
+
+.file-link {
+    cursor: pointer;
+    color: #007bff;
+    /* Link color */
+    text-decoration: underline;
+    margin-right: 10px;
+}
+
+.file-link:hover {
+    color: #0056b3;
+    /* Hover color */
+}
+
+/* Dark Mode Styles specific to KnowledgeBaseComponent */
+.knowledgebase-dark-mode .file-link {
+    color: #bbb;
+    /* Adjust color for dark mode */
+}
+
+.knowledgebase-dark-mode .file-link:hover {
+    color: #999;
+    /* Adjust hover color for dark mode */
+}

@@ -1,0 +1,25 @@
+# docker-compose.yml
+version: '3.8'
+services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: ./backends
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=/app/db/docsynth.db
+      - FRONTEND_ORIGIN=http://frontend:80  # Reference the frontend service
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
