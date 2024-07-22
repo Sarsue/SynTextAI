@@ -1,7 +1,7 @@
 
 
 DEPLOY
-copy .env, docker-compose.yml and deploy.sh files
+copy .env-prod, docker-compose-prod.yml and deploy.sh files
 
 scp deploy.sh docker-compose-prod.yml root@147.182.150.68:/root/
 scp /Users/osas/Documents/dev/docsynth/deploy.sh root@146.190.246.13:/root/
@@ -10,6 +10,7 @@ on server
 chmod +x deploy.sh
 ./deploy.sh
 
+rename files
 
 Troubleshooting
 scp may fail cos of key gen

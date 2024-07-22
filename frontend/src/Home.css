@@ -1,4 +1,7 @@
+/* Container styling to ensure positioning works */
 .app-container {
+    position: relative;
+    /* Ensure the absolute positioning of the logo is relative to this container */
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -9,26 +12,27 @@
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Dark mode styles */
 .dark-mode .app-container {
     background-color: #333;
     color: #fff;
 }
 
+/* Content container styling */
 .content-container {
     background-color: #fff;
-    /* Light mode background color */
     padding: 20px;
     border-radius: 10px;
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Dark mode styles for content container */
 .dark-mode .content-container {
     background-color: #444;
-    /* Dark mode background color */
     color: #fff;
-    /* Dark mode text color */
 }
 
+/* Title and description styling */
 .app-title {
     font-size: 2rem;
     margin-bottom: 10px;
@@ -39,6 +43,7 @@
     margin-bottom: 20px;
 }
 
+/* Sign-in button styling */
 .signin-link {
     text-decoration: none;
 }
@@ -57,9 +62,9 @@
 
 .google-sign-in-button:hover {
     background-color: #357ae8;
-    /* Slightly darker shade for hover effect */
 }
 
+/* Pricing table styling */
 .pricing-table {
     display: flex;
     justify-content: center;
@@ -67,6 +72,7 @@
     margin-bottom: 20px;
 }
 
+/* Individual pricing card styling */
 .pricing-card {
     border: 1px solid #ccc;
     border-radius: 10px;
@@ -74,18 +80,17 @@
     width: 250px;
     text-align: center;
     background-color: #fff;
-    /* Light mode background color */
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
+/* Dark mode styles for pricing card */
 .dark-mode .pricing-card {
     background-color: #444;
-    /* Dark mode background color */
     border-color: #555;
-    /* Dark mode border color */
 }
 
+/* Pricing card text styling */
 .pricing-title {
     font-size: 1.5rem;
     margin-bottom: 10px;
@@ -100,14 +105,14 @@
     margin-bottom: 20px;
     font-size: 0.9rem;
     color: #777;
-    /* Light mode text color */
 }
 
+/* Dark mode styles for pricing info */
 .dark-mode .pricing-info {
     color: #bbb;
-    /* Dark mode text color */
 }
 
+/* Pricing features list styling */
 .pricing-features {
     list-style: none;
     padding: 0;
@@ -119,6 +124,7 @@
     margin-bottom: 10px;
 }
 
+/* Pricing button styling */
 .pricing-button {
     display: inline-block;
     background-color: #4285f4;
@@ -132,12 +138,11 @@
 
 .pricing-button:hover {
     background-color: #357ae8;
-    /* Slightly darker shade for hover effect */
 }
 
+/* Company logo styling */
 .company-logo-container {
     position: absolute;
-    /* Absolute positioning */
     bottom: 20px;
     /* Distance from the bottom */
     right: 20px;
@@ -145,6 +150,48 @@
 }
 
 .company-logo-container img {
-    width: 150px;
+    max-width: 100px;
+    /* Adjust the size of the logo */
     height: auto;
+}
+
+/* Responsive logo styling */
+@media (max-width: 600px) {
+    .company-logo-container img {
+        max-width: 60px;
+        /* Smaller logo for smaller screens */
+    }
+}
+
+/* Features section styling */
+.features-section {
+    margin: 2rem 0;
+}
+
+.features-title {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+.features-intro {
+    font-size: 1.2rem;
+    margin-bottom: 1.5rem;
+}
+
+.features-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.feature-item {
+    margin-bottom: 1.5rem;
+}
+
+.feature-item h3 {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.feature-item p {
+    font-size: 1rem;
 }
