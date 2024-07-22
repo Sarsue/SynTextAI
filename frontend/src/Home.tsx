@@ -24,19 +24,19 @@ const Home: React.FC = () => {
 
                 <section className="features-section">
                     <h2 className="features-title">SynTextAI in a Nutshell</h2>
-                    <p className="features-intro"> AI for Documents - . Translate, Summarize and answer questions.</p>
+                    <p className="features-intro"> AI for Documents - Translate and Summarize  documents and answer questions.</p>
                     <div className="features-list">
                         <div className="feature-item">
                             <h3>Multiple Document Support</h3>
-                            <p> SyntextAI works on PDF, CSV, Txt, Image and support for many coming.</p>
+                            <p> SyntextAI works on PDF, CSV, Txt, Image and more coming.</p>
                         </div>
                         <div className="feature-item">
-                            <h3>Data Management Chats</h3>
-                            <p>Manage your chats and documents, you can export and delete your data.</p>
+                            <h3>Data Management</h3>
+                            <p>Export your chat's and delete your files</p>
                         </div>
                         <div className="feature-item">
                             <h3>Cited Sources</h3>
-                            <p>Answers contain references to their source in the original document. No Hallucinations.</p>
+                            <p>Answers contain references to their source in the original document.</p>
                         </div>
                         <div className="feature-item">
                             <h3>Any Language</h3>
@@ -47,9 +47,8 @@ const Home: React.FC = () => {
 
                 <div className="pricing-table">
                     <div className="pricing-card">
-                        <h2 className="pricing-title">Monthly Plan</h2>
-                        <p className="pricing-price">$20</p>
-                        <p className="pricing-info">First month free on sign-up</p>
+                        <h2 className="pricing-title">First Month Free Trial</h2>
+                        <p className="pricing-info">Then Pay $20 Monthly You'll Know Its Worth It</p>
                         {/* <ul className="pricing-features">
                             <li>Multilingual (English, French, Italian, German, Spanish and Code) QA on Documents</li>
                             <li>Document Summarization</li>
