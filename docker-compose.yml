@@ -7,7 +7,7 @@ services:
     ports:
       - "80:80"
     env_file:
-      - .env  # Pointing to the shared .env file
+      - .env
 
   backend:
     build:
@@ -15,6 +15,7 @@ services:
     ports:
       - "5001:5000"
     env_file:
-      - .env  # Pointing to the shared .env file
+      - .env
     volumes:
       - ./backend/db:/app/db
+    command: gunicorn app:create_app --bind 0.0.0.0:5000  # Ensure this matches your app callable

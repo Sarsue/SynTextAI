@@ -4,12 +4,12 @@ from db.docsynth_store import DocSynthStore
 from api.users import users_bp
 from api.histories import histories_bp
 from api.messages import messages_bp
-from api.files import files_bp, start_workers  # Import start_workers from api/files.py
+from api.files import files_bp, start_workers
 from api.subscriptions import subscriptions_bp
 from dotenv import load_dotenv
 import os
 from firebase_setup import initialize_firebase
- 
+
 load_dotenv()
 
 def create_app():
@@ -38,13 +38,6 @@ def create_app():
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
 
     return app
-
 if __name__ == '__main__':
     app = create_app()
-
-    # Start the background workers
-    num_workers = 4  # Maximum number of threads
-    start_workers(num_workers)
-
-    # Run the Flask app
     app.run(host='127.0.0.1', port=5000, debug=True)
