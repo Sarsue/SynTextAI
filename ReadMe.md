@@ -1,4 +1,12 @@
+Build
+docker-compose up --build 
 
+docker tag docsynth-frontend:latest osasdeeon/syntext:docsynth-frontend
+docker tag docsynth-backend:latest osasdeeon/syntext:docsynth-backend
+
+
+docker push osasdeeon/syntext:docsynth-frontend
+docker push osasdeeon/syntext:docsynth-backend 
 
 DEPLOY
 copy .env-prod, docker-compose-prod.yml and deploy.sh files
