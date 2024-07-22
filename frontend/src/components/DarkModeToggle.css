@@ -1,0 +1,55 @@
+.dark-mode-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 60px;
+    height: 30px;
+}
+
+.dark-mode-checkbox {
+    opacity: 0;
+    position: absolute;
+    width: 0;
+    height: 0;
+}
+
+.dark-mode-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 100%;
+    background-color: #ccc;
+    border-radius: 15px;
+    padding: 0 5px;
+    box-sizing: border-box;
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.3s;
+}
+
+.dark-mode-checkbox:checked+.dark-mode-label {
+    background-color: #4a4a4a;
+}
+
+.sun-icon,
+.moon-icon {
+    font-size: 18px;
+    line-height: 30px;
+}
+
+.toggle-ball {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 24px;
+    height: 24px;
+    background-color: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+}
+
+.dark-mode-checkbox:checked+.dark-mode-label .toggle-ball {
+    transform: translateX(30px);
+}

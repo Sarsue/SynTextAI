@@ -1,0 +1,35 @@
+/* ChatApp.css */
+
+.chat-app-container {
+    display: flex;
+    height: 100vh;
+}
+
+/* Apply dark mode styles to all child elements of chat-app-container when dark mode is active */
+.dark-mode .chat-app-container>* {
+    /* Example dark mode background color */
+    background-color: #333;
+    /* Example dark mode text color */
+    color: #fff;
+}
+
+.conversation-column {
+    flex: 2;
+    /* Adjust the proportion as needed */
+    display: flex;
+    flex-direction: column;
+}
+
+.history-column {
+    flex: 1;
+    /* Adjust the proportion as needed */
+    background-color: #f0f0f0;
+    /* Example background color for the history panel */
+}
+
+.dark-mode .history-column {
+    background-color: #333;
+    /* Dark mode background color for the history panel */
+    color: #fff;
+    /* Dark mode text color */
+}
