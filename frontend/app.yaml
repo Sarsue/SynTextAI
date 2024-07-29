@@ -1,0 +1,28 @@
+name: syntext-app
+
+services:
+  - name: frontend
+    git:
+      repo: https://github.com/Sarsue/SynTextAI.git
+      branch: main
+    build_command: |
+      npm install
+      npm run build
+    run_command: serve -s build -l 80
+    source_dir: frontend
+    static_site:
+      build_dir: build
+    envs:
+      - key: REACT_APP_API_BASE_URL
+        value: ${REACT_APP_API_BASE_URL}
+      - key: REACT_APP_STRIPE_API_KEY
+        value: ${REACT_APP_STRIPE_API_KEY}
+      - key: REACT_APP_STRIPE_SECRET
+        value: ${REACT_APP_STRIPE_SECRET}
+      - key: REACT_APP_STRIPE_ENDPOINT_SECRET
+        value: ${REACT_APP_STRIPE_ENDPOINT_SECRET}
+      - key: FRONTEND_ORIGIN
+        value: ${FRONTEND_ORIGIN}
+    routes:
+      - path: /
+        service: frontend
