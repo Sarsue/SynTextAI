@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from db.docsynth_store import DocSynthStore
 from api.users import users_bp
@@ -19,10 +19,8 @@ def create_app():
     initialize_firebase()
 
     # Set up CORS
-    frontend_origin = os.getenv('FRONTEND_ORIGIN', 'http://localhost:3000')
-    CORS(app, resources={
-        r"/api/*": {"origins": frontend_origin}
-    }, supports_credentials=True)
+    origin = os.getenv('FRONTEND_ORIGIN', 'http://localhost:3000')
+    CORS(app, supports_credentials=True)
 
     # Read the database URL from environment variables
     database_path = os.getenv('DATABASE_URL', './db/docsynth.db')
@@ -37,7 +35,11 @@ def create_app():
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
 
+    # Add a welcome route
+    @app.route('/')
+    def welcome():
+        return jsonify(message="Welcome to SynthTextAI API!")
+
     return app
-if __name__ == '__main__':
-    app = create_app()
-    app.run(host='127.0.0.1', port=5000, debug=True)
+
+

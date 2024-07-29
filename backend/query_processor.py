@@ -1,4 +1,4 @@
-from llm_service import prompt_llm,prompt_slm
+from llm_service import prompt_llm
 import re
 import json
 
@@ -35,7 +35,7 @@ def choose_best_answer(query, top_k_results):
                 resp_prompt = f"Answer the following question based on the provided text:{result['data']}\n\n"
                 resp_prompt += f"Question: {query}\n\n"
                 print(resp_prompt)
-                ans = prompt_slm(resp_prompt)
+                ans = prompt_llm(resp_prompt)
                 file_name = result['file_url'].split('/')[-1]
                 if (result['page_number'] > 1):
                     file_name += ' page ' + str(result['page_number'])
@@ -53,7 +53,7 @@ def choose_best_answer(query, top_k_results):
         resp_prompt = f"Answer the following question based on the provided text:{result['data']}\n\n"
         resp_prompt += f"Question: {query}\n\n"
         print(resp_prompt)
-        ans = prompt_slm(resp_prompt)
+        ans = prompt_llm(resp_prompt)
         file_name = result['file_url'].split('/')[-1]
         if (result['page_number'] > 1):
             file_name += ' page ' + str(result['page_number'])

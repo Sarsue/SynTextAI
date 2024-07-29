@@ -1,4 +1,3 @@
-# backend/Dockerfile
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -9,4 +8,4 @@ COPY . .
 # Expose port
 EXPOSE 5000
 
-CMD ["gunicorn", "app:create_app", "--bind", "0.0.0.0:5000"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "wsgi:app"]

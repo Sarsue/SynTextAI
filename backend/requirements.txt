@@ -41,7 +41,7 @@ grpcio-status
 grpcio-tools
 flask
 firebase-admin
-flask_cors
+flask-cors
 pdfminer.six
 Pillow
 pytesseract

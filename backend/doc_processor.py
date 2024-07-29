@@ -5,7 +5,7 @@ import re
 from pdfminer.high_level import extract_text
 from PIL import Image
 import pytesseract
-from llm_service import prompt_llm,prompt_slm
+from llm_service import prompt_llm
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -21,7 +21,7 @@ def summarizer(data):
             f"Question 2: What is another relevant question?\n"
             f"Answer 2: Another corresponding answer.\n"
         )
-        response = prompt_slm(data_prompt)
+        response = prompt_llm(data_prompt)
         
         # Use regex to extract questions and answers based on the structure
         question_pattern = r"Question \d+: (.*)"
@@ -51,7 +51,7 @@ def get_chunks(data):
     
     try:
         # use the slm for chunking
-        response = prompt_slm(chunk_prompt)
+        response = prompt_llm(chunk_prompt)
         print(response)
         chunks = response.split("\n")
         cleaned_chunks = [chunk.split(". ", 1)[1].strip('"') for chunk in chunks if ". " in chunk]
