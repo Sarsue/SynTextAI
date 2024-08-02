@@ -60,7 +60,7 @@ const Auth: FC<AuthProps> = ({ setUser }) => {
 
             // Now you can use the idToken to make API requests to your Flask API
             // Example: Make a POST request to your API endpoint with the idToken
-            const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/v1/users`, {
+            const response = await fetch(`api/v1/users`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

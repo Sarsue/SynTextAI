@@ -4,9 +4,6 @@ from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
 from doc_processor import process_file
 from google.cloud import storage
-from threading import Thread
-from queue import Queue, Empty
-from time import sleep
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -17,8 +14,7 @@ files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
 def get_id_helper(success, user_info):
     if not success:
         return jsonify(user_info), 401
-    id = user_info['user_id']
-    return id
+    return user_info['user_id']
 
 def delete_from_gcs(user_id, file_name):
     try:
@@ -82,42 +78,14 @@ def process_and_store_file(file_path, user_id, file_id, filename):
                 os.remove(file_path)
                 logging.info(f"Removed local file: {file_path}")
 
-# Create a thread-safe queue for processing files
-file_queue = Queue()
-
-def worker():
-    while True:
-        try:
-            file_info = file_queue.get(timeout=3)  # Use timeout to avoid blocking indefinitely
-            file_path = file_info['file_path']
-            user_id = file_info['user_id']
-            file_id = file_info['file_id']
-            filename = file_info['filename']
-            print(f"Worker processing file: {filename}")
-            process_and_store_file(file_path, user_id, file_id, filename)
-            file_queue.task_done()  # Signal that the task is done
-        except Empty:
-            continue  # Continue looping if the queue is empty
-        except Exception as e:
-           print(f"Worker encountered an error: {e}")
-
-def start_workers(num_workers):
-    threads = []
-    for _ in range(num_workers):
-        t = Thread(target=worker)
-        t.daemon = True
-        t.start()
-        threads.append(t)
-    return threads
-
 @files_bp.route('', methods=['GET'])
 def retrieve_files():
     try:
         store = current_app.store
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
-        id = store.get_user_id_from_email(user_info['email'])
-        files = store.get_files_for_user(id)
+        user_id = store.get_user_id_from_email(user_info['email'])
+        files = store.get_files_for_user(user_id)
         return jsonify(files)
     except Exception as e:
         logging.error(str(e))
@@ -130,7 +98,7 @@ def save_file():
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
         user_id = get_id_helper(success, user_info)
-        id = store.get_user_id_from_email(user_info['email'])
+        file_id = store.get_user_id_from_email(user_info['email'])
 
         if not request.files:
             logging.error('No files provided')
@@ -146,16 +114,11 @@ def save_file():
             file_path = os.path.join(source_documents_folder, file.filename)
             file.save(file_path)
 
-            # Add file information to the queue
-            file_queue.put_nowait({
-                'file_path': file_path,
-                'user_id': user_id,
-                'file_id': id,
-                'filename': file.filename
-            })
-            print(f"Queued file for processing: {file.filename}")
+            # Process and store the file
+            process_and_store_file(file_path, user_id, file_id, file.filename)
+            print(f"Processed and stored file: {file.filename}")
 
-        return jsonify({'message': 'File is being processed. It will appear in the knowledge base management section in settings, on completion.'})
+        return jsonify({'message': 'File processing complete. It will appear in the knowledge base management section in settings.'})
 
     except Exception as e:
         print(str(e))
@@ -168,8 +131,8 @@ def delete_file(fileId):
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
         user_id = get_id_helper(success, user_info)
-        id = store.get_user_id_from_email(user_info['email'])
-        file_dict = store.delete_file_entry(id, fileId)
+        file_id = store.get_user_id_from_email(user_info['email'])
+        file_dict = store.delete_file_entry(file_id, fileId)
         delete_from_gcs(user_id, file_dict['file_name'])
         return '', 204
     except Exception as e:
@@ -177,10 +140,6 @@ def delete_file(fileId):
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Start the background workers
-    num_workers = 4  # Maximum number of threads
-    start_workers(num_workers)
-
     # Your Flask app initialization code here
     from app import create_app
     app = create_app()

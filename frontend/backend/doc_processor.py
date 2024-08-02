@@ -67,9 +67,10 @@ def extract_text_from_pdf(pdf_file):
         text = extract_text(pdf_file)
         pages = text.split('\f')  # Split by form feed character for pages
         for page_number, page_text_data in enumerate(pages):
-            result = get_chunks(page_text_data)
-            result["page_number"] = page_number + 1
-            data.append(result)
+            if len(page_text_data) > 0 :
+                result = get_chunks(page_text_data)
+                result["page_number"] = page_number + 1
+                data.append(result)
     except Exception as e:
         logging.error(f"Error extracting text from PDF: {e}")
         data.append({"extractpdferror": str(e)})

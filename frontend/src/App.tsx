@@ -30,7 +30,7 @@ const App: React.FC = () => {
         // Make an API call to fetch the subscription status
         // Example:
         const idToken = await user?.getIdToken()
-        const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/v1/subscriptions/status`, {
+        const response = await fetch(`api/v1/subscriptions/status`, {
             method: 'GET',
             headers: {
                 Authorization: `Bearer ${idToken}`,

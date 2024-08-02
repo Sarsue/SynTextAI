@@ -101,7 +101,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
                 const token = await user.getIdToken();
 
                 try {
-                    const res = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/v1/subscriptions/sub`, {
+                    const res = await fetch(`api/v1/subscriptions/sub`, {
                         method: 'POST',
                         headers: {
                             Authorization: `Bearer ${token}`,
@@ -152,7 +152,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         try {
             const token = await user.getIdToken();
 
-            const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/v1/subscriptions/cancel`, {
+            const response = await fetch(`api/v1/subscriptions/cancel`, {
                 method: 'post',
                 headers: {
                     Authorization: `Bearer ${token}`,

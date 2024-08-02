@@ -1,26 +1,28 @@
-# Use a base image with Node.js
-FROM node:18-alpine
-
-# Set the working directory
+# Build step #1: build the React front end
+FROM node:16-alpine AS build-step
 WORKDIR /app
-
-# Copy package.json and package-lock.json
-COPY package*.json ./
-
-# Install dependencies
+ENV PATH=/app/node_modules/.bin:$PATH
+COPY frontend/package.json frontend/package-lock.json ./
+COPY frontend/src ./src
+COPY frontend/public ./public
 RUN npm install
-
-# Copy the rest of the application
-COPY . .
-
-# Build the React app
 RUN npm run build
 
-# Install a simple HTTP server
-RUN npm install -g serve
+# Build step #2: build the API with the client as static files
+FROM python:3.12-slim
+WORKDIR /app
 
-# Serve the app
-CMD ["serve", "-s", "build"]
+# Copy the build artifacts from the first stage
+COPY --from=build-step /app/build ./build
 
-# Expose port 80
-EXPOSE 3000
+# Copy backend files
+COPY frontend/backend/requirements.txt ./api/requirements.txt
+COPY frontend/backend/wsgi.py ./api/wsgi.py
+COPY frontend/backend/.flaskenv ./api/.flaskenv
+
+RUN pip install -r ./api/requirements.txt
+ENV FLASK_ENV=production
+
+EXPOSE 5000
+WORKDIR /app/api
+CMD ["gunicorn", "-b", ":5000", "wsgi:app"]

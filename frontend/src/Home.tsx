@@ -59,7 +59,9 @@ const Home: React.FC = () => {
                 </div>
             </div>
             <div className="company-logo-container">
-                <img src="/company-logo.png" alt="Company Logo" style={logoStyle} />
+                {/* <img src="/company-logo.png" alt="Company Logo" style={logoStyle} /> */}
+                <p>Developed By OSAS INC.</p>
+
             </div>
         </div>
     );

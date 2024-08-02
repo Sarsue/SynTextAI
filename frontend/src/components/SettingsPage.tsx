@@ -61,7 +61,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
         try {
             const token = await user.getIdToken();
 
-            const response = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/v1/files`, {
+            const response = await fetch(`api/v1/files`, {
                 headers: {
                     Authorization: `Bearer ${token}`,
                 },
@@ -88,7 +88,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
         try {
             const token = await user.getIdToken();
 
-            const deleteResponse = await fetch(`${process.env.REACT_APP_API_BASE_URL}/api/v1/files/${fileId}`, {
+            const deleteResponse = await fetch(`api/v1/files/${fileId}`, {
                 method: 'DELETE',
                 headers: {
                     Authorization: `Bearer ${token}`,

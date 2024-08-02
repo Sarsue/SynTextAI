@@ -30,7 +30,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const updateStatus = async (messageId: number, like: boolean) => {
         try {
-            const url = `${process.env.REACT_APP_API_BASE_URL}/api/v1/messages/${like ? 'like' : 'dislike'}/${messageId}`;
+            const url = `api/v1/messages/${like ? 'like' : 'dislike'}/${messageId}`;
             const method = 'POST';
 
             const response = await callApiWithToken(url, method);
@@ -137,7 +137,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
 
                 const fileDataResponse = await callApiWithToken(
-                    `${process.env.REACT_APP_API_BASE_URL}/api/v1/files`,
+                    `api/v1/files`,
                     'POST',
                     formData
                 );
@@ -206,7 +206,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     });
 
                     const linkDataResponse = await callApiWithToken(
-                        `${process.env.REACT_APP_API_BASE_URL}/api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}`,
+                        `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}`,
                         'POST'
                     );
 
@@ -244,7 +244,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 }
             } else {
                 const createHistoryResponse = await callApiWithToken(
-                    `${process.env.REACT_APP_API_BASE_URL}/api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
+                    `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
                     'POST'
                 );
 
@@ -280,7 +280,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         setCurrentHistory(newHistory.id);
 
                         const linkDataResponse = await callApiWithToken(
-                            `${process.env.REACT_APP_API_BASE_URL}/api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}`,
+                            `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}`,
                             'POST'
                         );
 
@@ -325,7 +325,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const handleClearHistory = async () => {
         try {
-            const clearHistoryResponse = await callApiWithToken(`${process.env.REACT_APP_API_BASE_URL}/api/v1/histories/all`, 'DELETE');
+            const clearHistoryResponse = await callApiWithToken(`api/v1/histories/all`, 'DELETE');
 
             if (!clearHistoryResponse?.ok) {
                 console.error('Failed to clear history:', clearHistoryResponse?.statusText);
@@ -342,7 +342,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const handleNewChat = async () => {
         try {
-            const createHistoryResponse = await callApiWithToken(`${process.env.REACT_APP_API_BASE_URL}/api/v1/histories?title=New%20Chat`, 'POST');
+            const createHistoryResponse = await callApiWithToken(`api/v1/histories?title=New%20Chat`, 'POST');
 
             if (createHistoryResponse) {
                 const createHistoryData = createHistoryResponse.ok ? await createHistoryResponse.json() : null;
@@ -368,7 +368,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         try {
             const idToDelete = typeof historyId === 'number' ? historyId : historyId.id;
 
-            const deleteHistoryResponse = await callApiWithToken(`${process.env.REACT_APP_API_BASE_URL}/api/v1/histories?history-id=${encodeURIComponent(idToDelete)}`, 'DELETE');
+            const deleteHistoryResponse = await callApiWithToken(`api/v1/histories?history-id=${encodeURIComponent(idToDelete)}`, 'DELETE');
 
             if (deleteHistoryResponse) {
                 const deleteHistoryData = await deleteHistoryResponse.json();
@@ -391,7 +391,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
     const fetchHistories = async () => {
         try {
-            const historiesResponse = await callApiWithToken(`${process.env.REACT_APP_API_BASE_URL}/api/v1/histories`, 'GET');
+            const historiesResponse = await callApiWithToken(`api/v1/histories`, 'GET');
 
             if (!historiesResponse?.ok) {
                 console.error('Failed to fetch chat histories:', historiesResponse?.status, historiesResponse?.statusText);
