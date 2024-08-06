@@ -15,21 +15,18 @@ WORKDIR /app
 COPY --from=build-step /app/build ./build
 
 # Create the api directory
-RUN mkdir ./api
+RUN mkdir -p ./api
 
 # Copy backend files
-# Copy backend files
 COPY backend/ ./api/
+
 
 # Install Python dependencies
 RUN pip install -r ./api/requirements.txt
 
-# Set environment variable
-ENV FLASK_ENV=production
-
-# Expose port
+# Expose the application port
 EXPOSE 3000
 
-# Set working directory and run the application
+# Start the Flask application
 WORKDIR /app/api
 CMD ["gunicorn", "-b", ":3000", "wsgi:app"]

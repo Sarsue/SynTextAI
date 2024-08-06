@@ -1,6 +1,6 @@
 from flask import Flask, jsonify,send_from_directory
 from flask_cors import CORS
-from db.docsynth_store import DocSynthStore
+from postgresql_store import DocSynthStore
 from api.users import users_bp
 from api.histories import histories_bp
 from api.messages import messages_bp
@@ -24,9 +24,21 @@ def create_app():
     # Set up CORS
     CORS(app, supports_credentials=True)
 
-    # Read the database URL from environment variables
-    database_path = os.getenv('DATABASE_URL', './db/docsynth.db')
-    store = DocSynthStore(database_path)
+    db_name = os.getenv("DATABASE_NAME")
+    db_user = os.getenv("DATABASE_USER")
+    db_pwd = os.getenv("DATABASE_PASSWORD")
+    db_host = os.getenv("DATABASE_HOST")
+    db_port = os.getenv("DATABASE_PORT")
+
+    database_config = {
+        'dbname': db_name,
+        'user': db_user,
+        'password': db_pwd,
+        'host': db_host,
+        'port': db_port
+    }
+   
+    store = DocSynthStore(database_config)
    
     app.store = store
 

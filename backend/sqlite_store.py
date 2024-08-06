@@ -12,7 +12,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 class DocSynthStore:
     def __init__(self, database_path):
-        self.database_path = database_path
+        self.database_path = './db/docsynth.db'
+        #self.database_path = database_path
         self.vectorizer = TfidfVectorizer()
         self.connection = sqlite3.connect(
             database_path, check_same_thread=False)

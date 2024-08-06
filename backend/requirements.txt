@@ -45,6 +45,7 @@ flask-cors
 pdfminer.six
 Pillow
 pytesseract
+psycopg2-binary==2.9.9
 gunicorn
 gpt4all
 mistralai
