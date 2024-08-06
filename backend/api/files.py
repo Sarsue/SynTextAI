@@ -43,40 +43,33 @@ def upload_to_gcs(file_path, user_id, filename):
         return None
 
 def process_and_store_file(file_path, user_id, file_id, filename):
-    from firebase_setup import initialize_firebase
-    initialize_firebase()
+    try:
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found at path: {file_path}")
 
-    from app import create_app
-    app = create_app()
+        # Process the file
+        doc_info = process_file(file_path)
+        print(f"Document info: {doc_info}")
 
-    with app.app_context():
-        try:
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"File not found at path: {file_path}")
+        # Verify file exists after processing
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found at path (post-processing check): {file_path}")
 
-            # Process the file
-            doc_info = process_file(file_path)
-            print(f"Document info: {doc_info}")
+        # Upload to GCS
+        file_url = upload_to_gcs(file_path, user_id, filename)
+        if file_url:
+            store = current_app.store
+            store.add_file(file_id, filename, file_url, doc_info)
+            print(f"Finished processing and storing file: {filename}")
 
-            # Verify file exists after processing
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"File not found at path (post-processing check): {file_path}")
+    except Exception as e:
+        logging.error(f"Error processing file {filename}: {e}")
 
-            # Upload to GCS
-            file_url = upload_to_gcs(file_path, user_id, filename)
-            if file_url:
-                store = current_app.store
-                store.add_file(file_id, filename, file_url, doc_info)
-                print(f"Finished processing and storing file: {filename}")
-
-        except Exception as e:
-            logging.error(f"Error processing file {filename}: {e}")
-
-        finally:
-            # Clean up: remove file from source documents folder
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logging.info(f"Removed local file: {file_path}")
+    finally:
+        # Clean up: remove file from source documents folder
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logging.info(f"Removed local file: {file_path}")
 
 @files_bp.route('', methods=['GET'])
 def retrieve_files():
@@ -95,6 +88,7 @@ def retrieve_files():
 def save_file():
     try:
         store = current_app.store
+        queue = current_app.queue  # Access the RQ queue from the app context
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
         user_id = get_id_helper(success, user_info)
@@ -114,11 +108,11 @@ def save_file():
             file_path = os.path.join(source_documents_folder, file.filename)
             file.save(file_path)
 
-            # Process and store the file
-            process_and_store_file(file_path, user_id, file_id, file.filename)
-            print(f"Processed and stored file: {file.filename}")
+            # Enqueue the file processing task
+            queue.enqueue(process_and_store_file, file_path, user_id, file_id, file.filename)
+            print(f"Enqueued processing for file: {file.filename}")
 
-        return jsonify({'message': 'File processing complete. It will appear in the knowledge base management section in settings.'})
+        return jsonify({'message': 'File processing started. It will appear in the knowledge base management section in settings.'})
 
     except Exception as e:
         print(str(e))
@@ -138,10 +132,3 @@ def delete_file(fileId):
     except Exception as e:
         logging.error(str(e))
         return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    # Your Flask app initialization code here
-    from app import create_app
-    app = create_app()
-    app.register_blueprint(files_bp)
-    app.run(debug=True)

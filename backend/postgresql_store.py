@@ -42,8 +42,7 @@ class DocSynthStore:
                         CREATE TABLE IF NOT EXISTS users (
                             id SERIAL PRIMARY KEY,
                             email TEXT NOT NULL UNIQUE,
-                            username TEXT NOT NULL UNIQUE,
-                            subscription_status TEXT NOT NULL DEFAULT 'inactive'
+                            username TEXT NOT NULL UNIQUE
                         )
                     ''')
 
@@ -124,23 +123,37 @@ class DocSynthStore:
             with connection:
                 with connection.cursor() as cursor:
                     try:
+                        # Check if the user already exists
                         cursor.execute('''
-                            INSERT INTO users (email, username, subscription_status)
-                            VALUES (%s, %s, %s)
-                            RETURNING id, email, username, subscription_status
-                        ''', (email, username, 'inactive'))
-                        user = cursor.fetchone()
-                        return {'id': user[0], 'email': user[1], 'username': user[2], 'subscription_status': user[3]}
-                    except errors.UniqueViolation as e:
-                        logging.error(f"Error adding user: {e}")
-                        connection.rollback()
-                        cursor.execute('''
-                            SELECT id, email, username, subscription_status
+                            SELECT id, email, username
                             FROM users
                             WHERE email = %s
                         ''', (email,))
                         user = cursor.fetchone()
-                        return {'id': user[0], 'email': user[1], 'username': user[2], 'subscription_status': user[3]}
+                        
+                        if user:
+                            return {'id': user[0], 'email': user[1], 'username': user[2]}
+                        
+                        # Insert the new user
+                        cursor.execute('''
+                            INSERT INTO users (email, username)
+                            VALUES (%s, %s)
+                            RETURNING id, email, username
+                        ''', (email, username))
+                        
+                        user = cursor.fetchone()
+                        return {'id': user[0], 'email': user[1], 'username': user[2]}
+                    
+                    except errors.UniqueViolation as e:
+                        logging.error(f"Error adding user: {e}")
+                        connection.rollback()
+                        cursor.execute('''
+                            SELECT id, email, username
+                            FROM users
+                            WHERE email = %s
+                        ''', (email,))
+                        user = cursor.fetchone()
+                        return {'id': user[0], 'email': user[1], 'username': user[2]}
         finally:
             self.release_connection(connection)
 
