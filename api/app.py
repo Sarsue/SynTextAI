@@ -2,7 +2,7 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from postgresql_store import DocSynthStore
 from dotenv import load_dotenv
-from api.celery import celery_app  # Import here to avoid circular import
+from celery_worker import celery_app  # Import here to avoid circular import
 import os
 from firebase_setup import initialize_firebase
 

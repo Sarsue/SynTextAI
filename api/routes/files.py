@@ -5,7 +5,7 @@ from utils import get_user_id
 from doc_processor import process_file
 from google.cloud import storage
 from redis.exceptions import RedisError
-from api.celery import celery_app  # Adjust this import
+from celery_worker import celery_app  # Adjust this import
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
