@@ -4,6 +4,7 @@ import time
 from dotenv import load_dotenv
 import os
 from gpt4all import GPT4All
+import httpx 
 
 # Load environment variables from a .env file in the current directory
 load_dotenv()

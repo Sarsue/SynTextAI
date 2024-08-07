@@ -1,17 +1,10 @@
 from flask import Flask, send_from_directory
 from flask_cors import CORS
 from postgresql_store import DocSynthStore
-from api.users import users_bp
-from api.histories import histories_bp
-from api.messages import messages_bp
-from api.files import files_bp
-from api.subscriptions import subscriptions_bp
 from dotenv import load_dotenv
+from api.celery import celery_app  # Import here to avoid circular import
 import os
 from firebase_setup import initialize_firebase
-from redis import Redis
-from rq import Queue
-import subprocess
 
 load_dotenv()
 
@@ -38,30 +31,30 @@ def create_app():
         'host': db_host,
         'port': db_port
     }
-   
-    store = DocSynthStore(database_config)
+
+    store = DocSynthStore(database_config) 
     app.store = store
 
     redis_username = os.getenv('REDIS_USERNAME')
     redis_pwd = os.getenv('REDIS_PASSWORD')
     redis_host = os.getenv("REDIS_HOST")
     redis_port = os.getenv("REDIS_PORT")
-    # Set up Redis and RQ
-    redis_url = f'redis://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}'
-    redis_conn = Redis.from_url(redis_url)
-    queue = Queue(connection=redis_conn)
-    app.queue = queue
 
-    # Start RQ worker
-    worker_process = subprocess.Popen(['rq', 'worker', '--url', redis_url])
+    # Celery configuration
+    app.config.update(
+        CELERY_BROKER_URL=f'redis://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0',
+        CELERY_RESULT_BACKEND=f'redis://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0'
+    )
 
-    @app.teardown_appcontext
-    def cleanup(exception):
-        if worker_process.poll() is None:
-            worker_process.terminate()
-            worker_process.wait()
+    celery_app.conf.update(app.config)
 
     # Register Blueprints
+    from routes.users import users_bp
+    from routes.histories import histories_bp
+    from routes.messages import messages_bp
+    from routes.files import files_bp
+    from routes.subscriptions import subscriptions_bp
+
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
     app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
@@ -77,3 +70,9 @@ def create_app():
         return send_from_directory(app.static_folder, path)
 
     return app
+
+def create_celery_app(app=None):
+    if app is None:
+        app = create_app()
+    celery_app.conf.update(app.config)
+    return celery_app

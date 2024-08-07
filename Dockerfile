@@ -18,15 +18,22 @@ COPY --from=build-step /app/build ./build
 RUN mkdir -p ./api
 
 # Copy backend files
-COPY backend/ ./api/
-
+COPY api/ ./api/
 
 # Install Python dependencies
 RUN pip install -r ./api/requirements.txt
 
+# Install Supervisor
+RUN pip install supervisor
+
+# Create the log directory for supervisor
+RUN mkdir -p /var/log/supervisor
+
+# Copy the supervisord configuration file
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
 # Expose the application port
 EXPOSE 3000
 
-# Start the Flask application
-WORKDIR /app/api
-CMD ["gunicorn", "-b", ":3000", "wsgi:app"]
+# Start Supervisor
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

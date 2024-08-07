@@ -150,4 +150,4 @@ weasel==0.3.4
 wrapt==1.16.0
 yarl==1.9.4
 redis==5.0.8 
-rq==1.16.2
+celery==5.4.0
