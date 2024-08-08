@@ -35,15 +35,15 @@ def create_app():
     store = DocSynthStore(database_config) 
     app.store = store
 
+    # Celery configuration
     redis_username = os.getenv('REDIS_USERNAME')
     redis_pwd = os.getenv('REDIS_PASSWORD')
     redis_host = os.getenv("REDIS_HOST")
     redis_port = os.getenv("REDIS_PORT")
 
-    # Celery configuration
     app.config.update(
-        CELERY_BROKER_URL=f'rediss://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0',
-        CELERY_RESULT_BACKEND=f'rediss://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0'
+        CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE',
+        CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
     )
 
     celery_app.conf.update(app.config)
@@ -72,7 +72,7 @@ def create_app():
     return app
 
 def create_celery_app(app=None):
-    if app is None:
-        app = create_app()
+    app = app or create_app()
     celery_app.conf.update(app.config)
+    celery_app.autodiscover_tasks(['routes.files'])  # Discover tasks
     return celery_app
