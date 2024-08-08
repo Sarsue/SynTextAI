@@ -42,8 +42,8 @@ def create_app():
 
     # Celery configuration
     app.config.update(
-        CELERY_BROKER_URL=f'rediss://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0',
-        CELERY_RESULT_BACKEND=f'rediss://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0'
+        CELERY_BROKER_URL=f'redis://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0',
+        CELERY_RESULT_BACKEND=f'redis://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0'
     )
 
     celery_app.conf.update(app.config)

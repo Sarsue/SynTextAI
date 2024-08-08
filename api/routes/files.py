@@ -59,7 +59,7 @@ def download_from_gcs(user_id, filename):
         return None
 
 @celery_app.task
-def process_and_store_file(user_id, file_id, filename, file_url):
+def process_and_store_file(user_id, filename, file_url):
     try:
         logging.info(f"Started processing file: {filename}")
 
@@ -75,7 +75,7 @@ def process_and_store_file(user_id, file_id, filename, file_url):
         logging.info(f"Document info: {doc_info}")
 
         store = celery_app.current_app.store
-        store.add_file(file_id, filename, file_url, doc_info)
+        store.add_file(user_id, filename, file_url, doc_info)
         logging.info(f"Finished processing and storing file: {filename}")
 
     except Exception as e:
@@ -102,8 +102,8 @@ def save_file():
       
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
-        user_id = get_id_helper(success, user_info)
-        file_id = store.get_user_id_from_email(user_info['email'])
+        user_id = store.get_user_id_from_email(user_info['email'])
+     
 
         if not request.files:
             logging.info('No files provided')
@@ -113,13 +113,13 @@ def save_file():
             logging.info(f"Received file: {file.filename}")
 
             # Upload the file to GCS
-            file_url = upload_to_gcs(file, user_id, file.filename)
+            file_url = upload_to_gcs(file, user_info['user_id'], file.filename)
             if file_url is None:
                 return jsonify({'error': 'File upload failed'}), 500
 
             # Enqueue the file processing task
             try:
-                process_and_store_file.delay(user_id, file_id, file.filename, file_url)
+                process_and_store_file.delay(user_id, file.filename, file_url)
                 logging.info(f"Enqueued processing for file: {file.filename}")
             except RedisError as e:
                 logging.error(f"Error enqueueing job: {e}")
@@ -137,10 +137,9 @@ def delete_file(fileId):
         store = current_app.store
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
-        user_id = get_id_helper(success, user_info)
-        file_id = store.get_user_id_from_email(user_info['email'])
-        file_dict = store.delete_file_entry(file_id, fileId)
-        delete_from_gcs(user_id, file_dict['file_name'])
+        user_id = store.get_user_id_from_email(user_info['email'])
+        file_dict = store.delete_file_entry(user_id, fileId)
+        delete_from_gcs(user_info['user_id'], file_dict['file_name'])
         return '', 204
     except Exception as e:
         logging.error(str(e))
