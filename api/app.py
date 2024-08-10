@@ -9,7 +9,7 @@ from firebase_setup import initialize_firebase
 load_dotenv()
 
 def create_app():
-    app = Flask(__name__, static_folder='../frontend/build', static_url_path='/')
+    app = Flask(__name__, static_folder='../build', static_url_path='/')
 
     # Initialize Firebase
     initialize_firebase()

@@ -47,7 +47,7 @@ const Home: React.FC = () => {
 
                 <div className="pricing-table">
                     <div className="pricing-card">
-                        <h2 className="pricing-title">First Month Free Trial</h2>
+                        <h2 className="pricing-title">14 Days Trial</h2>
                         <p className="pricing-info">Then Pay $15 Monthly You'll Know Its Worth It</p>
                         {/* <ul className="pricing-features">
                             <li>Multilingual (English, French, Italian, German, Spanish and Code) QA on Documents</li>

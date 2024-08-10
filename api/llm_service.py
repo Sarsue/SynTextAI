@@ -44,10 +44,10 @@ def prompt_llm(prompt):
         print(str(e))
         return "n/a"
 
-# def prompt_slm(prompt):
-#     model = GPT4All("Phi-3-mini-4k-instruct.Q4_0.gguf")
-#     with model.chat_session():
-#         return(model.generate(prompt))
+def prompt_slm(prompt):
+    model = GPT4All("Phi-3-mini-4k-instruct.Q4_0.gguf")
+    with model.chat_session():
+        return(model.generate(prompt))
 
 
 if __name__ == '__main__':

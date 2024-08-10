@@ -222,3 +222,4 @@ env/
 .conda_envs/
 .conda/
 .flaskenv
+*.gguf
