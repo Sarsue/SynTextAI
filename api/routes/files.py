@@ -6,13 +6,27 @@ from doc_processor import process_file
 from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
-
+from postgresql_store import DocSynthStore
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
 bucket_name = 'docsynth-fbb02.appspot.com'
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
+db_name = os.getenv("DATABASE_NAME")
+db_user = os.getenv("DATABASE_USER")
+db_pwd = os.getenv("DATABASE_PASSWORD")
+db_host = os.getenv("DATABASE_HOST")
+db_port = os.getenv("DATABASE_PORT")
 
+database_config = {
+        'dbname': db_name,
+        'user': db_user,
+        'password': db_pwd,
+        'host': db_host,
+        'port': db_port
+    }
+
+celery_store = DocSynthStore(database_config) 
 def get_id_helper(success, user_info):
     if not success:
         return jsonify(user_info), 401
@@ -59,12 +73,12 @@ def download_from_gcs(user_id, filename):
         return None
 
 @celery_app.task
-def process_and_store_file(user_id, filename, file_url):
+def process_and_store_file(user_id, user_token, filename, file_url):
     try:
         logging.info(f"Started processing file: {filename}")
 
         # Download file from GCS
-        file_data = download_from_gcs(user_id, filename)
+        file_data = download_from_gcs(user_token, filename)
         if file_data is None:
             raise FileNotFoundError(f"File {filename} not found in GCS for user {user_id}")
 
@@ -74,8 +88,7 @@ def process_and_store_file(user_id, filename, file_url):
         doc_info = process_file(file_data, file_extension)
         logging.info(f"Document info: {doc_info}")
 
-        store = celery_app.current_app.store
-        store.add_file(user_id, filename, file_url, doc_info)
+        celery_store.add_file(user_id, filename, file_url, doc_info)
         logging.info(f"Finished processing and storing file: {filename}")
 
     except Exception as e:
@@ -119,7 +132,7 @@ def save_file():
 
             # Enqueue the file processing task
             try:
-                process_and_store_file.delay(user_id, file.filename, file_url)
+                process_and_store_file.delay(user_id,  user_info['user_id'], file.filename, file_url)
                 logging.info(f"Enqueued processing for file: {file.filename}")
             except RedisError as e:
                 logging.error(f"Error enqueueing job: {e}")
