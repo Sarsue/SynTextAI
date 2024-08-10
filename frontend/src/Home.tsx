@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import './Home.css';
 import { useDarkMode } from './DarkModeContext';
-import BuyButtonComponent from './components/BuyButtonComponent';
+
 
 const Home: React.FC = () => {
     const { darkMode } = useDarkMode();
@@ -48,13 +48,18 @@ const Home: React.FC = () => {
                 <div className="pricing-table">
                     <div className="pricing-card">
                         <h2 className="pricing-title">First Month Free Trial</h2>
-                        <p className="pricing-info">Then Pay $20 Monthly You'll Know Its Worth It</p>
+                        <p className="pricing-info">Then Pay $15 Monthly You'll Know Its Worth It</p>
                         {/* <ul className="pricing-features">
                             <li>Multilingual (English, French, Italian, German, Spanish and Code) QA on Documents</li>
                             <li>Document Summarization</li>
                             <li>Document Translation</li>
                         </ul> */}
-                        {/* Removed Signup button */}
+                        {/* Removed Signup button */
+                            // <BuyButtonComponent
+                            //     buyButtonId="buy_btn_1PmFYiHuDDTkwuzjuYQGB6IQ"
+                            //     publishableKey="pk_live_51OXYPHHuDDTkwuzjvUVcNwur0xLQx7UWYfMN6d8hjbHUMhYlu7IJx0qEGyvZQhbIGSRKDxhCuXk6e1rQgnSh5XXu004fNj9Pwj"
+                            // />
+                        }
                     </div>
                 </div>
             </div>

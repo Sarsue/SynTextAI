@@ -1,13 +1,14 @@
 import * as React from 'react';
 
-// Define the type for the component props if needed
-interface BuyButtonComponentProps { }
+interface BuyButtonComponentProps {
+    buyButtonId: string;
+    publishableKey: string;
+}
 
-const BuyButtonComponent: React.FC<BuyButtonComponentProps> = () => {
+const BuyButtonComponent: React.FC<BuyButtonComponentProps> = ({ buyButtonId, publishableKey }) => {
     React.useEffect(() => {
-        // Ensure the Stripe buy button script is loaded
         const script = document.createElement('script');
-        script.src = 'https://buy.stripe.com/stripe-buy-button.js';
+        script.src = 'https://buy.stripe.com/28o5nk6Jp1ZT3T25kl';
         script.async = true;
         script.onload = () => {
             console.log('Stripe buy button script loaded successfully.');
@@ -28,15 +29,12 @@ const BuyButtonComponent: React.FC<BuyButtonComponentProps> = () => {
 
     return (
         <stripe-buy-button
-            buy-button-id="buy_btn_1PegIsHuDDTkwuzj6Cx6opwZ" // Replace with your actual BUY_BUTTON_ID
-            publishable-key="pk_test_51OXYPHHuDDTkwuzjkvYwr2LSyu3Jh2gE9M6BZeIc7VPgoIJHhk36wd1qAwt07NymVuMf4tpd17ClOWFSXah5sX5600k65gqzcD"
+            buy-button-id={buyButtonId}
+            publishable-key={publishableKey}
             onError={handleError}
-        >
-        </stripe-buy-button>
+        />
     );
 }
-
-export default BuyButtonComponent;
 
 // Declare the custom element type in the global JSX namespace
 declare global {
@@ -50,3 +48,5 @@ declare global {
         }
     }
 }
+
+export default BuyButtonComponent;

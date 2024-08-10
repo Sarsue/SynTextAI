@@ -11,7 +11,7 @@ import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useDarkMode } from '../DarkModeContext';
 import { Persona } from './types';
-
+import BuyButtonComponent from './BuyButtonComponent';
 interface File {
     id: number;
     name: string;
@@ -116,7 +116,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
             </button>
             <div className={`tab-buttons ${darkMode ? 'dark-mode' : ''}`}>
                 <button className={activeTab === 'general' ? 'active' : ''} onClick={() => setActiveTab('general')}>General</button>
-                {/* <button className={activeTab === 'payment' ? 'active' : ''} onClick={() => setActiveTab('payment')}>Payment</button> */}
+                <button className={activeTab === 'payment' ? 'active' : ''} onClick={() => setActiveTab('payment')}>Payment</button>
                 <button className={activeTab === 'knowledge' ? 'active' : ''} onClick={() => setActiveTab('knowledge')}>Knowledge Management</button>
             </div>
             <div className={`settings-content ${darkMode ? 'dark-mode' : ''}`}>
@@ -138,14 +138,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                         )}
                     </>
                 )}
-                {/* {activeTab === 'payment' && (
-                    <PaymentView
-                        stripePromise={stripePromise} user={user}
-                        subscriptionStatus={subscriptionStatusLocal}
-                        onSubscriptionChange={handleSubscriptionChange}
-                        darkMode={darkMode} />
+                {activeTab === 'payment' && (
+                    <BuyButtonComponent
+                        buyButtonId="buy_btn_1PmFYiHuDDTkwuzjuYQGB6IQ"
+                        publishableKey="pk_live_51OXYPHHuDDTkwuzjvUVcNwur0xLQx7UWYfMN6d8hjbHUMhYlu7IJx0qEGyvZQhbIGSRKDxhCuXk6e1rQgnSh5XXu004fNj9Pwj"
+                    />
 
-                )} */}
+                )}
                 {activeTab === 'general' && (
                     <>
                         <DarkModeToggle darkMode={darkMode} setDarkMode={setDarkMode} />
