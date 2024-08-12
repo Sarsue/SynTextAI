@@ -139,11 +139,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                     </>
                 )}
                 {activeTab === 'payment' && (
-                    <BuyButtonComponent
-                        buyButtonId="buy_btn_1PmFYiHuDDTkwuzjuYQGB6IQ"
-                        publishableKey="pk_live_51OXYPHHuDDTkwuzjvUVcNwur0xLQx7UWYfMN6d8hjbHUMhYlu7IJx0qEGyvZQhbIGSRKDxhCuXk6e1rQgnSh5XXu004fNj9Pwj"
+                    <PaymentView
+                        stripePromise={stripePromise}
+                        user={user}
+                        subscriptionStatus={subscriptionStatusLocal}
+                        onSubscriptionChange={handleSubscriptionChange}
+                        darkMode={darkMode}
                     />
-
                 )}
                 {activeTab === 'general' && (
                     <>

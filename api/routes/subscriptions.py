@@ -173,6 +173,32 @@ def webhook():
             customer_id = event['data']['object']['customer'] # contains the customer id
             print("USER HAS PAID")
             #user_info['paid'] = True
+        # Handle the checkout.session.completed event
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+
+            # Save an order in your database, marked as 'awaiting payment'
+            #create_order(session)
+
+            # Check if the order is already paid (for example, from a card payment)
+            #
+            # A delayed notification payment will have an `unpaid` status, as
+            # you're still waiting for funds to be transferred from the customer's
+            # account.
+            if session.payment_status == "paid":
+                # Fulfill the purchase
+                fulfill_checkout(session)
+
+        elif event['type'] == 'checkout.session.async_payment_succeeded':
+            session = event['data']['object']
+
+            # Fulfill the purchase
+            fulfill_checkout(session)
+
+        elif event['type'] == 'checkout.session.async_payment_failed':
+            session = event['data']['object']
+            # Send an email to the customer asking them to retry their order
+            #email_customer_about_failed_payment(session)
         else:
             return 'Unexpected event type', 400
 
@@ -185,3 +211,27 @@ def webhook():
         return 'Invalid signature', 400
 
     
+    # handle payment link
+def fulfill_checkout(session_id):
+    print("Fulfilling Checkout Session", session_id)
+
+    # TODO: Make this function safe to run multiple times,
+    # even concurrently, with the same session ID
+
+    # TODO: Make sure fulfillment hasn't already been
+    # peformed for this Checkout Session
+
+    # Retrieve the Checkout Session from the API with line_items expanded
+    checkout_session = stripe.checkout.Session.retrieve(
+        session_id,
+        expand=['line_items'],
+    )
+
+    # Check the Checkout Session's payment_status property
+    # to determine if fulfillment should be peformed
+    if checkout_session.payment_status != 'unpaid':
+        # TODO: Perform fulfillment of the line items
+
+        # TODO: Record/save fulfillment status for this
+        # Checkout Session
+        pass

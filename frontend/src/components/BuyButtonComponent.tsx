@@ -8,7 +8,7 @@ interface BuyButtonComponentProps {
 const BuyButtonComponent: React.FC<BuyButtonComponentProps> = ({ buyButtonId, publishableKey }) => {
     React.useEffect(() => {
         const script = document.createElement('script');
-        script.src = 'https://buy.stripe.com/28o5nk6Jp1ZT3T25kl';
+        script.src = 'https://billing.stripe.com/p/login/3cs6r94FKeJw9aw7ss'//'https://buy.stripe.com/28o5nk6Jp1ZT3T25kl';
         script.async = true;
         script.onload = () => {
             console.log('Stripe buy button script loaded successfully.');

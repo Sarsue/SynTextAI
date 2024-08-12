@@ -445,6 +445,65 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         navigate('/');
     };
 
+    const handleDownloadHistory = async () => {
+        if (!Object.keys(histories).length) {
+            console.error('No chat histories available to download.');
+            toast.error('No chat histories available to download.', {
+                position: 'top-right',
+                autoClose: 5000,
+                hideProgressBar: false,
+                closeOnClick: true,
+                pauseOnHover: true,
+                draggable: true,
+                progress: undefined,
+            });
+            return;
+        }
+
+        try {
+            const historiesArray = Object.values(histories);
+
+            // Convert the histories object to a JSON string
+            const dataStr = JSON.stringify(historiesArray, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const username = user?.displayName
+            // Create a download link
+            const url = URL.createObjectURL(blob);
+            const now = new Date();
+            const datetimeString = now.toISOString().replace(/[:.]/g, '-'); // Format as YYYY-MM-DDTHH-MM-SS
+            const filename = `${username}_${datetimeString}_history.json`;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url); // Clean up the URL object
+            toast.success('Chat histories downloaded successfully!', {
+                position: 'top-right',
+                autoClose: 3000,
+                hideProgressBar: false,
+                closeOnClick: true,
+                pauseOnHover: true,
+                draggable: true,
+                progress: undefined,
+            });
+        } catch (error) {
+            console.error('Error downloading chat histories:', error);
+            toast.error('Error downloading chat histories. Please try again.', {
+                position: 'top-right',
+                autoClose: 5000,
+                hideProgressBar: false,
+                closeOnClick: true,
+                pauseOnHover: true,
+                draggable: true,
+                progress: undefined,
+            });
+        }
+    };
+
+
+
     useEffect(() => {
         if (user) {
             fetchHistories();
@@ -476,6 +535,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     onClearHistory={handleClearHistory}
                     onNewChat={handleNewChat}
                     onDeleteHistory={handleDeleteHistory}
+                    onDownloadHistory={handleDownloadHistory}
                 />
             </div>
         </div>

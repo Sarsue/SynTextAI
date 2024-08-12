@@ -8,9 +8,10 @@ interface HistoryViewProps {
     onClearHistory: () => void;
     onNewChat: () => void;
     onDeleteHistory: (historyId: number | History) => void;
+    onDownloadHistory: () => void
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ histories, setCurrentHistory, onClearHistory, onNewChat, onDeleteHistory }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ histories, setCurrentHistory, onClearHistory, onNewChat, onDeleteHistory, onDownloadHistory }) => {
     const [selectedHistoryId, setSelectedHistoryId] = React.useState<number | null>(null);
 
     const onSelectHistory = (history: History) => {
@@ -23,10 +24,13 @@ const HistoryView: React.FC<HistoryViewProps> = ({ histories, setCurrentHistory,
         <div className="history-container">
             <div className="history-header">
                 <button className="history-button" onClick={onClearHistory}>
-                    Clear History
+                    🗑️
                 </button>
                 <button className="history-button" onClick={onNewChat}>
-                    New Chat
+                    ➕
+                </button>
+                <button className="history-button" onClick={onDownloadHistory}>
+                    ⬇️
                 </button>
             </div>
             {histories.slice().reverse().map((history) => (
