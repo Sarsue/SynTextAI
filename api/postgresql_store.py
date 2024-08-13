@@ -522,8 +522,23 @@ class DocSynthStore:
 
                 files = []
                 for row in rows:
-                    file_info = {'id': row[0], 'name': row[1],
-                                 'publicUrl': row[2]}
+                    file_id = row[0]
+                    file_info = {'id': file_id, 'name': row[1], 'publicUrl': row[2]}
+
+                    # Check if the file has chunks and pages
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM pages
+                        WHERE file_id = %s
+                    ''', (file_id,))
+                    pages_count = cursor.fetchone()[0]
+
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM chunks
+                        WHERE page_id IN (SELECT id FROM pages WHERE file_id = %s)
+                    ''', (file_id,))
+                    chunks_count = cursor.fetchone()[0]
+
+                    file_info['processed'] = (pages_count > 0 and chunks_count > 0)
                     files.append(file_info)
 
                 return files
@@ -536,7 +551,7 @@ class DocSynthStore:
     def get_tfidf_vectors(self, documents):
         return self.vectorizer.fit_transform(documents)
 
-    def add_file(self, user_id, file_name, file_url, document_chunks):
+    def add_file(self, user_id, file_name, file_url):
         connection = self.get_connection()
         try:
             with connection:
@@ -548,11 +563,27 @@ class DocSynthStore:
                     ''', (user_id, file_name, file_url))
 
                     file_id = cursor.fetchone()[0]
+                    return {'id': file_id, 'user_id': user_id, 'file_url': file_url}
+        except Exception as e:
+            logger.error(f"Error adding file: {e}")
+            raise
+        finally:
+            self.release_connection(connection)
 
-                    # Gather all chunks for TF-IDF fitting
-                    all_chunks = []
+    def update_file_with_chunks(self, user_id, file_name, doc_info):
+        connection = self.get_connection()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute('''
+                        SELECT id FROM files
+                        WHERE user_id = %s AND file_name = %s
+                    ''', (user_id, file_name))
 
-                    for entry in document_chunks:
+                    file_id = cursor.fetchone()[0]
+
+                    # Add pages and chunks to the file
+                    for entry in doc_info:
                         page_number = entry['page_number']
                         data = entry['data']
                         chunks = entry['chunks']
@@ -566,8 +597,6 @@ class DocSynthStore:
                         page_id = cursor.fetchone()[0]
 
                         for chunk in chunks:
-                            all_chunks.append(chunk)
-
                             # Embedding vector
                             embedding_vector = get_text_embedding(chunk)
                             embedding_vector_blob = pickle.dumps(embedding_vector)
@@ -577,9 +606,8 @@ class DocSynthStore:
                                 VALUES (%s, %s, %s)
                             ''', (page_id, chunk, embedding_vector_blob))
 
-                    return {'id': file_id, 'user_id': user_id, 'file_url': file_url}
         except Exception as e:
-            logger.error(f"Error adding file: {e}")
+            logger.error(f"Error updating file with chunks: {e}")
             raise
         finally:
             self.release_connection(connection)

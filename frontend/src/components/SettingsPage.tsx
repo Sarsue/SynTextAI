@@ -10,13 +10,9 @@ import { loadStripe, Stripe } from '@stripe/stripe-js';
 import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useDarkMode } from '../DarkModeContext';
-import { Persona } from './types';
+import { Persona, File } from './types';
 import BuyButtonComponent from './BuyButtonComponent';
-interface File {
-    id: number;
-    name: string;
-    publicUrl: string;
-}
+
 
 interface SettingsPageProps {
     stripePromise: Promise<Stripe | null>;

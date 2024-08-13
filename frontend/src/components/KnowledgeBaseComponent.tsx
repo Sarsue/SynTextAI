@@ -1,11 +1,7 @@
 import React from 'react';
 import './KnowledgeBaseComponent.css';
+import { File } from './types';
 
-interface File {
-    id: number;
-    name: string;
-    publicUrl: string;
-}
 
 interface KnowledgeBaseComponentProps {
     files: File[];
@@ -32,7 +28,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
             <h3>Knowledgebase Management</h3>
             <ul className="file-list">
                 {files.map((file) => (
-                    <li key={file.id}>
+                    <li key={file.id} className={file.processed ? 'processed-file' : 'not-processed-file'}>
                         <span className="file-link" onClick={() => handleFileClick(file)}>
                             {file.name}
                         </span>

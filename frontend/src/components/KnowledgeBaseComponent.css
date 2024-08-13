@@ -6,9 +6,13 @@
 }
 
 .file-list li {
+    display: flex;
+    align-items: center;
     margin-bottom: 10px;
+    /* Flexbox for better alignment */
 }
 
+/* Style for file links */
 .file-link {
     cursor: pointer;
     color: #007bff;
@@ -22,6 +26,17 @@
     /* Hover color */
 }
 
+/* Style for processed and not processed files */
+.processed-file .file-link {
+    color: green;
+    /* Color for processed files */
+}
+
+.not-processed-file .file-link {
+    color: red;
+    /* Color for not processed files */
+}
+
 /* Dark Mode Styles specific to KnowledgeBaseComponent */
 .knowledgebase-dark-mode .file-link {
     color: #bbb;
@@ -31,4 +46,29 @@
 .knowledgebase-dark-mode .file-link:hover {
     color: #999;
     /* Adjust hover color for dark mode */
+}
+
+/* Dark mode styles for processed and not processed files */
+.knowledgebase-dark-mode .processed-file .file-link {
+    color: lightgreen;
+    /* Adjust color for processed files in dark mode */
+}
+
+.knowledgebase-dark-mode .not-processed-file .file-link {
+    color: lightcoral;
+    /* Adjust color for not processed files in dark mode */
+}
+
+/* Button styles */
+.delete-button {
+    background: red;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    margin-left: auto;
+}
+
+.delete-button:hover {
+    background: darkred;
 }

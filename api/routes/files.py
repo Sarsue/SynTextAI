@@ -88,7 +88,7 @@ def process_and_store_file(user_id, user_token, filename, file_url):
         doc_info = process_file(file_data, file_extension)
         logging.info(f"Document info: {doc_info}")
 
-        celery_store.add_file(user_id, filename, file_url, doc_info)
+        celery_store.update_file_with_chunks(user_id, filename, doc_info)
         logging.info(f"Finished processing and storing file: {filename}")
 
     except Exception as e:
@@ -132,6 +132,9 @@ def save_file():
 
             # Enqueue the file processing task
             try:
+                file_info = store.add_file(user_id, file.filename, file_url)
+                logging.info(f"Stored file metadata: {file.filename}")
+                
                 process_and_store_file.delay(user_id,  user_info['user_id'], file.filename, file_url)
                 logging.info(f"Enqueued processing for file: {file.filename}")
             except RedisError as e:

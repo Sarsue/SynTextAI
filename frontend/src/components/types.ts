@@ -13,7 +13,12 @@ export interface User {
     email: string | null;
 
 }
-
+export interface File {
+    id: number;
+    name: string;
+    publicUrl: string;
+    processed: boolean;
+}
 
 export interface Message {
 
