@@ -23,14 +23,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ histories, setCurrentHistory,
 
         <div className="history-container">
             <div className="history-header">
-                <button className="history-button" onClick={onClearHistory}>
-                    🗑️
-                </button>
                 <button className="history-button" onClick={onNewChat}>
                     ➕
                 </button>
                 <button className="history-button" onClick={onDownloadHistory}>
                     ⬇️
+                </button>
+                <button className="history-button" onClick={onClearHistory}>
+                    🗑️
                 </button>
             </div>
             {histories.slice().reverse().map((history) => (
