@@ -3,7 +3,7 @@ from utils import get_user_id
 from youtube_video_handler import process_youtube_link
 from web_link_handler import process_newsletter_link
 from query_processor import process
-
+from context_processor import process_context
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
 
 
@@ -36,7 +36,7 @@ def create_message():
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
     message_list.append(user_request)
-    
+    context = process_context(message, formatted_history)
     top_k_results = store.hybrid_search(query = message, user_id = id, k=5)
     
     response = process(query=message, top_k_results= top_k_results)
