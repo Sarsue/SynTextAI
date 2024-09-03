@@ -1,14 +1,18 @@
 Build
-docker-compose up --build 
+ docker build --no-cache -t syntextaiapp .  
 
-docker tag docsynth-frontend:latest osasdeeon/syntext:docsynth-frontend
-docker tag docsynth-backend:latest osasdeeon/syntext:docsynth-backend
+ RUN
+ docker run --rm -p 3000:3000 --env-file .env syntextaiapp
+ 
+ TAG
+ docker tag syntextaiapp:latest osasdeeon/syntextai:latest
 
+ PUSH
+ docker push osasdeeon/syntextai:latest    
 
-docker push osasdeeon/syntext:docsynth-frontend
-docker push osasdeeon/syntext:docsynth-backend 
+ APP PLATFORM CONNECTS TO DOCKER HUB AND DEPLOYS PUSHED IMAGE 
 
-DEPLOY
+DEPLOY DROPLET
 copy .env-prod, docker-compose-prod.yml and deploy.sh files
 
 scp deploy.sh docker-compose-prod.yml root@147.182.150.68:/root/
