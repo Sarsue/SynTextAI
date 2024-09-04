@@ -611,6 +611,39 @@ class DocSynthStore:
             raise
         finally:
             self.release_connection(connection)
+   
+    def get_file_text(self, user_id, file_name):
+        connection = self.get_connection()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    # Fetch the file ID
+                    cursor.execute('''
+                        SELECT id FROM files
+                        WHERE user_id = %s AND file_name = %s
+                    ''', (user_id, file_name))
+
+                    file_id = cursor.fetchone()[0]
+
+                    # Fetch all pages associated with the file ID
+                    cursor.execute('''
+                        SELECT data FROM pages
+                        WHERE file_id = %s
+                        ORDER BY page_number
+                    ''', (file_id,))
+
+                    pages = cursor.fetchall()
+
+                    # Combine the data from all pages to get the full text of the file
+                    full_text = '\n'.join(page[0] for page in pages)
+
+                    return full_text
+
+        except Exception as e:
+            logger.error(f"Error retrieving file text: {e}")
+            raise
+        finally:
+            self.release_connection(connection)
 
     def knn_search(self, query, user_id, k=5):
         query_embedding_vector = get_text_embedding(query)

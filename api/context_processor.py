@@ -1,41 +1,85 @@
-from llm_service import prompt_llm, prompt_slm
+from llm_service import prompt_llm
 
 def process_context(query, user_history, files):
     # Construct the prompt to instruct the LLM on how to handle the query
     prompt = f"""
-    You are an intelligent assistant. Given the following query and message history and files , determine whether the user is asking for:
-    1. Information retrieval (just return "retrieval").
-    2. Document summarization (return "summarize [filename]").
-    3. Document translation (return "translate [filename] to [language]").
+You are an intelligent multilingual assistant. Given the following query, message history, and files, determine the nature of the user's request:
 
-    Ensure that:
-    - If the query is a retrieval request, just respond with "retrieval."
-    - If the query asks for summarization, identify the document and respond with "summarize [filename]".
-    - If the query asks for translation, identify the document and the target language, then respond with "translate [filename] to [language]".
-    - If the query is unclear or lacks a document reference where necessary, ask for clarification.
+1. **Information Retrieval**: If the user is requesting specific information from the documents. Include the language in the response if detected (e.g., "retrieval in English").
+2. **Document Summarization**: If the user is requesting a summary of a document. Include the language and the filename in the response if detected (e.g., "summarize annual_report.pdf in French").
+3. **Clarification**: if the user's request isn't clearly information retrieval or summarization.
 
-    Query: "{query}"
+Ensure that:
+- The response should be exactly one of the following formats: "retrieval in [language]" or "summarize [filename] in [language]" or "clarification".
+- Do not provide additional explanations, confidence percentages, or clarification requests unless explicitly asked for.
 
-    User History:
-    {user_history}
+**Example:**
+Query: "Peux-tu me donner le résumé ?"
+User History: ["how much did we make last quarter?", "according to the financial_report.pdf we made $300M."]
+Files: financial_report.pdf, annual_report.pdf
 
-    Files:
-    {files}
-    Your Response (choose from "retrieval," "summarize [filename]," or "translate [filename] to [language]"):
-    """
+Your Response: "summarize financial_report.pdf in French"
+
+**Now, given the current query:**
+
+Query: "{query}"
+
+User History:
+{user_history}
+
+Files:
+{files}
+
+Your Response (choose from "retrieval in [language]" or "summarize [filename] in [language]" or "clarification"):
+"""
 
     # Get the LLM response
-    response = prompt_llm(prompt)
+    response = prompt_llm(prompt).strip()
 
-    # Return only the response without explanations
-    return response.strip()
+    print("rcvd: " + response)
+
+    if "clarification" in response:
+        task_type = "clarification"
+        language = None
+        file_name = None
+    else:
+        # If the response doesn't match any expected format, return clarification
+        task_type = "clarification"
+        language = None
+        file_name = None
+    # Check for the occurrence of key phrases
+
+    if "retrieval in" in response:
+        parts = response.split("retrieval in")
+        language = parts[-1].strip().split()[0]
+        task_type = "retrieval"
+        file_name = None
+
+    if "summarize" in response and "in" in response:
+        parts = response.split(" ")
+        language = parts[-1].strip()  # Language is the part after "in"
+        
+        # Filename is the part before "in", after removing "summarize"
+        file_name = parts[1].strip()
+        task_type = "summarize"
+       
+   
+
+    return {
+        "task_type": task_type,
+        "language": language,
+        "file_name": file_name
+    }
+
 if __name__ == '__main__':
-    queries = ["Can you summarize the annual report?", "can you return this document in spanish?", "how many languages do we have this document translated into?"]
+    queries = [
+        "What was the total revenue for the organization in the annual report?",
+        "Comment fonctionne le Bitcoin ?",
+        "please sum up the bitcoin.pdf whitepaper"
+    ]
+    user_history = []
+    files = ["annual_report.pdf", "bitcoin.pdf"]
 
-    user_history =["What was the total revenue for the organization?", "Revenue was $300M"]
-    files = ["annual_report.pdf"]
     for query in queries:
-        response = process_context(query,user_history,files)
+        response = process_context(query, user_history, files)
         print(response)
-        user_history.append(query)
-        user_history.append(response)
