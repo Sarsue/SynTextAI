@@ -2,6 +2,9 @@ from llm_service import prompt_llm
 import re
 import json
 
+def summarize(query, language, data):
+    return "summarized"
+    
 def process(query, top_k_results):
     best_answer_data = choose_best_answer(query, top_k_results)
     return best_answer_data
