@@ -79,7 +79,6 @@
     padding: 2rem 1rem;
     text-align: center;
     background-color: #f9f9f9;
-    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .dark-mode .features-section {
@@ -90,7 +89,6 @@
     font-size: 2rem;
     margin-bottom: 2rem;
     color: #333;
-    transition: color 0.3s ease;
 }
 
 .dark-mode .features-title {
@@ -110,16 +108,15 @@
     border-radius: 10px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     margin-bottom: 2rem;
-    transition: transform 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+    color: #333;
+    transition: transform 0.3s ease;
 }
 
 /* Dark mode for feature items */
 .dark-mode .feature-item {
-    background-color: #2c2c2c;
-    /* Darker background for better contrast */
-    color: #fff;
-    /* White text for visibility */
+    background-color: #333;
     box-shadow: 0 4px 10px rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .feature-item:hover {
@@ -132,46 +129,49 @@
     margin-bottom: 1rem;
 }
 
-/* Dark mode for feature icons */
-.dark-mode .feature-icon {
-    color: #66a6ff;
-}
-
-.feature-description {
-    font-size: 1rem;
-    color: #666;
-    transition: color 0.3s ease;
-}
-
-/* Dark mode for feature description */
-.dark-mode .feature-description {
-    color: #ccc;
-    /* Light gray for better visibility */
-}
-
 /* Pricing section */
 .pricing-section {
     text-align: center;
     padding: 2rem 1rem;
     background-color: #f9f9f9;
+    position: relative;
 }
 
-/* Dark mode for pricing section */
 .dark-mode .pricing-section {
     background-color: #1e1e1e;
 }
 
+/* Free trial banner */
+.free-trial-banner {
+    background-color: #ffecb3;
+    color: #333;
+    padding: 10px 20px;
+    font-size: 1.2rem;
+    border-radius: 5px;
+    margin-bottom: 1rem;
+    display: inline-block;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark-mode .free-trial-banner {
+    background-color: #ffe082;
+    color: #1e1e1e;
+}
+
+/* Pricing card */
 .pricing-card {
     padding: 2rem;
     background-color: #fff;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s ease;
+    color: #333;
 }
 
 .dark-mode .pricing-card {
     background-color: #333;
     box-shadow: 0 4px 8px rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
 .pricing-card:hover {

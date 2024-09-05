@@ -9,7 +9,7 @@ interface DarkModeContextType {
 
 // Create the DarkModeContext with initial values
 const DarkModeContext = createContext<DarkModeContextType>({
-    darkMode: false,
+    darkMode: true,
     toggleDarkMode: () => { },
     setDarkMode: () => { }, // Provide a default empty function
 });
@@ -17,7 +17,7 @@ const DarkModeContext = createContext<DarkModeContextType>({
 // Define DarkModeProvider component
 export const DarkModeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     // Define state for darkMode
-    const [darkMode, setDarkMode] = useState<boolean>(false);
+    const [darkMode, setDarkMode] = useState<boolean>(true);
 
     // Function to toggle dark mode
     const toggleDarkMode = () => {

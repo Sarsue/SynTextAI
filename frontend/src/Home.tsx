@@ -57,7 +57,7 @@ const Home: React.FC = () => {
                     <div className="pricing-card">
                         <h2 className="pricing-title">7-Day Free Trial</h2>
                         <p className="pricing-info">Then $15/month, and you'll know it's worth it!</p>
-                        <Link to="/pricing" className="pricing-button">Start Your Trial</Link>
+                        {/* <Link to="/pricing" className="pricing-button">Start Your Trial</Link> */}
                     </div>
                 </section>
             </main>
