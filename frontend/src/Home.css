@@ -10,7 +10,7 @@
 }
 
 /* Dark mode styles */
-.dark-mode {
+.dark-mode .app-container {
     background-color: #121212;
     color: #fff;
 }
@@ -32,6 +32,10 @@
 .logo-container .app-title {
     font-size: 2.5rem;
     color: #333;
+}
+
+.dark-mode .logo-container .app-title {
+    color: #fff;
 }
 
 .auth-buttons .google-sign-in-button {
@@ -56,6 +60,11 @@
     color: white;
 }
 
+/* Dark mode for hero section */
+.dark-mode .hero-section {
+    background: linear-gradient(120deg, #333, #666);
+}
+
 .hero-title {
     font-size: 2.5rem;
     margin-bottom: 1rem;
@@ -69,12 +78,23 @@
 .features-section {
     padding: 2rem 1rem;
     text-align: center;
+    background-color: #f9f9f9;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dark-mode .features-section {
+    background-color: #1e1e1e;
 }
 
 .features-title {
     font-size: 2rem;
     margin-bottom: 2rem;
     color: #333;
+    transition: color 0.3s ease;
+}
+
+.dark-mode .features-title {
+    color: #fff;
 }
 
 .features-list {
@@ -90,7 +110,16 @@
     border-radius: 10px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     margin-bottom: 2rem;
-    transition: transform 0.3s ease;
+    transition: transform 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dark mode for feature items */
+.dark-mode .feature-item {
+    background-color: #2c2c2c;
+    /* Darker background for better contrast */
+    color: #fff;
+    /* White text for visibility */
+    box-shadow: 0 4px 10px rgba(255, 255, 255, 0.1);
 }
 
 .feature-item:hover {
@@ -103,11 +132,33 @@
     margin-bottom: 1rem;
 }
 
+/* Dark mode for feature icons */
+.dark-mode .feature-icon {
+    color: #66a6ff;
+}
+
+.feature-description {
+    font-size: 1rem;
+    color: #666;
+    transition: color 0.3s ease;
+}
+
+/* Dark mode for feature description */
+.dark-mode .feature-description {
+    color: #ccc;
+    /* Light gray for better visibility */
+}
+
 /* Pricing section */
 .pricing-section {
     text-align: center;
     padding: 2rem 1rem;
     background-color: #f9f9f9;
+}
+
+/* Dark mode for pricing section */
+.dark-mode .pricing-section {
+    background-color: #1e1e1e;
 }
 
 .pricing-card {
@@ -116,6 +167,11 @@
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s ease;
+}
+
+.dark-mode .pricing-card {
+    background-color: #333;
+    box-shadow: 0 4px 8px rgba(255, 255, 255, 0.1);
 }
 
 .pricing-card:hover {
@@ -130,6 +186,11 @@
 .pricing-info {
     margin-bottom: 1.5rem;
     font-size: 1rem;
+    color: #777;
+}
+
+.dark-mode .pricing-info {
+    color: #bbb;
 }
 
 .pricing-button {
