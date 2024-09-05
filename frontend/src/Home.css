@@ -1,62 +1,46 @@
-/* Container styling to ensure positioning works */
+/* Container styling */
 .app-container {
-    position: relative;
-    /* Ensure the absolute positioning of the logo is relative to this container */
+    font-family: 'Arial', sans-serif;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 20px;
     min-height: 100vh;
+    color: #333;
+    background-color: #f4f4f9;
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Dark mode styles */
-.dark-mode .app-container {
-    background-color: #333;
+.dark-mode {
+    background-color: #121212;
     color: #fff;
 }
 
-/* Content container styling */
-.content-container {
+/* Header styling */
+.header {
+    display: flex;
+    justify-content: space-between;
+    padding: 1.5rem 2rem;
     background-color: #fff;
-    padding: 20px;
-    border-radius: 10px;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: background-color 0.3s ease;
 }
 
-/* Dark mode styles for content container */
-.dark-mode .content-container {
-    background-color: #444;
-    color: #fff;
+.dark-mode .header {
+    background-color: #1e1e1e;
 }
 
-/* Title and description styling */
-.app-title {
-    font-size: 2rem;
-    margin-bottom: 10px;
+.logo-container .app-title {
+    font-size: 2.5rem;
+    color: #333;
 }
 
-.app-description {
-    font-size: 1.2rem;
-    margin-bottom: 20px;
-}
-
-/* Sign-in button styling */
-.signin-link {
-    text-decoration: none;
-}
-
-.google-sign-in-button {
+.auth-buttons .google-sign-in-button {
     background-color: #4285f4;
-    color: #fff;
+    color: white;
     border: none;
-    padding: 10px 20px;
+    padding: 12px 24px;
     font-size: 1rem;
-    cursor: pointer;
     border-radius: 5px;
-    margin-bottom: 20px;
     transition: background-color 0.3s ease;
 }
 
@@ -64,75 +48,96 @@
     background-color: #357ae8;
 }
 
-/* Pricing table styling */
-.pricing-table {
-    display: flex;
-    justify-content: center;
-    gap: 20px;
-    margin-bottom: 20px;
-}
-
-/* Individual pricing card styling */
-.pricing-card {
-    border: 1px solid #ccc;
-    border-radius: 10px;
-    padding: 20px;
-    width: 250px;
+/* Hero section */
+.hero-section {
     text-align: center;
-    background-color: #fff;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    transition: background-color 0.3s ease, border-color 0.3s ease;
+    padding: 3rem 1rem;
+    background: linear-gradient(120deg, #89f7fe, #66a6ff);
+    color: white;
 }
 
-/* Dark mode styles for pricing card */
-.dark-mode .pricing-card {
-    background-color: #444;
-    border-color: #555;
+.hero-title {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
 }
 
-/* Pricing card text styling */
-.pricing-title {
-    font-size: 1.5rem;
-    margin-bottom: 10px;
+.hero-description {
+    font-size: 1.2rem;
 }
 
-.pricing-price {
+/* Features section */
+.features-section {
+    padding: 2rem 1rem;
+    text-align: center;
+}
+
+.features-title {
     font-size: 2rem;
-    margin-bottom: 10px;
+    margin-bottom: 2rem;
+    color: #333;
+}
+
+.features-list {
+    display: flex;
+    justify-content: space-around;
+    flex-wrap: wrap;
+}
+
+.feature-item {
+    width: 220px;
+    padding: 1rem;
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    margin-bottom: 2rem;
+    transition: transform 0.3s ease;
+}
+
+.feature-item:hover {
+    transform: translateY(-5px);
+}
+
+.feature-icon {
+    font-size: 2rem;
+    color: #4285f4;
+    margin-bottom: 1rem;
+}
+
+/* Pricing section */
+.pricing-section {
+    text-align: center;
+    padding: 2rem 1rem;
+    background-color: #f9f9f9;
+}
+
+.pricing-card {
+    padding: 2rem;
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease;
+}
+
+.pricing-card:hover {
+    transform: scale(1.05);
+}
+
+.pricing-title {
+    font-size: 2rem;
+    margin-bottom: 1rem;
 }
 
 .pricing-info {
-    margin-bottom: 20px;
-    font-size: 0.9rem;
-    color: #777;
-}
-
-/* Dark mode styles for pricing info */
-.dark-mode .pricing-info {
-    color: #bbb;
-}
-
-/* Pricing features list styling */
-.pricing-features {
-    list-style: none;
-    padding: 0;
-    margin-bottom: 20px;
-    font-size: 0.9rem;
-}
-
-.pricing-features li {
-    margin-bottom: 10px;
-}
-
-/* Pricing button styling */
-.pricing-button {
-    display: inline-block;
-    background-color: #4285f4;
-    color: #fff;
-    padding: 10px 20px;
+    margin-bottom: 1.5rem;
     font-size: 1rem;
-    text-decoration: none;
+}
+
+.pricing-button {
+    background-color: #4285f4;
+    color: white;
+    padding: 10px 20px;
     border-radius: 5px;
+    text-decoration: none;
     transition: background-color 0.3s ease;
 }
 
@@ -140,58 +145,17 @@
     background-color: #357ae8;
 }
 
-/* Company logo styling */
-.company-logo-container {
-    position: absolute;
-    bottom: 20px;
-    /* Distance from the bottom */
-    right: 20px;
-    /* Distance from the right */
+/* Footer */
+.footer {
+    margin-top: auto;
+    padding: 1rem;
+    background-color: #fff;
+    text-align: center;
+    font-size: 0.9rem;
+    color: #777;
 }
 
-.company-logo-container img {
-    max-width: 100px;
-    /* Adjust the size of the logo */
-    height: auto;
-}
-
-/* Responsive logo styling */
-@media (max-width: 600px) {
-    .company-logo-container img {
-        max-width: 60px;
-        /* Smaller logo for smaller screens */
-    }
-}
-
-/* Features section styling */
-.features-section {
-    margin: 2rem 0;
-}
-
-.features-title {
-    font-size: 2rem;
-    margin-bottom: 1rem;
-}
-
-.features-intro {
-    font-size: 1.2rem;
-    margin-bottom: 1.5rem;
-}
-
-.features-list {
-    display: flex;
-    flex-direction: column;
-}
-
-.feature-item {
-    margin-bottom: 1.5rem;
-}
-
-.feature-item h3 {
-    font-size: 1.5rem;
-    margin-bottom: 0.5rem;
-}
-
-.feature-item p {
-    font-size: 1rem;
+.dark-mode .footer {
+    background-color: #1e1e1e;
+    color: #bbb;
 }

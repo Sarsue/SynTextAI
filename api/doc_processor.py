@@ -9,7 +9,7 @@ import re
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
-def summarizer(data):
+def qna(data):
     try:
         data_prompt = (
             f"Based on the following text: {data}\n"

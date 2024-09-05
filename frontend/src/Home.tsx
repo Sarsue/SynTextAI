@@ -3,72 +3,68 @@ import { Link } from 'react-router-dom';
 import './Home.css';
 import { useDarkMode } from './DarkModeContext';
 
-
 const Home: React.FC = () => {
     const { darkMode } = useDarkMode();
-    const logoStyle = {
-        maxWidth: '100px', // Adjust as needed
-        height: 'auto',
-    };
 
     return (
         <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
-            <div className={`content-container ${darkMode ? 'dark-mode' : ''}`}>
-                <h1 className="app-title">SynText AI</h1>
-                <p className="app-description">
-                    Unlock the power of SynText: Effortlessly manage your documents with advanced multilingual QA, intelligent summarization, and seamless translation.
-                </p>
-                <Link to="/login" className="signin-link">
-                    <button className="google-sign-in-button">Sign in with Google</button>
-                </Link>
+            <header className="header">
+                <div className="logo-container">
+                    <h1 className="app-title">SynText AI</h1>
+                </div>
+                <div className="auth-buttons">
+                    <Link to="/login" className="signin-link">
+                        <button className="google-sign-in-button">Sign in with Google</button>
+                    </Link>
+                </div>
+            </header>
+
+            <main className="content-container">
+                <section className="hero-section">
+                    <h2 className="hero-title">Manage Your Documents Like Never Before</h2>
+                    <p className="hero-description">
+                        Unlock the power of SynText: Effortlessly manage your documents with advanced multilingual QA, intelligent summarization, and seamless translation.
+                    </p>
+                </section>
 
                 <section className="features-section">
-                    <h2 className="features-title">SynTextAI in a Nutshell</h2>
-                    <p className="features-intro"> AI for Documents - Translate and Summarize  documents and answer questions.</p>
+                    <h2 className="features-title">SynTextAI Features</h2>
                     <div className="features-list">
                         <div className="feature-item">
+                            <i className="fas fa-file-alt feature-icon"></i>
                             <h3>Multiple Document Support</h3>
-                            <p> SyntextAI works on PDF, CSV, Txt, Image and more coming.</p>
+                            <p>SynTextAI works on PDF, CSV, Txt, and Images, with more formats coming soon.</p>
                         </div>
                         <div className="feature-item">
+                            <i className="fas fa-tasks feature-icon"></i>
                             <h3>Data Management</h3>
-                            <p>Export your chat's and delete your files</p>
+                            <p>Export your chats and delete files effortlessly.</p>
                         </div>
                         <div className="feature-item">
+                            <i className="fas fa-quote-right feature-icon"></i>
                             <h3>Cited Sources</h3>
-                            <p>Answers contain references to their source in the original document.</p>
+                            <p>Get answers with references to their sources in your original documents.</p>
                         </div>
                         <div className="feature-item">
-                            <h3>Any Language</h3>
-                            <p>Works worldwide! SynTextAI accepts documents in any language and can chat in any language.</p>
+                            <i className="fas fa-language feature-icon"></i>
+                            <h3>Language Flexibility</h3>
+                            <p>Works worldwide! SynTextAI accepts and translates documents in any language.</p>
                         </div>
                     </div>
                 </section>
 
-                <div className="pricing-table">
+                <section className="pricing-section">
                     <div className="pricing-card">
-                        <h2 className="pricing-title">7 Days Trial</h2>
-                        <p className="pricing-info">Then Pay $15 Monthly You'll Know Its Worth It</p>
-                        {/* <ul className="pricing-features">
-                            <li>Multilingual (English, French, Italian, German, Spanish and Code) QA on Documents</li>
-                            <li>Document Summarization</li>
-                            <li>Document Translation</li>
-                        </ul> */}
-                        {/* Removed Signup button */
-                            // <BuyButtonComponent
-                            //     buyButtonId="buy_btn_1PmFYiHuDDTkwuzjuYQGB6IQ"
-                            //     publishableKey="pk_live_51OXYPHHuDDTkwuzjvUVcNwur0xLQx7UWYfMN6d8hjbHUMhYlu7IJx0qEGyvZQhbIGSRKDxhCuXk6e1rQgnSh5XXu004fNj9Pwj"
-                            // />
-                        }
+                        <h2 className="pricing-title">7-Day Free Trial</h2>
+                        <p className="pricing-info">Then $15/month, and you'll know it's worth it!</p>
+                        <Link to="/pricing" className="pricing-button">Start Your Trial</Link>
                     </div>
-                </div>
-            </div>
-            <div className="company-logo-container">
-                {/* <img src="/company-logo.png" alt="Company Logo" style={logoStyle} /> */}
+                </section>
+            </main>
+
+            <footer className="footer">
                 <p>&copy; 2024 OSAS INC. All rights reserved.</p>
-
-
-            </div>
+            </footer>
         </div>
     );
 };
