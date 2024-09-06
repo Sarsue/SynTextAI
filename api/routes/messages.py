@@ -42,7 +42,7 @@ def create_message():
     print(context)
     if context['task_type'] == "retrieval":
         top_k_results = store.hybrid_search(query = message, user_id = id, k=5) 
-        response = process(query=message, top_k_results= top_k_results, language= context['langauge'])
+        response = process(query=message, top_k_results= top_k_results, language= context['language'])
         # add history for more conversational context
         # response = chat(query=message, persona_str=user_persona_pref,
         #                 convo_history=formatted_history)
