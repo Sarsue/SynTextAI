@@ -41,15 +41,15 @@ def create_message():
     context = process_context(message, formatted_history)
     if context['task_type'] == "retrieval":
         top_k_results = store.hybrid_search(query = message, user_id = id, k=5) 
-        response = process(query=message, top_k_results= top_k_results)
+        response = process(query=message, top_k_results= top_k_results, language= context['langauge'])
         # add history for more conversational context
         # response = chat(query=message, persona_str=user_persona_pref,
         #                 convo_history=formatted_history)
-    elif context['task_type'] == "summarize": 
-        file_data = store.get_file_text(id, context['file_name']) 
-        response = summarize(message,context['language'], file_data)
+    # elif context['task_type'] == "summarize": 
+    #     file_data = store.get_file_text(id, context['file_name']) 
+    #     response = summarize(message,context['language'], file_data)
     else:
-        response = "Syntext can't understand your request pleae be explicit about the file you want summarized or information you want"
+        response = "SyntextAI is a RAG application and cant handle other tasks besides information retrieval."
    
     bot_response = store.add_message(
             content=response, sender='bot', user_id=id, chat_history_id=history_id)
