@@ -73,9 +73,7 @@ Your Response (choose from "retrieval in [language]" or "summarize [filename] in
 
 if __name__ == '__main__':
     queries = [
-        "What was the total revenue for the organization in the annual report?",
-        "Comment fonctionne le Bitcoin ?",
-        "please sum up the bitcoin.pdf whitepaper"
+        "Comment les transactions sont-elles validées dans le réseau Bitcoin?"
     ]
     user_history = []
     files = ["annual_report.pdf", "bitcoin.pdf"]

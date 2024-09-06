@@ -36,9 +36,10 @@ def create_message():
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
     message_list.append(user_request)
-
+    files = store.get_files_for_user(user_id= id)
     # context is information retrieval or summarize with language detected
-    context = process_context(message, formatted_history)
+    context = process_context(message, formatted_history,files = files)
+    print(context)
     if context['task_type'] == "retrieval":
         top_k_results = store.hybrid_search(query = message, user_id = id, k=5) 
         response = process(query=message, top_k_results= top_k_results, language= context['langauge'])
