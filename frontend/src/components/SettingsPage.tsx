@@ -22,7 +22,7 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscriptionStatus }) => {
     const navigate = useNavigate();
-    const [activeTab, setActiveTab] = useState<'payment' | 'knowledge' | 'general'>('general');
+    const [activeTab, setActiveTab] = useState<'payment' | 'knowledge' | 'general'>('payment');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<File[]>([]);
     const [selectedFile, setSelectedFile] = useState<File | null>(null); // State for selected file
     const [subscriptionStatusLocal, setSubscriptionStatusLocal] = useState<string | null>(subscriptionStatus);
