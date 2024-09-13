@@ -11,7 +11,6 @@ import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useDarkMode } from '../DarkModeContext';
 import { Persona, File } from './types';
-import BuyButtonComponent from './BuyButtonComponent';
 
 
 interface SettingsPageProps {

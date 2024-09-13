@@ -114,42 +114,26 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
     };
 
-    const handleUpdatePayment = async (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!stripe || !elements) {
-            return;
-        }
-
+    const handleStartFreeTrial = async () => {
         setLoading(true);
-        setError(null);
-
-        const { token, error: stripeError } = await stripe.createToken(elements.getElement(CardElement)!);
-
-        if (stripeError) {
-            setError(stripeError.message || 'An unknown error occurred');
-            setLoading(false);
-            return;
-        }
-
         try {
-            const response = await fetch('/api/v1/subscriptions/update-payment', {
+            const token = await user?.getIdToken();
+            const res = await fetch('/api/v1/subscriptions/start-trial', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${await user?.getIdToken()}`,
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ payment_method: token?.id }),
             });
 
-            if (response.ok) {
+            if (res.ok) {
                 setSubscriptionData({ ...subscriptionData, subscription_status: 'active' });
                 onSubscriptionChange('active');
             } else {
-                const { error } = await response.json();
+                const { error } = await res.json();
                 setError(error || 'An unknown error occurred');
             }
         } catch (error) {
-            setError('Failed to update payment method');
+            setError('Failed to start free trial');
         } finally {
             setLoading(false);
         }
@@ -165,9 +149,16 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             <div>
                 <p>Subscription Price: ${subscriptionPrice.toFixed(2)}</p>
             </div>
-            {showUpdatePaymentForm ? (
+            {subscriptionData?.free_trial_used === false && subscriptionData?.subscription_status === 'none' ? (
+                <>
+                    <button onClick={handleStartFreeTrial} disabled={loading}>
+                        {loading ? 'Starting free trial...' : 'Start Free Trial'}
+                    </button>
+                    {error && <p className="error">{error}</p>}
+                </>
+            ) : showUpdatePaymentForm ? (
                 <Elements stripe={stripePromise}>
-                    <form onSubmit={handleUpdatePayment}>
+                    <form onSubmit={handleSubmit}>
                         <CardElement />
                         <button type="submit" disabled={loading}>
                             {loading ? 'Processing...' : 'Update Payment'}
