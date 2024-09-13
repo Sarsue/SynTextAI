@@ -99,24 +99,25 @@ def start_trial():
         success, user_info = decode_firebase_token(token)
 
         if not success:
+            print(f"Token decoding failed: {user_info}")  # Log the user_info or error details
             return jsonify(user_info), 401
 
         user_id = get_id_helper(store, success, user_info)
         subscription = store.get_subscription(user_id)
 
-        # Check if free trial has already been used
         if subscription and subscription.get('trial_end') and subscription.get('trial_end') < datetime.utcnow():
             return jsonify({'error': 'Free trial has already been used'}), 400
 
-        # Check if payment method is provided
         payment_method = request.json.get('payment_method')
         if not payment_method:
             return jsonify({'error': 'Payment method is missing'}), 400
 
-        # Create subscription with free trial
+        # Log Stripe customer and price details
+        print(f"Creating Stripe subscription for customer: {store.get_stripe_customer_id(user_id)}")
+
         subscription = stripe.Subscription.create(
             customer=store.get_stripe_customer_id(user_id),
-            items=[{'price': 'price_1PegHFHuDDTkwuzjucyRQKE1'}],  # Replace with your actual price ID
+            items=[{'price': 'price_1PegHFHuDDTkwuzjucyRQKE1'}],  # Ensure this is valid
             trial_period_days=7,
             default_payment_method=payment_method,
         )
@@ -132,7 +133,9 @@ def start_trial():
         )
 
         return jsonify({'subscription_id': subscription.id, 'message': 'Free trial started successfully'}), 200
+
     except Exception as e:
+        print(f"Error occurred: {str(e)}")  # Log the exception for debugging
         return jsonify({'error': str(e)}), 403
 
 @subscriptions_bp.route('/sub', methods=['POST'])
