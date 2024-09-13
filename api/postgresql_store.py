@@ -53,6 +53,8 @@ class DocSynthStore:
                             stripe_subscription_id TEXT NOT NULL,
                             status TEXT NOT NULL,
                             user_id INTEGER,
+                            trial_end TIMESTAMP,             
+                            current_period_end TIMESTAMP,   
                             FOREIGN KEY (user_id) REFERENCES users (id)
                         )
                     ''')
@@ -172,7 +174,7 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
-    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status):
+    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, trial_end=None, current_period_end=None):
         connection = self.get_connection()
         try:
             with connection:
@@ -185,32 +187,51 @@ class DocSynthStore:
                     existing_subscription = cursor.fetchone()
 
                     if existing_subscription:
-                        # If the subscription exists, update the status
+                        # If the subscription exists, update the status and trial/current period end dates
                         subscription_id = existing_subscription[0]
                         cursor.execute('''
                             UPDATE subscriptions
-                            SET status = %s
+                            SET status = %s, trial_end = %s, current_period_end = %s
                             WHERE stripe_subscription_id = %s
-                        ''', (status, stripe_subscription_id))
+                        ''', (status, trial_end, current_period_end, stripe_subscription_id))
                     else:
                         # If the subscription doesn't exist, add a new entry
                         cursor.execute('''
-                            INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_subscription_id, status)
-                            VALUES (%s, %s, %s, %s)
+                            INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_subscription_id, status, trial_end, current_period_end)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                             RETURNING id
-                        ''', (user_id, stripe_customer_id, stripe_subscription_id, status))
+                        ''', (user_id, stripe_customer_id, stripe_subscription_id, status, trial_end, current_period_end))
                         subscription_id = cursor.fetchone()[0]
 
-                    # Commit the transaction
-                    connection.commit()
-
-                    # Return subscription details
-                    return {'id': subscription_id, 'user_id': user_id, 'stripe_customer_id': stripe_customer_id, 'stripe_subscription_id': stripe_subscription_id, 'status': status}
+                connection.commit()
+                return {'id': subscription_id, 'user_id': user_id, 'stripe_customer_id': stripe_customer_id, 'stripe_subscription_id': stripe_subscription_id, 'status': status, 'trial_end': trial_end, 'current_period_end': current_period_end}
         except Exception as e:
             logger.error(f"Error adding or updating subscription: {e}")
             raise
         finally:
             self.release_connection(connection)
+    
+    def update_subscription_status(self,stripe_customer_id, new_status):
+        connection = self.get_connection()
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute('''
+                    UPDATE subscriptions
+                    SET status = %s
+                    WHERE stripe_customer_id = %s
+                ''', (new_status, stripe_customer_id))
+            connection.commit()
+
+    def update_subscription(self,stripe_customer_id, status, trial_end, current_period_end):
+        connection = self.get_connection()
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute('''
+                    UPDATE subscriptions
+                    SET status = %s, trial_end = %s, current_period_end = %s
+                    WHERE stripe_customer_id = %s
+                ''', (status, trial_end, current_period_end, stripe_customer_id))
+            connection.commit()
 
     def get_subscription(self, user_id):
         connection = self.get_connection()

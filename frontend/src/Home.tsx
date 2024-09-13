@@ -23,7 +23,7 @@ const Home: React.FC = () => {
                 <section className="hero-section">
                     <h2 className="hero-title">Manage Your Documents Like Never Before</h2>
                     <p className="hero-description">
-                        Unlock the power of SynText: Effortlessly manage your documents with advanced multilingual QA, intelligent summarization, and seamless translation.
+                        Unlock the power of SynText: Effortlessly manage your documents with advanced multilingual QA, intelligent summarization, and seamless document generation.
                     </p>
                 </section>
 
@@ -55,8 +55,8 @@ const Home: React.FC = () => {
 
                 <section className="pricing-section">
                     <div className="pricing-card">
-                        <h2 className="pricing-title">7-Day Free Trial</h2>
-                        <p className="pricing-info">Then $15/month, and you'll know it's worth it!</p>
+                        <h2 className="pricing-title">No Free Trial</h2>
+                        <p className="pricing-info">Pay $15/month, and cancel if it's not worth it!</p>
                         {/* <Link to="/pricing" className="pricing-button">Start Your Trial</Link> */}
                     </div>
                 </section>
