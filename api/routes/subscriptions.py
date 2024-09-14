@@ -104,7 +104,7 @@ def create_subscription():
 
         subscription = stripe.Subscription.create(
             customer=store.get_stripe_customer_id(user_id),
-            items=[{'price': 'price_1PegHFHuDDTkwuzjucyRQKE1'}],  # Replace with your actual price ID
+            items=[{'price': 'price_1OYEt8HuDDTkwuzjd4i66xD0'}],  # Replace with your actual price ID
             default_payment_method=payment_method,
         )
 
