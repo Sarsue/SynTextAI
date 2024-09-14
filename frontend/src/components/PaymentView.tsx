@@ -11,7 +11,6 @@ interface PaymentViewProps {
     onSubscriptionChange: (newStatus: string) => void;
     darkMode: boolean;
 }
-
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscriptionStatus, onSubscriptionChange, darkMode }) => {
     const stripe = useStripe();
     const elements = useElements();
@@ -42,30 +41,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             onSubscriptionChange(data.subscription_status);
         } catch (error) {
             setError('Failed to fetch subscription status');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleCancelSubscription = async () => {
-        setLoading(true);
-        try {
-            const token = await user?.getIdToken();
-            const res = await fetch('/api/v1/subscriptions/cancel', {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            if (res.ok) {
-                setSubscriptionData({ ...subscriptionData, subscription_status: 'canceled' });
-                onSubscriptionChange('canceled');
-            } else {
-                const { error } = await res.json();
-                setError(error);
-            }
-        } catch (error) {
-            setError('Failed to cancel subscription');
         } finally {
             setLoading(false);
         }
@@ -147,7 +122,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
 
         try {
-            const response = await fetch('/api/v1/subscriptions/update-payment-method', {
+            const response = await fetch('/api/v1/subscriptions/update-payment', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -169,7 +144,29 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             setLoading(false);
         }
     };
-
+    const handleCancelSubscription = async () => {
+        setLoading(true);
+        try {
+            const token = await user?.getIdToken();
+            const res = await fetch('/api/v1/subscriptions/cancel', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            if (res.ok) {
+                setSubscriptionData({ ...subscriptionData, subscription_status: 'canceled' });
+                onSubscriptionChange('canceled');
+            } else {
+                const { error } = await res.json();
+                setError(error);
+            }
+        } catch (error) {
+            setError('Failed to cancel subscription');
+        } finally {
+            setLoading(false);
+        }
+    };
     const showUpdatePaymentForm = subscriptionData?.subscription_status === 'card_expired' || subscriptionData?.subscription_status === 'past_due';
 
     if (loading) return <div>Loading...</div>;
@@ -179,30 +176,26 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             <h3>Payment</h3>
 
             {showUpdatePaymentForm ? (
-                <Elements stripe={stripePromise}>
-                    <form onSubmit={handleUpdatePaymentMethod}>
-                        <CardElement />
-                        <button type="submit" disabled={loading}>
-                            {loading ? 'Processing...' : 'Update Payment Method'}
-                        </button>
-                        {error && <p className="error">{error}</p>}
-                    </form>
-                </Elements>
+                <form onSubmit={handleUpdatePaymentMethod}>
+                    <CardElement />
+                    <button type="submit" disabled={loading}>
+                        {loading ? 'Processing...' : 'Update Payment Method'}
+                    </button>
+                    {error && <p className="error">{error}</p>}
+                </form>
             ) : subscriptionData?.subscription_status === 'active' ? (
                 <>
                     <p>Your subscription is active.</p>
                     <button onClick={handleCancelSubscription}>Cancel Subscription</button>
                 </>
             ) : (
-                <Elements stripe={stripePromise}>
-                    <form onSubmit={handleSubscribe}>
-                        <CardElement />
-                        <button type="submit" disabled={loading}>
-                            {loading ? 'Processing...' : 'Subscribe'}
-                        </button>
-                        {error && <p className="error">{error}</p>}
-                    </form>
-                </Elements>
+                <form onSubmit={handleSubscribe}>
+                    <CardElement />
+                    <button type="submit" disabled={loading}>
+                        {loading ? 'Processing...' : 'Subscribe'}
+                    </button>
+                    {error && <p className="error">{error}</p>}
+                </form>
             )}
 
             {error && <p className="error">{error}</p>}
@@ -210,4 +203,13 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
     );
 };
 
-export default PaymentView;
+const WrappedPaymentView: React.FC<PaymentViewProps> = (props) => {
+    return (
+        <Elements stripe={props.stripePromise}>
+            <PaymentView {...props} />
+        </Elements>
+    );
+};
+
+export default WrappedPaymentView;
+

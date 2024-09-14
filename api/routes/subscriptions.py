@@ -9,7 +9,7 @@ load_dotenv()
 
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
-
+price_id = os.getenv('STRIPE_PRICE_ID')
 subscriptions_bp = Blueprint("subscriptions", __name__, url_prefix="/api/v1/subscriptions")
 
 def get_id_helper(store, success, user_info):
@@ -73,7 +73,7 @@ def cancel_sub():
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
-@subscriptions_bp.route('/sub', methods=['POST'])
+@subscriptions_bp.route('/subscribe', methods=['POST'])
 def create_subscription():
     try:
         store = current_app.store
@@ -93,7 +93,7 @@ def create_subscription():
 
         subscription = stripe.Subscription.create(
             customer=store.get_stripe_customer_id(user_id),
-            items=[{'price': 'price_1OYEt8HuDDTkwuzjd4i66xD0'}],  # Replace with your actual price ID
+            items=[{'price': price_id}],  # Replace with your actual price ID
             default_payment_method=payment_method,
         )
 
