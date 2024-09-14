@@ -24,23 +24,29 @@ def get_id_helper(store, success, user_info):
 
 @subscriptions_bp.route('/status', methods=['GET'])
 def subscription_status():
-    store = current_app.store
-    token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    user_id = get_id_helper(store, success, user_info)
-    if not token:
-        return jsonify({'error': 'Authorization token is missing'}), 401
+    try:
 
-    token = token.split("Bearer ")[1]
+        store = current_app.store
+        token = request.headers.get('Authorization')
+        success, user_info = get_user_id(token)
+        user_id = get_id_helper(store, success, user_info)
+        if not token:
+            return jsonify({'error': 'Authorization token is missing'}), 401
+
+        token = token.split("Bearer ")[1]
 
 
-    subscription = store.get_subscription(user_id)
+        subscription = store.get_subscription(user_id)
 
-    response = {
-        'subscription_status': subscription['status'] if subscription else 'none',
-        'has_payment_method': subscription.get('default_payment_method') is not None if subscription else False
-    }
-    return jsonify(response), 200
+        response = {
+            'subscription_status': subscription['status'] if subscription else 'none',
+            'has_payment_method': subscription.get('default_payment_method') is not None if subscription else False
+        }
+        return jsonify(response), 200
+    except Exception as e:
+        current_app.logger.error(f"Error in subscription_status: {str(e)}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+
 
 @subscriptions_bp.route('/cancel', methods=['POST'])
 def cancel_sub():
