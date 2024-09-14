@@ -56,7 +56,11 @@ const Home: React.FC = () => {
                 <section className="pricing-section">
                     <div className="pricing-card">
                         <h2 className="pricing-title">No Free Trial</h2>
-                        <p className="pricing-info">Pay $15/month, and cancel if it's not worth it!</p>
+                        <p className="pricing-info">Just $15 a month? You betcha!
+
+                            And if it's not worth it? Cancel faster than a bad date!
+
+                            No strings attached, no hard feelings. Just pure, unadulterated value (or your money back). So, what are you waiting for? Let's get this party started!</p>
                         {/* <Link to="/pricing" className="pricing-button">Start Your Trial</Link> */}
                     </div>
                 </section>
