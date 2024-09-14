@@ -75,10 +75,17 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         event.preventDefault();
         if (!stripe || !elements) return;
 
+        const cardElement = elements.getElement(CardElement);
+        if (!cardElement) {
+            setError('CardElement is not available');
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         setError(null);
 
-        const { token, error: stripeError } = await stripe.createToken(elements.getElement(CardElement)!);
+        const { token, error: stripeError } = await stripe.createToken(cardElement);
 
         if (stripeError) {
             setError(stripeError.message || 'An unknown error occurred');
@@ -114,11 +121,15 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         event.preventDefault();
         if (!stripe || !elements) return;
 
+        const cardElement = elements.getElement(CardElement);
+        if (!cardElement) {
+            setError('CardElement is not available');
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         setError(null);
-
-        const cardElement = elements.getElement(CardElement);
-        if (!cardElement) return;
 
         const { setupIntent, error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
             payment_method: {
