@@ -32,12 +32,7 @@ def subscription_status():
         user_id = get_id_helper(store, success, user_info)
         if not token:
             return jsonify({'error': 'Authorization token is missing'}), 401
-
-        token = token.split("Bearer ")[1]
-
-
         subscription = store.get_subscription(user_id)
-
         response = {
             'subscription_status': subscription['status'] if subscription else 'none',
             'has_payment_method': subscription.get('default_payment_method') is not None if subscription else False
@@ -55,8 +50,6 @@ def cancel_sub():
         token = request.headers.get('Authorization')
         if not token:
             return jsonify({'error': 'Authorization token is missing'}), 401
-
-        token = token.split("Bearer ")[1]
         success, user_info = get_user_id(token)
         user_id = get_id_helper(store, success, user_info)
         subscription_status = store.get_subscription(user_id)
@@ -87,8 +80,6 @@ def create_subscription():
         token = request.headers.get('Authorization')
         if not token:
             return jsonify({'error': 'Authorization token is missing'}), 401
-
-        token = token.split("Bearer ")[1]
         success, user_info = get_user_id(token)
         user_id = get_id_helper(store, success, user_info)
 
@@ -126,8 +117,6 @@ def update_payment():
         token = request.headers.get('Authorization')
         if not token:
             return jsonify({'error': 'Authorization token is missing'}), 401
-
-        token = token.split("Bearer ")[1]
         success, user_info = get_user_id(token)
         user_id = get_id_helper(store, success, user_info)
 
