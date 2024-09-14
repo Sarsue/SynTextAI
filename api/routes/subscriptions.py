@@ -12,10 +12,10 @@ endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
 
 subscriptions_bp = Blueprint("subscriptions", __name__, url_prefix="/api/v1/subscriptions")
 
-def get_id_helper(store, success, user_info):
+def get_user_id_from_token(store, token):
+    success, user_info = decode_firebase_token(token)
     if not success:
         return jsonify(user_info), 401
-
     email = user_info['email']
     user_id = store.get_user_id_from_email(email)
     return user_id
@@ -28,24 +28,17 @@ def subscription_status():
         return jsonify({'error': 'Authorization token is missing'}), 401
 
     token = token.split("Bearer ")[1]
-    success, user_info = decode_firebase_token(token)
+    user_id = get_user_id_from_token(store, token)
+    if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
+        return user_id
 
-    if not success:
-        return jsonify(user_info), 401
-    
-    user_id = get_id_helper(store, success, user_info)
     subscription = store.get_subscription(user_id)
 
-    if subscription:
-        return jsonify({
-            'subscription_status': subscription['status'],
-            'has_payment_method': subscription.get('default_payment_method') is not None
-        }), 200
-    else:
-        return jsonify({
-            'subscription_status': 'none',
-            'has_payment_method': False
-        }), 200
+    response = {
+        'subscription_status': subscription['status'] if subscription else 'none',
+        'has_payment_method': subscription.get('default_payment_method') is not None if subscription else False
+    }
+    return jsonify(response), 200
 
 @subscriptions_bp.route('/cancel', methods=['POST'])
 def cancel_sub():
@@ -56,25 +49,28 @@ def cancel_sub():
             return jsonify({'error': 'Authorization token is missing'}), 401
 
         token = token.split("Bearer ")[1]
-        success, user_info = decode_firebase_token(token)
+        user_id = get_user_id_from_token(store, token)
+        if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
+            return user_id
 
-        if not success:
-            return jsonify(user_info), 401
-        
-        user_id = get_id_helper(store, success, user_info)
         subscription_status = store.get_subscription(user_id)
-       
         if not subscription_status:
             return jsonify({'error': 'No subscription found'}), 404
-        
+
         subscription_id = subscription_status.get('stripe_subscription_id')
         if not subscription_id:
             return jsonify({'error': 'Subscription ID is missing'}), 400
 
         cancellation_result = stripe.Subscription.delete(subscription_id)
-        store.add_or_update_subscription(user_id, subscription_status['stripe_customer_id'], subscription_id, cancellation_result['status'])
-   
+        store.add_or_update_subscription(
+            user_id,
+            subscription_status['stripe_customer_id'],
+            subscription_id,
+            cancellation_result['status']
+        )
+
         return jsonify({'subscription_status': cancellation_result['status']}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
@@ -87,14 +83,11 @@ def create_subscription():
             return jsonify({'error': 'Authorization token is missing'}), 401
 
         token = token.split("Bearer ")[1]
-        success, user_info = decode_firebase_token(token)
+        user_id = get_user_id_from_token(store, token)
+        if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
+            return user_id
 
-        if not success:
-            return jsonify(user_info), 401
-
-        user_id = get_id_helper(store, success, user_info)
         subscription = store.get_subscription(user_id)
-
         if subscription and subscription.get('status') == 'active':
             return jsonify({'error': 'Active subscription already exists'}), 400
 
@@ -117,6 +110,7 @@ def create_subscription():
         )
 
         return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully'}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
@@ -129,12 +123,10 @@ def update_payment():
             return jsonify({'error': 'Authorization token is missing'}), 401
 
         token = token.split("Bearer ")[1]
-        success, user_info = decode_firebase_token(token)
+        user_id = get_user_id_from_token(store, token)
+        if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
+            return user_id
 
-        if not success:
-            return jsonify(user_info), 401
-
-        user_id = get_id_helper(store, success, user_info)
         payment_method = request.json.get('payment_method')
         if not payment_method:
             return jsonify({'error': 'Payment method is missing'}), 400
@@ -153,6 +145,7 @@ def update_payment():
         stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
 
         return jsonify({'success': True}), 200
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -165,23 +158,22 @@ def webhook():
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
 
-        if event['type'] == 'invoice.payment_succeeded':
-            stripe_customer_id = event['data']['object']['customer']
+        event_type = event['type']
+        data_object = event['data']['object']
+        stripe_customer_id = data_object['customer']
+
+        if event_type == 'invoice.payment_succeeded':
             store.update_subscription_status(stripe_customer_id, "active")
 
-        elif event['type'] == 'invoice.payment_failed':
-            stripe_customer_id = event['data']['object']['customer']
+        elif event_type == 'invoice.payment_failed':
             store.update_subscription_status(stripe_customer_id, "card_expired")
 
-        elif event['type'] == 'customer.subscription.updated':
-            subscription = event['data']['object']
-            stripe_customer_id = subscription['customer']
-            status = subscription['status']
-            current_period_end = subscription['current_period_end']
+        elif event_type == 'customer.subscription.updated':
+            status = data_object['status']
+            current_period_end = data_object['current_period_end']
             store.update_subscription(stripe_customer_id, status, current_period_end)
 
-        elif event['type'] == 'customer.subscription.deleted':
-            stripe_customer_id = event['data']['object']['customer']
+        elif event_type == 'customer.subscription.deleted':
             store.update_subscription_status(stripe_customer_id, "canceled")
 
         else:
@@ -191,5 +183,5 @@ def webhook():
 
     except stripe.error.SignatureVerificationError:
         return jsonify({"error": "Invalid signature"}), 400
-    except ValueError as e:
+    except ValueError:
         return jsonify({"error": "Invalid payload"}), 400
