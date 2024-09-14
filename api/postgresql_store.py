@@ -16,6 +16,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# DocSynthStore class definition
 class DocSynthStore:
     def __init__(self, database_config):
         self.database_config = database_config
@@ -23,6 +24,7 @@ class DocSynthStore:
         self.pool = psycopg2.pool.SimpleConnectionPool(1, 20, **database_config)
         self.create_tables()
 
+    # Connection management methods
     def get_connection(self):
         try:
             return self.pool.getconn()
@@ -33,6 +35,7 @@ class DocSynthStore:
     def release_connection(self, connection):
         self.pool.putconn(connection)
 
+    # Table creation methods
     def create_tables(self):
         connection = self.get_connection()
         try:
@@ -47,17 +50,20 @@ class DocSynthStore:
                     ''')
 
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS subscriptions (
-                            id SERIAL PRIMARY KEY,
-                            stripe_customer_id TEXT NOT NULL,
-                            stripe_subscription_id TEXT NOT NULL,
-                            status TEXT NOT NULL,
-                            user_id INTEGER,
-                            trial_end TIMESTAMP,             
-                            current_period_end TIMESTAMP,   
-                            FOREIGN KEY (user_id) REFERENCES users (id)
-                        )
-                    ''')
+                       CREATE TABLE IF NOT EXISTS subscriptions (
+                        id SERIAL PRIMARY KEY,
+                        stripe_customer_id TEXT NOT NULL,
+                        stripe_subscription_id TEXT NOT NULL UNIQUE,
+                        status TEXT NOT NULL,
+                        user_id INTEGER,
+                        current_period_end TIMESTAMP,   
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id),
+                        UNIQUE (stripe_customer_id, stripe_subscription_id)
+                    )
+                ''')
+
 
                     cursor.execute('''
                         CREATE TABLE IF NOT EXISTS chat_histories (
@@ -119,6 +125,7 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
+     # User management methods
     def add_user(self, email, username):
         connection = self.get_connection()
         try:
@@ -173,65 +180,55 @@ class DocSynthStore:
             raise
         finally:
             self.release_connection(connection)
-
-    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, trial_end=None, current_period_end=None):
+    
+    # Subscription  management methods
+    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None):
         connection = self.get_connection()
         try:
             with connection:
                 with connection.cursor() as cursor:
-                    # Check if the subscription already exists for the user
                     cursor.execute('''
-                        SELECT id FROM subscriptions
-                        WHERE user_id = %s AND stripe_subscription_id = %s
-                    ''', (user_id, stripe_subscription_id))
-                    existing_subscription = cursor.fetchone()
-
-                    if existing_subscription:
-                        # If the subscription exists, update the status and trial/current period end dates
-                        subscription_id = existing_subscription[0]
-                        cursor.execute('''
-                            UPDATE subscriptions
-                            SET status = %s, trial_end = %s, current_period_end = %s
-                            WHERE stripe_subscription_id = %s
-                        ''', (status, trial_end, current_period_end, stripe_subscription_id))
-                    else:
-                        # If the subscription doesn't exist, add a new entry
-                        cursor.execute('''
-                            INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_subscription_id, status, trial_end, current_period_end)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            RETURNING id
-                        ''', (user_id, stripe_customer_id, stripe_subscription_id, status, trial_end, current_period_end))
-                        subscription_id = cursor.fetchone()[0]
+                        INSERT INTO subscriptions (user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (stripe_subscription_id)
+                        DO UPDATE SET status = EXCLUDED.status, current_period_end = EXCLUDED.current_period_end, updated_at = CURRENT_TIMESTAMP
+                        RETURNING id;
+                    ''', (user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end))
+                    
+                    subscription_id = cursor.fetchone()[0]
 
                 connection.commit()
-                return {'id': subscription_id, 'user_id': user_id, 'stripe_customer_id': stripe_customer_id, 'stripe_subscription_id': stripe_subscription_id, 'status': status, 'trial_end': trial_end, 'current_period_end': current_period_end}
+                return {
+                    'id': subscription_id, 
+                    'user_id': user_id, 
+                    'stripe_customer_id': stripe_customer_id, 
+                    'stripe_subscription_id': stripe_subscription_id, 
+                    'status': status, 
+                    'current_period_end': current_period_end
+                }
         except Exception as e:
             logger.error(f"Error adding or updating subscription: {e}")
             raise
         finally:
             self.release_connection(connection)
-    
-    def update_subscription_status(self,stripe_customer_id, new_status):
-        connection = self.get_connection()
-        with connection:
-            with connection.cursor() as cursor:
-                cursor.execute('''
-                    UPDATE subscriptions
-                    SET status = %s
-                    WHERE stripe_customer_id = %s
-                ''', (new_status, stripe_customer_id))
-            connection.commit()
 
-    def update_subscription(self,stripe_customer_id, status, trial_end, current_period_end):
+    def update_subscription(self, stripe_customer_id, status, current_period_end):
         connection = self.get_connection()
-        with connection:
-            with connection.cursor() as cursor:
-                cursor.execute('''
-                    UPDATE subscriptions
-                    SET status = %s, trial_end = %s, current_period_end = %s
-                    WHERE stripe_customer_id = %s
-                ''', (status, trial_end, current_period_end, stripe_customer_id))
-            connection.commit()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute('''
+                        UPDATE subscriptions
+                        SET status = %s, current_period_end = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE stripe_customer_id = %s;
+                    ''', (status, current_period_end, stripe_customer_id))
+                    
+                connection.commit()
+        except Exception as e:
+            logger.error(f"Error updating subscription: {e}")
+            raise
+        finally:
+            self.release_connection(connection)
 
     def get_subscription(self, user_id):
         connection = self.get_connection()
@@ -239,21 +236,22 @@ class DocSynthStore:
             with connection:
                 with connection.cursor() as cursor:
                     cursor.execute('''
-                        SELECT * FROM subscriptions
-                        WHERE user_id = %s
+                        SELECT id, stripe_customer_id, stripe_subscription_id, status, current_period_end, created_at, updated_at
+                        FROM subscriptions
+                        WHERE user_id = %s;
                     ''', (user_id,))
 
                     result = cursor.fetchone()
 
-                    # If a subscription exists for the user, return the subscription object
                     if result:
                         subscription = {
                             'id': result[0],
                             'stripe_customer_id': result[1],
                             'stripe_subscription_id': result[2],
                             'status': result[3],
-                            'user_id': result[4]
-                            # Add more fields as needed
+                            'current_period_end': result[4],
+                            'created_at': result[5],
+                            'updated_at': result[6]
                         }
                         return subscription
                     else:
@@ -264,6 +262,26 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
+    def update_subscription_status(self, stripe_customer_id, new_status):
+        connection = self.get_connection()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute('''
+                        UPDATE subscriptions
+                        SET status = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE stripe_customer_id = %s;
+                    ''', (new_status, stripe_customer_id))
+                    
+                connection.commit()
+        except Exception as e:
+            logger.error(f"Error updating subscription status: {e}")
+            raise
+        finally:
+            self.release_connection(connection)
+ 
+ 
+   # Chat Message & History  management methods
     def add_chat_history(self, title, user_id):
         connection = self.get_connection()
         try:
@@ -529,6 +547,7 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
+     # User Files management methods
     def get_files_for_user(self, user_id):
         connection = self.get_connection()
         try:

@@ -17,11 +17,9 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
     const elements = useElements();
     const [email, setEmail] = useState(user?.email || '');
     const [clientSecret, setClientSecret] = useState('');
-    const [cancellationInitiated, setCancellationInitiated] = useState(false);
-    const [subscriptionData, setSubscriptionData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const subscriptionPrice = 15; // Define the subscription price here
+    const [subscriptionData, setSubscriptionData] = useState<any>(null);
 
     useEffect(() => {
         if (user) {
@@ -73,11 +71,9 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
     };
 
-    const handleSubmit = async (event: React.FormEvent) => {
+    const handleSubscribe = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!stripe || !elements) {
-            return;
-        }
+        if (!stripe || !elements) return;
 
         setLoading(true);
         setError(null);
@@ -91,7 +87,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
 
         try {
-            const response = await fetch('/api/v1/subscriptions/sub', {
+            const response = await fetch('/api/v1/subscriptions/subscribe', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -114,78 +110,90 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
     };
 
-    const handleStartFreeTrial = async () => {
+    const handleUpdatePaymentMethod = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!stripe || !elements) return;
+
         setLoading(true);
+        setError(null);
+
+        const cardElement = elements.getElement(CardElement);
+        if (!cardElement) return;
+
+        const { setupIntent, error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
+            payment_method: {
+                card: cardElement,
+                billing_details: {
+                    email,
+                },
+            },
+        });
+
+        if (stripeError) {
+            setError(stripeError.message || 'An unknown error occurred');
+            setLoading(false);
+            return;
+        }
+
         try {
-            const token = await user?.getIdToken();
-            const res = await fetch('/api/v1/subscriptions/start-trial', {
+            const response = await fetch('/api/v1/subscriptions/update-payment-method', {
                 method: 'POST',
                 headers: {
-                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${await user?.getIdToken()}`,
                 },
+                body: JSON.stringify({ payment_method_id: setupIntent?.payment_method }),
             });
 
-            if (res.ok) {
+            if (response.ok) {
                 setSubscriptionData({ ...subscriptionData, subscription_status: 'active' });
                 onSubscriptionChange('active');
             } else {
-                const { error } = await res.json();
+                const { error } = await response.json();
                 setError(error || 'An unknown error occurred');
             }
         } catch (error) {
-            setError('Failed to start free trial');
+            setError('Failed to update payment method');
         } finally {
             setLoading(false);
         }
     };
 
-    if (loading) return <div>Loading...</div>;
+    const showUpdatePaymentForm = subscriptionData?.subscription_status === 'card_expired' || subscriptionData?.subscription_status === 'past_due';
 
-    const showUpdatePaymentForm = subscriptionData?.subscription_status === 'card_expired';
+    if (loading) return <div>Loading...</div>;
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
             <h3>Payment</h3>
-            <div>
-                <p>Subscription Price: ${subscriptionPrice.toFixed(2)}</p>
-            </div>
-            {subscriptionData?.free_trial_used === false && subscriptionData?.subscription_status === 'none' ? (
-                <>
-                    <button onClick={handleStartFreeTrial} disabled={loading}>
-                        {loading ? 'Starting free trial...' : 'Start Free Trial'}
-                    </button>
-                    {error && <p className="error">{error}</p>}
-                </>
-            ) : showUpdatePaymentForm ? (
+
+            {showUpdatePaymentForm ? (
                 <Elements stripe={stripePromise}>
-                    <form onSubmit={handleSubmit}>
+                    <form onSubmit={handleUpdatePaymentMethod}>
                         <CardElement />
                         <button type="submit" disabled={loading}>
-                            {loading ? 'Processing...' : 'Update Payment'}
+                            {loading ? 'Processing...' : 'Update Payment Method'}
                         </button>
                         {error && <p className="error">{error}</p>}
                     </form>
                 </Elements>
-            ) : (
+            ) : subscriptionData?.subscription_status === 'active' ? (
                 <>
-                    {subscriptionData?.subscription_status === 'active' ? (
-                        <>
-                            <p>Your subscription is active.</p>
-                            <button onClick={handleCancelSubscription}>Cancel Subscription</button>
-                        </>
-                    ) : (
-                        <Elements stripe={stripePromise}>
-                            <form onSubmit={handleSubmit}>
-                                <CardElement />
-                                <button type="submit" disabled={loading}>
-                                    {loading ? 'Processing...' : 'Subscribe'}
-                                </button>
-                                {error && <p className="error">{error}</p>}
-                            </form>
-                        </Elements>
-                    )}
+                    <p>Your subscription is active.</p>
+                    <button onClick={handleCancelSubscription}>Cancel Subscription</button>
                 </>
+            ) : (
+                <Elements stripe={stripePromise}>
+                    <form onSubmit={handleSubscribe}>
+                        <CardElement />
+                        <button type="submit" disabled={loading}>
+                            {loading ? 'Processing...' : 'Subscribe'}
+                        </button>
+                        {error && <p className="error">{error}</p>}
+                    </form>
+                </Elements>
             )}
+
             {error && <p className="error">{error}</p>}
         </div>
     );

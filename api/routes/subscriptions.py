@@ -35,24 +35,15 @@ def subscription_status():
     
     user_id = get_id_helper(store, success, user_info)
     subscription = store.get_subscription(user_id)
-    
-    # Check if user has used free trial by comparing trial_end with current time
-    free_trial_used = False
-    if subscription and subscription.get('trial_end'):
-        trial_end = subscription.get('trial_end')
-        if trial_end and trial_end < datetime.utcnow():
-            free_trial_used = True  # Free trial has ended in the past
 
     if subscription:
         return jsonify({
             'subscription_status': subscription['status'],
-            'free_trial_used': free_trial_used,
             'has_payment_method': subscription.get('default_payment_method') is not None
         }), 200
     else:
         return jsonify({
             'subscription_status': 'none',
-            'free_trial_used': free_trial_used,
             'has_payment_method': False
         }), 200
 
@@ -87,57 +78,6 @@ def cancel_sub():
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
-@subscriptions_bp.route('/start-trial', methods=['POST'])
-def start_trial():
-    try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Authorization token is missing'}), 401
-
-        token = token.split("Bearer ")[1]
-        success, user_info = decode_firebase_token(token)
-
-        if not success:
-            print(f"Token decoding failed: {user_info}")  # Log the user_info or error details
-            return jsonify(user_info), 401
-
-        user_id = get_id_helper(store, success, user_info)
-        subscription = store.get_subscription(user_id)
-
-        if subscription and subscription.get('trial_end') and subscription.get('trial_end') < datetime.utcnow():
-            return jsonify({'error': 'Free trial has already been used'}), 400
-
-        payment_method = request.json.get('payment_method')
-        if not payment_method:
-            return jsonify({'error': 'Payment method is missing'}), 400
-
-        # Log Stripe customer and price details
-        print(f"Creating Stripe subscription for customer: {store.get_stripe_customer_id(user_id)}")
-
-        subscription = stripe.Subscription.create(
-            customer=store.get_stripe_customer_id(user_id),
-            items=[{'price': 'price_1PegHFHuDDTkwuzjucyRQKE1'}],  # Ensure this is valid
-            trial_period_days=7,
-            default_payment_method=payment_method,
-        )
-
-        # Save subscription to the store
-        store.add_or_update_subscription(
-            user_id=user_id,
-            stripe_customer_id=store.get_stripe_customer_id(user_id),
-            stripe_subscription_id=subscription.id,
-            status=subscription.status,
-            trial_end=datetime.utcfromtimestamp(subscription.trial_end) if subscription.trial_end else None,
-            current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
-        )
-
-        return jsonify({'subscription_id': subscription.id, 'message': 'Free trial started successfully'}), 200
-
-    except Exception as e:
-        print(f"Error occurred: {str(e)}")  # Log the exception for debugging
-        return jsonify({'error': str(e)}), 403
-
 @subscriptions_bp.route('/sub', methods=['POST'])
 def create_subscription():
     try:
@@ -155,36 +95,30 @@ def create_subscription():
         user_id = get_id_helper(store, success, user_info)
         subscription = store.get_subscription(user_id)
 
-        # Check if free trial has already been used
-        if not subscription or (subscription.get('trial_end') and subscription.get('trial_end') >= datetime.utcnow()):
-            return jsonify({'error': 'Free trial is still active or not applicable'}), 400
+        if subscription and subscription.get('status') == 'active':
+            return jsonify({'error': 'Active subscription already exists'}), 400
 
-        # Check if payment method is provided
         payment_method = request.json.get('payment_method')
         if not payment_method:
             return jsonify({'error': 'Payment method is missing'}), 400
 
-        # Create regular subscription (without a free trial)
         subscription = stripe.Subscription.create(
             customer=store.get_stripe_customer_id(user_id),
             items=[{'price': 'price_1PegHFHuDDTkwuzjucyRQKE1'}],  # Replace with your actual price ID
             default_payment_method=payment_method,
         )
 
-        # Save subscription to the store
         store.add_or_update_subscription(
             user_id=user_id,
             stripe_customer_id=store.get_stripe_customer_id(user_id),
             stripe_subscription_id=subscription.id,
             status=subscription.status,
-            trial_end=datetime.utcfromtimestamp(subscription.trial_end) if subscription.trial_end else None,
             current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
         )
 
         return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 403
-
 
 @subscriptions_bp.route('/update-payment', methods=['POST'])
 def update_payment():
@@ -205,7 +139,6 @@ def update_payment():
         if not payment_method:
             return jsonify({'error': 'Payment method is missing'}), 400
 
-        # Retrieve the customer and current subscription
         stripe_customer_id = store.get_stripe_customer_id(user_id)
         subscription = store.get_subscription(user_id)
 
@@ -216,14 +149,12 @@ def update_payment():
         if not subscription_id:
             return jsonify({'error': 'Subscription ID is missing'}), 400
 
-        # Attach the new payment method and update the subscription
         stripe.PaymentMethod.attach(payment_method, customer=stripe_customer_id)
         stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
 
         return jsonify({'success': True}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 
 @subscriptions_bp.route('/webhook', methods=['POST'])
 def webhook():
@@ -235,12 +166,10 @@ def webhook():
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
 
         if event['type'] == 'invoice.payment_succeeded':
-            subscription = event['data']['object']['subscription']
             stripe_customer_id = event['data']['object']['customer']
             store.update_subscription_status(stripe_customer_id, "active")
 
         elif event['type'] == 'invoice.payment_failed':
-            subscription = event['data']['object']['subscription']
             stripe_customer_id = event['data']['object']['customer']
             store.update_subscription_status(stripe_customer_id, "card_expired")
 
@@ -248,13 +177,11 @@ def webhook():
             subscription = event['data']['object']
             stripe_customer_id = subscription['customer']
             status = subscription['status']
-            trial_end = subscription['trial_end']
             current_period_end = subscription['current_period_end']
-            store.update_subscription(stripe_customer_id, status, trial_end, current_period_end)
+            store.update_subscription(stripe_customer_id, status, current_period_end)
 
         elif event['type'] == 'customer.subscription.deleted':
-            subscription = event['data']['object']
-            stripe_customer_id = subscription['customer']
+            stripe_customer_id = event['data']['object']['customer']
             store.update_subscription_status(stripe_customer_id, "canceled")
 
         else:
