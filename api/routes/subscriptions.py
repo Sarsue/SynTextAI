@@ -12,25 +12,27 @@ endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
 
 subscriptions_bp = Blueprint("subscriptions", __name__, url_prefix="/api/v1/subscriptions")
 
-def get_user_id_from_token(store, token):
-    success, user_info = decode_firebase_token(token)
+def get_id_helper(store, success, user_info):
     if not success:
         return jsonify(user_info), 401
+
+    # Now you can use the user_info dictionary to allow or restrict actions
+    name = user_info['name']
     email = user_info['email']
-    user_id = store.get_user_id_from_email(email)
-    return user_id
+    id = store.get_user_id_from_email(email)
+    return id
 
 @subscriptions_bp.route('/status', methods=['GET'])
 def subscription_status():
     store = current_app.store
     token = request.headers.get('Authorization')
+    success, user_info = get_user_id(token)
+    user_id = get_id_helper(store, success, user_info)
     if not token:
         return jsonify({'error': 'Authorization token is missing'}), 401
 
     token = token.split("Bearer ")[1]
-    user_id = get_user_id_from_token(store, token)
-    if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
-        return user_id
+
 
     subscription = store.get_subscription(user_id)
 
@@ -49,10 +51,8 @@ def cancel_sub():
             return jsonify({'error': 'Authorization token is missing'}), 401
 
         token = token.split("Bearer ")[1]
-        user_id = get_user_id_from_token(store, token)
-        if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
-            return user_id
-
+        success, user_info = get_user_id(token)
+        user_id = get_id_helper(store, success, user_info)
         subscription_status = store.get_subscription(user_id)
         if not subscription_status:
             return jsonify({'error': 'No subscription found'}), 404
@@ -83,9 +83,8 @@ def create_subscription():
             return jsonify({'error': 'Authorization token is missing'}), 401
 
         token = token.split("Bearer ")[1]
-        user_id = get_user_id_from_token(store, token)
-        if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
-            return user_id
+        success, user_info = get_user_id(token)
+        user_id = get_id_helper(store, success, user_info)
 
         subscription = store.get_subscription(user_id)
         if subscription and subscription.get('status') == 'active':
@@ -123,9 +122,8 @@ def update_payment():
             return jsonify({'error': 'Authorization token is missing'}), 401
 
         token = token.split("Bearer ")[1]
-        user_id = get_user_id_from_token(store, token)
-        if isinstance(user_id, tuple):  # Error response from get_user_id_from_token
-            return user_id
+        success, user_info = get_user_id(token)
+        user_id = get_id_helper(store, success, user_info)
 
         payment_method = request.json.get('payment_method')
         if not payment_method:
