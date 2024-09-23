@@ -69,7 +69,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
                 ))}
             </div>
             <button onClick={handleSendClick} disabled={isSending} className="send-button">
-                {isSending ? 'Sending...' : 'Send'}
+                {isSending ? '⏳' : '✉️'}
             </button>
         </div>
     );
