@@ -3,14 +3,16 @@
 .chat-app-container {
     display: flex;
     height: 100vh;
+    flex-direction: row;
+    /* Default layout for larger screens */
 }
 
 /* Apply dark mode styles to all child elements of chat-app-container when dark mode is active */
 .dark-mode .chat-app-container>* {
-    /* Example dark mode background color */
     background-color: #333;
-    /* Example dark mode text color */
+    /* Dark mode background color */
     color: #fff;
+    /* Dark mode text color */
 }
 
 .conversation-column {
@@ -18,18 +20,107 @@
     /* Adjust the proportion as needed */
     display: flex;
     flex-direction: column;
+    overflow: auto;
+    /* Allow scrolling if content overflows */
 }
 
 .history-column {
     flex: 1;
     /* Adjust the proportion as needed */
     background-color: #f0f0f0;
-    /* Example background color for the history panel */
+    /* Light mode background color for the history panel */
+    overflow: auto;
+    /* Allow scrolling if content overflows */
 }
 
+/* Dark mode styles for the history column */
 .dark-mode .history-column {
     background-color: #333;
     /* Dark mode background color for the history panel */
     color: #fff;
     /* Dark mode text color */
+}
+
+/* Light mode styles for conversation column */
+.light-mode .conversation-column {
+    background-color: #fff;
+    /* Light mode background color for the conversation panel */
+    color: #000;
+    /* Light mode text color */
+}
+
+/* Mobile styles */
+@media (max-width: 768px) {
+    .chat-app-container {
+        flex-direction: column;
+        /* Stack columns on smaller screens */
+    }
+
+    .conversation-column,
+    .history-column {
+        flex: none;
+        /* Remove flex proportion for mobile */
+        width: 100%;
+        /* Full width on mobile */
+    }
+
+    .conversation-column {
+        height: 70%;
+        /* Adjust height as needed for mobile */
+    }
+
+    .history-column {
+        height: 30%;
+        /* Adjust height as needed for mobile */
+    }
+
+    .user-actions {
+        display: flex;
+        /* Align buttons horizontally */
+        justify-content: space-between;
+        /* Space out buttons */
+        margin: 10px;
+        /* Margin for aesthetics */
+    }
+
+    .user-actions button {
+        flex: 1;
+        /* Equal width for buttons */
+        margin: 0 5px;
+        /* Spacing between buttons */
+        padding: 10px;
+        /* Padding for touch targets */
+    }
+}
+
+/* Additional dark mode styles for mobile */
+.dark-mode .conversation-column {
+    background-color: #444;
+    /* Dark mode background color for conversation panel */
+}
+
+/* Add any other styles for text inputs, buttons, etc. */
+.chat-input {
+    padding: 10px;
+    /* Adjust padding */
+    border: 1px solid #ccc;
+    /* Light mode border color */
+}
+
+.dark-mode .chat-input {
+    border: 1px solid #666;
+    /* Dark mode border color */
+}
+
+button {
+    cursor: pointer;
+    /* Pointer cursor for buttons */
+}
+
+/* Dark mode button styles */
+.dark-mode button {
+    background-color: #555;
+    /* Dark mode button background */
+    color: #fff;
+    /* Dark mode button text color */
 }

@@ -20,48 +20,60 @@ const Home: React.FC = () => {
             </header>
 
             <main className="content-container">
+                {/* Hero Section */}
                 <section className="hero-section">
                     <h2 className="hero-title">Manage Your Documents Like Never Before</h2>
                     <p className="hero-description">
-                        Unlock the power of SynText: Effortlessly manage your documents with advanced multilingual QA, intelligent summarization, and seamless document generation.
+                        Unlock the power of SynText: Effortlessly manage, analyze, and simplify your documents with AI-driven features.
                     </p>
                 </section>
 
-                <section className="features-section">
-                    <h2 className="features-title">SynTextAI Features</h2>
-                    <div className="features-list">
-                        <div className="feature-item">
-                            <i className="fas fa-file-alt feature-icon"></i>
-                            <h3>Multiple Document Support</h3>
-                            <p>SynTextAI works on PDF, CSV, Txt, and Images, with more formats coming soon.</p>
-                        </div>
-                        <div className="feature-item">
-                            <i className="fas fa-tasks feature-icon"></i>
-                            <h3>Data Management</h3>
-                            <p>Export your chats and delete files effortlessly.</p>
-                        </div>
-                        <div className="feature-item">
-                            <i className="fas fa-quote-right feature-icon"></i>
-                            <h3>Cited Sources</h3>
-                            <p>Get answers with references to their sources in your original documents.</p>
-                        </div>
-                        <div className="feature-item">
-                            <i className="fas fa-language feature-icon"></i>
-                            <h3>Language Flexibility</h3>
-                            <p>Works worldwide! SynTextAI accepts and translates documents in any language.</p>
-                        </div>
+                {/* Video and Features Side by Side */}
+                <section className="video-features-section">
+                    <div className="features-column">
+                        <h2 className="features-title">Why SynTextAI?</h2>
+                        <ul className="features-list">
+                            <li className="feature-item">
+                                <i className="fas fa-file-alt feature-icon"></i>
+                                <h3>Multiple Document Support</h3>
+                                <p>Works on PDFs, CSVs, Text, and Images.</p>
+                            </li>
+                            <li className="feature-item">
+                                <i className="fas fa-tasks feature-icon"></i>
+                                <h3>Data Management</h3>
+                                <p>Easily manage, export, and delete your files.</p>
+                            </li>
+                            <li className="feature-item">
+                                <i className="fas fa-quote-right feature-icon"></i>
+                                <h3>Cited Sources</h3>
+                                <p>Get answers with references to their sources in your documents.</p>
+                            </li>
+                            <li className="feature-item">
+                                <i className="fas fa-language feature-icon"></i>
+                                <h3>Multilingual Support</h3>
+                                <p>queries and documents in multiple languages.</p>
+                            </li>
+                            <li className="feature-item">
+                                <i className="fas fa-search feature-icon"></i>
+                                <h3>AI-Powered Capabilities</h3>
+                                <p>Search, summarize, simplify, and generate content with AI.</p>
+                            </li>
+                        </ul>
                     </div>
-                </section>
 
-                <section className="pricing-section">
-                    <div className="pricing-card">
-                        <h2 className="pricing-title">No Free Trial</h2>
-                        <p className="pricing-info">Just $15 a month? You betcha!
-
-                            And if it's not worth it? Cancel faster than a bad date!
-
-                            No strings attached, no hard feelings. Just pure, unadulterated value (or your money back). So, what are you waiting for? Let's get this party started!</p>
-                        {/* <Link to="/pricing" className="pricing-button">Start Your Trial</Link> */}
+                    <div className="video-column">
+                        <h2 className="video-title">Watch SynTextAI in Action</h2>
+                        <div className="video-container">
+                            <iframe
+                                width="100%"
+                                height="250"
+                                src="https://www.youtube.com/embed/your-video-id"
+                                title="SynText AI Tutorial"
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                allowFullScreen
+                            ></iframe>
+                        </div>
                     </div>
                 </section>
             </main>

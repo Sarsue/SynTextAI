@@ -525,8 +525,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             <div className="history-column">
                 {user !== null && (
                     <div>
-                        <button onClick={handleSettingsClick}>Settings</button>
-                        <button onClick={handleLogout}>Logout</button>
+                        <button onClick={handleSettingsClick}> ⚙️</button>
+                        <button onClick={handleLogout}>❌</button>
                     </div>
                 )}
                 <HistoryView

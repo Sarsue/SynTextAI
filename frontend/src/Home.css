@@ -1,222 +1,282 @@
-/* Container styling */
+/* Overall container for dark mode */
 .app-container {
-    font-family: 'Arial', sans-serif;
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-    color: #333;
+    font-family: Arial, sans-serif;
     background-color: #f4f4f9;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    /* Light mode background */
+    color: #333;
+    /* Light mode text */
+    padding: 0 1rem;
+    /* Add padding for mobile */
 }
 
-/* Dark mode styles */
 .dark-mode .app-container {
     background-color: #121212;
     color: #fff;
 }
 
-/* Header styling */
+/* Header */
 .header {
     display: flex;
-    justify-content: space-between;
-    padding: 1.5rem 2rem;
+    flex-direction: column;
+    /* Stack items vertically on mobile */
+    align-items: center;
+    /* Center items */
+    padding: 1rem;
     background-color: #fff;
+    /* Light mode header */
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    transition: background-color 0.3s ease;
+    /* Added shadow for header */
 }
 
 .dark-mode .header {
     background-color: #1e1e1e;
+    /* Dark mode header */
 }
 
-.logo-container .app-title {
-    font-size: 2.5rem;
-    color: #333;
+.app-title {
+    font-size: 2rem;
+    color: #4285f4;
+    /* Keep the app title blue */
 }
 
-.dark-mode .logo-container .app-title {
-    color: #fff;
+.dark-mode .app-title {
+    color: #4285f4;
+}
+
+/* Auth Buttons Section */
+.auth-buttons {
+    display: flex;
+    flex-direction: column;
+    /* Stack buttons on mobile */
+    align-items: center;
+    /* Center buttons */
+    margin-top: 1rem;
+    /* Add margin for spacing */
 }
 
 .auth-buttons .google-sign-in-button {
     background-color: #4285f4;
     color: white;
+    padding: 0.5rem 1rem;
     border: none;
-    padding: 12px 24px;
-    font-size: 1rem;
-    border-radius: 5px;
-    transition: background-color 0.3s ease;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 1rem;
+    /* Add margin for spacing */
 }
 
-.google-sign-in-button:hover {
+.auth-buttons .google-sign-in-button:hover {
     background-color: #357ae8;
 }
 
-/* Hero section */
+/* Hero Section */
 .hero-section {
     text-align: center;
-    padding: 3rem 1rem;
+    padding: 4rem 2rem;
     background: linear-gradient(120deg, #89f7fe, #66a6ff);
+    /* Light mode gradient */
     color: white;
 }
 
-/* Dark mode for hero section */
 .dark-mode .hero-section {
     background: linear-gradient(120deg, #333, #666);
+    /* Dark mode gradient */
 }
 
 .hero-title {
     font-size: 2.5rem;
     margin-bottom: 1rem;
+    color: #4285f4;
+    /* Keep hero title blue */
 }
 
 .hero-description {
     font-size: 1.2rem;
+    color: #666;
+    /* Light mode description text */
 }
 
-/* Features section */
-.features-section {
-    padding: 2rem 1rem;
-    text-align: center;
+.dark-mode .hero-description {
+    color: #ccc;
+    /* Dark mode description text */
+}
+
+/* Video and Features Section */
+.video-features-section {
+    display: flex;
+    flex-direction: column;
+    /* Stack columns on mobile */
+    padding: 3rem 0;
+    /* Remove side padding */
     background-color: #f9f9f9;
+    /* Light mode background */
+    gap: 2rem;
+    /* Spacing between sections */
 }
 
-.dark-mode .features-section {
+.dark-mode .video-features-section {
     background-color: #1e1e1e;
+    /* Dark mode background */
+}
+
+.features-column {
+    padding: 0 1rem;
+    /* Add horizontal padding */
 }
 
 .features-title {
     font-size: 2rem;
-    margin-bottom: 2rem;
-    color: #333;
-}
-
-.dark-mode .features-title {
-    color: #fff;
+    margin-bottom: 1.5rem;
+    color: #4285f4;
+    /* Features title blue */
 }
 
 .features-list {
-    display: flex;
-    justify-content: space-around;
-    flex-wrap: wrap;
+    list-style: none;
+    padding: 0;
+    margin: 0;
 }
 
 .feature-item {
-    width: 220px;
-    padding: 1rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    /* Stack icon and text vertically */
+    align-items: flex-start;
     background-color: #fff;
+    /* Light mode feature item background */
     border-radius: 10px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-    margin-bottom: 2rem;
-    color: #333;
+    padding: 1rem;
     transition: transform 0.3s ease;
-}
-
-/* Dark mode for feature items */
-.dark-mode .feature-item {
-    background-color: #333;
-    box-shadow: 0 4px 10px rgba(255, 255, 255, 0.1);
-    color: #fff;
+    color: #333;
+    /* Light mode text */
 }
 
 .feature-item:hover {
     transform: translateY(-5px);
 }
 
+.dark-mode .feature-item {
+    background-color: #333;
+    /* Dark mode feature item background */
+    color: #fff;
+    /* Dark mode text */
+}
+
 .feature-icon {
-    font-size: 2rem;
+    font-size: 1.8rem;
     color: #4285f4;
-    margin-bottom: 1rem;
+    /* Feature icon in blue */
+    margin-right: 1rem;
 }
 
-/* Pricing section */
-.pricing-section {
-    text-align: center;
-    padding: 2rem 1rem;
-    background-color: #f9f9f9;
-    position: relative;
-}
-
-.dark-mode .pricing-section {
-    background-color: #1e1e1e;
-}
-
-/* Free trial banner */
-.free-trial-banner {
-    background-color: #ffecb3;
-    color: #333;
-    padding: 10px 20px;
+.feature-item h3 {
     font-size: 1.2rem;
-    border-radius: 5px;
-    margin-bottom: 1rem;
-    display: inline-block;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    margin-bottom: 0.5rem;
+    color: #333;
+    /* Light mode heading */
 }
 
-.dark-mode .free-trial-banner {
-    background-color: #ffe082;
-    color: #1e1e1e;
+.dark-mode .feature-item h3 {
+    color: #fff;
+    /* Dark mode heading */
 }
 
-/* Pricing card */
-.pricing-card {
-    padding: 2rem;
-    background-color: #fff;
+.feature-item p {
+    font-size: 1rem;
+    margin: 0;
+    color: #666;
+    /* Light mode text */
+}
+
+.dark-mode .feature-item p {
+    color: #ccc;
+    /* Dark mode text */
+}
+
+/* Video Column */
+.video-column {
+    padding: 0 1rem;
+    /* Add horizontal padding */
+}
+
+.video-container {
+    width: 100%;
+    /* Ensure the video is responsive */
+    height: auto;
+    min-height: 300px;
+}
+
+.video-container iframe {
+    width: 100%;
+    height: auto;
+    min-height: 300px;
+    aspect-ratio: 16/9;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    transition: transform 0.3s ease;
-    color: #333;
 }
 
-.dark-mode .pricing-card {
-    background-color: #333;
-    box-shadow: 0 4px 8px rgba(255, 255, 255, 0.1);
-    color: #fff;
-}
-
-.pricing-card:hover {
-    transform: scale(1.05);
-}
-
-.pricing-title {
+.video-title {
     font-size: 2rem;
     margin-bottom: 1rem;
+    color: #4285f4;
+    /* Video title in blue */
 }
 
-.pricing-info {
-    margin-bottom: 1.5rem;
-    font-size: 1rem;
-    color: #777;
-}
-
-.dark-mode .pricing-info {
-    color: #bbb;
-}
-
-.pricing-button {
-    background-color: #4285f4;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 5px;
-    text-decoration: none;
-    transition: background-color 0.3s ease;
-}
-
-.pricing-button:hover {
-    background-color: #357ae8;
+.dark-mode .video-title {
+    color: #4285f4;
 }
 
 /* Footer */
 .footer {
-    margin-top: auto;
-    padding: 1rem;
-    background-color: #fff;
     text-align: center;
-    font-size: 0.9rem;
-    color: #777;
+    padding: 2rem;
+    background-color: #fff;
+    /* Light mode footer background */
+    color: #333;
+    /* Light mode text */
 }
 
 .dark-mode .footer {
-    background-color: #1e1e1e;
-    color: #bbb;
+    background-color: #1f1f1f;
+    /* Dark mode footer background */
+    color: #fff;
+    /* Dark mode text */
+}
+
+/* Responsive Styles */
+@media (min-width: 768px) {
+    .header {
+        flex-direction: row;
+        /* Row layout on larger screens */
+        justify-content: space-between;
+        /* Space between header items */
+        align-items: center;
+        /* Center items vertically */
+    }
+
+    .auth-buttons {
+        flex-direction: row;
+        /* Row layout for buttons on larger screens */
+    }
+
+    .video-features-section {
+        flex-direction: row;
+        /* Side by side on larger screens */
+        justify-content: space-between;
+        /* Space between columns */
+    }
+
+    .features-column {
+        padding-right: 2rem;
+        /* Add space between columns */
+    }
+
+    .video-column {
+        max-width: 50%;
+        /* Limit video column width */
+        padding-left: 2rem;
+        /* Add space on the left */
+    }
 }
