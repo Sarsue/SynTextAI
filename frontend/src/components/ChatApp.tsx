@@ -160,6 +160,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         draggable: true,
                         progress: undefined,
                     });
+                    fetchUserFiles();
                 } else {
                     // Handle other responses (e.g., error responses) here
                     toast.error('File upload failed. Please try again.', {

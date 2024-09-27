@@ -45,12 +45,15 @@
     align-items: center;
 }
 
+/* Common styles for the file link (both processed and unprocessed) */
 .file-list .file-link {
     cursor: pointer;
     color: #0078d4;
+    /* Standard blue for links */
     text-decoration: underline;
 }
 
+/* Delete button */
 .file-list .delete-button {
     background-color: #ff6b6b;
     border: none;
@@ -65,11 +68,13 @@
     background-color: #ff3333;
 }
 
-/* Processed/Not Processed Files */
+/* Processed and Not Processed File Status Styles */
 .processed-file {
     color: #4caf50;
+    /* Green color for processed */
 }
 
 .not-processed-file {
     color: #ff9800;
+    /* Orange color for not processed */
 }
