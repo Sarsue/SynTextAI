@@ -2,123 +2,99 @@
 .history-container {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
-    /* Ensures full width */
-    padding: 16px;
-    /* Add padding around the container */
-    max-width: 400px;
-    /* Set a maximum width for better readability */
-    margin: auto;
-    /* Center the container */
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    /* Add shadow for depth */
-    border-radius: 8px;
-    /* Rounded corners */
+    height: 100%;
+    padding: 10px;
     background-color: #f9f9f9;
-    /* Light background */
+    transition: background-color 0.3s;
 }
 
-/* History header */
-.history-header {
+.dark-mode .history-container {
+    background-color: #333;
+}
+
+/* History actions (fixed at the top) */
+.history-actions {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 16px;
-    /* Adjust the margin as needed */
+    padding-bottom: 10px;
 }
 
-/* History button */
-.history-button {
-    background-color: #0078d4;
-    /* Primary button color */
-    color: #fff;
-    padding: 10px 14px;
-    /* Increased padding for touch targets */
+.history-action {
+    padding: 10px 15px;
     border: none;
-    border-radius: 4px;
+    background-color: #007bff;
+    color: white;
     cursor: pointer;
-    margin-right: 8px;
-    /* Adjust the margin between buttons as needed */
-    transition: background-color 0.2s;
-    /* Smooth hover effect */
+    transition: background-color 0.3s;
+    border-radius: 5px;
 }
 
-.history-button:hover {
-    background-color: #005999;
-    /* Darker shade on hover */
+.history-action:hover {
+    background-color: #0056b3;
 }
 
-/* History item */
+.dark-mode .history-action {
+    background-color: #555;
+}
+
+.dark-mode .history-action:hover {
+    background-color: #777;
+}
+
+/* History list styling */
+.history-list {
+    flex-grow: 1;
+    overflow-y: auto;
+    margin-top: 10px;
+}
+
 .history-item {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 12px;
-    /* Increased padding for better touch target */
+    padding: 10px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    background-color: #fff;
     border: 1px solid #ccc;
     border-radius: 4px;
-    margin-bottom: 12px;
-    /* Slightly larger gap between items */
-    width: 100%;
-    /* Full width */
-    cursor: pointer;
-    transition: background-color 0.2s;
-    /* Smooth hover effect */
+    transition: background-color 0.3s, border-color 0.3s;
 }
 
 .history-item:hover {
     background-color: #f0f0f0;
-    /* Light gray on hover */
 }
 
-/* Selected history item */
-.selected {
-    background-color: #e0e0e0;
-    /* Highlight selected item */
+.history-item.selected {
+    background-color: #007bff;
+    color: white;
+    border-color: #0056b3;
 }
 
-/* History content */
-.history-content {
-    flex-grow: 1;
-    font-size: 16px;
-    /* Larger font for readability */
+.dark-mode .history-item {
+    background-color: #444;
+    color: white;
+    border-color: #555;
 }
 
-/* Delete button */
+.dark-mode .history-item:hover {
+    background-color: #555;
+}
+
+.dark-mode .history-item.selected {
+    background-color: #007bff;
+    border-color: #0056b3;
+}
+
+/* Delete button styling */
 .delete-button {
-    background-color: #d9534f;
-    /* Danger button color */
-    color: #fff;
-    padding: 8px 12px;
-    /* Increased padding for better touch target */
+    background-color: transparent;
     border: none;
-    border-radius: 4px;
+    color: red;
     cursor: pointer;
-    transition: background-color 0.2s;
-    /* Smooth hover effect */
+    font-size: 16px;
+    margin-left: 10px;
 }
 
 .delete-button:hover {
-    background-color: #c9302c;
-    /* Darker shade on hover */
-}
-
-/* Media Queries for mobile responsiveness */
-@media (max-width: 480px) {
-    .history-container {
-        padding: 12px;
-        /* Reduce padding on small screens */
-    }
-
-    .history-button,
-    .delete-button {
-        padding: 8px 12px;
-        /* Adjust padding for small screens */
-        font-size: 14px;
-        /* Slightly smaller font */
-    }
-
-    .history-content {
-        font-size: 14px;
-        /* Adjust font size for better readability on small screens */
-    }
+    color: darkred;
 }

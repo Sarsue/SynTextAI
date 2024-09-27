@@ -9,7 +9,9 @@ import { Message, History } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
 import { useDarkMode } from '../DarkModeContext';
-
+import KnowledgeBaseComponent from './KnowledgeBaseComponent';
+import FileViewerComponent from './FileViewerComponent';
+import { Persona, UploadedFile } from './types';
 interface ChatAppProps {
     user: User | null;
     onLogout: () => void;
@@ -21,7 +23,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
     const { darkMode, setDarkMode } = useDarkMode(); // Access the darkMode state and setDarkMode function
-
+    const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
+    const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
     const navigate = useNavigate();
 
     const handleSettingsClick = () => {
@@ -502,44 +505,130 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     };
 
-
+    const [isKnowledgeBaseVisible, setKnowledgeBaseVisible] = useState(false);
+    const handleFileError = (error: string) => {
+        setSelectedFile(null);
+    };
+    const handleFileClick = (file: UploadedFile) => {
+        setSelectedFile(file); // Set the selected file when clicked
+    };
+    const handleCloseFileViewer = () => {
+        setSelectedFile(null); // Clear selected file when closing viewer
+    };
 
     useEffect(() => {
         if (user) {
             fetchHistories();
+            fetchUserFiles();
         }
     }, [user]);
 
+    const fetchUserFiles = async () => {
+        if (!user) {
+            return;
+        }
+
+        try {
+            const token = await user.getIdToken();
+
+            const response = await fetch(`api/v1/files`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (response.ok) {
+                const files = await response.json();
+                setKnowledgeBaseFiles(files);
+            } else {
+                console.error('Failed to fetch user files:', response.statusText);
+            }
+        } catch (error) {
+            console.error('Error fetching user files:', error);
+        }
+    }
+
+    const handleDeleteFile = async (fileId: number) => {
+        if (!user) {
+            console.error('User is not available.');
+            return;
+        }
+
+        // Add logic to delete the file on the server
+        try {
+            const token = await user.getIdToken();
+
+            const deleteResponse = await fetch(`api/v1/files/${fileId}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (deleteResponse.ok) {
+                setKnowledgeBaseFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
+            } else {
+                console.error('Failed to delete file:', deleteResponse.statusText);
+            }
+        } catch (error) {
+            console.error('Error deleting file:', error);
+        }
+    };
+
     return (
         <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''}`}>
-            <div className="conversation-column">
-                <ConversationView
-                    history={currentHistory !== null ? histories[currentHistory] : null}
-                    onLike={handleLike}
-                    onDislike={handleDislike}
-                    onCopy={handleCopy}
-                />
-                <InputArea onSend={handleSend} isSending={loading} />
-                <ToastContainer />
-            </div>
-            <div className="history-column">
-                {user !== null && (
-                    <div>
-                        <button onClick={handleSettingsClick}> ⚙️</button>
-                        <button onClick={handleLogout}>❌</button>
-                    </div>
-                )}
-                <HistoryView
-                    histories={Object.values(histories)}
-                    setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
-                    onClearHistory={handleClearHistory}
-                    onNewChat={handleNewChat}
-                    onDeleteHistory={handleDeleteHistory}
-                    onDownloadHistory={handleDownloadHistory}
-                />
+            <div className="layout-container">
+                {/* History Column on the left */}
+                <div className="history-column">
+                    {user !== null && (
+                        <div>
+                            <button onClick={handleSettingsClick}>⚙️</button>
+                            <button onClick={handleLogout}>❌</button>
+                        </div>
+                    )}
+                    <HistoryView
+                        histories={Object.values(histories)}
+                        setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
+                        onClearHistory={handleClearHistory}
+                        onNewChat={handleNewChat}
+                        onDeleteHistory={handleDeleteHistory}
+                        onDownloadHistory={handleDownloadHistory}
+                    />
+                </div>
+
+                {/* Conversation View in the middle */}
+                <div className="conversation-column">
+                    <ConversationView
+                        history={currentHistory !== null ? histories[currentHistory] : null}
+                        onLike={handleLike}
+                        onDislike={handleDislike}
+                        onCopy={handleCopy}
+                    />
+                    <InputArea onSend={handleSend} isSending={loading} />
+                    <ToastContainer />
+                </div>
+
+                {/* Files Column on the right */}
+                <div className="files-column">
+                    <KnowledgeBaseComponent
+                        files={knowledgeBaseFiles}
+                        onDeleteFile={handleDeleteFile}
+                        onFileClick={handleFileClick} // Pass handleFileClick as onFileClick prop
+                        darkMode={darkMode}
+                    />
+                    {selectedFile && (
+                        <FileViewerComponent
+                            fileUrl={selectedFile.publicUrl}
+                            onClose={handleCloseFileViewer}
+                            onError={handleFileError}
+                            darkMode={darkMode}
+                        />
+                    )}
+                </div>
             </div>
         </div>
     );
+
 };
 
 export default ChatApp;

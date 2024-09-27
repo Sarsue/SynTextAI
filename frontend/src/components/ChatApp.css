@@ -1,126 +1,186 @@
-/* ChatApp.css */
-
+/* General container styling */
 .chat-app-container {
     display: flex;
     height: 100vh;
     flex-direction: row;
-    /* Default layout for larger screens */
+    background-color: #fafafa;
+    /* Default light background color */
+    transition: background-color 0.3s, color 0.3s;
+    /* Smooth transition for theme changes */
 }
 
-/* Apply dark mode styles to all child elements of chat-app-container when dark mode is active */
-.dark-mode .chat-app-container>* {
-    background-color: #333;
-    /* Dark mode background color */
+/* Dark mode styles */
+.dark-mode .chat-app-container {
+    background-color: #222;
     color: #fff;
-    /* Dark mode text color */
 }
 
+/* Layout container for three columns */
+.layout-container {
+    display: flex;
+    /* Aligns the columns horizontally */
+    flex: 1;
+    /* Allow the container to take up available space */
+}
+
+/* Conversation column styling */
 .conversation-column {
     flex: 2;
-    /* Adjust the proportion as needed */
+    /* Takes up two parts of the layout */
     display: flex;
     flex-direction: column;
-    overflow: auto;
-    /* Allow scrolling if content overflows */
+    padding: 15px;
+    border-left: 1px solid #e0e0e0;
+    /* Adjust border to separate from the history column */
+    border-right: 1px solid #e0e0e0;
+    /* Add border to separate from files column */
+    overflow-y: auto;
+    transition: background-color 0.3s, border-color 0.3s;
 }
 
+.dark-mode .conversation-column {
+    background-color: #444;
+    border-color: #555;
+}
+
+/* History column styling */
 .history-column {
     flex: 1;
-    /* Adjust the proportion as needed */
+    /* Takes up one part of the layout */
+    padding: 15px;
     background-color: #f0f0f0;
-    /* Light mode background color for the history panel */
-    overflow: auto;
-    /* Allow scrolling if content overflows */
+    overflow-y: auto;
+    transition: background-color 0.3s;
 }
 
-/* Dark mode styles for the history column */
 .dark-mode .history-column {
     background-color: #333;
-    /* Dark mode background color for the history panel */
-    color: #fff;
-    /* Dark mode text color */
 }
 
-/* Light mode styles for conversation column */
-.light-mode .conversation-column {
-    background-color: #fff;
-    /* Light mode background color for the conversation panel */
-    color: #000;
-    /* Light mode text color */
+/* Files column styling */
+.files-column {
+    flex: 1;
+    /* Takes up one part of the layout */
+    padding: 15px;
+    background-color: #f0f0f0;
+    /* Same background as history column */
+    overflow-y: auto;
+    transition: background-color 0.3s;
+}
+
+.dark-mode .files-column {
+    background-color: #333;
+    /* Dark mode background for files column */
+}
+
+/* Make sure buttons are visible and well-spaced */
+button {
+    padding: 10px 15px;
+    margin: 5px 0;
+    border: none;
+    border-radius: 4px;
+    background-color: #007bff;
+    color: white;
+    font-size: 16px;
+    transition: background-color 0.3s, color 0.3s;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+.dark-mode button {
+    background-color: #555;
+    color: white;
 }
 
 /* Mobile styles */
 @media (max-width: 768px) {
     .chat-app-container {
         flex-direction: column;
-        /* Stack columns on smaller screens */
+        /* Stacks columns vertically on small screens */
     }
 
     .conversation-column,
-    .history-column {
-        flex: none;
-        /* Remove flex proportion for mobile */
+    .history-column,
+    .files-column {
         width: 100%;
-        /* Full width on mobile */
+        padding: 10px;
+        flex: none;
+        /* Remove flex-grow for mobile layout */
     }
 
     .conversation-column {
-        height: 70%;
-        /* Adjust height as needed for mobile */
+        height: 70vh;
+        border-left: none;
+        /* No left border in mobile */
+        border-bottom: 1px solid #e0e0e0;
+        /* Bottom border for separation */
+    }
+
+    .dark-mode .conversation-column {
+        border-bottom: 1px solid #555;
     }
 
     .history-column {
-        height: 30%;
-        /* Adjust height as needed for mobile */
+        height: 30vh;
+        /* Adjust height for history on mobile */
     }
 
+    /* Buttons are spaced and easier to tap on mobile */
     .user-actions {
         display: flex;
-        /* Align buttons horizontally */
         justify-content: space-between;
-        /* Space out buttons */
-        margin: 10px;
-        /* Margin for aesthetics */
+        margin-top: 10px;
     }
 
     .user-actions button {
         flex: 1;
-        /* Equal width for buttons */
         margin: 0 5px;
-        /* Spacing between buttons */
-        padding: 10px;
-        /* Padding for touch targets */
+        padding: 15px;
+        /* Increased padding for touch targets */
+    }
+
+    /* Improve the size of text on smaller screens */
+    button {
+        font-size: 14px;
+        /* Adjust button font size for mobile */
     }
 }
 
-/* Additional dark mode styles for mobile */
-.dark-mode .conversation-column {
-    background-color: #444;
-    /* Dark mode background color for conversation panel */
-}
-
-/* Add any other styles for text inputs, buttons, etc. */
+/* Dark mode chat input */
 .chat-input {
-    padding: 10px;
-    /* Adjust padding */
+    padding: 15px;
     border: 1px solid #ccc;
-    /* Light mode border color */
+    width: 100%;
+    border-radius: 4px;
 }
 
 .dark-mode .chat-input {
     border: 1px solid #666;
-    /* Dark mode border color */
 }
 
-button {
-    cursor: pointer;
-    /* Pointer cursor for buttons */
+/* Scrollbar styling */
+.conversation-column::-webkit-scrollbar,
+.history-column::-webkit-scrollbar,
+.files-column::-webkit-scrollbar {
+    width: 8px;
+    /* Set scrollbar width */
 }
 
-/* Dark mode button styles */
-.dark-mode button {
+.conversation-column::-webkit-scrollbar-thumb,
+.history-column::-webkit-scrollbar-thumb,
+.files-column::-webkit-scrollbar-thumb {
+    background-color: #ccc;
+    /* Scrollbar color */
+    border-radius: 8px;
+    /* Rounded scrollbar */
+}
+
+.dark-mode .conversation-column::-webkit-scrollbar-thumb,
+.dark-mode .history-column::-webkit-scrollbar-thumb,
+.dark-mode .files-column::-webkit-scrollbar-thumb {
     background-color: #555;
-    /* Dark mode button background */
-    color: #fff;
-    /* Dark mode button text color */
+    /* Dark mode scrollbar color */
 }

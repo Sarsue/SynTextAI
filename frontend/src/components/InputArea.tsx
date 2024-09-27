@@ -10,29 +10,26 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-    const { darkMode, setDarkMode } = useDarkMode(); // Access the darkMode state and setDarkMode function
-
+    const { darkMode } = useDarkMode();
 
     const handleSendClick = () => {
-        if (!message.trim() && attachedFiles.length === 0) {
-            return;
-        }
-
-        onSend(message, attachedFiles);
-        setMessage('');
-        setAttachedFiles([]);
+        if (!message.trim() && attachedFiles.length === 0) return;
+        onSend(message, attachedFiles).then(() => {
+            setMessage('');
+            setAttachedFiles([]);
+        });
     };
 
     const handleAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
-        setAttachedFiles([...attachedFiles, ...files]);
+        setAttachedFiles((prevFiles) => [...prevFiles, ...files]);
         e.target.value = '';
     };
 
     const handleRemoveFile = (file: File) => {
-        const updatedFiles = attachedFiles.filter((f) => f !== file);
-        setAttachedFiles(updatedFiles);
+        setAttachedFiles((prevFiles) => prevFiles.filter((f) => f !== file));
     };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -44,32 +41,41 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
         <div className={`input-area ${darkMode ? 'dark-mode' : ''}`}>
             <textarea
                 className="text-input"
-                placeholder="Type your message here or paste link here..."
+                placeholder="Type your message or paste a link..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={isSending}
+                aria-label="Message input area"
             />
             <div className="file-input">
-                <label htmlFor="file-upload" className="custom-file-upload">📎 Attach Files</label>
+                <label htmlFor="file-upload" className="custom-file-upload" aria-label="Attach a file">
+                    📎
+                </label>
                 <input
                     id="file-upload"
                     type="file"
                     multiple
                     onChange={handleAttachment}
                     disabled={isSending}
+                    aria-label="File upload input"
                 />
             </div>
             <div className="attached-files">
                 {attachedFiles.map((file, index) => (
                     <div key={index} className="attached-file">
                         <span>{file.name}</span>
-                        <button onClick={() => handleRemoveFile(file)}>X</button>
+                        <button onClick={() => handleRemoveFile(file)} aria-label="Remove attached file">X</button>
                     </div>
                 ))}
             </div>
-            <button onClick={handleSendClick} disabled={isSending} className="send-button">
-                {isSending ? '⏳' : '✉️'}
+            <button
+                onClick={handleSendClick}
+                disabled={isSending}
+                className="send-button"
+                aria-label="Send message"
+            >
+                {isSending ? <span className="spinner" /> : '✉️'}
             </button>
         </div>
     );

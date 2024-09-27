@@ -13,7 +13,7 @@ export interface User {
     email: string | null;
 
 }
-export interface File {
+export interface UploadedFile {
     id: number;
     name: string;
     publicUrl: string;

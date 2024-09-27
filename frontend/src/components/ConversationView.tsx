@@ -80,17 +80,25 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onLike, on
                     key={message.id}
                     className={`chat-message ${message.sender === 'user' ? 'sent' : 'received'}`}
                 >
-                    <div className="message-timestamp">{message.timestamp}</div>
                     <div className="message-content">
                         {renderMarkdown(message.content)}
                     </div>
-                    {message.sender === 'bot' && (
-                        <div className="actions">
-                            <button onClick={() => onLike(message)}>👍</button>
-                            <button onClick={() => onDislike(message)}>👎</button>
-                            <button onClick={() => onCopy(message)}>📋</button>
-                        </div>
-                    )}
+                    <div className="message-metadata">
+                        <div className="message-timestamp">{message.timestamp}</div>
+                        {message.sender === 'bot' && (
+                            <div className="actions">
+                                <button className="icon-button like-button" onClick={() => onLike(message)}>
+                                    👍
+                                </button>
+                                <button className="icon-button dislike-button" onClick={() => onDislike(message)}>
+                                    👎
+                                </button>
+                                <button className="icon-button copy-button" onClick={() => onCopy(message)}>
+                                    📋
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             ))}
             {fileError && <div className="error-message">{fileError}</div>}
@@ -109,6 +117,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onLike, on
             <div ref={messagesEndRef} />
         </div>
     );
+
 };
 
 export default ConversationView;
