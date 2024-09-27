@@ -75,7 +75,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
                 className="send-button"
                 aria-label="Send message"
             >
-                {isSending ? <span className="spinner" /> : '✉️'}
+                {isSending ? '💬' : '✉️'}
             </button>
         </div>
     );

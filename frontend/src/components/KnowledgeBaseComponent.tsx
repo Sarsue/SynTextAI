@@ -25,7 +25,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
 
     return (
         <div className={`knowledgebase-container ${darkMode ? 'dark-mode' : ''}`}>
-            <h3>File Management</h3>
+            <h3> 🗂️ Management</h3>
             <ul className="file-list">
                 {files.map((file) => (
                     <li key={file.id} className={file.processed ? 'processed-file' : 'not-processed-file'}>

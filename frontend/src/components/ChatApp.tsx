@@ -578,37 +578,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     return (
         <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''}`}>
             <div className="layout-container">
-                {/* History Column on the left */}
-                <div className="history-column">
-                    {user !== null && (
-                        <div>
-                            <button onClick={handleSettingsClick}>⚙️</button>
-                            <button onClick={handleLogout}>❌</button>
-                        </div>
-                    )}
-                    <HistoryView
-                        histories={Object.values(histories)}
-                        setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
-                        onClearHistory={handleClearHistory}
-                        onNewChat={handleNewChat}
-                        onDeleteHistory={handleDeleteHistory}
-                        onDownloadHistory={handleDownloadHistory}
-                    />
-                </div>
-
-                {/* Conversation View in the middle */}
-                <div className="conversation-column">
-                    <ConversationView
-                        history={currentHistory !== null ? histories[currentHistory] : null}
-                        onLike={handleLike}
-                        onDislike={handleDislike}
-                        onCopy={handleCopy}
-                    />
-                    <InputArea onSend={handleSend} isSending={loading} />
-                    <ToastContainer />
-                </div>
-
-                {/* Files Column on the right */}
+                {/* Files Column on the left */}
                 <div className="files-column">
                     <KnowledgeBaseComponent
                         files={knowledgeBaseFiles}
@@ -624,6 +594,35 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             darkMode={darkMode}
                         />
                     )}
+                </div>
+                {/* Conversation View in the middle */}
+                <div className="conversation-column">
+                    <ConversationView
+                        history={currentHistory !== null ? histories[currentHistory] : null}
+                        onLike={handleLike}
+                        onDislike={handleDislike}
+                        onCopy={handleCopy}
+                    />
+                    <InputArea onSend={handleSend} isSending={loading} />
+                    <ToastContainer />
+                </div>
+
+                {/* History Column on the right */}
+                <div className="history-column">
+                    {user !== null && (
+                        <div>
+                            <button onClick={handleSettingsClick}>⚙️</button>
+                            <button onClick={handleLogout}>❌</button>
+                        </div>
+                    )}
+                    <HistoryView
+                        histories={Object.values(histories)}
+                        setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
+                        onClearHistory={handleClearHistory}
+                        onNewChat={handleNewChat}
+                        onDeleteHistory={handleDeleteHistory}
+                        onDownloadHistory={handleDownloadHistory}
+                    />
                 </div>
             </div>
         </div>
