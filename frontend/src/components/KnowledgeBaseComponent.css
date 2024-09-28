@@ -53,12 +53,12 @@
 
 /* Styles for processed and not processed file links */
 .link-processed {
-    color: #ff0000;
+    color: #4caf50;
     /* Red for processed files */
 }
 
 .link-not-processed {
-    color: #0078d4;
+    color: #ff0000;
     /* Blue for not processed files */
 }
 
