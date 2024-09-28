@@ -45,12 +45,21 @@
     align-items: center;
 }
 
-/* Common styles for the file link (both processed and unprocessed) */
+/* Common styles for the file link */
 .file-list .file-link {
     cursor: pointer;
-    color: #0078d4;
-    /* Standard blue for links */
     text-decoration: underline;
+}
+
+/* Styles for processed and not processed file links */
+.link-processed {
+    color: #ff0000;
+    /* Red for processed files */
+}
+
+.link-not-processed {
+    color: #0078d4;
+    /* Blue for not processed files */
 }
 
 /* Delete button */

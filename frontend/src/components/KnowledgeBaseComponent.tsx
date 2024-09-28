@@ -29,7 +29,10 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
             <ul className="file-list">
                 {files.map((file) => (
                     <li key={file.id} className={file.processed ? 'processed-file' : 'not-processed-file'}>
-                        <span className="file-link" onClick={() => handleFileClick(file)}>
+                        <span
+                            className={`file-link ${file.processed ? 'link-processed' : 'link-not-processed'}`}
+                            onClick={() => handleFileClick(file)}
+                        >
                             {file.name}
                         </span>
                         <button
@@ -46,6 +49,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
             </ul>
         </div>
     );
+
 };
 
 export default KnowledgeBaseComponent;
