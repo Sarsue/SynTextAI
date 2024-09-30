@@ -584,7 +584,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     <KnowledgeBaseComponent
                         files={knowledgeBaseFiles}
                         onDeleteFile={handleDeleteFile}
-                        onFileClick={handleFileClick} // Pass handleFileClick as onFileClick prop
+                        onFileClick={handleFileClick}
                         darkMode={darkMode}
                     />
                     {selectedFile && (
@@ -595,7 +595,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             darkMode={darkMode}
                         />
                     )}
+                    {/* Settings Button at the bottom left */}
+                    {user !== null && (
+                        <button className="settings-button" onClick={handleSettingsClick}>⚙️</button>
+                    )}
                 </div>
+
                 {/* Conversation View in the middle */}
                 <div className="conversation-column">
                     <ConversationView
@@ -611,9 +616,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 {/* History Column on the right */}
                 <div className="history-column">
                     {user !== null && (
-                        <div>
-                            <button onClick={handleSettingsClick}>⚙️</button>
-                            <button onClick={handleLogout}>❌</button>
+                        <div className="logout-button-container">
+                            <button onClick={handleLogout}>🚫</button>
                         </div>
                     )}
                     <HistoryView
@@ -628,6 +632,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             </div>
         </div>
     );
+
 
 };
 

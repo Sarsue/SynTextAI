@@ -93,7 +93,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     return (
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
-                <h4>{fileUrl}</h4> {/* Displaying file URL for now */}
                 {renderFileContent()}
                 <button onClick={onClose}>Close</button>
             </div>

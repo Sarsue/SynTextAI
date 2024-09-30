@@ -108,6 +108,8 @@ button:hover {
         width: 100%;
         padding: 10px;
         flex: none;
+        position: relative;
+        /* Set posi
         /* Remove flex-grow for mobile layout */
     }
 
@@ -183,4 +185,24 @@ button:hover {
 .dark-mode .files-column::-webkit-scrollbar-thumb {
     background-color: #555;
     /* Dark mode scrollbar color */
+}
+
+.settings-button {
+    position: absolute;
+    /* Position button absolutely within the files column */
+    bottom: 15px;
+    /* Adjust this value for desired spacing from the bottom */
+    left: 15px;
+    /* Adjust this value for desired spacing from the left */
+    padding: 10px 15px;
+    /* Add padding for button */
+}
+
+.logout-button-container {
+    display: flex;
+    /* Use flexbox for alignment */
+    justify-content: flex-end;
+    /* Align to the right */
+    padding: 15px;
+    /* Add padding for spacing */
 }
