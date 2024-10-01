@@ -91,7 +91,7 @@ def process_and_store_file(user_id, user_token, filename, file_url):
 
         celery_store.update_file_with_chunks(user_id, filename, doc_info)
         logging.info(f"Finished processing and storing file: {filename}")
-        sse.publish({"message": f"File {filename} has been processed"}, type='file_processed')
+        sse.publish({"message": f"File {filename} has been processed"}, type='file_processed', id = user_id)
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")

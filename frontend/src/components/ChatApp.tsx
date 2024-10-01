@@ -473,7 +473,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     useEffect(() => {
         if (user) {
             fetchHistories();
-            const eventSource = new EventSource('/events/v1/stream');
+            const idToken = user?.getIdToken();
+            const eventSource = new EventSource(`/events/v1/stream/${idToken}`);
 
             eventSource.onmessage = (event) => {
                 console.log('Notification received:', event.data);
