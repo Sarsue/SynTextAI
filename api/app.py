@@ -67,11 +67,6 @@ def create_app():
     # Make sure to also register the Flask-SSE instance
     app.register_blueprint(sse, url_prefix='/sse')
 
-    @app.route('/stream')
-    def stream():
-        # Clients can connect to this endpoint for SSE updates
-        return sse.stream()
-
     @app.route('/')
     def serve_react_app():
         return send_from_directory(app.static_folder, 'index.html')
