@@ -473,25 +473,41 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     useEffect(() => {
         if (user) {
             fetchHistories();
-            const idToken = user?.getIdToken();
-            const eventSource = new EventSource(`/events/v1/stream/${idToken}`);
+            const setupEventSource = async () => {
+                if (user) {
+                    // Fetch the ID token asynchronously
+                    const idToken = await user.getIdToken();
 
-            eventSource.onmessage = (event) => {
-                console.log('Notification received:', event.data);
-                const eventData = JSON.parse(event.data);
-                //if (eventData.type === 'file_processed') {
-                fetchUserFiles();  // Refresh the files on notification
-                //  }
+                    // Call fetchHistories after retrieving the token
+                    await fetchHistories();
+
+                    // Create the EventSource with the user's ID token
+                    const eventSource = new EventSource(`/events/v1/stream/${idToken}`);
+
+                    eventSource.onmessage = (event) => {
+                        console.log('Notification received:', event.data);
+                        const eventData = JSON.parse(event.data);
+
+                        // Optionally check for specific event types
+                        // if (eventData.type === 'file_processed') {
+                        fetchUserFiles();  // Refresh the files on notification
+                        // }
+                    };
+
+                    eventSource.onerror = (error) => {
+                        console.error('EventSource error:', error);
+                        eventSource.close(); // Close the connection on error
+                    };
+
+                    // Cleanup on component unmount
+                    return () => {
+                        eventSource.close();
+                    };
+                }
             };
 
-            eventSource.onerror = (error) => {
-                console.error('EventSource error:', error);
-            };
-
-            // Cleanup on component unmount
-            return () => {
-                eventSource.close();
-            };
+            // Invoke the setup function
+            setupEventSource();
         }
     }, [user]);
 
