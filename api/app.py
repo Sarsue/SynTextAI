@@ -56,7 +56,7 @@ def create_app():
     from routes.messages import messages_bp
     from routes.files import files_bp
     from routes.subscriptions import subscriptions_bp
-    from routes.sse import sse_bp
+    from routes.sse_route import sse_bp
 
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
