@@ -7,6 +7,7 @@ from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
 from postgresql_store import DocSynthStore
+from flask_sse import sse
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
@@ -90,6 +91,7 @@ def process_and_store_file(user_id, user_token, filename, file_url):
 
         celery_store.update_file_with_chunks(user_id, filename, doc_info)
         logging.info(f"Finished processing and storing file: {filename}")
+        sse.publish({"message": f"File {filename} has been processed"}, type='file_processed')
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")

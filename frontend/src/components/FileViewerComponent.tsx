@@ -71,13 +71,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         switch (fileType) {
             case 'pdf':
                 return (
-                    <div style={{ height: '750px' }}>
-                        <embed src={`${fileContent}#page=${pageNumber}`} type="application/pdf" width="100%" height="100%" />
-                        <div>
-                            {pageNumber > 1 && <button onClick={() => setPageNumber(pageNumber - 1)}>Previous</button>}
-                            <button onClick={() => setPageNumber(pageNumber + 1)}>Next</button>
-                        </div>
-                    </div>
+                    <embed src={`${fileContent}#page=${pageNumber}`} type="application/pdf" width="100%" height="750px" />
                 );
             case 'mp4':
                 return <video src={fileContent!} controls width="100%" />;
@@ -94,7 +88,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
                 {renderFileContent()}
-                <button onClick={onClose}>Close</button>
+                <button onClick={onClose}>❌</button>
             </div>
         </div>
     );

@@ -31,48 +31,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         navigate('/settings');
     };
 
-    const updateStatus = async (messageId: number, like: boolean) => {
-        try {
-            const url = `api/v1/messages/${like ? 'like' : 'dislike'}/${messageId}`;
-            const method = 'POST';
 
-            const response = await callApiWithToken(url, method);
-
-            if (response && response.ok) {
-                // Update local state here
-                setHistories((prevHistories) => {
-                    const updatedHistories = { ...prevHistories };
-
-                    // Check if currentHistory is not null or undefined
-                    if (currentHistory !== null && currentHistory !== undefined) {
-                        const updatedMessages = updatedHistories[currentHistory]?.messages.map((message) => {
-                            if (message.id === messageId) {
-                                return { ...message, liked: like, disliked: !like };
-                            }
-                            return message;
-                        });
-
-                        if (updatedMessages) {
-                            // Update the specific history with the modified messages
-                            updatedHistories[currentHistory] = {
-                                ...updatedHistories[currentHistory],
-                                messages: updatedMessages,
-                            };
-                        }
-                    }
-
-                    return updatedHistories;
-                });
-
-                console.log(`Message ${like ? 'liked' : 'disliked'} successfully`);
-            } else {
-                console.error(`Failed to ${like ? 'like' : 'dislike'} message`);
-                // Handle the error, show a notification, etc.
-            }
-        } catch (error) {
-            console.error('Unexpected error:', error);
-        }
-    };
 
     const callApiWithToken = async (url: string, method: string, body?: any) => {
         try {
@@ -105,13 +64,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
 
 
-    const handleLike = (message: Message) => {
-        updateStatus(message.id, true);
-    };
-
-    const handleDislike = (message: Message) => {
-        updateStatus(message.id, false);
-    };
 
     const handleCopy = (message: Message) => {
         const textToCopy = message.content;
@@ -506,10 +458,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     };
 
-    const [isKnowledgeBaseVisible, setKnowledgeBaseVisible] = useState(false);
+
     const handleFileError = (error: string) => {
         setSelectedFile(null);
     };
+
     const handleFileClick = (file: UploadedFile) => {
         setSelectedFile(file); // Set the selected file when clicked
     };
@@ -520,7 +473,24 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     useEffect(() => {
         if (user) {
             fetchHistories();
-            fetchUserFiles();
+            const eventSource = new EventSource('/events/v1/stream');
+
+            eventSource.onmessage = (event) => {
+                console.log('Notification received:', event.data);
+                const eventData = JSON.parse(event.data);
+                //if (eventData.type === 'file_processed') {
+                fetchUserFiles();  // Refresh the files on notification
+                //  }
+            };
+
+            eventSource.onerror = (error) => {
+                console.error('EventSource error:', error);
+            };
+
+            // Cleanup on component unmount
+            return () => {
+                eventSource.close();
+            };
         }
     }, [user]);
 
@@ -605,8 +575,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 <div className="conversation-column">
                     <ConversationView
                         history={currentHistory !== null ? histories[currentHistory] : null}
-                        onLike={handleLike}
-                        onDislike={handleDislike}
                         onCopy={handleCopy}
                     />
                     <InputArea onSend={handleSend} isSending={loading} />

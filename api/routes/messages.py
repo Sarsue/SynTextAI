@@ -58,33 +58,3 @@ def create_message():
     message_list.append(bot_response)
     return message_list
 
-
-@messages_bp.route('/like/<int:message_id>', methods=['POST'])
-def like_message(message_id):
-    try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        id = get_id_helper(store, success, user_info)
-        store.like_message(message_id, id)
-        return jsonify({'message': 'Message liked successfully'})
-    except Exception as e:
-        # Handle exceptions and return an error response
-        print(str(e))
-        return jsonify({'error': str(e)}), 500
-
-
-# Example route to handle disliking a message
-@messages_bp.route('/dislike/<int:message_id>', methods=['POST'])
-def dislike_message(message_id):
-    try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        id = get_id_helper(store, success, user_info)
-        store.dislike_message(message_id, id)
-        return jsonify({'message': 'Message disliked successfully'})
-    except Exception as e:
-        # Handle exceptions and return an error response
-        print(str(e))
-        return jsonify({'error': str(e)}), 500

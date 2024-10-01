@@ -8,12 +8,10 @@ import FileViewerComponent from './FileViewerComponent';
 
 interface ConversationViewProps {
     history: History | null;
-    onLike: (message: Message) => void;
-    onDislike: (message: Message) => void;
     onCopy: (message: Message) => void;
 }
 
-const ConversationView: React.FC<ConversationViewProps> = ({ history, onLike, onDislike, onCopy }) => {
+const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) => {
     const [selectedFile, setSelectedFile] = useState<string | null>(null); // Adjusted to store file URL string
     const [fileError, setFileError] = useState<string | null>(null);
     const { darkMode } = useDarkMode();
@@ -47,14 +45,12 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onLike, on
     };
 
     const renderMarkdown = (markdown: string) => {
-        console.log('Rendering markdown:', markdown);
         return (
             <ReactMarkdown
                 children={markdown}
                 remarkPlugins={[remarkGfm]}
                 components={{
                     a: ({ href, children }) => {
-                        console.log('Rendering link:', href);
                         if (href && href.startsWith('https://')) {
                             const regex = /https:\/\/(.*?)(?:\?page=(\d+))?/;
                             const match = regex.exec(href);
@@ -87,12 +83,18 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onLike, on
                         <div className="message-timestamp">{message.timestamp}</div>
                         {message.sender === 'bot' && (
                             <div className="actions">
-                                <button className="icon-button like-button" onClick={() => onLike(message)}>
+                                {/* <button
+                                    className={`icon-button like-button ${message.liked ? 'active' : ''}`}
+                                    onClick={() => onLike(message)}
+                                >
                                     👍
                                 </button>
-                                <button className="icon-button dislike-button" onClick={() => onDislike(message)}>
+                                <button
+                                    className={`icon-button dislike-button ${message.disliked ? 'active' : ''}`}
+                                    onClick={() => onDislike(message)}
+                                >
                                     👎
-                                </button>
+                                </button> */}
                                 <button className="icon-button copy-button" onClick={() => onCopy(message)}>
                                     📋
                                 </button>
@@ -101,6 +103,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onLike, on
                     </div>
                 </div>
             ))}
+
+
+
             {fileError && <div className="error-message">{fileError}</div>}
             {selectedFile && (
                 <div className="file-viewer-modal">

@@ -79,8 +79,6 @@ class DocSynthStore:
                             id SERIAL PRIMARY KEY,
                             content TEXT,
                             sender TEXT,
-                            is_liked BOOLEAN DEFAULT FALSE,
-                            is_disliked BOOLEAN DEFAULT FALSE,
                             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             user_id INTEGER,
                             chat_history_id INTEGER,
@@ -301,16 +299,16 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
-    def add_message(self, content, sender, user_id, chat_history_id, is_liked=False, is_disliked=False):
+    def add_message(self, content, sender, user_id, chat_history_id):
         connection = self.get_connection()
         try:
             with connection:
                 with connection.cursor() as cursor:
                     cursor.execute('''
-                        INSERT INTO messages (content, sender, user_id, chat_history_id, is_liked, is_disliked)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO messages (content, sender, user_id, chat_history_id)
+                        VALUES (%s, %s, %s, %s)
                         RETURNING id, timestamp
-                    ''', (content, sender, user_id, chat_history_id, is_liked, is_disliked))
+                    ''', (content, sender, user_id, chat_history_id))
 
                     message_id, timestamp = cursor.fetchone()
 
@@ -321,8 +319,6 @@ class DocSynthStore:
                         'timestamp': timestamp,
                         'user_id': user_id,
                         'chat_history_id': chat_history_id,
-                        'is_liked': is_liked,
-                        'is_disliked': is_disliked
                     }
         except Exception as e:
             logger.error(f"Error adding message: {e}")
@@ -330,45 +326,6 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
-    def like_message(self, message_id, user_id):
-        connection = self.get_connection()
-        try:
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute('''
-                        UPDATE messages
-                        SET is_liked = TRUE
-                        WHERE id = %s AND user_id = %s
-                    ''', (message_id, user_id))
-
-                    if cursor.rowcount == 0:
-                        raise ValueError(
-                            "Message not found or user does not have permission to like the message")
-        except Exception as e:
-            logger.error(f"Error liking message: {e}")
-            raise
-        finally:
-            self.release_connection(connection)
-
-    def dislike_message(self, message_id, user_id):
-        connection = self.get_connection()
-        try:
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute('''
-                        UPDATE messages
-                        SET is_disliked = TRUE
-                        WHERE id = %s AND user_id = %s
-                    ''', (message_id, user_id))
-
-                    if cursor.rowcount == 0:
-                        raise ValueError(
-                            "Message not found or user does not have permission to dislike the message")
-        except Exception as e:
-            logger.error(f"Error disliking message: {e}")
-            raise
-        finally:
-            self.release_connection(connection)
 
     def get_all_user_chat_histories(self, user_id):
         connection = self.get_connection()
@@ -415,7 +372,7 @@ class DocSynthStore:
         try:
             with connection.cursor() as cursor:
                 cursor.execute('''
-                    SELECT id, content, sender, timestamp, is_liked, is_disliked, user_id
+                    SELECT id, content, sender, timestamp, user_id
                     FROM messages
                     WHERE chat_history_id = %s AND user_id = %s
                 ''', (chat_history_id, user_id))
@@ -429,9 +386,7 @@ class DocSynthStore:
                         'content': row[1],
                         'sender': row[2],
                         'timestamp': row[3],
-                        'is_liked': row[4],
-                        'is_disliked': row[5],
-                        'user_id': row[6],
+                        'user_id': row[4],
                     }
 
                     messages.append(message)
@@ -509,9 +464,7 @@ class DocSynthStore:
                         'timestamp': message[2],
                         'user_id': message[3],
                         'chat_history_id': message[4],
-                        'is_liked': message[5],
-                        'is_disliked': message[6],
-                        'sender': message[7]
+                        'sender': message[5]
                     })
                 return result_messages
         except Exception as e:

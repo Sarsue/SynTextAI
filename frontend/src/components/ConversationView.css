@@ -24,20 +24,20 @@
     word-break: break-word;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     animation: fadeIn 0.3s ease-in-out;
+    transition: background-color 0.3s;
+    /* Smooth transition for active state */
 }
 
 .sent {
     align-self: flex-end;
     background: linear-gradient(135deg, #0078d4, #005bb5);
     color: #fff;
-    border-bottom-right-radius: 0;
 }
 
 .received {
     align-self: flex-start;
     background: #e5e5ea;
     color: #333;
-    border-bottom-left-radius: 0;
 }
 
 /* Dark mode message styles */
@@ -82,6 +82,7 @@
     margin-top: 6px;
 }
 
+/* Action buttons */
 .icon-button {
     background: none;
     border: none;
@@ -103,9 +104,22 @@
     color: #5a6268;
 }
 
-.like-button.active,
-.dislike-button.active {
+.like-button.active {
     color: blue;
+}
+
+.dislike-button.active {
+    color: red;
+}
+
+.like-button {
+    color: gray;
+    /* Default color for unliked */
+}
+
+.dislike-button {
+    color: gray;
+    /* Default color for undisliked */
 }
 
 /* Error message */

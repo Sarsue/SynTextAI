@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from celery_worker import celery_app  # Import here to avoid circular import
 import os
 from firebase_setup import initialize_firebase
+from flask_sse import sse
 
 load_dotenv()
 
@@ -44,6 +45,7 @@ def create_app():
     app.config.update(
         CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE',
         CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
+        REDIS_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
     )
 
     celery_app.conf.update(app.config)
@@ -54,12 +56,21 @@ def create_app():
     from routes.messages import messages_bp
     from routes.files import files_bp
     from routes.subscriptions import subscriptions_bp
+    from routes.sse import sse_bp
 
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
     app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
+    app.register_blueprint(sse_bp, url_prefix='/events')  # Register the SSE blueprint
+    # Make sure to also register the Flask-SSE instance
+    app.register_blueprint(sse, url_prefix='/sse')
+
+    @app.route('/stream')
+    def stream():
+        # Clients can connect to this endpoint for SSE updates
+        return sse.stream()
 
     @app.route('/')
     def serve_react_app():
@@ -70,6 +81,8 @@ def create_app():
         return send_from_directory(app.static_folder, path)
 
     return app
+
+  
 
 def create_celery_app(app=None):
     app = app or create_app()
