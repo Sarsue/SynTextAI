@@ -7,7 +7,9 @@ from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
 from postgresql_store import DocSynthStore
-from flask_sse import sse
+import redis 
+import json
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
@@ -77,6 +79,7 @@ def download_from_gcs(user_id, filename):
 def process_and_store_file(user_id, user_token, filename, file_url):
     try:
         logging.info(f"Started processing file: {filename}")
+        redis_client = redis.StrictRedis.from_url(current_app.config['REDIS_URL'])
 
         # Download file from GCS
         file_data = download_from_gcs(user_token, filename)
@@ -91,7 +94,8 @@ def process_and_store_file(user_id, user_token, filename, file_url):
 
         celery_store.update_file_with_chunks(user_id, filename, doc_info)
         logging.info(f"Finished processing and storing file: {filename}")
-        sse.publish({"message": f"File {filename} has been processed"}, type='file_processed', id = user_id)
+        redis_client.publish(user_id, json.dumps({"message": f"File {filename} has been processed"}))
+        #sse.publish({"message": f"File {filename} has been processed"}, type='file_processed', id = user_id)
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
