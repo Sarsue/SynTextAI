@@ -471,22 +471,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
 
     useEffect(() => {
-        let intervalId;
-        const setupPolling = async () => {
-            if (user) {
-                // Fetch the ID token asynchronously
-        
-
-                // Fetch histories and user files
-                await fetchHistories();
-                await fetchUserFiles();
-
-                // Set up polling to refresh files every 3 minutes (180,000 milliseconds)
-                intervalId = setInterval(fetchUserFiles, 3 * 60 * 1000);
-            }
-        };
         if (user) {
-            setupPolling();
+            fetchHistories();
+            fetchUserFiles();
         }
     }, [user]);
 
@@ -581,7 +568,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 <div className="history-column">
                     {user !== null && (
                         <div className="logout-button-container">
-                            <button onClick={handleLogout}>🚫</button>
+                            <button onClick={handleLogout}>Logout</button>
                         </div>
                     )}
                     <HistoryView
