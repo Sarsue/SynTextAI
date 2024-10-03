@@ -137,14 +137,13 @@ def save_file():
             try:
                 file_info = store.add_file(user_id, file.filename, file_url)
                 logging.info(f"Stored file metadata: {file.filename}")
-                
                 process_and_store_file.delay(user_id,  user_info['user_id'], file.filename, file_url)
                 logging.info(f"Enqueued processing for file: {file.filename}")
             except RedisError as e:
                 logging.error(f"Error enqueueing job: {e}")
                 return jsonify({'error': 'Failed to enqueue job'}), 500
 
-        return jsonify({'message': 'File processing started. It will appear in the knowledge base management section in settings.'})
+        return jsonify({'message': 'File processing Queued.'})
 
     except Exception as e:
         logging.error(f"Exception occurred: {e}")
