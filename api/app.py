@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from celery_worker import celery_app  # Import here to avoid circular import
 import os
 from firebase_setup import initialize_firebase
-from flask_sse import sse
 from redis import StrictRedis
 
 load_dotenv()
