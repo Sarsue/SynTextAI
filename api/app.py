@@ -46,8 +46,7 @@ def create_app():
     app.config.update(
     CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE',
     CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE',
-    REDIS_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
-    )
+   )
 
     celery_app.conf.update(app.config)
 
@@ -57,14 +56,14 @@ def create_app():
     from routes.messages import messages_bp
     from routes.files import files_bp
     from routes.subscriptions import subscriptions_bp
-    from routes.sse_route import sse_bp
+
 
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
     app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
-    app.register_blueprint(sse_bp, url_prefix='/events')  # Register the SSE blueprint
+
 
     @app.route('/')
     def serve_react_app():

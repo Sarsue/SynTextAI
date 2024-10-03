@@ -42,7 +42,6 @@ grpcio-tools
 flask
 firebase-admin
 flask-cors
-Flask-SSE
 pdfminer.six
 Pillow
 pytesseract

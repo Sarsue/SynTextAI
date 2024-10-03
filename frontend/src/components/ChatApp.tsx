@@ -471,43 +471,22 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
 
     useEffect(() => {
+        let intervalId;
+        const setupPolling = async () => {
+            if (user) {
+                // Fetch the ID token asynchronously
+        
+
+                // Fetch histories and user files
+                await fetchHistories();
+                await fetchUserFiles();
+
+                // Set up polling to refresh files every 3 minutes (180,000 milliseconds)
+                intervalId = setInterval(fetchUserFiles, 3 * 60 * 1000);
+            }
+        };
         if (user) {
-            fetchHistories();
-            const setupEventSource = async () => {
-                if (user) {
-                    // Fetch the ID token asynchronously
-                    const idToken = await user.getIdToken();
-
-                    // Call fetchHistories after retrieving the token
-                    await fetchHistories();
-
-                    // Create the EventSource with the user's ID token
-                    const eventSource = new EventSource(`/events/v1/stream/${idToken}`);
-
-                    eventSource.onmessage = (event) => {
-                        console.log('Notification received:', event.data);
-                        const eventData = JSON.parse(event.data);
-
-                        // Optionally check for specific event types
-                        // if (eventData.type === 'file_processed') {
-                        fetchUserFiles();  // Refresh the files on notification
-                        // }
-                    };
-
-                    eventSource.onerror = (error) => {
-                        console.error('EventSource error:', error);
-                        eventSource.close(); // Close the connection on error
-                    };
-
-                    // Cleanup on component unmount
-                    return () => {
-                        eventSource.close();
-                    };
-                }
-            };
-
-            // Invoke the setup function
-            setupEventSource();
+            setupPolling();
         }
     }, [user]);
 
