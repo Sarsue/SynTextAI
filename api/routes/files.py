@@ -79,8 +79,6 @@ def download_from_gcs(user_id, filename):
 def process_and_store_file(user_id, user_token, filename, file_url):
     try:
         logging.info(f"Started processing file: {filename}")
-        redis_client = redis.StrictRedis.from_url(current_app.config['REDIS_URL'])
-
         # Download file from GCS
         file_data = download_from_gcs(user_token, filename)
         if file_data is None:
