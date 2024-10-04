@@ -30,9 +30,10 @@ const HistoryView: React.FC<HistoryViewProps> = ({
 
     return (
         <div className={`history-container ${darkMode ? 'dark-mode' : ''}`}>
+            <h3>📜</h3>
             {/* Action button always visible at the top */}
             <div className="history-actions">
-                <button className="history-action" onClick={onNewChat}>New</button>
+                <button className="history-action" onClick={onNewChat}>✚</button>
             </div>
 
             {/* History list */}
@@ -64,8 +65,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({
 
             {/* Save and Clear buttons at the bottom */}
             <div className="history-actions bottom-actions">
-                <button className="history-action" onClick={onDownloadHistory}>Save</button>
-                <button className="history-action" onClick={onClearHistory}>Clear</button>
+                <button className="history-action" onClick={onDownloadHistory}>⬇️</button>
+                <button className="history-action" onClick={onClearHistory}>🗑️</button>
             </div>
         </div>
 
