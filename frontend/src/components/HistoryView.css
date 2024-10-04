@@ -41,6 +41,12 @@
     background-color: #777;
 }
 
+/* New bottom actions styles */
+.bottom-actions {
+    margin-top: 10px;
+    /* Space above buttons */
+}
+
 /* History list styling */
 .history-list {
     flex-grow: 1;
