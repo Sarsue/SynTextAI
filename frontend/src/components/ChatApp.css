@@ -47,10 +47,14 @@
 .history-column {
     flex: 1;
     /* Takes up one part of the layout */
+    display: flex;
+    flex-direction: column;
     padding: 15px;
     background-color: #f0f0f0;
     overflow-y: auto;
     transition: background-color 0.3s;
+    height: 100%;
+    /* Ensure it occupies the full height */
 }
 
 .dark-mode .history-column {
@@ -66,6 +70,7 @@
     /* Same background as history column */
     overflow-y: auto;
     transition: background-color 0.3s;
+    height: 100%;
 }
 
 .dark-mode .files-column {
@@ -205,4 +210,6 @@ button:hover {
     /* Align to the right */
     padding: 15px;
     /* Add padding for spacing */
+    position: relative;
+    top: 0;
 }

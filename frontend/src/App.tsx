@@ -21,7 +21,13 @@ const App: React.FC = () => {
         if (user) {
             fetchSubscriptionStatus();
         }
-    }, [user]);
+        if (darkMode) {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+
+    }, [user, darkMode]);
 
     const fetchSubscriptionStatus = async () => {
         const idToken = await user?.getIdToken();

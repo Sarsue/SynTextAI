@@ -588,17 +588,31 @@ class DocSynthStore:
 
                         page_id = cursor.fetchone()[0]
 
+                        max_retries = 3
                         for chunk in chunks:
                             # Embedding vector
-                          
-                            embedding_vector = get_text_embedding(chunk)
-                            embedding_vector_blob = pickle.dumps(embedding_vector)
+                            retries = 0  # Reset retries for each chunk
+                            success = False
+                            while not success and retries < max_retries:
+                                try:
+                            
+                                    embedding_vector = get_text_embedding(chunk)
+                                    embedding_vector_blob = pickle.dumps(embedding_vector)
 
-                            cursor.execute('''
-                                INSERT INTO chunks (page_id, chunk, embedding_vector)
-                                VALUES (%s, %s, %s)
-                            ''', (page_id, chunk, embedding_vector_blob))
-                            time.sleep(1) 
+                                    cursor.execute('''
+                                        INSERT INTO chunks (page_id, chunk, embedding_vector)
+                                        VALUES (%s, %s, %s)
+                                    ''', (page_id, chunk, embedding_vector_blob))
+                                
+                                    time.sleep(1)  # Optional sleep to prevent overwhelming the system
+                                    success = True  # Mark success if no exception occurs
+
+                                except Exception as e:
+                                    retries += 1
+                                    print(f"Retrying {retries}/{max_retries}...")
+                                    if retries == max_retries:
+                                        print(f"Failed to process chunk after {max_retries} attempts. Moving to next.")
+                                        break  # Move on to the next chunk after max retries
 
         except Exception as e:
             logger.error(f"Error updating file with chunks: {e}")

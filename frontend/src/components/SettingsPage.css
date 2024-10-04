@@ -1,17 +1,26 @@
+/* General settings container styling */
 .settings-container {
     position: relative;
     padding: 20px;
-    max-width: 600px;
-    margin: 0 auto;
+    width: 100%;
+    height: 100vh;
+    /* Full height of the viewport */
+    max-width: 100%;
+    /* Allow it to take full width */
+    margin: 0;
+    /* Remove auto centering */
     background-color: #f9f9f9;
     border-radius: 10px;
     transition: background-color 0.3s;
+    box-sizing: border-box;
+    /* Ensure padding doesn't affect width */
 }
 
 .dark-mode .settings-container {
     background-color: #333;
 }
 
+/* Close button styling */
 .close-button {
     position: absolute;
     top: 10px;
@@ -22,12 +31,17 @@
     cursor: pointer;
 }
 
+/* Settings content structure */
 .settings-content {
     display: flex;
     flex-direction: column;
     gap: 20px;
+    height: 100%;
+    overflow-y: auto;
+    /* Allow scrolling if content overflows */
 }
 
+/* Section styling */
 .settings-section {
     padding: 20px;
     background-color: white;
@@ -39,6 +53,7 @@
     background-color: #444;
 }
 
+/* Title styling */
 .section-title {
     font-size: 18px;
     margin-bottom: 10px;
@@ -49,6 +64,7 @@
     color: white;
 }
 
+/* Content styling within sections */
 .section-content {
     display: flex;
     flex-direction: column;
