@@ -1,4 +1,6 @@
-/* Default (Light Mode) */
+/* index.css */
+
+/* Default Light Mode Styles */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -8,17 +10,27 @@ body {
   background-color: #ffffff;
   /* Light mode background */
   color: #333;
-  /* Default text color */
-}
-
-/* Dark Mode */
-.dark-mode body {
-  background-color: #121212;
-  /* Dark mode background */
-  color: #f5f5f5;
-  /* Dark mode text color */
+  /* Light mode text color */
+  transition: background-color 0.3s ease, color 0.3s ease;
+  /* Smooth transition between modes */
 }
 
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+/* Dark Mode Styles */
+.dark-mode body {
+  background-color: #121212;
+  /* Dark mode background color */
+  color: #f5f5f5;
+  /* Dark mode text color */
+}
+
+/* Optional: Custom dark mode for specific elements (optional) */
+.dark-mode .app-container {
+  background-color: #1e1e1e;
+  /* Slightly lighter dark background for container */
+  color: #f5f5f5;
+  /* Ensure text is still light in dark mode */
 }

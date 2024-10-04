@@ -1,0 +1,25 @@
+/* Light Mode Styles */
+body {
+    background-color: white;
+    /* Light background */
+    color: black;
+    /* Dark text */
+}
+
+/* Dark Mode Styles */
+body.dark-mode {
+    background-color: #121212;
+    /* Dark background */
+    color: white;
+    /* Light text */
+}
+
+.app-container {
+    padding: 20px;
+    /* Example padding */
+}
+
+.app-container.dark-mode {
+    background-color: #1e1e1e;
+    /* Darker container background */
+}
