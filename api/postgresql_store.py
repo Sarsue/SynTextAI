@@ -1,8 +1,7 @@
 import psycopg2
 from psycopg2 import pool, sql, OperationalError, errors
 from datetime import datetime
-import json
-import os
+import time
 from llm_service import get_text_embedding
 import pickle
 from scipy.spatial.distance import cosine
@@ -591,6 +590,7 @@ class DocSynthStore:
 
                         for chunk in chunks:
                             # Embedding vector
+                          
                             embedding_vector = get_text_embedding(chunk)
                             embedding_vector_blob = pickle.dumps(embedding_vector)
 
@@ -598,6 +598,7 @@ class DocSynthStore:
                                 INSERT INTO chunks (page_id, chunk, embedding_vector)
                                 VALUES (%s, %s, %s)
                             ''', (page_id, chunk, embedding_vector_blob))
+                            time.sleep(1) 
 
         except Exception as e:
             logger.error(f"Error updating file with chunks: {e}")

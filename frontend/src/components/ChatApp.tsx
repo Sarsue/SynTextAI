@@ -481,7 +481,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             fetchFiles();
 
             // Set up polling to refresh user files every 3 minutes (180,000 milliseconds)
-            const intervalId = setInterval(fetchUserFiles, 60000); // 3 minutes in milliseconds
+            const intervalId = setInterval(fetchUserFiles, 50000); // 3 minutes in milliseconds
 
             // Cleanup function to clear the interval on unmount or when user changes
             return () => {
