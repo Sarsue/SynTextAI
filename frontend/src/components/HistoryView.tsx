@@ -33,8 +33,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({
             {/* Action buttons always visible at the top */}
             <div className="history-actions">
                 <button className="history-action" onClick={onNewChat}>New</button>
-                <button className="history-action" onClick={onDownloadHistory}>Download</button>
-                <button className="history-action" onClick={onClearHistory}>Delete</button>
+                <button className="history-action" onClick={onDownloadHistory}>Save</button>
+                <button className="history-action" onClick={onClearHistory}>Clear</button>
             </div>
 
             {/* History list */}
