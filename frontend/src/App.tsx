@@ -4,12 +4,11 @@ import Home from './Home';
 import Auth from './Auth';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
-
+import { Link } from 'react-router-dom';
 import { User as FirebaseUser } from 'firebase/auth';
 import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { DarkModeProvider, useDarkMode } from './DarkModeContext';
-import './App.css';
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY);
 
 const App: React.FC = () => {
