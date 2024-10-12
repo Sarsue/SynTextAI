@@ -8,6 +8,7 @@ const Home: React.FC = () => {
 
     return (
         <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
+            {/* Header */}
             <header className="header">
                 <div className="logo-container">
                     <h1 className="app-title">SynText AI</h1>
@@ -22,31 +23,43 @@ const Home: React.FC = () => {
             <main className="content-container">
                 {/* Hero Section */}
                 <section className="hero-section">
-                    <h2 className="hero-title">Find Guidance Through Scripture and Manage Your Documents</h2>
+                    <h2 className="hero-title">Discover Wisdom for Every Path – Spiritual, Secular, and Agnostic</h2>
                     <p className="hero-description">
-                        SynText AI offers spiritual guidance, powered by ancient wisdom like the Bible, and simplifies document management with AI-driven features.
+                        Whether you seek guidance from ancient scriptures, modern philosophy, or mindfulness practices, SynText AI offers personalized insights to help you navigate life’s challenges.
+                        <strong> Sign In and Start Your Journey Today </strong>
                     </p>
+
                 </section>
 
-                {/* Video and Features Side by Side */}
+                {/* Video and Features Section */}
                 <section className="video-features-section">
                     <div className="features-column">
                         <h2 className="features-title">Why Choose SynText AI?</h2>
                         <ul className="features-list">
                             <li className="feature-item">
-                                <i className="fas fa-book feature-icon"></i>
-                                <h3>Bible-Based Guidance</h3>
-                                <p>Receive instant advice grounded in biblical wisdom for your spiritual and personal challenges.</p>
+                                <i className="fas fa-question-circle feature-icon"></i>
+                                <h3>Guidance on Life's Questions</h3>
+                                <p>Ask questions on various topics in any language and receive insights from spiritual, secular, and agnostic perspectives.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-language feature-icon"></i>
-                                <h3>Multilingual Support</h3>
-                                <p>Ask questions and get answers in multiple languages, with support for scripture in different translations.</p>
+                                <i className="fas fa-image feature-icon"></i>
+                                <h3>Multimodal Interpretation</h3>
+                                <p>Upload images, text etc  of multilingual texts for interpretation and understanding, enhancing your insights.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-search feature-icon"></i>
-                                <h3>Share With Social Media</h3>
-                                <p>Generate blog posts, social media updates, or even Bible-based reflections with AI.</p>
+                                <i className="fas fa-calendar-alt feature-icon"></i>
+                                <h3>Daily Prompts & Wisdom</h3>
+                                <p>Receive daily tips, mantras, and "Wisdom of the Day," blending scripture and philosophical quotes based on your belief system.</p>
+                            </li>
+                            <li className="feature-item">
+                                <i className="fas fa-tools feature-icon"></i>
+                                <h3>Growth Tools & Recommendations</h3>
+                                <p>Access tools and resources for personal growth, including journal uploads and development recommendations.</p>
+                            </li>
+                            <li className="feature-item">
+                                <i className="fas fa-adjust feature-icon"></i>
+                                <h3>Personalized Insights</h3>
+                                <p>Select preferences for spiritual or secular insights tailored to your needs and beliefs.</p>
                             </li>
                         </ul>
                     </div>
@@ -66,9 +79,19 @@ const Home: React.FC = () => {
                         </div>
                     </div>
                 </section>
+
+
             </main>
 
+            {/* Footer */}
             <footer className="footer">
+                {/* Pricing Section */}
+                <section className="pricing-section">
+                    <h2 className="pricing-title">Start Your Self Improvement Journey</h2>
+                    <p className="pricing-description">
+                        For just <strong>$15/month</strong>.
+                    </p>
+                </section>
                 <p>&copy; 2024 OSAS INC. All rights reserved.</p>
             </footer>
         </div>

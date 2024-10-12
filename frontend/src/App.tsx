@@ -73,7 +73,6 @@ const App: React.FC = () => {
                                     />
                                 }
                             />
-
                             <Route
                                 path="/settings"
                                 element={
