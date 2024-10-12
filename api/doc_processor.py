@@ -12,7 +12,6 @@ def qna(data):
         data_prompt = (
             f"Based on the following text: {data}\n"
             f"Generate questions and answers.\n"
-            f"Your response should be related to {data}.\n"
             f"Question 1: What is a relevant question?\n"
             f"Answer 1: A corresponding answer.\n"
             f"Question 2: What is another relevant question?\n"
