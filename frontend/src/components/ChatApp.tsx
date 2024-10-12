@@ -8,7 +8,7 @@ import HistoryView from './HistoryView';
 import { Message, History } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
-import { useDarkMode } from '../DarkModeContext';
+import { useUserContext } from '../UserContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
@@ -22,7 +22,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const [loading, setLoading] = useState(false);
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
-    const { darkMode, setDarkMode } = useDarkMode(); // Access the darkMode state and setDarkMode function
+    const { darkMode, setDarkMode } = useUserContext(); // Access the darkMode state and setDarkMode function
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
     const navigate = useNavigate();

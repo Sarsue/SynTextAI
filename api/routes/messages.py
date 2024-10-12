@@ -35,23 +35,11 @@ def create_message():
 
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
+
     message_list.append(user_request)
-    files = store.get_files_for_user(user_id= id)
-    # context is information retrieval or summarize with language detected
-    context = process_context(message, formatted_history,files = files)
-    print(context)
-    if context['task_type'] == "retrieval":
-        top_k_results = store.hybrid_search(query = message, user_id = id, k=5) 
-        response = process(query=message, top_k_results= top_k_results, language= context['language'])
-        # add history for more conversational context
-        # response = chat(query=message, persona_str=user_persona_pref,
-        #                 convo_history=formatted_history)
-    # elif context['task_type'] == "summarize": 
-    #     file_data = store.get_file_text(id, context['file_name']) 
-    #     response = summarize(message,context['language'], file_data)
-    else:
-        response = "SyntextAI is a RAG application and cant handle other tasks besides information retrieval."
    
+    # context is information retrieval or summarize with language detected
+    response = process_context(message, formatted_history)
     bot_response = store.add_message(
             content=response, sender='bot', user_id=id, chat_history_id=history_id)
 

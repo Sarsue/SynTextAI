@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './ConversationView.css';
 import { History, Message } from './types';
-import { useDarkMode } from '../DarkModeContext';
+import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
 
 interface ConversationViewProps {
@@ -14,7 +14,7 @@ interface ConversationViewProps {
 const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) => {
     const [selectedFile, setSelectedFile] = useState<string | null>(null); // Adjusted to store file URL string
     const [fileError, setFileError] = useState<string | null>(null);
-    const { darkMode } = useDarkMode();
+    const { darkMode } = useUserContext();
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {

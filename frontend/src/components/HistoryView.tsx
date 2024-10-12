@@ -1,7 +1,7 @@
 import React from 'react';
 import { History } from './types';
 import './HistoryView.css';
-import { useDarkMode } from '../DarkModeContext';
+import { useUserContext } from '../UserContext';
 
 interface HistoryViewProps {
     histories: History[];
@@ -21,7 +21,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({
     onDownloadHistory,
 }) => {
     const [selectedHistoryId, setSelectedHistoryId] = React.useState<number | null>(null);
-    const { darkMode } = useDarkMode(); // Access the darkMode state
+    const { darkMode } = useUserContext(); // Access the darkMode state
 
     const onSelectHistory = (history: History) => {
         setCurrentHistory(history.id);

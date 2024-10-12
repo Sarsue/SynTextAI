@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import './Home.css';
-import { useDarkMode } from './DarkModeContext';
+import { useUserContext } from './UserContext';
 
 const Home: React.FC = () => {
-    const { darkMode } = useDarkMode();
+    const { darkMode } = useUserContext();
 
     return (
         <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>

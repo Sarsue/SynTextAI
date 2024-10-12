@@ -8,13 +8,13 @@ import { Link } from 'react-router-dom';
 import { User as FirebaseUser } from 'firebase/auth';
 import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
-import { DarkModeProvider, useDarkMode } from './DarkModeContext';
+import { UserProvider, useUserContext } from './UserContext';
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY);
 
 const App: React.FC = () => {
     const [user, setUser] = useState<FirebaseUser | null>(null);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null); // Ensure subscriptionStatus is a string or null
-    const { darkMode } = useDarkMode();
+    const { darkMode } = useUserContext();
 
     useEffect(() => {
         if (user) {
@@ -37,7 +37,7 @@ const App: React.FC = () => {
     };
 
     return (
-        <DarkModeProvider>
+        <UserProvider>
             <Elements stripe={stripePromise}>
                 <Router>
                     <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
@@ -87,7 +87,7 @@ const App: React.FC = () => {
                     </div>
                 </Router>
             </Elements>
-        </DarkModeProvider>
+        </UserProvider>
     );
 };
 

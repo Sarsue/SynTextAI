@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PaymentView from './PaymentView';
 import DarkModeToggle from './DarkModeToggle';
 import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
-import { useDarkMode } from '../DarkModeContext';
+import { useUserContext } from '../UserContext';
 import { loadStripe, Stripe } from '@stripe/stripe-js';
 
 interface SettingsPageProps {
@@ -15,15 +15,20 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscriptionStatus }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode } = useDarkMode();
+    const { darkMode, setDarkMode, userSettings, setUserSettings } = useUserContext();
     const [subscriptionStatusLocal, setSubscriptionStatusLocal] = useState<string | null>(subscriptionStatus);
+    const [beliefSystem, setBeliefSystem] = useState<string>(userSettings.beliefSystem || '');
+    const [demographic, setDemographic] = useState<string>(userSettings.demographic || '');
+    const [gender, setGender] = useState<string>(userSettings.gender || '');
+
+    // Update userSettings in context whenever gender, demographic, or beliefSystem changes
+    useEffect(() => {
+        setUserSettings({ gender, demographic, beliefSystem });
+    }, [gender, demographic, beliefSystem, setUserSettings]);
 
     const handleSubscriptionChange = (newStatus: string) => {
         setSubscriptionStatusLocal(newStatus);
     };
-    const [beliefSystem, setBeliefSystem] = useState<string>('');
-    const [demographic, setDemographic] = useState<string>('');
-    const [gender, setGender] = useState<string>('');
 
     return (
         <div className={`settings-container ${darkMode ? 'dark-mode' : ''}`}>
@@ -105,7 +110,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                         <DarkModeToggle darkMode={darkMode} setDarkMode={setDarkMode} />
                     </div>
                 </div>
-
             </div>
         </div>
     );

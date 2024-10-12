@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useDarkMode } from '../DarkModeContext';
+import { useUserContext } from '../UserContext';
 import './InputArea.css';
 
 interface InputAreaProps {
@@ -10,7 +10,7 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-    const { darkMode } = useDarkMode();
+    const { darkMode } = useUserContext();
 
     const handleSendClick = () => {
         if (!message.trim() && attachedFiles.length === 0) return;

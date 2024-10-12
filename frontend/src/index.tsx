@@ -3,16 +3,16 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import { DarkModeProvider } from './DarkModeContext'; // Import DarkModeProvider
+import { UserProvider } from './UserContext'; // Import DarkModeProvider
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
 root.render(
   <React.StrictMode>
-    <DarkModeProvider>
+    <UserProvider>
       <App />
-    </DarkModeProvider>
+    </UserProvider>
   </React.StrictMode>
 );
 

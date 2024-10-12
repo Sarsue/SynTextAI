@@ -1,83 +1,93 @@
 from llm_service import prompt_llm
 
-def process_context(query, user_history, files):
-    # Construct the prompt to instruct the LLM on how to handle the query
+topics = ['growth and well being', 'love and relationships', 'spirituality and mindfulness', 'ethics and values']
+topics_list = "\n".join(f"- {topic}" for topic in topics)
+
+sources = {
+    "spiritual": ['Bible', 'Quran', 'Torah', 'Talmud', 'Bhavad Gita', 'Tripitaka', 'Tao Te Ching'],
+    "secular": ['The Republic', 'Nicomachean Ethics', 'Meditations', 'Beyond Good and Evil', 
+                'Man’s Search for Meaning', 'The Way of the Superior Man by David Deida', 
+                'Osho: The Book Of Wisdom', 'Secular Humanism: Works by Richard Dawkins or Christopher Hitchens']
+}
+
+def process_context(query, user_history, belief_system='agnostic'):
+    # Determine the sources to use based on belief system
+    if belief_system == 'spiritual':
+        selected_sources = sources["spiritual"]
+    elif belief_system == 'secular':
+        selected_sources = sources["secular"]
+    else:  # 'agnostic' can use both
+        selected_sources = sources["spiritual"] + sources["secular"]
+
+    # Format the sources for inclusion in the prompt
+    sources_list = "\n".join(f"- {src}" for src in selected_sources)
+
     prompt = f"""
-You are an intelligent multilingual assistant. Given the following query, message history, and files, determine the nature of the user's request:
+        Your task is to act as a thoughtful and empathetic assistant. Use the **user's query and history** to determine the topic the user needs guidance with. 
+        Depending on the **belief system** (spiritual, secular, or agnostic), select the **best 2-4 sources** from the list provided, and weave them naturally into your response in a **supportive, conversational tone**. 
 
-1. **Information Retrieval**: If the user is requesting specific information from the documents. Include the language in the response if detected (e.g., "retrieval in English").
-2. **Document Summarization**: If the user is requesting a summary of a document. Include the language and the filename in the response if detected (e.g., "summarize annual_report.pdf in French").
-3. **Clarification**: if the user's request isn't clearly information retrieval or summarization.
+        Make sure your response:
+        1. Clearly reflects the relevant topic based on the query and user history.
+        2. Weaves quotes or ideas from 2-4 sources seamlessly into the response. Avoid listing sources mechanically.
+        3. Feels conversational, showing empathy and offering meaningful suggestions.
+        4. Ends with encouragement or actionable advice (if relevant). 
 
-Ensure that:
-- The response should be exactly one of the following formats: "retrieval in [language]" or "summarize [filename] in [language]" or "clarification".
-- Do not provide additional explanations, confidence percentages, or clarification requests unless explicitly asked for.
+        ---
 
-**Example:**
-Query: "Peux-tu me donner le résumé ?"
-User History: ["how much did we make last quarter?", "according to the financial_report.pdf we made $300M."]
-Files: financial_report.pdf, annual_report.pdf
+        ### Query:
+        "{query}"
 
-Your Response: "summarize financial_report.pdf in French"
+        ### User History:
+        {user_history or "No prior history provided."}
 
-**Now, given the current query:**
+        ### Available Topics:
+        {topics_list}
 
-Query: "{query}"
+        ### Available Sources (based on belief system):
+        {sources_list}
 
-User History:
-{user_history}
+        ### Belief System:
+        '{belief_system}'
 
-Files:
-{files}
+        ---
 
-Your Response (choose from "retrieval in [language]" or "summarize [filename] in [language]" or "clarification"):
-"""
+        Remember: If the query doesn’t fit any topic or there are no relevant sources, say:  
+        "Sorry, I don’t have the right information to help with that at the moment. You might consider seeking additional support or guidance elsewhere."
+
+        Now, please generate the most appropriate response for the user.
+
+        """
 
     # Get the LLM response
     response = prompt_llm(prompt).strip()
+    return response
 
-    print("rcvd: " + response)
 
-    if "clarification" in response:
-        task_type = "clarification"
-        language = None
-        file_name = None
-    else:
-        # If the response doesn't match any expected format, return clarification
-        task_type = "clarification"
-        language = None
-        file_name = None
-    # Check for the occurrence of key phrases
 
-    if "retrieval in" in response:
-        parts = response.split("retrieval in")
-        language = parts[-1].strip().split()[0]
-        task_type = "retrieval"
-        file_name = None
 
-    if "summarize" in response and "in" in response:
-        parts = response.split(" ")
-        language = parts[-1].strip()  # Language is the part after "in"
-        
-        # Filename is the part before "in", after removing "summarize"
-        file_name = parts[1].strip()
-        task_type = "summarize"
-       
+
+
+def process_file_context(file_data):
+    prompt = f"""
+    Given the following file data:
+
+    {file_data}
    
+    ### Topics:
+    {topics_list}
 
-    return {
-        "task_type": task_type,
-        "language": language,
-        "file_name": file_name
-    }
+    Please classify  based on the closest match from the topics above. Provide only the topic name or "out of scope" if the data doesn’t align with any topic.
+    """
+    response = prompt_llm(prompt).strip()
+    return response
+
 
 if __name__ == '__main__':
     queries = [
-        "Comment les transactions sont-elles validées dans le réseau Bitcoin?"
+        "what are the highlights o this book you recommended "
     ]
-    user_history = []
-    files = ["annual_report.pdf", "bitcoin.pdf"]
+    user_history = ["I saw some messages on my wife phone that have me questioning her fidelity? I am worried about my family and I am upset and almost breaking down","The Relationship Cure by John Gottman and Joan DeClaire - This book offers research-based advice on how to build strong, healthy relationships, including how to repair trust after infidelity"]
 
     for query in queries:
-        response = process_context(query, user_history, files)
+        response = process_context(query, user_history)
         print(response)
