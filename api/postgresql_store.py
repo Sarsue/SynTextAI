@@ -96,27 +96,27 @@ class DocSynthStore:
                         )
                     ''')
 
-                    # Table to store page metadata
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS pages (
-                            id SERIAL PRIMARY KEY,
-                            file_id INTEGER,
-                            page_number INTEGER,
-                            data TEXT,
-                            FOREIGN KEY (file_id) REFERENCES files (id)
-                        )
-                    ''')
+                    # # Table to store page metadata
+                    # cursor.execute('''
+                    #     CREATE TABLE IF NOT EXISTS pages (
+                    #         id SERIAL PRIMARY KEY,
+                    #         file_id INTEGER,
+                    #         page_number INTEGER,
+                    #         data TEXT,
+                    #         FOREIGN KEY (file_id) REFERENCES files (id)
+                    #     )
+                    # ''')
 
-                    # Table to store chunks and their vectors
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS chunks (
-                            id SERIAL PRIMARY KEY,
-                            page_id INTEGER,
-                            chunk TEXT,
-                            embedding_vector BYTEA,
-                            FOREIGN KEY (page_id) REFERENCES pages (id)
-                        )
-                    ''')
+                    # # Table to store chunks and their vectors
+                    # cursor.execute('''
+                    #     CREATE TABLE IF NOT EXISTS chunks (
+                    #         id SERIAL PRIMARY KEY,
+                    #         page_id INTEGER,
+                    #         chunk TEXT,
+                    #         embedding_vector BYTEA,
+                    #         FOREIGN KEY (page_id) REFERENCES pages (id)
+                    #     )
+                    # ''')
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
         finally:
@@ -298,7 +298,37 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
-    def add_message(self, content, sender, user_id, chat_history_id):
+    def get_latest_chat_history_id(self, user_id):
+        """Fetch the latest chat history ID for a given user."""
+
+        connection = self.get_connection()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    cursor.execute('''
+                        SELECT id
+                        FROM chat_histories
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC  -- Assuming you have a timestamp column
+                        LIMIT 1
+                    ''', (user_id,))
+
+                    result = cursor.fetchone()
+                    return result[0] if result else None
+        except Exception as e:
+            logger.error(f"Error fetching latest chat history ID: {e}")
+            raise
+        finally:
+            self.release_connection(connection)
+
+    def add_message(self, content, sender, user_id, chat_history_id = None):
+        if chat_history_id is None:
+            chat_history_id = self.get_latest_chat_history_id(user_id)
+
+        if chat_history_id is None:
+            file_history = self.add_chat_history("",user_id)
+            chat_history_id = file_history["id"]
+
         connection = self.get_connection()
         try:
             with connection:
@@ -516,21 +546,7 @@ class DocSynthStore:
                 for row in rows:
                     file_id = row[0]
                     file_info = {'id': file_id, 'name': row[1], 'publicUrl': row[2]}
-
-                    # Check if the file has chunks and pages
-                    cursor.execute('''
-                        SELECT COUNT(*) FROM pages
-                        WHERE file_id = %s
-                    ''', (file_id,))
-                    pages_count = cursor.fetchone()[0]
-
-                    cursor.execute('''
-                        SELECT COUNT(*) FROM chunks
-                        WHERE page_id IN (SELECT id FROM pages WHERE file_id = %s)
-                    ''', (file_id,))
-                    chunks_count = cursor.fetchone()[0]
-
-                    file_info['processed'] = (pages_count > 0 and chunks_count > 0)
+                    file_info['processed'] = True 
                     files.append(file_info)
 
                 return files

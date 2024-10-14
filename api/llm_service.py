@@ -95,7 +95,7 @@ def prompt_llm(prompt):
         print(str(e))
         return "n/a"
 
-def prompt_multimodal(base64_image):
+def extract_image_text(base64_image):
     try:
         url = "https://api.mistral.ai/v1/chat/completions"
         api_key = mistral_key

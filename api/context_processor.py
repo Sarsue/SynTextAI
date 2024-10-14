@@ -9,6 +9,16 @@ sources = {
                 'Man’s Search for Meaning', 'The Way of the Superior Man by David Deida', 
                 'Osho: The Book Of Wisdom', 'Secular Humanism: Works by Richard Dawkins or Christopher Hitchens']
 }
+LLM_CONTEXT_WINDOW = 3000
+def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
+    """Split text into chunks that fit within the LLM's context window."""
+    words = text.split()
+    chunks = []
+    while words:
+        chunk = words[:max_tokens]
+        chunks.append(" ".join(chunk))
+        words = words[max_tokens:]
+    return chunks
 
 def process_context(query, user_history, belief_system='agnostic'):
     # Determine the sources to use based on belief system
@@ -63,31 +73,86 @@ def process_context(query, user_history, belief_system='agnostic'):
     return response
 
 
+def classify_content(content, topics_list):
+    """Classify the content using the LLM."""
+    classification_prompt = f"""
+    Given the following content:
 
+    {content[:2000]}  # Trim to avoid overflow in prompt
 
-
-
-def process_file_context(file_data):
-    prompt = f"""
-    Given the following file data:
-
-    {file_data}
-   
     ### Topics:
-    {topics_list}
+    {', '.join(topics_list)}
 
-    Please classify  based on the closest match from the topics above. Provide only the topic name or "out of scope" if the data doesn’t align with any topic.
+    Please classify the content under one of the topics above. 
+    If the content doesn’t align with any topic, respond with "out of scope."
     """
-    response = prompt_llm(prompt).strip()
+    return prompt_llm(classification_prompt).strip()
+
+def generate_interpretation(content_chunk, topic, sources_list, belief_system):
+    """Generate interpretation of a content chunk using the LLM."""
+    prompt = f"""
+    The content is classified under the topic: **{topic}**.
+
+    Provide an interpretation of this content based on the topic.
+    Use **2-4 relevant sources** from the list below (aligned with the belief system: {belief_system}).
+    Weave the sources naturally to provide insights.
+
+    ### Content Chunk:
+    {content_chunk}
+
+    ### Relevant Sources:
+    {sources_list}
+
+    ### Belief System:
+    {belief_system}
+
+    Generate a conversational interpretation of this chunk, integrating insights from sources. 
+    Conclude with an actionable or supportive message.
+    """
+    return prompt_llm(prompt).strip()
+
+
+def process_file_context(content, belief_system='agnostic'):
+    selected_sources = (
+        sources["spiritual"] if belief_system == 'spiritual' 
+        else sources["secular"] if belief_system == 'secular'
+        else sources["spiritual"] + sources["secular"]
+    )
+    sources_list = "\n".join(f"- {src}" for src in selected_sources)
+
+    first_chunk = chunk_text(content)[0]  # Use the first chunk for classification
+    topic = classify_content(first_chunk, topics_list)
+
+    if topic.lower() == "out of scope":
+        return "The content is not relevant to the topics SynText covers."
+
+    # Generate interpretations for all chunks
+    content_chunks = chunk_text(content)
+    interpretations = [
+        generate_interpretation(chunk, topic, sources_list, belief_system)
+        for chunk in content_chunks
+    ]
+
+    # Combine interpretations into a single response
+    response = "\n\n".join(interpretations)
     return response
+    
+
 
 
 if __name__ == '__main__':
-    queries = [
-        "what are the highlights o this book you recommended "
-    ]
-    user_history = ["I saw some messages on my wife phone that have me questioning her fidelity? I am worried about my family and I am upset and almost breaking down","The Relationship Cure by John Gottman and Joan DeClaire - This book offers research-based advice on how to build strong, healthy relationships, including how to repair trust after infidelity"]
+    # queries = [
+    #     "what are the highlights o this book you recommended "
+    # ]
+    # user_history = ["I saw some messages on my wife phone that have me questioning her fidelity? I am worried about my family and I am upset and almost breaking down","The Relationship Cure by John Gottman and Joan DeClaire - This book offers research-based advice on how to build strong, healthy relationships, including how to repair trust after infidelity"]
 
-    for query in queries:
-        response = process_context(query, user_history)
-        print(response)
+    # for query in queries:
+    #     response = process_context(query, user_history)
+    #     print(response)
+    # Example usage
+    file_data = """
+    The document discusses the challenges of maintaining trust in long-term relationships 
+    and offers strategies to rebuild intimacy after emotional distance.
+    """
+    response = process_file_context(file_data, belief_system='agnostic')
+    print(response)

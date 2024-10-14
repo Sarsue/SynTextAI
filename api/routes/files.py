@@ -8,6 +8,7 @@ from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
 from postgresql_store import DocSynthStore
 import redis 
+from context_processor import process_file_context
 
 
 # Configure logging
@@ -90,8 +91,14 @@ def process_and_store_file(user_id, user_token, filename, file_url):
         doc_info = process_file(file_data, file_extension)
         logging.info(f"Document info: {doc_info}")
 
-        celery_store.update_file_with_chunks(user_id, filename, doc_info)
-        logging.info(f"Finished processing and storing file: {filename}")
+        message = f"Uploaded file: {filename}"
+        response = process_file_context(doc_info)
+        celery_store.add_message(
+        content=message, sender='user', user_id=id)    
+        celery_store.add_message(
+            content=response, sender='bot', user_id=id)
+
+
      
 
     except Exception as e:
@@ -137,7 +144,7 @@ def save_file():
             try:
                 file_info = store.add_file(user_id, file.filename, file_url)
                 logging.info(f"Stored file metadata: {file.filename}")
-                process_and_store_file.delay(user_id,  user_info['user_id'], file.filename, file_url)
+                process_and_store_file(user_id,  user_info['user_id'], file.filename, file_url)
                 logging.info(f"Enqueued processing for file: {file.filename}")
             except RedisError as e:
                 logging.error(f"Error enqueueing job: {e}")
