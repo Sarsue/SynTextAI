@@ -472,21 +472,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     useEffect(() => {
         if (user) {
-            const fetchFiles = async () => {
+            const fetchHistoriesandFiles = async () => {
                 await fetchHistories();
                 await fetchUserFiles();
             };
 
             // Fetch files initially
-            fetchFiles();
+            fetchHistoriesandFiles();
 
-            // Set up polling to refresh user files every 3 minutes (180,000 milliseconds)
-            const intervalId = setInterval(fetchUserFiles, 50000); // 3 minutes in milliseconds
-
-            // Cleanup function to clear the interval on unmount or when user changes
-            return () => {
-                clearInterval(intervalId);
-            };
         }
     }, [user]); // Runs whenever `user` changes
 

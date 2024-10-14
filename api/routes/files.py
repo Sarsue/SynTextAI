@@ -98,7 +98,7 @@ def process_and_store_file(user_id, user_token, filename, file_url):
             {response}
             """ 
             celery_store.add_message(
-                content=message, sender='bot', user_id=id)
+                content=message, sender='bot', user_id=user_id)
 
 
      

@@ -7,7 +7,7 @@ sources = {
     "spiritual": ['Bible', 'Quran', 'Torah', 'Talmud', 'Bhavad Gita', 'Tripitaka', 'Tao Te Ching'],
     "secular": ['The Republic', 'Nicomachean Ethics', 'Meditations', 'Beyond Good and Evil', 
                 'Man’s Search for Meaning', 'The Way of the Superior Man by David Deida', 
-                'Osho: The Book Of Wisdom', 'Secular Humanism: Works by Richard Dawkins or Christopher Hitchens']
+                'Osho: The Book Of Wisdom', 'Secular Humanism: Works by Richard Dawkins or Christopher Hitchens', 'Esther Vilar – The Manipulated Man']
 }
 LLM_CONTEXT_WINDOW = 3000
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
