@@ -2,7 +2,7 @@ import io
 import logging
 from pdfminer.high_level import extract_text
 from llm_service import prompt_llm,extract_image_text
-import re 
+import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -51,12 +51,12 @@ def process_file(file_data, file_extension):
     return result
 
 if __name__ == "__main__":
-    import base64
-    image_path = "//Users//osas//Downloads//test.jpeg"
+  
+    pdf_path = "//Users//osas//Downloads//Pitch Deck.pdf"
     # Open and read image data
-    with open(image_path, "rb") as image_file:
-        image_data = base64.b64encode(image_file.read()).decode('utf-8')
+    with open(pdf_path, "rb") as pdf_file:
+        pdf_data = pdf_file.read()
 
     # Call the process_file function with 'jpeg' as the file extension
-    result = process_file(image_data, 'jpeg') 
+    result = process_file(pdf_data, 'pdf') 
     print(result)

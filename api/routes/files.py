@@ -90,13 +90,15 @@ def process_and_store_file(user_id, user_token, filename, file_url):
         # Process the file
         doc_info = process_file(file_data, file_extension)
         logging.info(f"Document info: {doc_info}")
-
-        message = f"Uploaded file: {filename}"
         response = process_file_context(doc_info)
+        message = f"""
+        The document **{filename}** has been successfully processed.
+
+        **Interpretation:**
+        {response}
+        """ 
         celery_store.add_message(
-        content=message, sender='user', user_id=id)    
-        celery_store.add_message(
-            content=response, sender='bot', user_id=id)
+            content=message, sender='bot', user_id=id)
 
 
      
