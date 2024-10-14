@@ -60,3 +60,9 @@ if __name__ == "__main__":
     # Call the process_file function with 'jpeg' as the file extension
     result = process_file(pdf_data, 'pdf') 
     print(result)
+    from context_processor import process_file_context
+    if(len(result.strip()) > 0):
+        response = process_file_context(result)
+        print(response)
+    else:
+        print("no data")

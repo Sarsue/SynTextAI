@@ -89,16 +89,16 @@ def process_and_store_file(user_id, user_token, filename, file_url):
         file_extension = file_extension.lower().strip('.')
         # Process the file
         doc_info = process_file(file_data, file_extension)
-        logging.info(f"Document info: {doc_info}")
-        response = process_file_context(doc_info)
-        message = f"""
-        The document **{filename}** has been successfully processed.
+        if(len(doc_info.strip()) > 0):
+            response = process_file_context(doc_info)
+            message = f"""
+            The document **{filename}** has been successfully processed.
 
-        **Interpretation:**
-        {response}
-        """ 
-        celery_store.add_message(
-            content=message, sender='bot', user_id=id)
+            **Interpretation:**
+            {response}
+            """ 
+            celery_store.add_message(
+                content=message, sender='bot', user_id=id)
 
 
      
