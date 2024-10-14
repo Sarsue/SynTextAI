@@ -309,7 +309,7 @@ class DocSynthStore:
                         SELECT id
                         FROM chat_histories
                         WHERE user_id = %s
-                        ORDER BY created_at DESC  -- Assuming you have a timestamp column
+                        ORDER BY id DESC  -- Assuming you have a timestamp column
                         LIMIT 1
                     ''', (user_id,))
 
