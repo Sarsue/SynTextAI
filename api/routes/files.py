@@ -8,7 +8,7 @@ from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
 from postgresql_store import DocSynthStore
 import redis 
-from context_processor import process_file_context
+from context_processor import context
 
 
 # Configure logging
@@ -90,7 +90,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
         # Process the file
         doc_info = process_file(file_data, file_extension)
         if(len(doc_info.strip()) > 0):
-            response = process_file_context(doc_info)
+            response = context(doc_info)
             message = f"""
             The document **{filename}** has been successfully processed.
 

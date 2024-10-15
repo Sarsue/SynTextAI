@@ -157,7 +157,7 @@ def generate_interpretation(content_chunk, topic, sources_list, belief_system):
     interpretation_text = response['choices'][0]['message']['content'].strip()
     return interpretation_text
 
-def process_file_context(content, belief_system='agnostic'):
+def context(content, belief_system='agnostic'):
     """Process file content and generate relevant insights."""
     content_chunks = chunk_text(content)
     topic = classify_content(content_chunks[0], topics_list)
@@ -183,5 +183,5 @@ if __name__ == '__main__':
     The document discusses the challenges of maintaining trust in long-term relationships 
     and offers strategies to rebuild intimacy after emotional distance.
     """
-    response = process_file_context(file_data, belief_system='agnostic')
+    response = context(file_data, belief_system='agnostic')
     print(response)

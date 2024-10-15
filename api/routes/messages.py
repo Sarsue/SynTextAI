@@ -3,7 +3,7 @@ from utils import get_user_id
 from youtube_video_handler import process_youtube_link
 from web_link_handler import process_newsletter_link
 from query_processor import process, summarize
-from context_processor import process_context
+from context_processor import context
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
 
 
@@ -39,7 +39,17 @@ def create_message():
     message_list.append(user_request)
    
     # context is information retrieval or summarize with language detected
-    response = process_context(message, formatted_history)
+    prompt = f"""
+        This is a conversation between a user and an assistant. Use the context from the history and the latest message to provide a thoughtful response.
+
+        ### User's Message:
+        {message}
+
+        ### Current Conversation History:
+        {formatted_history}
+        """
+
+    response = context(prompt)
     bot_response = store.add_message(
             content=response, sender='bot', user_id=id, chat_history_id=history_id)
 
