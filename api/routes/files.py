@@ -83,7 +83,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
         # Download file from GCS
         file_data = download_from_gcs(user_gc_id, filename)
         if file_data is None:
-            raise FileNotFoundError(f"File {filename} not found in GCS for user {user_id}")
+            raise FileNotFoundError(f"File {filename} not found in GCS for user {user_gc_id}")
 
         _, file_extension = os.path.splitext(filename)
         file_extension = file_extension.lower().strip('.')

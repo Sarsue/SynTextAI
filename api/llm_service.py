@@ -1,113 +1,87 @@
 import time
-from dotenv import load_dotenv
 import os
+import requests
+from dotenv import load_dotenv
 from gpt4all import GPT4All
-import requests 
+from requests.exceptions import HTTPError, Timeout, RequestException
 
-def prompt_slm(prompt):
-    model = GPT4All("Phi-3-mini-4k-instruct.Q4_0.gguf")
-    with model.chat_session():
-        return(model.generate(prompt))
-
-
-
-# Load environment variables from a .env file in the current directory
+# Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
 
-def get_mistral_response(url , api_key, model_name, user_message):
+# Timeout settings for HTTP requests
+REQUEST_TIMEOUT = (5, 15)  # (connect timeout, read timeout)
+RETRY_DELAY = 2  # Seconds between retries
+MAX_RETRIES = 3  # Retry limit for requests
+
+def prompt_slm(prompt):
+    """Generate a response using GPT4All model."""
+    model = GPT4All("Phi-3-mini-4k-instruct.Q4_0.gguf")
+    with model.chat_session():
+        return model.generate(prompt)
+
+def robust_request(url, headers, data):
+    """Send a robust POST request with retries and error handling."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()  # Raise exception on non-2xx responses
+            return response.json()  # Return JSON response if successful
+
+        except Timeout:
+            print(f"Request timed out. Retrying... ({attempt + 1}/{MAX_RETRIES})")
+            time.sleep(RETRY_DELAY)
+
+        except HTTPError as http_err:
+            print(f"HTTP error occurred: {http_err}")
+            break  # No point in retrying on HTTP errors
+
+        except RequestException as err:
+            print(f"Request failed: {err}. Retrying... ({attempt + 1}/{MAX_RETRIES})")
+            time.sleep(RETRY_DELAY)
+
+    return {"error": "Request failed after multiple retries."}
+
+def get_mistral_response(url, api_key, model_name, user_message):
+    """Send request to the Mistral API and handle various models."""
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': f'Bearer {api_key}'
+        'Authorization': f'Bearer {api_key}',
     }
-    if ('embeddings' in url):
+
+    if 'embeddings' in url:
+        data = {"input": user_message, "model": model_name, "encoding_format": "float"}
+    elif 'pixtral' in model_name:
         data = {
-        "input": user_message,
-        "model": model_name,
-        "encoding_format": "float"
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Extract the text from this image"},
+                        {"type": "image_url", "image_url": f"data:image/jpeg;base64,{user_message}"}
+                    ]
+                }
+            ],
+            "max_tokens": 3000
         }
     else:
-        if ('pixtral' in model_name):
-                    data = {
-                "model": model_name,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Extract the text from this image"
-                            },
-                            {
-                                "type": "image_url",
-                "image_url": f"data:image/jpeg;base64,{user_message}"
-                            }
-                        ]
-                    }
-                ],
-                "max_tokens": 2056
-            }
-        else:
+        data = {"model": model_name, "messages": [{"role": "user", "content": user_message}]}
 
-            data = {
-                "model": model_name,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
-                ]
-            }
+    return robust_request(url, headers, data)
 
-    try:
-        response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()  # Check if the request was successful
-         # Convert the response to JSON format
-        chat_response = response.json()     
-        # Accessing the message content from the first choice
-        if ('embeddings' in url):
-            return chat_response['data'][0]['embedding']
-        else:
-            return chat_response['choices'][0]['message']['content']
-     # Return the API response as a Python dictionary
-    except requests.exceptions.HTTPError as err:
-        return {"error": str(err)}
-
-def get_text_embedding(input):
-    # Example usage:
+def get_text_embedding(input_text):
+    """Get text embeddings from the Mistral API."""
     url = "https://api.mistral.ai/v1/embeddings"
-    api_key = mistral_key  # Replace with your actual API key
-    model_name ="mistral-embed"  # Model name can be passed dynamically
-    user_message = input 
-    embeddings_batch_response = get_mistral_response(url, api_key, model_name, user_message)
-    return embeddings_batch_response
+    return get_mistral_response(url, mistral_key, "mistral-embed", input_text)
 
 def prompt_llm(prompt):
-    try:
-        url = "https://api.mistral.ai/v1/chat/completions"
-        api_key = mistral_key
-        model_name = "mistral-medium-latest"
-        user_message = prompt 
-        chat_response = get_mistral_response(url, api_key, model_name, user_message)
-        return chat_response 
-    except Exception as e:
-        print(str(e))
-        return "n/a"
+    """Generate a chat completion using the Mistral API."""
+    url = "https://api.mistral.ai/v1/chat/completions"
+    return get_mistral_response(url, mistral_key, "mistral-medium-latest", prompt)
 
 def extract_image_text(base64_image):
-    try:
-        url = "https://api.mistral.ai/v1/chat/completions"
-        api_key = mistral_key
-        model_name = "pixtral-12b-2409"
-        user_message = base64_image 
-        chat_response = get_mistral_response(url, api_key, model_name, user_message)
-        return chat_response
-
-    except Exception as e:
-        print(str(e))
-        return "n/a"
-
-
-
-
+    """Extract text from a base64-encoded image using Pixtral."""
+    url = "https://api.mistral.ai/v1/chat/completions"
+    return get_mistral_response(url, mistral_key, "pixtral-12b-2409", base64_image)

@@ -1,6 +1,7 @@
 from llm_service import prompt_llm
 from requests.exceptions import Timeout
 import logging 
+import time 
 
 topics = ['growth and well being', 'love and relationships', 'spirituality and mindfulness', 'ethics and values']
 topics_list = "\n".join(f"- {topic}" for topic in topics)
