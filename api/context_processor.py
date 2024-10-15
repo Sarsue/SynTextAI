@@ -1,83 +1,116 @@
 from llm_service import prompt_llm
 from requests.exceptions import Timeout
-import logging 
-import time 
+import logging
+import time
 
-topics = ['growth and well being', 'love and relationships', 'spirituality and mindfulness', 'ethics and values']
+topics = [
+    'Physical Health and Nutrition',
+    'Mental Health and Stress Management',
+    'Emotional Well-Being and Relationships',
+    'Spirituality and Inner Harmony',
+    'Personal Growth and Self-Actualization',
+    'Work-Life Balance and Fulfillment',
+    'Community and Social Connections'
+]
+
 topics_list = "\n".join(f"- {topic}" for topic in topics)
 
-sources = {
-    "spiritual": ['Bible', 'Quran', 'Torah', 'Talmud', 'Bhavad Gita', 'Tripitaka', 'Tao Te Ching'],
-    "secular": ['The Republic', 'Nicomachean Ethics', 'Meditations', 'Beyond Good and Evil', 
-                'Man’s Search for Meaning', 'The Way of the Superior Man by David Deida', 
-                'Osho: The Book Of Wisdom', 'Secular Humanism: Works by Richard Dawkins or Christopher Hitchens', 'Esther Vilar – The Manipulated Man']
+# Updated sources linked to the new topics
+topic_sources = {
+    "Physical Health and Nutrition": {
+        "spiritual": [
+            'Bible', 'Quran', 'Ayurvedic texts', 'Tao Te Ching'
+        ],
+        "secular": [
+            'The Blue Zones: Lessons for Living Longer From the People Who’ve Lived the Longest', 
+            'How Not to Die by Michael Greger', 
+            'The Omnivore’s Dilemma by Michael Pollan'
+        ]
+    },
+    "Mental Health and Stress Management": {
+        "spiritual": [
+            'The Power of Now by Eckhart Tolle', 
+            'The Tao of Pooh by Benjamin Hoff'
+        ],
+        "secular": [
+            'Mindfulness for Beginners by Jon Kabat-Zinn', 
+            'Feeling Good: The New Mood Therapy by David D. Burns'
+        ]
+    },
+    "Emotional Well-Being and Relationships": {
+        "spiritual": [
+            'The Bible', 'The Quran', 'The Bhagavad Gita'
+        ],
+        "secular": [
+            'The 5 Love Languages by Gary Chapman', 
+            'Attached by Amir Levine and Rachel Heller', 
+            'Emotional Intelligence by Daniel Goleman'
+        ]
+    },
+    "Spirituality and Inner Harmony": {
+        "spiritual": [
+            'Tao Te Ching', 'Bhagavad Gita', 'The Upanishads'
+        ],
+        "secular": [
+            'The Four Agreements by Don Miguel Ruiz', 
+            'The Gifts of Imperfection by Brené Brown'
+        ]
+    },
+    "Personal Growth and Self-Actualization": {
+        "spiritual": [
+            'Man’s Search for Meaning by Viktor Frankl', 
+            'The Alchemist by Paulo Coelho'
+        ],
+        "secular": [
+            'Atomic Habits by James Clear', 
+            'Mindset: The New Psychology of Success by Carol S. Dweck'
+        ]
+    },
+    "Work-Life Balance and Fulfillment": {
+        "spiritual": [
+            'The Art of Happiness by the Dalai Lama', 
+            'The Tao of Pooh by Benjamin Hoff'
+        ],
+        "secular": [
+            'The 7 Habits of Highly Effective People by Stephen R. Covey', 
+            'Essentialism: The Disciplined Pursuit of Less by Greg McKeown'
+        ]
+    },
+    "Community and Social Connections": {
+        "spiritual": [
+            'The Bible', 'The Quran', 'The Art of Loving by Erich Fromm'
+        ],
+        "secular": [
+            'Bowling Alone by Robert D. Putnam', 
+            'The Power of Habit by Charles Duhigg'
+        ]
+    }
 }
+
 LLM_CONTEXT_WINDOW = 3000
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
+def get_sources(topic, belief_system):
+    """Retrieve relevant sources for a given topic and belief system."""
+    return topic_sources.get(topic, {}).get(belief_system, [])
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
-    """Split text into chunks that fit within the LLM's context window."""
+    """Split text into chunks fitting within the LLM's context window."""
     words = text.split()
-    chunks = []
-    while words:
-        chunk = words[:max_tokens]
-        chunks.append(" ".join(chunk))
-        words = words[max_tokens:]
-    return chunks
+    return [" ".join(words[i:i + max_tokens]) for i in range(0, len(words), max_tokens)]
 
-def process_context(query, user_history, belief_system='agnostic'):
-    # Determine the sources to use based on belief system
-    if belief_system == 'spiritual':
-        selected_sources = sources["spiritual"]
-    elif belief_system == 'secular':
-        selected_sources = sources["secular"]
-    else:  # 'agnostic' can use both
-        selected_sources = sources["spiritual"] + sources["secular"]
-
-    # Format the sources for inclusion in the prompt
-    sources_list = "\n".join(f"- {src}" for src in selected_sources)
-
-    prompt = f"""
-        Your task is to act as a thoughtful and empathetic assistant. Use the **user's query and history** to determine the topic the user needs guidance with. 
-        Depending on the **belief system** (spiritual, secular, or agnostic), select the **best 2-4 sources** from the list provided, and weave them naturally into your response in a **supportive, conversational tone**. 
-
-        Make sure your response:
-        1. Clearly reflects the relevant topic based on the query and user history.
-        2. Weaves quotes or ideas from 2-4 sources seamlessly into the response. Avoid listing sources mechanically.
-        3. Feels conversational, showing empathy and offering meaningful suggestions.
-        4. Ends with encouragement or actionable advice (if relevant). 
-
-        ---
-
-        ### Query:
-        "{query}"
-
-        ### User History:
-        {user_history or "No prior history provided."}
-
-        ### Available Topics:
-        {topics_list}
-
-        ### Available Sources (based on belief system):
-        {sources_list}
-
-        ### Belief System:
-        '{belief_system}'
-
-        ---
-
-        Remember: If the query doesn’t fit any topic or there are no relevant sources, say:  
-        "Sorry, I don’t have the right information to help with that at the moment. You might consider seeking additional support or guidance elsewhere."
-
-        Now, please generate the most appropriate response for the user.
-
-        """
-
-    # Get the LLM response
-    response = prompt_llm(prompt).strip()
-    return response
-
+def retry_with_delay(func, *args, **kwargs):
+    """Retry function with exponential backoff."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return func(*args, **kwargs)
+        except Timeout as e:
+            logging.warning(f"Timeout occurred: {e}. Retrying {attempt + 1}/{MAX_RETRIES}...")
+            time.sleep(RETRY_DELAY * (attempt + 1))
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            raise
+    raise Timeout(f"Failed after {MAX_RETRIES} retries.")
 
 def classify_content(content, topics_list):
     """Classify the content using the LLM."""
@@ -92,82 +125,59 @@ def classify_content(content, topics_list):
     Please classify the content under one of the topics above. 
     If the content doesn’t align with any topic, respond with "out of scope."
     """
-    return prompt_llm(classification_prompt).strip()
+    response = retry_with_delay(prompt_llm, classification_prompt)
+    topic = response['choices'][0]['message']['content'].strip().lower()
+    return topic.replace('-', '').replace(',', '').strip()
 
 def generate_interpretation(content_chunk, topic, sources_list, belief_system):
-    """Generate interpretation of a content chunk using the LLM."""
+    """Generate an interpretation of a content chunk using the LLM."""
+    # Extend the prompt to encourage broader interpretation and exploration of ideas
     prompt = f"""
     The content is classified under the topic: **{topic}**.
 
-    Provide an interpretation of this content based on the topic.
-    Use **2-4 relevant sources** from the list below (aligned with the belief system: {belief_system}).
-    Weave the sources naturally to provide insights.
+    Based on this content, provide a thoughtful and conversational interpretation.
+    While weaving in insights from **2-4 relevant sources** from the list below (aligned with the belief system: {belief_system}),
+    feel free to draw on additional knowledge or perspectives that might enrich the interpretation.
 
     ### Content Chunk:
     {content_chunk}
 
     ### Relevant Sources:
-    {sources_list}
+    {', '.join(sources_list)}
 
     ### Belief System:
     {belief_system}
 
-    Generate a conversational interpretation of this chunk, integrating insights from sources. 
-    Conclude with an actionable or supportive message.
+    Your response should be engaging and supportive, ending with actionable or uplifting advice for the reader.
     """
-    return prompt_llm(prompt).strip()
 
+    response = retry_with_delay(prompt_llm, prompt)
 
-def retry_with_delay(func, *args, **kwargs):
-    """Retry function with delay and exponential backoff."""
-    for attempt in range(MAX_RETRIES):
-        try:
-            return func(*args, **kwargs)
-        except Timeout as e:
-            logging.warning(f"Timeout occurred: {e}. Retrying {attempt + 1}/{MAX_RETRIES}...")
-            time.sleep(RETRY_DELAY * (attempt + 1))
-        except Exception as e:
-            logging.error(f"Error during execution: {e}")
-            raise
-    raise Timeout(f"Failed after {MAX_RETRIES} retries.")
+    # Extract the text response from the returned dictionary
+    interpretation_text = response['choices'][0]['message']['content'].strip()
+    return interpretation_text
 
 def process_file_context(content, belief_system='agnostic'):
-    selected_sources = (
-        sources["spiritual"] if belief_system == 'spiritual' 
-        else sources["secular"] if belief_system == 'secular'
-        else sources["spiritual"] + sources["secular"]
-    )
-    sources_list = "\n".join(f"- {src}" for src in selected_sources)
-
-    first_chunk = chunk_text(content)[0]  # Use the first chunk for classification
-    topic = classify_content(first_chunk, topics_list)
-
-    if topic.lower() == "out of scope":
-        return "The content is not relevant to the topics SynText covers."
-
-    # Generate interpretations for all chunks
+    """Process file content and generate relevant insights."""
     content_chunks = chunk_text(content)
-    interpretations = [
-            retry_with_delay(generate_interpretation, chunk, topic, sources_list, belief_system)
-            for chunk in content_chunks
-        ]
+    topic = classify_content(content_chunks[0], topics_list)
+    logging.info(f"Classified Topic: {topic}")
 
-    # Combine interpretations into a single response
-    response = "\n\n".join(interpretations)
-    return response
+    if topic == "out of scope":
+        return "The content is not relevant to the topics SynText covers."
     
+    sources_list = get_sources(topic, belief_system)
+    
+    # Ensure that interpretations is a list of strings
+    interpretations = [
+        generate_interpretation(chunk, topic, sources_list, belief_system)
+        for chunk in content_chunks
+    ]
 
-
+    # Join only strings into a single output
+    return "\n\n".join(interpretations)
 
 if __name__ == '__main__':
-    # queries = [
-    #     "what are the highlights o this book you recommended "
-    # ]
-    # user_history = ["I saw some messages on my wife phone that have me questioning her fidelity? I am worried about my family and I am upset and almost breaking down","The Relationship Cure by John Gottman and Joan DeClaire - This book offers research-based advice on how to build strong, healthy relationships, including how to repair trust after infidelity"]
-
-    # for query in queries:
-    #     response = process_context(query, user_history)
-    #     print(response)
     # Example usage
     file_data = """
     The document discusses the challenges of maintaining trust in long-term relationships 

@@ -51,17 +51,11 @@ def process_file(file_data, file_extension):
     return result
 
 if __name__ == "__main__":
-    pdf_path = "//Users//osas//Downloads//Pitch Deck.pdf"
-    # # Open and read image data
-    # with open(pdf_path, "rb") as pdf_file:
-    #     pdf_data = pdf_file.read()
+    pdf_path = "//Users//osas//Downloads//Esther-Vilar-The-Manipulated-Man.pdf"
+    # Open and read image data
+    with open(pdf_path, "rb") as pdf_file:
+        pdf_data = pdf_file.read()
 
-    # # Call the process_file function with 'jpeg' as the file extension
-    # result = process_file(pdf_data, 'pdf') 
-    # print(result)
-    # from context_processor import process_file_context
-    # if(len(result.strip()) > 0):
-    #     response = process_file_context(result)
-    #     print(response)
-    # else:
-    #     print("no data")
+    # Call the process_file function with 'jpeg' as the file extension
+    result = process_file(pdf_data, 'pdf') 
+   
