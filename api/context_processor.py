@@ -1,4 +1,6 @@
 from llm_service import prompt_llm
+from requests.exceptions import Timeout
+import logging 
 
 topics = ['growth and well being', 'love and relationships', 'spirituality and mindfulness', 'ethics and values']
 topics_list = "\n".join(f"- {topic}" for topic in topics)
@@ -10,6 +12,9 @@ sources = {
                 'Osho: The Book Of Wisdom', 'Secular Humanism: Works by Richard Dawkins or Christopher Hitchens', 'Esther Vilar – The Manipulated Man']
 }
 LLM_CONTEXT_WINDOW = 3000
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
     """Split text into chunks that fit within the LLM's context window."""
     words = text.split()
@@ -112,6 +117,19 @@ def generate_interpretation(content_chunk, topic, sources_list, belief_system):
     return prompt_llm(prompt).strip()
 
 
+def retry_with_delay(func, *args, **kwargs):
+    """Retry function with delay and exponential backoff."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return func(*args, **kwargs)
+        except Timeout as e:
+            logging.warning(f"Timeout occurred: {e}. Retrying {attempt + 1}/{MAX_RETRIES}...")
+            time.sleep(RETRY_DELAY * (attempt + 1))
+        except Exception as e:
+            logging.error(f"Error during execution: {e}")
+            raise
+    raise Timeout(f"Failed after {MAX_RETRIES} retries.")
+
 def process_file_context(content, belief_system='agnostic'):
     selected_sources = (
         sources["spiritual"] if belief_system == 'spiritual' 
@@ -129,9 +147,9 @@ def process_file_context(content, belief_system='agnostic'):
     # Generate interpretations for all chunks
     content_chunks = chunk_text(content)
     interpretations = [
-        generate_interpretation(chunk, topic, sources_list, belief_system)
-        for chunk in content_chunks
-    ]
+            retry_with_delay(generate_interpretation, chunk, topic, sources_list, belief_system)
+            for chunk in content_chunks
+        ]
 
     # Combine interpretations into a single response
     response = "\n\n".join(interpretations)
