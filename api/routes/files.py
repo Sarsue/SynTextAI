@@ -47,11 +47,11 @@ def delete_from_gcs(user_id, file_name):
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
 
-def upload_to_gcs(file_data, user_id, filename):
+def upload_to_gcs(file_data, user_gc_id, filename):
     try:
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
-        user_folder = f"{user_id}/"
+        user_folder = f"{user_gc_id}/"
         blob = bucket.blob(user_folder + filename)
         
         blob.upload_from_file(file_data, content_type=file_data.mimetype)
@@ -63,11 +63,11 @@ def upload_to_gcs(file_data, user_id, filename):
         logging.error(f"Error uploading to GCS: {e}")
         return None
 
-def download_from_gcs(user_id, filename):
+def download_from_gcs(user_gc_id, filename):
     try:
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
-        user_folder = f"{user_id}/"
+        user_folder = f"{user_gc_id}/"
         blob = bucket.blob(user_folder + filename)
         file_data = blob.download_as_bytes()
         logging.info(f"Downloaded {filename} from GCS.")
@@ -77,11 +77,11 @@ def download_from_gcs(user_id, filename):
         return None
 
 @celery_app.task
-def process_and_store_file(user_id, user_token, filename, file_url):
+def process_and_store_file(user_id, user_gc_id, filename):
     try:
         logging.info(f"Started processing file: {filename}")
         # Download file from GCS
-        file_data = download_from_gcs(user_token, filename)
+        file_data = download_from_gcs(user_gc_id, filename)
         if file_data is None:
             raise FileNotFoundError(f"File {filename} not found in GCS for user {user_id}")
 
@@ -146,7 +146,7 @@ def save_file():
             try:
                 file_info = store.add_file(user_id, file.filename, file_url)
                 logging.info(f"Stored file metadata: {file.filename}")
-                process_and_store_file(user_id,  user_info['user_id'], file.filename, file_url)
+                process_and_store_file(user_id, user_info['user_id'], file.filename)
                 logging.info(f"Enqueued processing for file: {file.filename}")
             except RedisError as e:
                 logging.error(f"Error enqueueing job: {e}")
