@@ -87,13 +87,14 @@ topic_sources = {
     }
 }
 
-LLM_CONTEXT_WINDOW = 3000
+LLM_CONTEXT_WINDOW = 1024
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 
 def get_sources(topic, belief_system):
     """Retrieve relevant sources for a given topic and belief system."""
     return topic_sources.get(topic, {}).get(belief_system, [])
+
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
     """Split text into chunks fitting within the LLM's context window."""
     words = text.split()
@@ -179,9 +180,14 @@ def context(content, belief_system='agnostic'):
 
 if __name__ == '__main__':
     # Example usage
-    file_data = """
-    The document discusses the challenges of maintaining trust in long-term relationships 
-    and offers strategies to rebuild intimacy after emotional distance.
-    """
-    response = context(file_data, belief_system='agnostic')
+    from doc_processor import process_file
+    pdf_path = "//Users//osas//Downloads//Esther-Vilar-The-Manipulated-Man.pdf"
+    # Open and read image data
+    with open(pdf_path, "rb") as pdf_file:
+        pdf_data = pdf_file.read()
+
+    # Call the process_file function with 'jpeg' as the file extension
+    result = process_file(pdf_data, 'pdf') 
+   
+    response = context(result, belief_system='agnostic')
     print(response)
