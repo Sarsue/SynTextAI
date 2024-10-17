@@ -48,7 +48,7 @@ pytesseract
 psycopg2-binary==2.9.9
 gunicorn
 gpt4all
-mistralai==1.1.0
+mistralai
 h11==0.14.0
 h2==4.1.0
 hpack==4.0.0

@@ -168,26 +168,7 @@ def context(content, belief_system='agnostic'):
         return "The content is not relevant to the topics SynText covers."
     
     sources_list = get_sources(topic, belief_system)
+    return content_chunks,topic,sources_list,belief_system
     
-    # Ensure that interpretations is a list of strings
-    interpretations = [
-        generate_interpretation(chunk, topic, sources_list, belief_system)
-        for chunk in content_chunks
-    ]
 
-    # Join only strings into a single output
-    return "\n\n".join(interpretations)
 
-if __name__ == '__main__':
-    # Example usage
-    from doc_processor import process_file
-    pdf_path = "//Users//osas//Downloads//Esther-Vilar-The-Manipulated-Man.pdf"
-    # Open and read image data
-    with open(pdf_path, "rb") as pdf_file:
-        pdf_data = pdf_file.read()
-
-    # Call the process_file function with 'jpeg' as the file extension
-    result = process_file(pdf_data, 'pdf') 
-   
-    response = context(result, belief_system='agnostic')
-    print(response)

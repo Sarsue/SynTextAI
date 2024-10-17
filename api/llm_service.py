@@ -9,10 +9,11 @@ mistral_key = os.getenv("MISTRAL_API_KEY")
 # Initialize MistralAI client
 mistral_client = MistralClient(api_key=mistral_key)
 
-# def get_text_embedding(input_text):
-#     """Get text embeddings from the Mistral API."""
-#     response = mistral_client.get_embeddings(input_text=input_text)
-#     return response
+def get_text_embedding(input_text):
+    """Get text embeddings from the Mistral API."""
+    model = "mistral-embed"
+    response = mistral_client.embeddings(model = model,input_text=input_text)
+    return response.data[0].embedding
 
 def prompt_llm(prompt):
     """Generate a chat completion using the Mistral API."""

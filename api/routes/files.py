@@ -8,7 +8,7 @@ from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
 from postgresql_store import DocSynthStore
 import redis 
-from context_processor import context
+from context_processor import context,generate_interpretation
 
 
 # Configure logging
@@ -77,6 +77,14 @@ def download_from_gcs(user_gc_id, filename):
         return None
 
 @celery_app.task
+def process_chunk(chunk, topic, sources_list, belief_system):
+    return generate_interpretation(chunk, topic, sources_list, belief_system)
+
+@celery_app.task
+def combine_results(results):
+    return "\n\n".join(results)
+
+@celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     try:
         logging.info(f"Started processing file: {filename}")
@@ -90,7 +98,14 @@ def process_and_store_file(user_id, user_gc_id, filename):
         # Process the file
         doc_info = process_file(file_data, file_extension)
         if(len(doc_info.strip()) > 0):
-            response = context(doc_info)
+            chunks,topic,sources_list,belief_system = context(doc_info)
+
+            async_results = [
+                process_chunk.apply_async((chunk, topic, sources_list, belief_system))
+                for chunk in chunks
+            ]
+
+            response =  combine_results.apply_async((async_results,))
             message = f"""
             The document **{filename}** has been successfully processed.
 
