@@ -29,8 +29,7 @@ def prompt_llm(prompt):
         messages=messages
     )
 
-    print(response.json())  # Ensure it's JSON serializable
-    return response.json()
+    return response
 
 def extract_image_text(base64_image):
     """Extract text from a base64-encoded image using Pixtral."""

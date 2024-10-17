@@ -127,7 +127,7 @@ def classify_content(content, topics_list):
     If the content doesn’t align with any topic, respond with "out of scope."
     """
     response = retry_with_delay(prompt_llm, classification_prompt)
-    topic = response['choices'][0]['message']['content'].strip().lower()
+    topic = response.choices[0].message.content.strip().lower()
     return topic.replace('-', '').replace(',', '').strip()
 
 def generate_interpretation(content_chunk, topic, sources_list, belief_system):
@@ -155,7 +155,7 @@ def generate_interpretation(content_chunk, topic, sources_list, belief_system):
     response = retry_with_delay(prompt_llm, prompt)
 
     # Extract the text response from the returned dictionary
-    interpretation_text = response['choices'][0]['message']['content'].strip()
+    interpretation_text = response.choices[0].message.content.strip().lower()
     return interpretation_text
 
 def context(content, belief_system='agnostic'):
