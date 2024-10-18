@@ -6,6 +6,7 @@ from doc_processor import process_file
 from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
+from celery.result import AsyncResult
 from postgresql_store import DocSynthStore
 import redis 
 from context_processor import context,generate_interpretation
@@ -101,14 +102,16 @@ def process_and_store_file(user_id, user_gc_id, filename):
             chunks, topic, sources_list, belief_system = context(doc_info)
 
             chunk_results = []
-            chunk_results = []
             for i, chunk in enumerate(chunks):
                 # Spread out tasks by 2 seconds between each task
                 async_result = process_chunk.apply_async(
                     (chunk, topic, sources_list, belief_system),
                     countdown=1  # Adds a delay of 1s between each task submission
                 )
-                chunk_results.append(async_result)
+                chunk_results.append(async_result.id)  # Store only the task IDs
+
+            # Retrieve the results from the chunk tasks before combining
+            processed_chunks = [AsyncResult(task_id).get() for task_id in chunk_results]
 
                 # Delay before processing the next chunk (adjust delay as needed)
                
