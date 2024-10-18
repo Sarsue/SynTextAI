@@ -29,8 +29,8 @@ const App: React.FC = () => {
             method: 'GET',
             headers: {
                 Authorization: `Bearer ${idToken}`,
-                mode: 'cors',
             },
+
         });
         const data = await response.json();
         setSubscriptionStatus(data.subscription_status ?? null);
