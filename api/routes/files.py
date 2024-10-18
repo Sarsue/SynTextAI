@@ -97,29 +97,35 @@ def process_and_store_file(user_id, user_gc_id, filename):
         file_extension = file_extension.lower().strip('.')
         # Process the file
         doc_info = process_file(file_data, file_extension)
-        if(len(doc_info.strip()) > 0):
-            chunks,topic,sources_list,belief_system = context(doc_info)
+        if len(doc_info.strip()) > 0:
+            chunks, topic, sources_list, belief_system = context(doc_info)
 
+            # Process each chunk asynchronously
             async_results = [
                 process_chunk.apply_async((chunk, topic, sources_list, belief_system))
                 for chunk in chunks
             ]
+            
+            # Collect results from async tasks
+            chunk_results = []
+            for res in async_results:
+                chunk_results.append(res.get())  # Get the actual result from the AsyncResult
 
-            response =  combine_results.apply_async((async_results,))
+            # Combine results
+            response = combine_results.apply_async((chunk_results,)).get()  # Get the final response
+
+            # Format the message
             message = f"""
             The document **{filename}** has been successfully processed.
 
             **Interpretation:**
             {response}
             """ 
-            celery_store.add_message(
-                content=message, sender='bot', user_id=user_id)
-
-
-     
+            celery_store.add_message(content=message, sender='bot', user_id=user_id)
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
+
 
 @files_bp.route('', methods=['GET'])
 def retrieve_files():
