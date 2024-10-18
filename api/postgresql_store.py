@@ -24,17 +24,21 @@ class DocSynthStore:
         self.create_tables()
 
     # Connection management methods
-    def get_connection(self):
-        try:
-            return self.pool.getconn()
-        except OperationalError as e:
-            logger.error(f"Error getting connection from pool: {e}")
-            raise
+    def get_connection(self, retries=3, delay=2):
+        for attempt in range(retries):
+            try:
+                return self.pool.getconn()
+            except psycopg2.OperationalError as e:
+                logger.error(f"Error getting connection (Attempt {attempt + 1}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(delay)  # Wait before retrying
+                else:
+                    raise e  # Re-raise the exception after all retries
+
 
     def release_connection(self, connection):
         self.pool.putconn(connection)
 
-    # Table creation methods
     def create_tables(self):
         connection = self.get_connection()
         try:
@@ -49,20 +53,19 @@ class DocSynthStore:
                     ''')
 
                     cursor.execute('''
-                       CREATE TABLE IF NOT EXISTS subscriptions (
-                        id SERIAL PRIMARY KEY,
-                        stripe_customer_id TEXT NOT NULL,
-                        stripe_subscription_id TEXT NOT NULL UNIQUE,
-                        status TEXT NOT NULL,
-                        user_id INTEGER,
-                        current_period_end TIMESTAMP,   
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users (id),
-                        UNIQUE (stripe_customer_id, stripe_subscription_id)
-                    )
-                ''')
-
+                        CREATE TABLE IF NOT EXISTS subscriptions (
+                            id SERIAL PRIMARY KEY,
+                            stripe_customer_id TEXT NOT NULL,
+                            stripe_subscription_id TEXT NOT NULL UNIQUE,
+                            status TEXT NOT NULL,
+                            user_id INTEGER,
+                            current_period_end TIMESTAMP,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES users (id),
+                            UNIQUE (stripe_customer_id, stripe_subscription_id)
+                        )
+                    ''')
 
                     cursor.execute('''
                         CREATE TABLE IF NOT EXISTS chat_histories (
@@ -95,32 +98,14 @@ class DocSynthStore:
                             FOREIGN KEY (user_id) REFERENCES users (id)
                         )
                     ''')
-
-                    # # Table to store page metadata
-                    # cursor.execute('''
-                    #     CREATE TABLE IF NOT EXISTS pages (
-                    #         id SERIAL PRIMARY KEY,
-                    #         file_id INTEGER,
-                    #         page_number INTEGER,
-                    #         data TEXT,
-                    #         FOREIGN KEY (file_id) REFERENCES files (id)
-                    #     )
-                    # ''')
-
-                    # # Table to store chunks and their vectors
-                    # cursor.execute('''
-                    #     CREATE TABLE IF NOT EXISTS chunks (
-                    #         id SERIAL PRIMARY KEY,
-                    #         page_id INTEGER,
-                    #         chunk TEXT,
-                    #         embedding_vector BYTEA,
-                    #         FOREIGN KEY (page_id) REFERENCES pages (id)
-                    #     )
-                    # ''')
+        except psycopg2.OperationalError as e:
+            logger.error(f"Database operation error: {e}")
+            raise  # Optional: re-raise to handle at a higher level
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
         finally:
-            self.release_connection(connection)
+            self.release_connection(connection)  # Ensure connection is released
+
 
      # User management methods
     def add_user(self, email, username):
