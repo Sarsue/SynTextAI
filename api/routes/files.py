@@ -84,11 +84,11 @@ def process_chunk(chunk, topic, sources_list, belief_system):
 @celery_app.task
 def combine_results(results):
     return "\n\n".join(results)
-
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     try:
         logging.info(f"Started processing file: {filename}")
+        
         # Download file from GCS
         file_data = download_from_gcs(user_gc_id, filename)
         if file_data is None:
@@ -96,6 +96,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
         _, file_extension = os.path.splitext(filename)
         file_extension = file_extension.lower().strip('.')
+
         # Process the file
         doc_info = process_file(file_data, file_extension)
         if len(doc_info.strip()) > 0:
@@ -103,32 +104,45 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
             chunk_results = []
             for i, chunk in enumerate(chunks):
-                # Spread out tasks by 2 seconds between each task
                 async_result = process_chunk.apply_async(
                     (chunk, topic, sources_list, belief_system),
-                    countdown=1  # Adds a delay of 1s between each task submission
+                    countdown=1  # Delay task submissions incrementally
                 )
-                chunk_results.append(async_result.id)  # Store only the task IDs
+                chunk_results.append(async_result.id)
 
-            # Retrieve the results from the chunk tasks before combining
-            processed_chunks = [AsyncResult(task_id).get() for task_id in chunk_results]
+            # Retrieve the results (polling instead of blocking)
+            processed_chunks = []
+            for task_id in chunk_results:
+                result = AsyncResult(task_id)
+                if result.ready():
+                    processed_chunks.append(result.get(timeout=30))  # Set a timeout
+                else:
+                    logging.warning(f"Chunk task {task_id} not ready yet.")
 
-                # Delay before processing the next chunk (adjust delay as needed)
-               
-            # Combine results
-            response = combine_results.apply_async((chunk_results,)).get()  # Get the final response
+            if not processed_chunks:
+                raise ValueError("No chunks processed successfully.")
 
-            # Format the message
+            # Combine the chunk results (use polling to avoid blocking)
+            final_result = AsyncResult(
+                combine_results.apply_async((processed_chunks,)).id
+            )
+            response = final_result.get(timeout=30)  # Adjust timeout as needed
+
+            # Format the success message
             message = f"""
             The document **{filename}** has been successfully processed.
 
             **Interpretation:**
             {response}
-            """ 
+            """
             celery_store.add_message(content=message, sender='bot', user_id=user_id)
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
+        celery_store.add_message(
+            content=f"Failed to process {filename}: {str(e)}", sender='bot', user_id=user_id
+        )
+
 
 
 @files_bp.route('', methods=['GET'])
