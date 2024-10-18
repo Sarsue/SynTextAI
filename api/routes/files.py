@@ -9,7 +9,7 @@ from celery_worker import celery_app  # Adjust this import
 from postgresql_store import DocSynthStore
 import redis 
 from context_processor import context,generate_interpretation
-
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -100,17 +100,17 @@ def process_and_store_file(user_id, user_gc_id, filename):
         if len(doc_info.strip()) > 0:
             chunks, topic, sources_list, belief_system = context(doc_info)
 
-            # Process each chunk asynchronously
-            async_results = [
-                process_chunk.apply_async((chunk, topic, sources_list, belief_system))
-                for chunk in chunks
-            ]
-            
-            # Collect results from async tasks
             chunk_results = []
-            for res in async_results:
-                chunk_results.append(res.get())  # Get the actual result from the AsyncResult
+            for chunk in chunks:
+                # Send the chunk for processing
+                async_result = process_chunk.apply_async((chunk, topic, sources_list, belief_system))
+                
+                # Optionally wait for the result or continue processing
+                result = async_result.get()  # Get the actual result from the AsyncResult
+                chunk_results.append(result)
 
+                # Delay before processing the next chunk (adjust delay as needed)
+                time.sleep(1)  
             # Combine results
             response = combine_results.apply_async((chunk_results,)).get()  # Get the final response
 
