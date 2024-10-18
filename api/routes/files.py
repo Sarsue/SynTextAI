@@ -101,16 +101,17 @@ def process_and_store_file(user_id, user_gc_id, filename):
             chunks, topic, sources_list, belief_system = context(doc_info)
 
             chunk_results = []
-            for chunk in chunks:
-                # Send the chunk for processing
-                async_result = process_chunk.apply_async((chunk, topic, sources_list, belief_system))
-                
-                # Optionally wait for the result or continue processing
-                result = async_result.get()  # Get the actual result from the AsyncResult
-                chunk_results.append(result)
+            chunk_results = []
+            for i, chunk in enumerate(chunks):
+                # Spread out tasks by 2 seconds between each task
+                async_result = process_chunk.apply_async(
+                    (chunk, topic, sources_list, belief_system),
+                    countdown=1  # Adds a delay of 1s between each task submission
+                )
+                chunk_results.append(async_result)
 
                 # Delay before processing the next chunk (adjust delay as needed)
-                time.sleep(1)  
+               
             # Combine results
             response = combine_results.apply_async((chunk_results,)).get()  # Get the final response
 
