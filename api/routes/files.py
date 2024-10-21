@@ -68,6 +68,11 @@ def process_chunk(chunk, topic, sources_list, belief_system):
     return generate_interpretation(chunk, topic, sources_list, belief_system)
 
 @celery_app.task
+def handle_chunk_error(request, exc, traceback):
+    logging.error(f"Chunk failed with error: {exc}")
+    return f"Chunk failed: {str(exc)}"  # Optional: Mark it with a placeholder result.
+
+@celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     try:
         file_data = download_from_gcs(user_gc_id, filename)
@@ -84,11 +89,13 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
         for i in range(0, len(chunks), chunk_size):
             current_chunks = chunks[i:i + chunk_size]
-            # Create a chord with tasks and specify the callback
-            task_chord = chord(
-                [process_chunk.s(chunk, topic, sources_list, belief_system) for chunk in current_chunks],
-                combine_results.s(user_id, filename)  # Callback to aggregate results
-            )
+    
+            # Create tasks with error handling
+            chunk_tasks = [process_chunk.s(chunk, topic, sources_list, belief_system).on_error(handle_chunk_error.s()) 
+                        for chunk in current_chunks]
+
+            # Create a chord with error-tolerant tasks
+            task_chord = chord(chunk_tasks, combine_results.s(user_id, filename))
             chords.append(task_chord)
 
         # Execute all chords asynchronously
