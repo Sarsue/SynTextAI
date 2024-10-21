@@ -68,10 +68,6 @@ def process_chunk(chunk, topic, sources_list, belief_system):
     return generate_interpretation(chunk, topic, sources_list, belief_system)
 
 @celery_app.task
-def combine_results(results):
-    return "\n\n".join(results)
-
-@celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     try:
         file_data = download_from_gcs(user_gc_id, filename)
@@ -82,15 +78,47 @@ def process_and_store_file(user_id, user_gc_id, filename):
         doc_info = process_file(file_data, file_extension.lstrip('.'))
         chunks, topic, sources_list, belief_system = context(doc_info)
 
-        chunk_tasks = group(
-            process_chunk.s(chunk, topic, sources_list, belief_system) for chunk in chunks
-        )
-        result = chord(chunk_tasks)(combine_results.s())
-        
-        message = f"The document {filename} has been successfully processed.\n\n{result.get()}"
-        celery_store.add_message(content=message, sender='bot', user_id=user_id)
+        # Step 3: Process the chunks asynchronously using chords
+        chunk_size = 5  # Number of tasks per chord
+        chords = []
+
+        for i in range(0, len(chunks), chunk_size):
+            current_chunks = chunks[i:i + chunk_size]
+            # Create a chord with tasks and specify the callback
+            task_chord = chord(
+                [process_chunk.s(chunk, topic, sources_list, belief_system) for chunk in current_chunks],
+                combine_results.s(user_id, filename)  # Callback to aggregate results
+            )
+            chords.append(task_chord)
+
+        # Execute all chords asynchronously
+        for task_chord in chords:
+            task_chord.apply_async()
+
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
+        error_message = f"Failed to process the document {filename}. Error: {str(e)}"
+        celery_store.add_message(content=error_message, sender='bot', user_id=user_id)
+
+
+@celery_app.task
+def combine_results(results, user_id, filename):
+    """Callback to combine results from the tasks."""
+    try:
+        # Combine results from all the chunks
+        combined_data = "\n".join(results)
+
+        # Optional: Store or process the combined result
+        message = (
+            f"The document '{filename}' has been successfully processed.\n"
+            f"Combined Results:\n{combined_data}"
+        )
+
+        # Send a success message to the user
+        celery_store.add_message(content=message, sender='bot', user_id=user_id)
+
+    except Exception as e:
+        logging.error(f"Error combining results for {filename}: {e}")
 
 # Flask route to upload files
 @files_bp.route('', methods=['POST'])
