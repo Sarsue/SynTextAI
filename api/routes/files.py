@@ -97,8 +97,8 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
-        error_message = f"Failed to process the document {filename}. Error: {str(e)}"
-        celery_store.add_message(content=error_message, sender='bot', user_id=user_id)
+        # error_message = f"Failed to process the document {filename}. Error: {str(e)}"
+        # celery_store.add_message(content=error_message, sender='bot', user_id=user_id)
 
 
 @celery_app.task
