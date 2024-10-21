@@ -62,71 +62,46 @@ def download_from_gcs(user_gc_id, filename):
         logging.error(f"Error downloading from GCS: {e}")
         return None
 
-# Celery tasks
+# Celery Tasks
 @celery_app.task
 def process_chunk(chunk, topic, sources_list, belief_system):
+    """Processes a single chunk."""
     return generate_interpretation(chunk, topic, sources_list, belief_system)
 
 @celery_app.task
-def handle_chunk_error(request, exc, traceback):
-    logging.error(f"Chunk failed with error: {exc}")
-    return f"Chunk failed: {str(exc)}"  # Optional: Mark it with a placeholder result.
+def combine_results(results, user_id, filename):
+    """Combines only successful chunk results."""
+    successful_results = [res for res in results if res]
+    if not successful_results:
+        logging.error(f"No valid chunks for {filename}.")
+        return
+
+    combined_data = "\n".join(successful_results)
+    message = f"Processed '{filename}' successfully.\n{combined_data}"
+    celery_store.add_message(content=message, sender='bot', user_id=user_id)
 
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
+    """Downloads and processes the file in chunks."""
     try:
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
-            raise FileNotFoundError(f"File {filename} not found in GCS.")
+            raise FileNotFoundError(f"{filename} not found.")
 
-        _, file_extension = os.path.splitext(filename)
-        doc_info = process_file(file_data, file_extension.lstrip('.'))
+        _, ext = os.path.splitext(filename)
+        doc_info = process_file(file_data, ext.lstrip('.'))
         chunks, topic, sources_list, belief_system = context(doc_info)
 
-        # Step 3: Process the chunks asynchronously using chords
-        chunk_size = 5  # Number of tasks per chord
-        chords = []
-
-        for i in range(0, len(chunks), chunk_size):
-            current_chunks = chunks[i:i + chunk_size]
-    
-            # Create tasks with error handling
-            chunk_tasks = [process_chunk.s(chunk, topic, sources_list, belief_system).on_error(handle_chunk_error.s()) 
-                        for chunk in current_chunks]
-
-            # Create a chord with error-tolerant tasks
-            task_chord = chord(chunk_tasks, combine_results.s(user_id, filename))
-            chords.append(task_chord)
-
-        # Execute all chords asynchronously
-        for task_chord in chords:
-            task_chord.apply_async()
+        # Process chunks in parallel using a chord
+        tasks = [
+            process_chunk.s(chunk, topic, sources_list, belief_system) 
+            for chunk in chunks
+        ]
+        chord(tasks)(combine_results.s(user_id, filename))
 
     except Exception as e:
-        logging.error(f"Error processing file {filename}: {e}")
-        # error_message = f"Failed to process the document {filename}. Error: {str(e)}"
-        # celery_store.add_message(content=error_message, sender='bot', user_id=user_id)
-
-
-@celery_app.task
-def combine_results(results, user_id, filename):
-    """Callback to combine results from the tasks."""
-    try:
-        # Combine results from all the chunks
-        combined_data = "\n".join(results)
-
-        # Optional: Store or process the combined result
-        message = (
-            f"The document '{filename}' has been successfully processed.\n"
-            f"Combined Results:\n{combined_data}"
-        )
-
-        # Send a success message to the user
-        celery_store.add_message(content=message, sender='bot', user_id=user_id)
-
-    except Exception as e:
-        logging.error(f"Error combining results for {filename}: {e}")
-
+        logging.error(f"Error processing {filename}: {e}")
+        
 # Flask route to upload files
 @files_bp.route('', methods=['POST'])
 def save_file():
