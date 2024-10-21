@@ -6,6 +6,7 @@ from doc_processor import process_file
 from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
+from celery import group, chord
 from celery.result import AsyncResult
 from postgresql_store import DocSynthStore
 import redis 
@@ -16,7 +17,9 @@ import time
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
 bucket_name = 'docsynth-fbb02.appspot.com'
+
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
+
 db_name = os.getenv("DATABASE_NAME")
 db_user = os.getenv("DATABASE_USER")
 db_pwd = os.getenv("DATABASE_PASSWORD")
@@ -77,73 +80,72 @@ def download_from_gcs(user_gc_id, filename):
         logging.error(f"Error downloading from GCS: {e}")
         return None
 
-@celery_app.task
-def process_chunk(chunk, topic, sources_list, belief_system):
-    return generate_interpretation(chunk, topic, sources_list, belief_system)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)  # Retry every 60s
+def process_chunk(self, chunk, topic, sources, belief_system):
+    try:
+        return generate_interpretation(chunk, topic, sources, belief_system)
+    except Exception as exc:
+        raise self.retry(exc=exc)
 
+# Task to combine results after all chunks are done
 @celery_app.task
 def combine_results(results):
+    logging.info("Combining chunk results...")
     return "\n\n".join(results)
-@celery_app.task
-def process_and_store_file(user_id, user_gc_id, filename):
+
+# Task to process and store the final result (non-blocking)
+def process_and_store_file(user_id, filename, chunks, topic, sources, belief_system):
     try:
-        logging.info(f"Started processing file: {filename}")
-        
-        # Download file from GCS
-        file_data = download_from_gcs(user_gc_id, filename)
-        if file_data is None:
-            raise FileNotFoundError(f"File {filename} not found in GCS for user {user_gc_id}")
+        # Create a group of chunk-processing tasks
+        chunk_tasks = group(
+            process_chunk.s(chunk, topic, sources, belief_system) for chunk in chunks
+        )
 
-        _, file_extension = os.path.splitext(filename)
-        file_extension = file_extension.lower().strip('.')
+        # Use chord to combine results after processing all chunks
+        result = chord(chunk_tasks)(combine_results.s())
 
-        # Process the file
-        doc_info = process_file(file_data, file_extension)
-        if len(doc_info.strip()) > 0:
-            chunks, topic, sources_list, belief_system = context(doc_info)
-
-            chunk_results = []
-            for i, chunk in enumerate(chunks):
-                async_result = process_chunk.apply_async(
-                    (chunk, topic, sources_list, belief_system),
-                    countdown=1  # Delay task submissions incrementally
-                )
-                chunk_results.append(async_result.id)
-
-            # Retrieve the results (polling instead of blocking)
-            processed_chunks = []
-            for task_id in chunk_results:
-                result = AsyncResult(task_id)
-                if result.ready():
-                    processed_chunks.append(result.get(timeout=30))  # Set a timeout
-                else:
-                    logging.warning(f"Chunk task {task_id} not ready yet.")
-
-            if not processed_chunks:
-                raise ValueError("No chunks processed successfully.")
-
-            # Combine the chunk results (use polling to avoid blocking)
-            final_result = AsyncResult(
-                combine_results.apply_async((processed_chunks,)).id
-            )
-            response = final_result.get(timeout=30)  # Adjust timeout as needed
-
-            # Format the success message
-            message = f"""
-            The document **{filename}** has been successfully processed.
-
-            **Interpretation:**
-            {response}
-            """
-            celery_store.add_message(content=message, sender='bot', user_id=user_id)
+        # Use polling instead of blocking get() to avoid timeout issues
+        wait_for_result(result, user_id, filename)
 
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
-        celery_store.add_message(
-            content=f"Failed to process {filename}: {str(e)}", sender='bot', user_id=user_id
-        )
 
+# Polling function to check for result readiness without blocking
+def wait_for_result(result, user_id, filename, timeout=1800, interval=10):
+    """Poll for task results to avoid blocking timeouts."""
+    elapsed = 0
 
+    while not result.ready() and elapsed < timeout:
+        logging.info(f"Waiting for chunk results... {elapsed}s elapsed")
+        time.sleep(interval)  # Wait for 10 seconds before polling again
+        elapsed += interval
+
+    if result.ready():
+        try:
+            final_result = result.get(timeout=30)  # Short timeout to fetch the result
+            logging.info(f"Successfully processed {filename} for user {user_id}")
+            save_message_to_store(user_id, filename, final_result)
+        except Exception as e:
+            logging.error(f"Error retrieving final result: {e}")
+            handle_failure(user_id, filename, str(e))
+    else:
+        logging.error(f"Timeout exceeded for processing {filename}")
+        handle_failure(user_id, filename, "Task timed out.")
+
+# Save final message to store
+def save_message_to_store(user_id, filename, message):
+    content = f"""
+    The document **{filename}** has been successfully processed.
+
+    **Interpretation:**
+    {message}
+    """
+    celery_store.add_message(content=content, sender='bot', user_id=user_id)
+
+# Handle failures gracefully
+def handle_failure(user_id, filename, error_message):
+    content = f"Failed to process {filename}: {error_message}"
+    celery_store.add_message(content=content, sender='bot', user_id=user_id)
 
 @files_bp.route('', methods=['GET'])
 def retrieve_files():
