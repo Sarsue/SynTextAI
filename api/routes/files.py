@@ -7,45 +7,33 @@ from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app  # Adjust this import
 from celery import group, chord
-from celery.result import AsyncResult
 from postgresql_store import DocSynthStore
-import redis 
-from context_processor import context,generate_interpretation
-import time
+import redis
+from context_processor import context, generate_interpretation
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
 
 bucket_name = 'docsynth-fbb02.appspot.com'
-
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
 
-db_name = os.getenv("DATABASE_NAME")
-db_user = os.getenv("DATABASE_USER")
-db_pwd = os.getenv("DATABASE_PASSWORD")
-db_host = os.getenv("DATABASE_HOST")
-db_port = os.getenv("DATABASE_PORT")
-
+# Database configuration
 database_config = {
-        'dbname': db_name,
-        'user': db_user,
-        'password': db_pwd,
-        'host': db_host,
-        'port': db_port
-    }
+    'dbname': os.getenv("DATABASE_NAME"),
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': os.getenv("DATABASE_PORT")
+}
 
-celery_store = DocSynthStore(database_config) 
-def get_id_helper(success, user_info):
-    if not success:
-        return jsonify(user_info), 401
-    return user_info['user_id']
+celery_store = DocSynthStore(database_config)
 
+# Helper functions for GCS operations
 def delete_from_gcs(user_id, file_name):
     try:
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
-        user_folder = f"{user_id}/"
-        blob = bucket.blob(user_folder + file_name)
+        blob = bucket.blob(f"{user_id}/{file_name}")
         blob.delete()
         logging.info(f"Deleted {file_name} from GCS.")
     except Exception as e:
@@ -55,14 +43,11 @@ def upload_to_gcs(file_data, user_gc_id, filename):
     try:
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
-        user_folder = f"{user_gc_id}/"
-        blob = bucket.blob(user_folder + filename)
-        
+        blob = bucket.blob(f"{user_gc_id}/{filename}")
         blob.upload_from_file(file_data, content_type=file_data.mimetype)
         blob.make_public()
-        file_url = blob.public_url
-        logging.info(f"Uploaded {filename} to GCS: {file_url}")
-        return file_url
+        logging.info(f"Uploaded {filename} to GCS: {blob.public_url}")
+        return blob.public_url
     except Exception as e:
         logging.error(f"Error uploading to GCS: {e}")
         return None
@@ -71,144 +56,107 @@ def download_from_gcs(user_gc_id, filename):
     try:
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
-        user_folder = f"{user_gc_id}/"
-        blob = bucket.blob(user_folder + filename)
-        file_data = blob.download_as_bytes()
-        logging.info(f"Downloaded {filename} from GCS.")
-        return file_data
+        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        return blob.download_as_bytes()
     except Exception as e:
         logging.error(f"Error downloading from GCS: {e}")
         return None
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)  # Retry every 60s
-def process_chunk(self, chunk, topic, sources, belief_system):
-    try:
-        return generate_interpretation(chunk, topic, sources, belief_system)
-    except Exception as exc:
-        raise self.retry(exc=exc)
+# Celery tasks
+@celery_app.task
+def process_chunk(chunk, topic, sources_list, belief_system):
+    return generate_interpretation(chunk, topic, sources_list, belief_system)
 
-# Task to combine results after all chunks are done
 @celery_app.task
 def combine_results(results):
-    logging.info("Combining chunk results...")
     return "\n\n".join(results)
 
-# Task to process and store the final result (non-blocking)
-def process_and_store_file(user_id, filename, chunks, topic, sources, belief_system):
+@celery_app.task
+def process_and_store_file(user_id, user_gc_id, filename):
     try:
-        # Create a group of chunk-processing tasks
+        file_data = download_from_gcs(user_gc_id, filename)
+        if not file_data:
+            raise FileNotFoundError(f"File {filename} not found in GCS.")
+
+        _, file_extension = os.path.splitext(filename)
+        doc_info = process_file(file_data, file_extension.lstrip('.'))
+        chunks, topic, sources_list, belief_system = context(doc_info)
+
         chunk_tasks = group(
-            process_chunk.s(chunk, topic, sources, belief_system) for chunk in chunks
+            process_chunk.s(chunk, topic, sources_list, belief_system) for chunk in chunks
         )
-
-        # Use chord to combine results after processing all chunks
         result = chord(chunk_tasks)(combine_results.s())
-
-        # Use polling instead of blocking get() to avoid timeout issues
-        wait_for_result(result, user_id, filename)
-
+        
+        message = f"The document {filename} has been successfully processed.\n\n{result.get()}"
+        celery_store.add_message(content=message, sender='bot', user_id=user_id)
     except Exception as e:
         logging.error(f"Error processing file {filename}: {e}")
 
-# Polling function to check for result readiness without blocking
-def wait_for_result(result, user_id, filename, timeout=1800, interval=10):
-    """Poll for task results to avoid blocking timeouts."""
-    elapsed = 0
-
-    while not result.ready() and elapsed < timeout:
-        logging.info(f"Waiting for chunk results... {elapsed}s elapsed")
-        time.sleep(interval)  # Wait for 10 seconds before polling again
-        elapsed += interval
-
-    if result.ready():
-        try:
-            final_result = result.get(timeout=30)  # Short timeout to fetch the result
-            logging.info(f"Successfully processed {filename} for user {user_id}")
-            save_message_to_store(user_id, filename, final_result)
-        except Exception as e:
-            logging.error(f"Error retrieving final result: {e}")
-            handle_failure(user_id, filename, str(e))
-    else:
-        logging.error(f"Timeout exceeded for processing {filename}")
-        handle_failure(user_id, filename, "Task timed out.")
-
-# Save final message to store
-def save_message_to_store(user_id, filename, message):
-    content = f"""
-    The document **{filename}** has been successfully processed.
-
-    **Interpretation:**
-    {message}
-    """
-    celery_store.add_message(content=content, sender='bot', user_id=user_id)
-
-# Handle failures gracefully
-def handle_failure(user_id, filename, error_message):
-    content = f"Failed to process {filename}: {error_message}"
-    celery_store.add_message(content=content, sender='bot', user_id=user_id)
-
-@files_bp.route('', methods=['GET'])
-def retrieve_files():
-    try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        user_id = store.get_user_id_from_email(user_info['email'])
-        files = store.get_files_for_user(user_id)
-        return jsonify(files)
-    except Exception as e:
-        logging.error(str(e))
-        return jsonify({'error': str(e)}), 500
-
+# Flask route to upload files
 @files_bp.route('', methods=['POST'])
 def save_file():
     try:
-        print('Starting file upload process')
-        store = current_app.store
-      
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
-        user_id = store.get_user_id_from_email(user_info['email'])
-     
+        if not success:
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        user_id = current_app.store.get_user_id_from_email(user_info['email'])
 
         if not request.files:
-            logging.info('No files provided')
             return jsonify({'error': 'No files provided'}), 400
 
-        for file_key, file in request.files.items():
-            logging.info(f"Received file: {file.filename}")
-
-            # Upload the file to GCS
+        for _, file in request.files.items():
             file_url = upload_to_gcs(file, user_info['user_id'], file.filename)
-            if file_url is None:
+            if not file_url:
                 return jsonify({'error': 'File upload failed'}), 500
 
-            # Enqueue the file processing task
-            try:
-                file_info = store.add_file(user_id, file.filename, file_url)
-                logging.info(f"Stored file metadata: {file.filename}")
-                process_and_store_file(user_id, user_info['user_id'], file.filename)
-                logging.info(f"Enqueued processing for file: {file.filename}")
-            except RedisError as e:
-                logging.error(f"Error enqueueing job: {e}")
-                return jsonify({'error': 'Failed to enqueue job'}), 500
+            current_app.store.add_file(user_id, file.filename, file_url)
 
-        return jsonify({'message': 'File processing Queued.'})
+            # Enqueue file processing task
+            process_and_store_file.apply_async(
+                (user_id, user_info['user_id'], file.filename)
+            )
+            logging.info(f"Enqueued processing for {file.filename}")
 
+        return jsonify({'message': 'File processing queued.'}), 202
+
+    except RedisError as e:
+        logging.error(f"Redis error: {e}")
+        return jsonify({'error': 'Failed to enqueue job'}), 500
     except Exception as e:
         logging.error(f"Exception occurred: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Flask route to retrieve files
+@files_bp.route('', methods=['GET'])
+def retrieve_files():
+    try:
+        token = request.headers.get('Authorization')
+        success, user_info = get_user_id(token)
+        if not success:
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        user_id = current_app.store.get_user_id_from_email(user_info['email'])
+        files = current_app.store.get_files_for_user(user_id)
+        return jsonify(files)
+    except Exception as e:
+        logging.error(f"Error retrieving files: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Flask route to delete a file
 @files_bp.route('/<int:fileId>', methods=['DELETE'])
 def delete_file(fileId):
     try:
-        store = current_app.store
         token = request.headers.get('Authorization')
         success, user_info = get_user_id(token)
-        user_id = store.get_user_id_from_email(user_info['email'])
-        file_dict = store.delete_file_entry(user_id, fileId)
+        if not success:
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        user_id = current_app.store.get_user_id_from_email(user_info['email'])
+        file_dict = current_app.store.delete_file_entry(user_id, fileId)
         delete_from_gcs(user_info['user_id'], file_dict['file_name'])
         return '', 204
     except Exception as e:
-        logging.error(str(e))
+        logging.error(f"Error deleting file: {e}")
         return jsonify({'error': str(e)}), 500
