@@ -81,7 +81,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
         chunks = chunk_text(chunk)
         interpretations = []
         topic = classify_content(chunk)  # Classify topic for each chunk
-        sources_list = get_sources(topic)  # Get relevant sources
+        sources_list = get_sources(topic,belief_system='agnostic')  # Get relevant sources
 
         for content_chunk in chunks:
             try:
