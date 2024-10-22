@@ -3,7 +3,7 @@ from utils import get_user_id
 from youtube_video_handler import process_youtube_link
 from web_link_handler import process_newsletter_link
 from query_processor import process, summarize
-from context_processor import context
+from llm_service import process_content  
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
 
 
@@ -49,7 +49,7 @@ def create_message():
         {formatted_history}
         """
 
-    response = context(prompt)
+    response = process_content(prompt)
     bot_response = store.add_message(
             content=response, sender='bot', user_id=id, chat_history_id=history_id)
 
