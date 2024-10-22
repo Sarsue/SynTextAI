@@ -80,11 +80,13 @@ def process_and_store_file(user_id, user_gc_id, filename):
         chunk = process_file(file_data, ext.lstrip('.'))
         chunks = chunk_text(chunk)
         interpretations = []
+        topic = classify_content(chunk)  # Classify topic for each chunk
+        sources_list = get_sources(topic)  # Get relevant sources
 
         for content_chunk in chunks:
             try:
-                topic = classify_content(content_chunk)  # Classify topic for each chunk
-                sources_list = get_sources(topic)  # Get relevant sources
+              
+            
                 prompt = f"""
                 The content is classified under the topic: **{topic}**.
 

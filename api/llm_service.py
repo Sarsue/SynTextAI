@@ -165,7 +165,7 @@ def extract_image_text(base64_image):
         return ""
 
 
-def classify_content(content_chunk, topics_list):
+def classify_content(content_chunk):
     """Classify content using the LLM."""
     classification_prompt = f"""
     Given the following content:
