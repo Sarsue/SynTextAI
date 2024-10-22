@@ -35,8 +35,8 @@ google-cloud-storage
 google-crc32c==1.5.0
 google-resumable-media==2.7.0
 googleapis-common-protos==1.62.0
-gevent==24.10.3
 greenlet==3.0.3
+gevent
 grpcio
 grpcio-status
 grpcio-tools
