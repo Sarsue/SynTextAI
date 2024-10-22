@@ -85,8 +85,6 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
         for content_chunk in chunks:
             try:
-              
-            
                 prompt = f"""
                 The content is classified under the topic: **{topic}**.
 
