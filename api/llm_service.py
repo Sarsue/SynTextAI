@@ -213,7 +213,7 @@ async def generate_interpretation(content_chunk, topic, sources_list, belief_sys
 async def process_content(content, belief_system='agnostic'):
     """Main function to process files asynchronously."""
     # Step 1: Extract content (e.g., from PDF or image)
- 
+    
     # Step 2: Chunk the content for processing
     content_chunks = chunk_text(content)
 
@@ -228,10 +228,10 @@ async def process_content(content, belief_system='agnostic'):
     sources_list = get_sources(topic, belief_system)
 
     # Step 5: Generate an interpretation for each chunk
-    interpretations = [
-        await generate_interpretation(chunk, topic, sources_list, belief_system)
-        for chunk in content_chunks
-    ]
+    interpretations = []
+    for chunk in content_chunks:
+        interpretation = await generate_interpretation(chunk, topic, sources_list, belief_system)
+        interpretations.append(interpretation)
 
     return "\n\n".join(interpretations)
 
