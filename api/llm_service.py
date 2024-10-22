@@ -108,6 +108,18 @@ TIMEOUT_SECONDS = 10  # Set timeout for network calls
 logging.basicConfig(level=logging.INFO)
 
 # ---- Helper Functions ----
+
+
+def get_text_embedding(input):
+    client = MistralClient(api_key = mistral_key)
+
+    embeddings_batch_response = client.embeddings(
+        model="mistral-embed",
+        input=input
+    )
+    return embeddings_batch_response.data[0].embedding
+
+
 def get_sources(topic, belief_system):
     """Retrieve relevant sources for a given topic and belief system."""
     return topic_sources.get(topic, {}).get(belief_system, [])
@@ -224,25 +236,3 @@ async def process_content(content, belief_system='agnostic'):
     return "\n\n".join(interpretations)
 
 # ---- Example Usage ----
-
-async def main():
-    pdf_path = "//Users//osas//Downloads//test.jpeg"
-    topics = [
-        'Physical Health and Nutrition',
-        'Mental Health and Stress Management',
-        'Emotional Well-Being and Relationships',
-        'Spirituality and Inner Harmony',
-        'Personal Growth and Self-Actualization',
-        'Work-Life Balance and Fulfillment',
-        'Community and Social Connections'
-    ]
-
-    try:
-        result = await process_file(pdf_path, topics, belief_system="secular")
-        print(result)
-    except Exception as e:
-        logging.error(f"Failed to process file: {e}")
-
-# Run the script
-if __name__ == '__main__':
-    asyncio.run(main())
