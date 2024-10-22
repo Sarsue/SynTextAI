@@ -71,14 +71,18 @@ def delete_from_gcs(user_gc_id, filename):
 
 # Celery task for processing files
 @celery_app.task
-async def process_and_store_file(user_id, user_gc_id, filename):
+def process_and_store_file(user_id, user_gc_id, filename):
+    # Use asyncio.run to run the async function
+    return asyncio.run(process_and_store_file_async(user_id, user_gc_id, filename))
+
+async def process_and_store_file_async(user_id, user_gc_id, filename):
     try:
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
             raise FileNotFoundError(f"{filename} not found.")
 
         _, ext = os.path.splitext(filename)
-        chunk = process_file(file_data, ext.lstrip('.'))  
+        chunk = process_file(file_data, ext.lstrip('.'))
         result = await process_content(chunk)  # Use await for async processing
         store.add_message(content=result, sender='bot', user_id=user_id)
 
