@@ -5,10 +5,9 @@ from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app
 from postgresql_store import DocSynthStore
-from llm_service import process_content
+from llm_service import prompt_llm,chunk_text,classify_content,get_sources
 from utils import get_user_id
 from doc_processor import process_file
-import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -72,10 +71,6 @@ def delete_from_gcs(user_gc_id, filename):
 # Celery task for processing files
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
-    # Use asyncio.run to run the async function
-    return asyncio.run(process_and_store_file_async(user_id, user_gc_id, filename))
-
-async def process_and_store_file_async(user_id, user_gc_id, filename):
     try:
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
@@ -83,7 +78,34 @@ async def process_and_store_file_async(user_id, user_gc_id, filename):
 
         _, ext = os.path.splitext(filename)
         chunk = process_file(file_data, ext.lstrip('.'))
-        result = await process_content(chunk)  # Use await for async processing
+        chunks = chunk_text(chunk)
+        interpretations = []
+
+        for content_chunk in chunks:
+            try:
+                topic = classify_content(content_chunk)  # Classify topic for each chunk
+                sources_list = get_sources(topic)  # Get relevant sources
+                prompt = f"""
+                The content is classified under the topic: **{topic}**.
+
+                Provide a thoughtful interpretation using **2-4 relevant sources** from the belief system: {'agnostic'}.
+
+                ### Content Chunk:
+                {content_chunk}
+
+                ### Relevant Sources:
+                {', '.join(sources_list)}
+
+                End with uplifting advice for the reader.
+                """
+                interpretation = prompt_llm(prompt)  # Generate interpretation
+                interpretations.append(interpretation)
+            except Exception as chunk_error:
+                logging.error(f"Error processing chunk: {chunk_error}")
+                # Optionally, add logic to retry or handle failed chunks
+
+        # Join interpretations and store the result
+        result = "\n\n".join(interpretations)
         store.add_message(content=result, sender='bot', user_id=user_id)
 
         logging.info(f"Processed and stored '{filename}' successfully.")

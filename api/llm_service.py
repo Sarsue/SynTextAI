@@ -129,24 +129,11 @@ def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
     words = text.split()
     return [" ".join(words[i:i + max_tokens]) for i in range(0, len(words), max_tokens)]
 
-async def retry_with_delay(func, *args, **kwargs):
-    """Retry function with exponential backoff."""
-    for attempt in range(MAX_RETRIES):
-        try:
-            return await asyncio.wait_for(func(*args, **kwargs), timeout=TIMEOUT_SECONDS)
-        except (Timeout, RequestException) as e:
-            logging.warning(f"Error: {e}. Retrying {attempt + 1}/{MAX_RETRIES}...")
-            await asyncio.sleep(RETRY_DELAY * (attempt + 1))
-        except Exception as e:
-            logging.error(f"Unexpected error: {e}")
-            raise
-    raise Timeout(f"Failed after {MAX_RETRIES} retries.")
-
-async def prompt_llm(prompt):
+def prompt_llm(prompt):
     """Generate a chat completion using the Mistral API."""
     model = "mistral-large-latest"
     messages = [chat_completion.ChatMessage(role="user", content=prompt)]
-    response = await mistral_client.chat(model=model, messages=messages)
+    response = mistral_client.chat(model=model, messages=messages)
     return response.choices[0].message.content.strip()
 
 def extract_image_text(base64_image):
@@ -178,7 +165,7 @@ def extract_image_text(base64_image):
         return ""
 
 
-async def classify_content(content_chunk, topics_list):
+def classify_content(content_chunk, topics_list):
     """Classify content using the LLM."""
     classification_prompt = f"""
     Given the following content:
@@ -191,9 +178,9 @@ async def classify_content(content_chunk, topics_list):
     Please classify the content under one of the topics above. 
     If the content doesn’t align with any topic, respond with "out of scope."
     """
-    return await retry_with_delay(prompt_llm, classification_prompt)
+    return prompt_llm(classification_prompt)
 
-async def generate_interpretation(content_chunk, topic, sources_list, belief_system):
+def generate_interpretation(content_chunk, topic, sources_list, belief_system):
     """Generate interpretation of a content chunk."""
     prompt = f"""
     The content is classified under the topic: **{topic}**.
@@ -208,17 +195,17 @@ async def generate_interpretation(content_chunk, topic, sources_list, belief_sys
 
     End with uplifting advice for the reader.
     """
-    return await retry_with_delay(prompt_llm, prompt)
+    return prompt_llm(prompt)
 
-async def process_content(content, belief_system='agnostic'):
-    """Main function to process files asynchronously."""
+def process_content(content, belief_system='agnostic'):
+    """Main function to process files."""
     # Step 1: Extract content (e.g., from PDF or image)
     
     # Step 2: Chunk the content for processing
     content_chunks = chunk_text(content)
 
     # Step 3: Classify the first chunk to determine its topic
-    topic = await classify_content(content_chunks[0], topics_list)
+    topic = classify_content(content_chunks[0], topics_list)
     logging.info(f"Classified Topic: {topic}")
 
     if topic == "out of scope":
@@ -230,9 +217,10 @@ async def process_content(content, belief_system='agnostic'):
     # Step 5: Generate an interpretation for each chunk
     interpretations = []
     for chunk in content_chunks:
-        interpretation = await generate_interpretation(chunk, topic, sources_list, belief_system)
+        interpretation = generate_interpretation(chunk, topic, sources_list, belief_system)
         interpretations.append(interpretation)
 
     return "\n\n".join(interpretations)
+
 
 # ---- Example Usage ----
