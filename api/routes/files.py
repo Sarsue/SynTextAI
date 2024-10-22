@@ -8,6 +8,10 @@ from postgresql_store import DocSynthStore
 from llm_service import process_content  # API call logic
 from utils import get_user_id
 from doc_processor import process_file
+from gevent import monkey
+
+# Apply Gevent monkey patching
+monkey.patch_all()  # Make I/O operations non-blocking
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -44,7 +48,7 @@ def download_from_gcs(user_gc_id, filename):
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
-        return blob.download_as_bytes()
+        return blob.download_as_bytes()  # Non-blocking due to monkey patching
     except Exception as e:
         logging.error(f"Error downloading from GCS: {e}")
         return None
