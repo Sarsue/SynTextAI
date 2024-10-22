@@ -8,7 +8,7 @@ from postgresql_store import DocSynthStore
 from llm_service import prompt_llm,chunk_text,classify_content,get_sources
 from utils import get_user_id
 from doc_processor import process_file
-
+import time
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
@@ -100,6 +100,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
                 """
                 interpretation = prompt_llm(prompt)  # Generate interpretation
                 interpretations.append(interpretation)
+                time.sleep(1)
             except Exception as chunk_error:
                 logging.error(f"Error processing chunk: {chunk_error}")
                 # Optionally, add logic to retry or handle failed chunks
