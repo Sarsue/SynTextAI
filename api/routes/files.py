@@ -3,15 +3,12 @@ import logging
 from flask import Blueprint, request, jsonify, current_app
 from google.cloud import storage
 from redis.exceptions import RedisError
-from celery_worker import celery_app  # Ensure this import is correct
+from celery_worker import celery_app
 from postgresql_store import DocSynthStore
-from llm_service import process_content  # API call logic
+from llm_service import process_content
 from utils import get_user_id
 from doc_processor import process_file
-from gevent import monkey
-
-# Apply Gevent monkey patching
-monkey.patch_all()  # Make I/O operations non-blocking
+import asyncio
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -29,7 +26,16 @@ database_config = {
 }
 store = DocSynthStore(database_config)
 
-# Helper functions for GCS operations
+# Helper function to authenticate user and retrieve user ID
+def authenticate_user():
+    token = request.headers.get('Authorization')
+    success, user_info = get_user_id(token)
+    if not success:
+        return None, None
+    user_id = current_app.store.get_user_id_from_email(user_info['email'])
+    return user_id, user_info['user_id']
+
+# Helper function for GCS operations
 def upload_to_gcs(file_data, user_gc_id, filename):
     try:
         client = storage.Client()
@@ -65,18 +71,16 @@ def delete_from_gcs(user_gc_id, filename):
 
 # Celery task for processing files
 @celery_app.task
-def process_and_store_file(user_id, user_gc_id, filename):
+async def process_and_store_file(user_id, user_gc_id, filename):
     try:
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
             raise FileNotFoundError(f"{filename} not found.")
 
         _, ext = os.path.splitext(filename)
-        chunks = process_file(file_data, ext.lstrip('.'))  # Process in chunks
-
-        for chunk in chunks:
-            result = process_content(chunk)  # Call LLM service
-            store.add_message(content=result, sender='bot', user_id=user_id)
+        chunk = process_file(file_data, ext.lstrip('.'))  
+        result = await process_content(chunk)  # Use await for async processing
+        store.add_message(content=result, sender='bot', user_id=user_id)
 
         logging.info(f"Processed and stored '{filename}' successfully.")
     except Exception as e:
@@ -86,25 +90,21 @@ def process_and_store_file(user_id, user_gc_id, filename):
 @files_bp.route('', methods=['POST'])
 def save_file():
     try:
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        if not success:
+        user_id, user_gc_id = authenticate_user()
+        if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
-
-        user_id = current_app.store.get_user_id_from_email(user_info['email'])
 
         if not request.files:
             return jsonify({'error': 'No files provided'}), 400
 
         for _, file in request.files.items():
-            file_url = upload_to_gcs(file, user_info['user_id'], file.filename)
+            file_url = upload_to_gcs(file, user_gc_id, file.filename)
             if not file_url:
                 return jsonify({'error': 'File upload failed'}), 500
 
             store.add_file(user_id, file.filename, file_url)
-
             # Enqueue the file processing task
-            process_and_store_file.apply_async((user_id, user_info['user_id'], file.filename))
+            process_and_store_file.apply_async((user_id, user_gc_id, file.filename))
             logging.info(f"Enqueued processing for {file.filename}")
 
         return jsonify({'message': 'File processing queued.'}), 202
@@ -119,12 +119,10 @@ def save_file():
 @files_bp.route('', methods=['GET'])
 def retrieve_files():
     try:
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        if not success:
+        user_id, _ = authenticate_user()
+        if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 
-        user_id = current_app.store.get_user_id_from_email(user_info['email'])
         files = store.get_files_for_user(user_id)
         return jsonify(files)
     except Exception as e:
@@ -135,14 +133,12 @@ def retrieve_files():
 @files_bp.route('/<int:fileId>', methods=['DELETE'])
 def delete_file(fileId):
     try:
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        if not success:
+        user_id, user_gc_id = authenticate_user()
+        if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 
-        user_id = current_app.store.get_user_id_from_email(user_info['email'])
         file_info = store.delete_file_entry(user_id, fileId)
-        delete_from_gcs(user_info['user_id'], file_info['file_name'])
+        delete_from_gcs(user_gc_id, file_info['file_name'])
         return '', 204
     except Exception as e:
         logging.error(f"Error deleting file: {e}")
