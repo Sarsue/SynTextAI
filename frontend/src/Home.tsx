@@ -23,12 +23,11 @@ const Home: React.FC = () => {
             <main className="content-container">
                 {/* Hero Section */}
                 <section className="hero-section">
-                    <h2 className="hero-title">Discover Wisdom for Every Path – Spiritual, Secular, and Agnostic</h2>
+                    <h2 className="hero-title">Unlock Knowledge, Transform Your Understanding</h2>
                     <p className="hero-description">
-                        Whether you seek guidance from ancient scriptures, modern philosophy, or mindfulness practices, SynText AI offers personalized insights to help you navigate life’s challenges.
-                        <strong> Sign In and Start Your Journey Today </strong>
+                        With SynText AI, easily summarize and explain complex concepts, translate text into multiple languages, and retrieve relevant documents based on your queries.
+                        <strong> Sign In and Enhance Your Learning Today!</strong>
                     </p>
-
                 </section>
 
                 {/* Video and Features Section */}
@@ -37,29 +36,29 @@ const Home: React.FC = () => {
                         <h2 className="features-title">Why Choose SynText AI?</h2>
                         <ul className="features-list">
                             <li className="feature-item">
-                                <i className="fas fa-question-circle feature-icon"></i>
-                                <h3>Guidance on Life's Questions</h3>
-                                <p>Ask questions on various topics in any language and receive insights from spiritual, secular, and agnostic perspectives.</p>
+                                <i className="fas fa-lightbulb feature-icon"></i>
+                                <h3>Concept Summarization</h3>
+                                <p>Effortlessly summarize complex ideas and concepts into clear, concise explanations tailored to your understanding.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-image feature-icon"></i>
-                                <h3>Multimodal Interpretation</h3>
-                                <p>Upload images, text etc  of multilingual texts for interpretation and understanding, enhancing your insights.</p>
+                                <i className="fas fa-language feature-icon"></i>
+                                <h3>Multilingual Translation</h3>
+                                <p>Translate documents and texts into various languages, making information accessible to everyone.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-calendar-alt feature-icon"></i>
-                                <h3>Daily Prompts & Wisdom</h3>
-                                <p>Receive daily tips, mantras, and "Wisdom of the Day," blending scripture and philosophical quotes based on your belief system.</p>
+                                <i className="fas fa-search feature-icon"></i>
+                                <h3>Relevant Document Retrieval</h3>
+                                <p>Retrieve pertinent documents and resources based on your queries, enhancing your research capabilities.</p>
                             </li>
                             <li className="feature-item">
                                 <i className="fas fa-tools feature-icon"></i>
-                                <h3>Growth Tools & Recommendations</h3>
-                                <p>Access tools and resources for personal growth, including journal uploads and development recommendations.</p>
+                                <h3>Growth Tools & Resources</h3>
+                                <p>Access a range of tools for personal and professional growth, including insights tailored to your learning journey.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-adjust feature-icon"></i>
+                                <i className="fas fa-user-circle feature-icon"></i>
                                 <h3>Personalized Insights</h3>
-                                <p>Select preferences for spiritual or secular insights tailored to your needs and beliefs.</p>
+                                <p>Receive insights based on your interests and preferences, designed to enrich your understanding and knowledge base.</p>
                             </li>
                         </ul>
                     </div>
@@ -79,17 +78,15 @@ const Home: React.FC = () => {
                         </div>
                     </div>
                 </section>
-
-
             </main>
 
             {/* Footer */}
             <footer className="footer">
                 {/* Pricing Section */}
                 <section className="pricing-section">
-                    <h2 className="pricing-title">Start Your Self Improvement Journey</h2>
+                    <h2 className="pricing-title">Start Your Knowledge Journey</h2>
                     <p className="pricing-description">
-                        For just <strong>$15/month</strong>.
+                        For just <strong>$15/month</strong>, unlock the full potential of SynText AI.
                     </p>
                 </section>
                 <p>&copy; 2024 OSAS INC. All rights reserved.</p>

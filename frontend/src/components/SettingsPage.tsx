@@ -5,7 +5,10 @@ import DarkModeToggle from './DarkModeToggle';
 import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
+// Remove this line if not used
 import { loadStripe, Stripe } from '@stripe/stripe-js';
+
+// Removed loadStripe import as it's not used
 
 interface SettingsPageProps {
     stripePromise: Promise<Stripe | null>;
@@ -17,14 +20,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
     const navigate = useNavigate();
     const { darkMode, setDarkMode, userSettings, setUserSettings } = useUserContext();
     const [subscriptionStatusLocal, setSubscriptionStatusLocal] = useState<string | null>(subscriptionStatus);
-    const [beliefSystem, setBeliefSystem] = useState<string>(userSettings.beliefSystem || '');
-    const [demographic, setDemographic] = useState<string>(userSettings.demographic || '');
-    const [gender, setGender] = useState<string>(userSettings.gender || '');
+    const [explanationLevel, setExplanationLevel] = useState<string>(userSettings.explanationLevel || '');
+    const [numberOfAnswers, setNumberOfAnswers] = useState<number>(userSettings.numberOfAnswers || 1); // Default to 1
 
-    // Update userSettings in context whenever gender, demographic, or beliefSystem changes
+    // Update userSettings in context whenever explanationLevel or numberOfAnswers changes
     useEffect(() => {
-        setUserSettings({ gender, demographic, beliefSystem });
-    }, [gender, demographic, beliefSystem, setUserSettings]);
+        setUserSettings({
+            ...userSettings,  // Preserving existing userSettings
+            explanationLevel,
+            numberOfAnswers
+        });
+    }, [explanationLevel, numberOfAnswers, setUserSettings]);
 
     const handleSubscriptionChange = (newStatus: string) => {
         setSubscriptionStatusLocal(newStatus);
@@ -53,52 +59,36 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                     </div>
                 </div>
 
-                {/* Gender Section */}
+                {/* Explanation Level Section */}
                 <div className="settings-section">
-                    <h2 className="section-title">Gender</h2>
+                    <h2 className="section-title">Explanation Level</h2>
                     <div className="section-content">
                         <select
-                            value={gender}
-                            onChange={(e) => setGender(e.target.value)}
+                            value={explanationLevel}
+                            onChange={(e) => setExplanationLevel(e.target.value)}
                         >
-                            <option value="">Select your gender</option>
-                            <option value="male">Male</option>
-                            <option value="female">Female</option>
-                            <option value="other">Other</option>
+                            <option value="">Select explanation level</option>
+                            <option value="child">Child</option>
+                            <option value="teen">Teen</option>
+                            <option value="college student">College Student</option>
+                            <option value="grad student">Grad Student</option>
+                            <option value="expert">Expert</option>
                         </select>
                     </div>
                 </div>
 
-                {/* Demographic Section */}
+                {/* Number of Answers Section */}
                 <div className="settings-section">
-                    <h2 className="section-title">Demographic</h2>
+                    <h2 className="section-title">Number of Answers</h2>
                     <div className="section-content">
                         <select
-                            value={demographic}
-                            onChange={(e) => setDemographic(e.target.value)}
+                            value={numberOfAnswers}
+                            onChange={(e) => setNumberOfAnswers(Number(e.target.value))}
                         >
-                            <option value="">Select your demographic</option>
-                            <option value="Silent Generation">Silent Generation: 1928-1945</option>
-                            <option value="Baby Boomers">Baby Boomers: 1946-1964</option>
-                            <option value="Generation X">Generation X: 1965-1980</option>
-                            <option value="Millennials">Millennials: 1981-1996</option>
-                            <option value="Generation Z">Generation Z: 1997-2012</option>
-                        </select>
-                    </div>
-                </div>
-
-                {/* Belief System Section */}
-                <div className="settings-section">
-                    <h2 className="section-title">Belief System</h2>
-                    <div className="section-content">
-                        <select
-                            value={beliefSystem}
-                            onChange={(e) => setBeliefSystem(e.target.value)}
-                        >
-                            <option value="">Select your belief system</option>
-                            <option value="Spiritual">Spiritual</option>
-                            <option value="Secular">Secular</option>
-                            <option value="Agnostic">Agnostic</option>
+                            <option value={1}>1</option>
+                            <option value={2}>2</option>
+                            <option value={3}>3</option>
+                            <option value={4}>4</option>
                         </select>
                     </div>
                 </div>

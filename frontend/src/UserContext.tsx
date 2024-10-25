@@ -3,8 +3,8 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
 // Define the type for UserSettings
 interface UserSettings {
     gender: string;
-    demographic: string;
-    beliefSystem: string;
+    explanationLevel: string; // Added explanationLevel
+    numberOfAnswers: number;   // Added numberOfAnswers
 }
 
 // Define the type for UserContext
@@ -21,7 +21,11 @@ const UserContext = createContext<UserContextType>({
     darkMode: false,
     toggleDarkMode: () => { },
     setDarkMode: () => { }, // Provide a default empty function
-    userSettings: { gender: '', demographic: '', beliefSystem: '' }, // Default user settings
+    userSettings: {
+        gender: '',
+        explanationLevel: '', // Default explanationLevel
+        numberOfAnswers: 1,   // Default numberOfAnswers
+    },
     setUserSettings: () => { }, // Provide a default empty function
 });
 
@@ -33,8 +37,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Define state for userSettings
     const [userSettings, setUserSettings] = useState<UserSettings>({
         gender: '',
-        demographic: '',
-        beliefSystem: ''
+        explanationLevel: '', // Initial value for explanationLevel
+        numberOfAnswers: 1,   // Initial value for numberOfAnswers
     });
 
     // Function to toggle dark mode
