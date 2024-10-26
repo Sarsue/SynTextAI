@@ -72,6 +72,9 @@ def delete_from_gcs(user_gc_id, filename):
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     try:
+        if isinstance(filename, list):
+            filename = filename[0]
+            
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
             raise FileNotFoundError(f"{filename} not found.")

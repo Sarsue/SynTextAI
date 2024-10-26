@@ -38,7 +38,7 @@ const Home: React.FC = () => {
                             <li className="feature-item">
                                 <i className="fas fa-lightbulb feature-icon"></i>
                                 <h3>Concept Summarization</h3>
-                                <p>Effortlessly summarize complex ideas and concepts into clear, concise explanations tailored to your understanding.</p>
+                                <p>Transform complex ideas into clear, concise summaries tailored to your needs.</p>
                             </li>
                             <li className="feature-item">
                                 <i className="fas fa-language feature-icon"></i>
@@ -46,19 +46,19 @@ const Home: React.FC = () => {
                                 <p>Translate documents and texts into various languages, making information accessible to everyone.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-search feature-icon"></i>
-                                <h3>Relevant Document Retrieval</h3>
-                                <p>Retrieve pertinent documents and resources based on your queries, enhancing your research capabilities.</p>
+                                <i className="fas fa-image feature-icon"></i>
+                                <h3>Image Text Extraction</h3>
+                                <p>Extract text from images with ease, making data from visual content available for analysis.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-tools feature-icon"></i>
-                                <h3>Growth Tools & Resources</h3>
-                                <p>Access a range of tools for personal and professional growth, including insights tailored to your learning journey.</p>
+                                <i className="fas fa-file-pdf feature-icon"></i>
+                                <h3>PDF Content Processing</h3>
+                                <p>Efficiently extract and summarize information from PDF documents.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-user-circle feature-icon"></i>
-                                <h3>Personalized Insights</h3>
-                                <p>Receive insights based on your interests and preferences, designed to enrich your understanding and knowledge base.</p>
+                                <i className="fas fa-video feature-icon"></i>
+                                <h3>Video Transcription</h3>
+                                <p>Transcribe audio from videos to convert spoken content into written form.</p>
                             </li>
                         </ul>
                     </div>

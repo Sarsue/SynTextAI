@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
-from youtube_video_handler import process_youtube_link
 from web_link_handler import process_newsletter_link
 from query_processor import process, summarize
 from llm_service import process_content  
