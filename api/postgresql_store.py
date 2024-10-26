@@ -10,20 +10,17 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import logging
-from psycopg2.pool import SimpleConnectionPool
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # DocSynthStore class definition
 class DocSynthStore:
-    _pool = None 
     def __init__(self, database_config):
         self.database_config = database_config
         self.vectorizer = TfidfVectorizer()
-        if not DocSynthStore._pool:
-            DocSynthStore._pool = SimpleConnectionPool(1, 5, **database_config)
-        self.pool = DocSynthStore._pool
+        self.pool = psycopg2.pool.SimpleConnectionPool(1, 5, **database_config)
         self.create_tables()
 
     # Connection management methods
