@@ -5,7 +5,6 @@ import time
 from llm_service import get_text_embedding
 import pickle
 from scipy.spatial.distance import cosine
-from tfidf_helper import TfidfHelper
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
