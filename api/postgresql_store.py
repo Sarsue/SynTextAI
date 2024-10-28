@@ -19,7 +19,7 @@ class DocSynthStore:
     def __init__(self, database_config):
         self.database_config = database_config
         self.vectorizer = TfidfVectorizer()
-        self.pool = psycopg2.pool.SimpleConnectionPool(1, 5, **database_config)
+        self.pool = psycopg2.pool.SimpleConnectionPool(1, 2, **database_config)  # Use a smaller pool size
         self.create_tables()
 
     def get_connection(self, retries=3, delay=2):
