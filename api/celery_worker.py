@@ -12,12 +12,12 @@ redis_port = os.getenv("REDIS_PORT")
 def make_celery(app_name):
     celery = Celery(
         app_name,
-        backend=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0',
-        broker=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+        backend=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED',
+        broker=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED'
     )
     celery.conf.update({
-        'broker_url': f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0',
-        'result_backend': f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+        'broker_url': f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED',
+        'result_backend': f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED'
     })
 
     # Automatically discover tasks from specified modules
