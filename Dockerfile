@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Create a non-root user
+RUN adduser --disabled-password myuser
+
 # Copy build artifacts from the first stage
 COPY --from=build-step /app/build ./build
 
@@ -32,5 +35,8 @@ RUN mkdir -p /var/log/supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 EXPOSE 3000
+
+# Switch to non-root user
+USER myuser
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

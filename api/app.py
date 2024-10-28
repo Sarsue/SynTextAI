@@ -43,8 +43,8 @@ def create_app():
     redis_port = os.getenv("REDIS_PORT")
 
     app.config.update(
-    CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE',
-    CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE',
+    CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0',
+    CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0',
    )
 
     celery_app.conf.update(app.config)
