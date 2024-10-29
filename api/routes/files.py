@@ -124,7 +124,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
         logging.debug(f"File processed, result length: {len(result)}")
 
         # Update the database with extracted content
-        update_file_with_extract(user_id, filename, result)
+        store.update_file_with_extract(user_id, filename, result)
         chunks = chunk_text(result)
         interpretations = []
 
@@ -160,7 +160,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
         # Join interpretations and store the result
         result_message = "\n\n".join(interpretations)
         logging.info(f"Storing result for file: {filename}")
-        add_message(content=result_message, sender='bot', user_id=user_id)
+        store.add_message(content=result_message, sender='bot', user_id=user_id)
 
         logging.info(f"Processed and stored '{filename}' successfully.")
 
