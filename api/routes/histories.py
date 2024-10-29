@@ -28,13 +28,18 @@ def create_history():
 
 @histories_bp.route('', methods=['GET'])
 def get_history_messages():
-    store = current_app.store
-    token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    id = get_id_helper(store, success, user_info)
-    # message list is history and the messages in it
-    message_list = store.get_all_user_chat_histories(id)
-    return message_list
+    try:
+        store = current_app.store
+        token = request.headers.get('Authorization')
+        success, user_info = get_user_id(token)
+        id = get_id_helper(store, success, user_info)
+        # message list is history and the messages in it
+        message_list = store.get_all_user_chat_histories(id)
+        return message_list
+    except Exception as e:
+        print(str(e))
+
+
 
 
 @histories_bp.route('', methods=['GET'])

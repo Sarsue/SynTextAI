@@ -43,8 +43,8 @@ def create_app():
     redis_port = os.getenv("REDIS_PORT")
 
     app.config.update(
-    CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0',
-    CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0',
+    CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED',
+    CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED',
    )
 
     celery_app.conf.update(app.config)
@@ -82,6 +82,7 @@ def create_celery_app(app=None):
     celery_app.conf.task_time_limit=300,  # 5 minutes
     celery_app.conf.task_soft_time_limit=280,  # 4 minutes and 40 seconds
     celery_app.conf.worker_prefetch_multiplier=1,
+    celery_app.broker_connection = True,
     celery_app.autodiscover_tasks(['routes.files'])  # Discover tasks
 
     return celery_app

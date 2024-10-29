@@ -27,12 +27,17 @@ store = DocSynthStore(database_config)
 
 # Helper function to authenticate user and retrieve user ID
 def authenticate_user():
-    token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    if not success:
-        return None, None
-    user_id = current_app.store.get_user_id_from_email(user_info['email'])
-    return user_id, user_info['user_id']
+    try:
+
+        token = request.headers.get('Authorization')
+        success, user_info = get_user_id(token)
+        if not success:
+            return None, None
+        user_id = current_app.store.get_user_id_from_email(user_info['email'])
+        return user_id, user_info['user_id']
+    except Exception as e:
+        logging.error("authenticating error" + str(e))
+
 
 # Helper function for GCS operations
 def upload_to_gcs(file_data, user_gc_id, filename):
@@ -115,23 +120,36 @@ def process_and_store_file(user_id, user_gc_id, filename):
     except Exception as e:
         logging.error(f"Error processing {filename}: {e}")
 
-# Flask route to upload files
 @files_bp.route('', methods=['POST'])
 def save_file():
     try:
         user_id, user_gc_id = authenticate_user()
+        logging.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_gc_id}")
+        
         if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 
         if not request.files:
+            logging.warning('No files provided.')
             return jsonify({'error': 'No files provided'}), 400
 
+        logging.info(f"Received files: {request.files}")
+
         for _, file in request.files.items():
+            logging.info(f"Processing file: {file.filename}")
+
             file_url = upload_to_gcs(file, user_gc_id, file.filename)
             if not file_url:
+                logging.error(f"Failed to upload {file.filename} to GCS.")
                 return jsonify({'error': 'File upload failed'}), 500
 
-            store.add_file(user_id, file.filename, file_url)
+            try:
+                logging.info("Adding file to store")
+                store.add_file(user_id, file.filename, file_url)
+            except Exception as db_err:
+                logging.error(f"Database error: {db_err}")
+                return jsonify({'error': 'Database error'}), 500
+
             # Enqueue the file processing task
             process_and_store_file.apply_async((user_id, user_gc_id, file.filename))
             logging.info(f"Enqueued processing for {file.filename}")
@@ -143,6 +161,7 @@ def save_file():
     except Exception as e:
         logging.error(f"Exception occurred: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 # Route to retrieve files
 @files_bp.route('', methods=['GET'])
