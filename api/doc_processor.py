@@ -9,9 +9,10 @@ import numpy as np
 import os 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(message)s')
 
 def extract_text_from_pdf(pdf_data):
+    logging.info("Extracting text from PDF...")
     try:
         return extract_text(io.BytesIO(pdf_data))
     except Exception as e:
@@ -19,6 +20,7 @@ def extract_text_from_pdf(pdf_data):
         return None
 
 def extract_text_from_image(image_data):
+    logging.info("Extracting text from IMAGE...")
     try:
         encoded_data = base64.b64encode(image_data).decode('utf-8')
         return extract_image_text(encoded_data)
@@ -28,6 +30,7 @@ def extract_text_from_image(image_data):
 
 def extract_audio_to_memory(video_input):
     """Extract audio directly to memory using FFmpeg."""
+    logging.info("Extracting AUDIO TO MEMORY...")
     try:
         input_args = {'pipe': True} if isinstance(video_input, (io.BytesIO, io.BufferedReader)) else {'filename': video_input}
         input_data = video_input.read() if isinstance(video_input, (io.BytesIO, io.BufferedReader)) else None
@@ -45,6 +48,7 @@ def extract_audio_to_memory(video_input):
 
 def transcribe_audio(audio_data):
     """Transcribe audio using Whisper."""
+    logging.info("Transcribing audio...")
     model = whisper.load_model("medium")
 
     try:
@@ -72,6 +76,7 @@ def transcribe_audio(audio_data):
 
 def extract_text_from_video(video_data):
     """Extract audio and transcribe text from video."""
+    logging.info("Extracting text from video...")
     video_bytes = io.BytesIO(video_data)
     audio_data = extract_audio_to_memory(video_bytes)
     if not audio_data:
@@ -82,6 +87,7 @@ def extract_text_from_video(video_data):
     return text
 
 def process_file(file_data, file_extension):
+    logging.info("processing file...")
     video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
     try:
         if file_extension == 'pdf':

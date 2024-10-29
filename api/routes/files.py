@@ -10,7 +10,7 @@ from utils import get_user_id
 from doc_processor import process_file
 import time
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 
 bucket_name = 'docsynth-fbb02.appspot.com'
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
@@ -74,7 +74,6 @@ def process_and_store_file(user_id, user_gc_id, filename):
     try:
         if isinstance(filename, list):
             filename = filename[0]
-            
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
             raise FileNotFoundError(f"{filename} not found.")

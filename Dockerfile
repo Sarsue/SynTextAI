@@ -30,7 +30,8 @@ COPY api/ ./api/
 RUN pip install --no-cache-dir -r ./api/requirements.txt && \
     pip install --no-cache-dir supervisor
 
-RUN mkdir -p /var/log/supervisor
+# Create log directory and set permissions
+RUN mkdir -p /var/log/supervisor && chown myuser:myuser /var/log/supervisor
 
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
