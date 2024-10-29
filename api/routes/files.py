@@ -9,6 +9,10 @@ from llm_service import prompt_llm,chunk_text,classify_content,get_sources
 from utils import get_user_id
 from doc_processor import process_file
 import time
+from video_task import process_video_task  # Import your video task
+
+video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
+
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 
@@ -89,14 +93,15 @@ def delete_from_gcs(user_gc_id, filename):
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
 
+
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     logging.info(f"Starting to process file: {filename} for user_id: {user_id}")
 
     try:
         if isinstance(filename, list):
-            filename = filename[0]
-        
+            filename = filename[0]  # Handle list case
+
         logging.info(f"Downloading file: {filename} from GCS for user_gc_id: {user_gc_id}")
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
@@ -104,20 +109,29 @@ def process_and_store_file(user_id, user_gc_id, filename):
             raise FileNotFoundError(f"{filename} not found.")
 
         _, ext = os.path.splitext(filename)
-        logging.info(f"Processing file with extension: {ext.lstrip('.')}")
+        ext = ext.lstrip('.').lower()  # Normalize extension
+        logging.info(f"Processing file with extension: {ext}")
 
-        chunk = process_file(file_data, ext.lstrip('.'))
-        logging.debug(f"File processed, chunk length: {len(chunk)}")
-        
-        # Update the database with the extracted content
-        store.update_file_with_extract(user_id, filename, chunk)
-        chunks = chunk_text(chunk)
+        if ext in video_extensions:
+            logging.info(f"Detected video file: {filename}. Delegating to video task.")
+            result = process_video_task(video_data=file_data)  # Call the video task
+            if not result:
+                logging.error(f"Video processing failed for: {filename}")
+                raise ValueError(f"Failed to process video: {filename}")
+        else:
+            result = process_file(file_data, ext)  # Handle other files
+
+        logging.debug(f"File processed, result length: {len(result)}")
+
+        # Update the database with extracted content
+        update_file_with_extract(user_id, filename, result)
+        chunks = chunk_text(result)
         interpretations = []
-        
-        topic = classify_content(chunk)  # Classify topic for each chunk
+
+        topic = classify_content(result)  # Classify content topic
         logging.info(f"Classified content under the topic: {topic}")
-        
-        sources_list = get_sources(topic, belief_system='agnostic')  # Get relevant sources
+
+        sources_list = get_sources(topic, belief_system='agnostic')
         logging.info(f"Retrieved sources for the topic: {sources_list}")
 
         for content_chunk in chunks:
@@ -125,7 +139,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
                 prompt = f"""
                 The content is classified under the topic: **{topic}**.
 
-                Provide a thoughtful interpretation using **2-4 relevant sources** from the belief system: {'agnostic'}.
+                Provide a thoughtful interpretation using **2-4 relevant sources** from the belief system: 'agnostic'.
 
                 ### Content Chunk:
                 {content_chunk}
@@ -139,18 +153,20 @@ def process_and_store_file(user_id, user_gc_id, filename):
                 logging.debug(f"Prompting LLM with chunk: {content_chunk}")
                 interpretation = prompt_llm(prompt)  # Generate interpretation
                 interpretations.append(interpretation)
-                time.sleep(1)
+                time.sleep(1)  # Avoid rate limits or overload
             except Exception as chunk_error:
                 logging.error(f"Error processing chunk: {chunk_error}")
 
         # Join interpretations and store the result
-        result = "\n\n".join(interpretations)
+        result_message = "\n\n".join(interpretations)
         logging.info(f"Storing result for file: {filename}")
-        store.add_message(content=result, sender='bot', user_id=user_id)
+        add_message(content=result_message, sender='bot', user_id=user_id)
 
         logging.info(f"Processed and stored '{filename}' successfully.")
+
     except Exception as e:
         logging.error(f"Error processing {filename}: {e}")
+
 
 @files_bp.route('', methods=['POST'])
 def save_file():
