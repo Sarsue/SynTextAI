@@ -147,17 +147,29 @@ class DocSynthStore:
     def get_user_id_from_email(self, email):
         connection = self.get_connection()
         try:
+            logging.info(f"Attempting to retrieve user ID for email: {email}")
+            
             with connection.cursor() as cursor:
                 cursor.execute('''
                     SELECT id FROM users WHERE email = %s
                 ''', (email,))
                 result = cursor.fetchone()
+
+            if result:
+                logging.info(f"User ID found for email {email}: {result[0]}")
+            else:
+                logging.warning(f"No user ID found for email: {email}")
+
             return result[0] if result else None
+        
         except Exception as e:
-            logger.error(f"Error getting user ID from email: {e}")
-            raise
+            logger.exception(f"Error getting user ID from email: {e}")
+            raise  # Ensure the exception is propagated for debugging purposes
+        
         finally:
+            logging.info("Releasing database connection")
             self.release_connection(connection)
+
 
     # Subscription  management methods
     def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None):
