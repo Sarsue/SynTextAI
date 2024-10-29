@@ -41,8 +41,8 @@ const Auth: FC<AuthProps> = ({ setUser }) => {
             if (user) {
                 console.log('Sign-in successful:', user);
                 await registerUserInBackend(user); // Register the user in backend
-                setUser(user);
-                navigate('/chat');
+                // setUser(user);
+                // navigate('/chat');
             }
         } catch (err) {
             console.error('Sign-in error:', err);
@@ -70,10 +70,10 @@ const Auth: FC<AuthProps> = ({ setUser }) => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${idToken}`,
                 },
-                body: JSON.stringify({
-                    email: user.email,
-                    displayName: user.displayName,
-                }),
+                // body: JSON.stringify({
+                //     email: user.email,
+                //     displayName: user.displayName,
+                // }),
             });
 
             if (!response.ok) {
