@@ -17,8 +17,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Create a non-root user
-RUN adduser --disabled-password myuser
+
 
 # Copy build artifacts from the first stage
 COPY --from=build-step /app/build ./build
@@ -30,14 +29,14 @@ COPY api/ ./api/
 RUN pip install --no-cache-dir -r ./api/requirements.txt && \
     pip install --no-cache-dir supervisor
 
-# Create log directory and set permissions
-RUN mkdir -p /var/log/supervisor && chown myuser:myuser /var/log/supervisor
+# Create the log directory for supervisor
+RUN mkdir -p /var/log/supervisor
 
+# Copy the supervisord configuration file
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
+# Expose the application port
 EXPOSE 3000
 
-# Switch to non-root user
-USER myuser
-
+# Start Supervisor
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
