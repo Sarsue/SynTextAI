@@ -33,8 +33,6 @@ def authenticate_user():
             logging.error("Missing Authorization token in request headers")
             return None, None
         
-        logging.info(f"Authorization token received: {token}")
-
         # Attempt to get user information from token
         success, user_info = get_user_id(token)
         if not success:
@@ -91,23 +89,36 @@ def delete_from_gcs(user_gc_id, filename):
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
 
-# Celery task for processing files
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
+    logging.info(f"Starting to process file: {filename} for user_id: {user_id}")
+
     try:
         if isinstance(filename, list):
             filename = filename[0]
+        
+        logging.info(f"Downloading file: {filename} from GCS for user_gc_id: {user_gc_id}")
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
+            logging.error(f"File data not found for: {filename}. Raising FileNotFoundError.")
             raise FileNotFoundError(f"{filename} not found.")
 
         _, ext = os.path.splitext(filename)
+        logging.info(f"Processing file with extension: {ext.lstrip('.')}")
+
         chunk = process_file(file_data, ext.lstrip('.'))
-        store.update_file_with_extract(user_id,filename,chunk)
+        logging.debug(f"File processed, chunk length: {len(chunk)}")
+        
+        # Update the database with the extracted content
+        store.update_file_with_extract(user_id, filename, chunk)
         chunks = chunk_text(chunk)
         interpretations = []
+        
         topic = classify_content(chunk)  # Classify topic for each chunk
-        sources_list = get_sources(topic,belief_system='agnostic')  # Get relevant sources
+        logging.info(f"Classified content under the topic: {topic}")
+        
+        sources_list = get_sources(topic, belief_system='agnostic')  # Get relevant sources
+        logging.info(f"Retrieved sources for the topic: {sources_list}")
 
         for content_chunk in chunks:
             try:
@@ -124,15 +135,17 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
                 End with uplifting advice for the reader.
                 """
+                
+                logging.debug(f"Prompting LLM with chunk: {content_chunk}")
                 interpretation = prompt_llm(prompt)  # Generate interpretation
                 interpretations.append(interpretation)
                 time.sleep(1)
             except Exception as chunk_error:
                 logging.error(f"Error processing chunk: {chunk_error}")
-                # Optionally, add logic to retry or handle failed chunks
 
         # Join interpretations and store the result
         result = "\n\n".join(interpretations)
+        logging.info(f"Storing result for file: {filename}")
         store.add_message(content=result, sender='bot', user_id=user_id)
 
         logging.info(f"Processed and stored '{filename}' successfully.")
