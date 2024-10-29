@@ -28,15 +28,33 @@ store = DocSynthStore(database_config)
 # Helper function to authenticate user and retrieve user ID
 def authenticate_user():
     try:
-
         token = request.headers.get('Authorization')
+        if not token:
+            logging.error("Missing Authorization token in request headers")
+            return None, None
+        
+        logging.info(f"Authorization token received: {token}")
+
+        # Attempt to get user information from token
         success, user_info = get_user_id(token)
         if not success:
+            logging.error("Failed to authenticate user with the provided token")
             return None, None
+        
+        logging.info(f"User info retrieved: {user_info}")
+
+        # Get user ID from email
         user_id = current_app.store.get_user_id_from_email(user_info['email'])
+        if not user_id:
+            logging.error(f"No user ID found for email: {user_info['email']}")
+            return None, user_info['user_id']
+
+        logging.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
         return user_id, user_info['user_id']
+    
     except Exception as e:
-        logging.error("authenticating error" + str(e))
+        logging.exception(f"Error during user authentication: {e}")
+        return None, None
 
 
 # Helper function for GCS operations
@@ -85,6 +103,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
 
         _, ext = os.path.splitext(filename)
         chunk = process_file(file_data, ext.lstrip('.'))
+        store.update_file_with_extract(user_id,filename,chunk)
         chunks = chunk_text(chunk)
         interpretations = []
         topic = classify_content(chunk)  # Classify topic for each chunk

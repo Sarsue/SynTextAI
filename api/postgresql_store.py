@@ -92,6 +92,7 @@ class DocSynthStore:
                             user_id INTEGER,
                             file_name TEXT,
                             file_url TEXT,
+                            extract TEXT,  
                             FOREIGN KEY (user_id) REFERENCES users (id)
                         )
                     ''')
@@ -547,8 +548,7 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
-    def get_tfidf_vectors(self, documents):
-        return self.vectorizer.fit_transform(documents)
+  
 
     def add_file(self, user_id, file_name, file_url):
         connection = self.get_connection()
@@ -569,65 +569,7 @@ class DocSynthStore:
         finally:
             self.release_connection(connection)
 
-    def update_file_with_chunks(self, user_id, file_name, doc_info):
-        connection = self.get_connection()
-        try:
-            with connection:
-                with connection.cursor() as cursor:
-                    cursor.execute('''
-                        SELECT id FROM files
-                        WHERE user_id = %s AND file_name = %s
-                    ''', (user_id, file_name))
-
-                    file_id = cursor.fetchone()[0]
-
-                    # Add pages and chunks to the file
-                    for entry in doc_info:
-                        page_number = entry['page_number']
-                        data = entry['data']
-                        chunks = entry['chunks']
-
-                        cursor.execute('''
-                            INSERT INTO pages (file_id, page_number, data)
-                            VALUES (%s, %s, %s)
-                            RETURNING id
-                        ''', (file_id, page_number, data))
-
-                        page_id = cursor.fetchone()[0]
-
-                        max_retries = 3
-                        for chunk in chunks:
-                            # Embedding vector
-                            retries = 0  # Reset retries for each chunk
-                            success = False
-                            while not success and retries < max_retries:
-                                try:
-
-                                    embedding_vector = get_text_embedding(chunk)
-                                    embedding_vector_blob = pickle.dumps(embedding_vector)
-
-                                    cursor.execute('''
-                                        INSERT INTO chunks (page_id, chunk, embedding_vector)
-                                        VALUES (%s, %s, %s)
-                                    ''', (page_id, chunk, embedding_vector_blob))
-
-                                    time.sleep(1)  # Optional sleep to prevent overwhelming the system
-                                    success = True  # Mark success if no exception occurs
-
-                                except Exception as e:
-                                    retries += 1
-                                    print(f"Retrying {retries}/{max_retries}...")
-                                    if retries == max_retries:
-                                        print(f"Failed to process chunk after {max_retries} attempts. Moving to next.")
-                                        break  # Move on to the next chunk after max retries
-
-        except Exception as e:
-            logger.error(f"Error updating file with chunks: {e}")
-            raise
-        finally:
-            self.release_connection(connection)
-
-    def get_file_text(self, user_id, file_name):
+    def update_file_with_extract(self, user_id, file_name, extract):
         connection = self.get_connection()
         try:
             with connection:
@@ -640,182 +582,55 @@ class DocSynthStore:
 
                     file_id = cursor.fetchone()[0]
 
-                    # Fetch all pages associated with the file ID
+                    # Update the file's extract field
                     cursor.execute('''
-                        SELECT data FROM pages
-                        WHERE file_id = %s
-                        ORDER BY page_number
+                        UPDATE files
+                        SET extract = %s
+                        WHERE id = %s
+                    ''', (extract, file_id))
+
+        except Exception as e:
+            logger.error(f"Error updating file with extract: {e}")
+            raise
+        finally:
+            self.release_connection(connection)
+
+    def get_file_extract(self, user_id, file_name):
+        connection = self.get_connection()
+        try:
+            with connection:
+                with connection.cursor() as cursor:
+                    # Fetch the file ID
+                    cursor.execute('''
+                        SELECT id FROM files
+                        WHERE user_id = %s AND file_name = %s
+                    ''', (user_id, file_name))
+
+                    file_id = cursor.fetchone()[0]
+
+                    # Fetch the extract directly from the files table
+                    cursor.execute('''
+                        SELECT extract FROM files
+                        WHERE id = %s
                     ''', (file_id,))
 
-                    pages = cursor.fetchall()
+                    extract = cursor.fetchone()[0]
 
-                    # Combine the data from all pages to get the full text of the file
-                    full_text = '\n'.join(page[0] for page in pages)
-
-                    return full_text
+                    return extract
 
         except Exception as e:
-            logger.error(f"Error retrieving file text: {e}")
+            logger.error(f"Error retrieving file extract: {e}")
             raise
         finally:
             self.release_connection(connection)
 
-    def knn_search(self, query, user_id, k=5):
-        query_embedding_vector = get_text_embedding(query)
-
-        connection = self.get_connection()
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute('''
-                    SELECT c.id, c.page_id, c.chunk, c.embedding_vector
-                    FROM chunks c
-                    JOIN pages p ON c.page_id = p.id
-                    JOIN files f ON p.file_id = f.id
-                    WHERE f.user_id = %s
-                ''', (user_id,))
-
-                results = cursor.fetchall()
-
-                if not results:
-                    return []
-
-                embedding_similarities = []
-                for result in results:
-                    chunk_id, page_id, chunk, embedding_vector_blob = result
-                    embedding_vector = pickle.loads(embedding_vector_blob)
-
-                    # Calculate similarity for embeddings
-                    embedding_similarity = 1 - cosine(query_embedding_vector, embedding_vector)
-                    embedding_similarities.append((chunk_id, page_id, chunk, embedding_similarity))
-
-                # Sort by similarity (highest to lowest)
-                embedding_similarities.sort(key=lambda x: x[3], reverse=True)
-
-                # Get top-k results
-                top_k_embeddings = embedding_similarities[:k]
-
-                return top_k_embeddings
-        except Exception as e:
-            logger.error(f"Error performing KNN search: {e}")
-            raise
-        finally:
-            self.release_connection(connection)
-
-    def tfidf_search(self, query, user_id, k=5):
-        # Retrieve documents and their text from the database
-        connection = self.get_connection()
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute('''
-                    SELECT c.id, c.page_id, c.chunk
-                    FROM chunks c
-                    JOIN pages p ON c.page_id = p.id
-                    JOIN files f ON p.file_id = f.id
-                    WHERE f.user_id = %s
-                ''', (user_id,))
-
-                results = cursor.fetchall()
-
-                if not results:
-                    return []
-
-                # Extract chunks of text for TF-IDF vectorization
-                chunks = [result[2] for result in results]
-
-                # Compute TF-IDF vectors for the documents
-                tfidf_matrix = self.get_tfidf_vectors(chunks)
-
-                # Compute TF-IDF vector for the query
-                query_vector = self.vectorizer.transform([query])
-
-                # Compute cosine similarities between query and documents
-                similarities = cosine_similarity(query_vector, tfidf_matrix).flatten()
-
-                # Combine results with their similarities
-                chunk_similarities = [(results[i][0], results[i][1], results[i][2], similarities[i]) for i in range(len(results))]
-
-                # Sort by similarity (highest to lowest)
-                chunk_similarities.sort(key=lambda x: x[3], reverse=True)
-
-                # Get top-k results
-                top_k_similarities = chunk_similarities[:k]
-
-                return top_k_similarities
-        except Exception as e:
-            logger.error(f"Error performing TF-IDF search: {e}")
-            raise
-        finally:
-            self.release_connection(connection)
-
-    def hybrid_search(self, query, user_id, k=5):
-        # Perform KNN search
-        knn_results = self.knn_search(query, user_id, k)
-        knn_results = {(result[0], result[1]): (result[2], result[3], 'knn') for result in knn_results}
-
-        # Perform TF-IDF search
-        tfidf_results = self.tfidf_search(query, user_id, k)
-        tfidf_results = {(result[0], result[1]): (result[2], result[3], 'tfidf') for result in tfidf_results}
-
-        # Combine and deduplicate results
-        combined_results = {}
-        for result_dict in [knn_results, tfidf_results]:
-            for key, value in result_dict.items():
-                if key not in combined_results:
-                    combined_results[key] = value
-                else:
-                    # Merge scores from different methods if needed
-                    combined_results[key] = (
-                        combined_results[key][0],
-                        max(combined_results[key][1], value[1]),
-                        combined_results[key][2]
-                    )
-
-        # Sort by the highest similarity score
-        sorted_results = sorted(combined_results.items(), key=lambda x: x[1][1], reverse=True)
-
-        # Get top-k results
-        top_k_results = sorted_results[:k]
-
-        # Fetch page data for combined results
-        final_results = []
-        connection = self.get_connection()
-        try:
-            with connection.cursor() as cursor:
-                for (chunk_id, page_id), (chunk_text, similarity, source) in top_k_results:
-                    cursor.execute('''
-                        SELECT p.file_id, p.page_number, p.data, f.file_url
-                        FROM pages p
-                        JOIN files f ON p.file_id = f.id
-                        WHERE p.id = %s
-                    ''', (page_id,))
-                    page_data = cursor.fetchone()
-                    if page_data:
-                        file_id, page_number, data, file_url = page_data
-                        final_results.append({
-                            "chunk_id": chunk_id,
-                            "page_id": page_id,
-                            "chunk": chunk_text,
-                            "file_id": file_id,
-                            "page_number": page_number,
-                            "data": data,
-                            "similarity": similarity,
-                            "file_url": file_url,
-                            "source": source
-                        })
-        except Exception as e:
-            logger.error(f"Error performing hybrid search: {e}")
-            raise
-        finally:
-            self.release_connection(connection)
-
-        return final_results
 
     def delete_file_entry(self, user_id, file_id):
         connection = self.get_connection()
         try:
             with connection:
                 with connection.cursor() as cursor:
-                    # Fetch the file_name and vector_doc_id before deleting the entry
+                    # Fetch the file_name before deleting the entry
                     cursor.execute('''
                         SELECT file_name, id FROM files
                         WHERE user_id = %s AND id = %s
@@ -826,21 +641,7 @@ class DocSynthStore:
                     if result:
                         file_name, file_id = result
 
-                        # First, delete all chunks associated with the pages of the file
-                        cursor.execute('''
-                            DELETE FROM chunks
-                            WHERE page_id IN (
-                                SELECT id FROM pages WHERE file_id = %s
-                            )
-                        ''', (file_id,))
-
-                        # Then, delete all pages associated with the file
-                        cursor.execute('''
-                            DELETE FROM pages
-                            WHERE file_id = %s
-                        ''', (file_id,))
-
-                        # Then delete the file entry
+                        # Simply delete the file entry now, as there are no chunks
                         cursor.execute('''
                             DELETE FROM files
                             WHERE user_id = %s AND id = %s

@@ -3,10 +3,11 @@ from flask_cors import CORS
 from postgresql_store import DocSynthStore
 from dotenv import load_dotenv
 from celery_worker import celery_app  # Import here to avoid circular import
-import os
 from firebase_setup import initialize_firebase
-from redis import StrictRedis
+from redis import StrictRedis, ConnectionPool  # Added connection pooling
+import os
 
+# Load environment variables
 load_dotenv()
 
 def create_app():
@@ -19,34 +20,39 @@ def create_app():
     CORS(app, supports_credentials=True)
 
     # Database configuration
-    db_name = os.getenv("DATABASE_NAME")
-    db_user = os.getenv("DATABASE_USER")
-    db_pwd = os.getenv("DATABASE_PASSWORD")
-    db_host = os.getenv("DATABASE_HOST")
-    db_port = os.getenv("DATABASE_PORT")
-
     database_config = {
-        'dbname': db_name,
-        'user': db_user,
-        'password': db_pwd,
-        'host': db_host,
-        'port': db_port
+        'dbname': os.getenv("DATABASE_NAME"),
+        'user': os.getenv("DATABASE_USER"),
+        'password': os.getenv("DATABASE_PASSWORD"),
+        'host': os.getenv("DATABASE_HOST"),
+        'port': os.getenv("DATABASE_PORT"),
     }
-
-    store = DocSynthStore(database_config) 
+    store = DocSynthStore(database_config)
     app.store = store
 
-    # Celery configuration
+    # Redis Configuration with Connection Pooling
     redis_username = os.getenv('REDIS_USERNAME')
     redis_pwd = os.getenv('REDIS_PASSWORD')
-    redis_host = os.getenv("REDIS_HOST")
-    redis_port = os.getenv("REDIS_PORT")
+    redis_host = os.getenv('REDIS_HOST')
+    redis_port = os.getenv('REDIS_PORT')
 
+    # Redis connection pool for Celery
+    redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
+    pool = ConnectionPool.from_url(redis_url, max_connections=10)  # Set a max connection pool
+
+    redis_client = StrictRedis(connection_pool=pool)
+    app.redis_client = redis_client  # Make Redis available in your app
+
+    # Celery configuration
     app.config.update(
-    CELERY_BROKER_URL=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED',
-    CELERY_RESULT_BACKEND=f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_REQUIRED',
-   )
-
+        CELERY_BROKER_URL=redis_url,
+        CELERY_RESULT_BACKEND=redis_url,
+        CELERY_BROKER_TRANSPORT_OPTIONS={
+            'visibility_timeout': 3600,  # 1 hour timeout
+            'socket_timeout': 30,
+            'socket_connect_timeout': 10,
+        },
+    )
     celery_app.conf.update(app.config)
 
     # Register Blueprints
@@ -56,13 +62,11 @@ def create_app():
     from routes.files import files_bp
     from routes.subscriptions import subscriptions_bp
 
-
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
     app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
-
 
     @app.route('/')
     def serve_react_app():
@@ -74,15 +78,21 @@ def create_app():
 
     return app
 
-  
-
 def create_celery_app(app=None):
     app = app or create_app()
     celery_app.conf.update(app.config)
-    celery_app.conf.task_time_limit=300,  # 5 minutes
-    celery_app.conf.task_soft_time_limit=280,  # 4 minutes and 40 seconds
-    celery_app.conf.worker_prefetch_multiplier=1,
-    celery_app.broker_connection = True,
-    celery_app.autodiscover_tasks(['routes.files'])  # Discover tasks
+
+    # Celery task configuration
+    celery_app.conf.update(
+        task_time_limit=300,  # 5 minutes
+        task_soft_time_limit=280,  # 4 minutes and 40 seconds
+        worker_prefetch_multiplier=1,  # Ensure tasks are not prefetched
+    )
+
+    # Ensure broker connection is always valid
+    celery_app.broker_connection_retry = True
+    celery_app.broker_connection_max_retries = None  # Infinite retries
+
+    celery_app.autodiscover_tasks(['routes.files'])  # Discover tasks in specified module
 
     return celery_app
