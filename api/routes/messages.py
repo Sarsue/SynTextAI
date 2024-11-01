@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
 from web_link_handler import process_newsletter_link
 from query_processor import process, summarize
-from llm_service import process_content  
+from llm_service import syntext  
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
 
 
@@ -38,17 +38,8 @@ def create_message():
     message_list.append(user_request)
    
     # context is information retrieval or summarize with language detected
-    prompt = f"""
-        This is a conversation between a user and an assistant. Use the context from the history and the latest message to provide a thoughtful response.
 
-        ### User's Message:
-        {message}
-
-        ### Current Conversation History:
-        {formatted_history}
-        """
-
-    response = process_content(prompt)
+    response = syntext(content = message, last_output= formatted_history, intent= 'chat', language='English')  # Generate interpretation
     bot_response = store.add_message(
             content=response, sender='bot', user_id=id, chat_history_id=history_id)
 

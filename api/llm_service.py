@@ -8,90 +8,6 @@ from mistralai.client import MistralClient
 from mistralai.models import chat_completion
 from requests.exceptions import Timeout, RequestException
 import requests
-
-topics = [
-    'Physical Health and Nutrition',
-    'Mental Health and Stress Management',
-    'Emotional Well-Being and Relationships',
-    'Spirituality and Inner Harmony',
-    'Personal Growth and Self-Actualization',
-    'Work-Life Balance and Fulfillment',
-    'Community and Social Connections'
-]
-
-topics_list = "\n".join(f"- {topic}" for topic in topics)
-
-# Updated sources linked to the new topics
-topic_sources = {
-    "Physical Health and Nutrition": {
-        "spiritual": [
-            'Bible', 'Quran', 'Ayurvedic texts', 'Tao Te Ching'
-        ],
-        "secular": [
-            'The Blue Zones: Lessons for Living Longer From the People Who’ve Lived the Longest', 
-            'How Not to Die by Michael Greger', 
-            'The Omnivore’s Dilemma by Michael Pollan'
-        ]
-    },
-    "Mental Health and Stress Management": {
-        "spiritual": [
-            'The Power of Now by Eckhart Tolle', 
-            'The Tao of Pooh by Benjamin Hoff'
-        ],
-        "secular": [
-            'Mindfulness for Beginners by Jon Kabat-Zinn', 
-            'Feeling Good: The New Mood Therapy by David D. Burns'
-        ]
-    },
-    "Emotional Well-Being and Relationships": {
-        "spiritual": [
-            'The Bible', 'The Quran', 'The Bhagavad Gita'
-        ],
-        "secular": [
-            'The 5 Love Languages by Gary Chapman', 
-            'Attached by Amir Levine and Rachel Heller', 
-            'Emotional Intelligence by Daniel Goleman'
-        ]
-    },
-    "Spirituality and Inner Harmony": {
-        "spiritual": [
-            'Tao Te Ching', 'Bhagavad Gita', 'The Upanishads'
-        ],
-        "secular": [
-            'The Four Agreements by Don Miguel Ruiz', 
-            'The Gifts of Imperfection by Brené Brown'
-        ]
-    },
-    "Personal Growth and Self-Actualization": {
-        "spiritual": [
-            'Man’s Search for Meaning by Viktor Frankl', 
-            'The Alchemist by Paulo Coelho'
-        ],
-        "secular": [
-            'Atomic Habits by James Clear', 
-            'Mindset: The New Psychology of Success by Carol S. Dweck'
-        ]
-    },
-    "Work-Life Balance and Fulfillment": {
-        "spiritual": [
-            'The Art of Happiness by the Dalai Lama', 
-            'The Tao of Pooh by Benjamin Hoff'
-        ],
-        "secular": [
-            'The 7 Habits of Highly Effective People by Stephen R. Covey', 
-            'Essentialism: The Disciplined Pursuit of Less by Greg McKeown'
-        ]
-    },
-    "Community and Social Connections": {
-        "spiritual": [
-            'The Bible', 'The Quran', 'The Art of Loving by Erich Fromm'
-        ],
-        "secular": [
-            'Bowling Alone by Robert D. Putnam', 
-            'The Power of Habit by Charles Duhigg'
-        ]
-    }
-}
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
@@ -100,7 +16,7 @@ mistral_key = os.getenv("MISTRAL_API_KEY")
 mistral_client = MistralClient(api_key=mistral_key)
 
 # Constants
-LLM_CONTEXT_WINDOW = 1024
+LLM_CONTEXT_WINDOW = 8192
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds
 TIMEOUT_SECONDS = 10  # Set timeout for network calls
@@ -120,9 +36,6 @@ def get_text_embedding(input):
     return embeddings_batch_response.data[0].embedding
 
 
-def get_sources(topic, belief_system):
-    """Retrieve relevant sources for a given topic and belief system."""
-    return topic_sources.get(topic, {}).get(belief_system, [])
 
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
     """Split text into manageable chunks."""
@@ -131,7 +44,7 @@ def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
 
 def prompt_llm(prompt):
     """Generate a chat completion using the Mistral API."""
-    model = "mistral-large-latest"
+    model = "mistral-small-latest"
     messages = [chat_completion.ChatMessage(role="user", content=prompt)]
     response = mistral_client.chat(model=model, messages=messages)
     return response.choices[0].message.content.strip()
@@ -165,62 +78,79 @@ def extract_image_text(base64_image):
         return ""
 
 
-def classify_content(content_chunk):
-    """Classify content using the LLM."""
-    classification_prompt = f"""
-    Given the following content:
+def token_count(text):
+    """Estimate the number of tokens in the text."""
+    # This is a simple approximation; you may need a more accurate tokenizer depending on your LLM.
+    return len(text.split())
 
-    {content_chunk[:2000]}  # Trim to avoid overflow
-
-    ### Topics:
-    {', '.join(topics_list)}
-
-    Please classify the content under one of the topics above. 
-    If the content doesn’t align with any topic, respond with "out of scope."
-    """
-    return prompt_llm(classification_prompt)
-
-def generate_interpretation(content_chunk, topic, sources_list, belief_system):
-    """Generate interpretation of a content chunk."""
-    prompt = f"""
-    The content is classified under the topic: **{topic}**.
-
-    Provide a thoughtful interpretation using **2-4 relevant sources** from the belief system: {belief_system}.
-
-    ### Content Chunk:
-    {content_chunk}
-
-    ### Relevant Sources:
-    {', '.join(sources_list)}
-
-    End with uplifting advice for the reader.
-    """
-    return prompt_llm(prompt)
-
-def process_content(content, belief_system='agnostic'):
-    """Main function to process files."""
-    # Step 1: Extract content (e.g., from PDF or image)
+def truncate_for_context(last_output, new_content, max_tokens):
+    """Truncate the last output or new content if necessary to fit within the context window."""
+    total_tokens = token_count(last_output) + token_count(new_content)
     
-    # Step 2: Chunk the content for processing
-    content_chunks = chunk_text(content)
+    # If the total exceeds the max tokens, truncate the last output
+    while total_tokens > max_tokens:
+        last_output = " ".join(last_output.split()[1:])  # Remove the first word
+        total_tokens = token_count(last_output) + token_count(new_content)
 
-    # Step 3: Classify the first chunk to determine its topic
-    topic = classify_content(content_chunks[0], topics_list)
-    logging.info(f"Classified Topic: {topic}")
+    return last_output
 
-    if topic == "out of scope":
-        return "The content is not relevant to the topics covered."
+def syntext(content, last_output, intent, language, education_level='dropout'):
+    """
+    Generate either an explanation or translation for given content.
+    
+    Parameters:
+    - content (str): Text to be explained or translated.
+    - last_output (str): Previous output from the LLM for context.
+    - intent (str): Either 'explain' or 'translate'.
+    - language (str): Language for the output (English, French, German, Spanish, Chinese, and Japanese).
+    - education_level (str): Education level (High school dropout, High school graduate, University, or Master's).
+    
+    Returns:
+    - str: Generated output from the LLM.
+    
+    Raises:
+    - ValueError: If any parameter is invalid.
+    """
 
-    # Step 4: Fetch relevant sources
-    sources_list = get_sources(topic, belief_system)
+    # Valid options
+    valid_intents = {'educate', 'translate', 'chat'}
+    valid_languages = {'English', 'French', 'German', 'Spanish', 'Chinese', 'Japanese'}
+    valid_education_levels = {'dropout', 'high school graduate', 'university', 'masters'}
 
-    # Step 5: Generate an interpretation for each chunk
-    interpretations = []
-    for chunk in content_chunks:
-        interpretation = generate_interpretation(chunk, topic, sources_list, belief_system)
-        interpretations.append(interpretation)
+    # Guard clauses for input validation
+    if intent.lower() not in valid_intents:
+        raise ValueError(f"Invalid intent: '{intent}'. Must be one of {valid_intents}.")
+    
+    if language.capitalize() not in valid_languages:
+        raise ValueError(f"Invalid language: '{language}'. Must be one of {valid_languages}.")
+    
+    if education_level.lower() not in valid_education_levels:
+        raise ValueError(f"Invalid education level: '{education_level}'. Must be one of {valid_education_levels}.")
 
-    return "\n\n".join(interpretations)
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Content must be a non-empty string.")
+    
+    # Standardizing inputs for prompt consistency
+    intent = intent.lower()
+    language = language.capitalize()
+    education_level = education_level.lower()
 
+    # Truncate last_output if necessary to fit the context window
+    last_output = truncate_for_context(last_output, content, LLM_CONTEXT_WINDOW)
 
-# ---- Example Usage ----
+    # Create the prompt based on standardized inputs and last output for context
+    prompt = f"""
+    ### Intent: {intent.capitalize()}
+
+    To maintain a smooth, conversational flow, please reference the previous output provided below:
+    {last_output}
+
+    Now, please {intent} the following content in {language}, tailored to a comprehension level of a {education_level}.
+
+    #### Content:
+    {content}
+
+    Ensure the response aligns with the tone and style of the previous output to make the conversation seamless for the reader at this education level.
+    """
+
+    return prompt_llm(prompt)

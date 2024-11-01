@@ -5,14 +5,16 @@ from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app
 from postgresql_store import DocSynthStore
-from llm_service import prompt_llm,chunk_text,classify_content,get_sources
+from llm_service import syntext, chunk_text
 from utils import get_user_id
 from doc_processor import process_file
-import time
-from video_task import process_video_task  # Import your video task
+import io
+import numpy as np
+import ffmpeg
+import whisper
 
 video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
-
+model = whisper.load_model("base")
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 
@@ -92,80 +94,101 @@ def delete_from_gcs(user_gc_id, filename):
         logging.info(f"Deleted {filename} from GCS.")
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
+@celery_app.task
+def extract_audio_to_memory_chunked(video_data, chunk_size=1):
+    logging.info("Extracting audio in chunks...")
+    output_chunks = []
+    try:
+        process = (
+            ffmpeg
+            .input('pipe:0', format='mp4')
+            .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
+            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True, timeout=60)
+        )
+        process.stdin.write(video_data)
+        process.stdin.close()
+        while True:
+            chunk = process.stdout.read(chunk_size * 1024 * 1024)
+            if not chunk:
+                break
+            output_chunks.append(io.BytesIO(chunk))
+        return_code = process.wait()
+        if return_code != 0:
+            logging.error(f"FFmpeg error: {return_code}")
+            return []
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return []
+    return output_chunks
 
+@celery_app.task
+def transcribe_audio_chunked(audio_stream):
+    logging.info("Transcribing audio in chunks...")
+    full_transcription = ""
+    try:
+        for audio_chunk in audio_stream:
+            audio_bytes = audio_chunk.getvalue()
+            audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            if audio_array.ndim != 1 or audio_array.size == 0:
+                logging.warning("Skipping empty audio chunk.")
+                continue
+            result = model.transcribe(audio_array, fp16=False)
+            full_transcription += result["text"] + " "
+        return full_transcription.strip()
+    except Exception as e:
+        logging.error(f"Transcription error: {e}")
+        return None
+
+@celery_app.task
+def process_video_task(video_data):
+    logging.info("Processing video via Celery task...")
+    audio_stream = extract_audio_to_memory_chunked(video_data)
+    transcription = transcribe_audio_chunked(audio_stream)
+    if transcription:
+        logging.info("Video transcription completed successfully.")
+        return transcription
+    else:
+        logging.error("Failed to transcribe video.")
+        return None
 
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
     logging.info(f"Starting to process file: {filename} for user_id: {user_id}")
-
     try:
         if isinstance(filename, list):
-            filename = filename[0]  # Handle list case
-
-        logging.info(f"Downloading file: {filename} from GCS for user_gc_id: {user_gc_id}")
+            filename = filename[0]
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
-            logging.error(f"File data not found for: {filename}. Raising FileNotFoundError.")
             raise FileNotFoundError(f"{filename} not found.")
-
+        
         _, ext = os.path.splitext(filename)
-        ext = ext.lstrip('.').lower()  # Normalize extension
-        logging.info(f"Processing file with extension: {ext}")
-
+        ext = ext.lstrip('.').lower()
+        
+        # Use a separate task to process the video
         if ext in video_extensions:
-            logging.info(f"Detected video file: {filename}. Delegating to video task.")
-            result = process_video_task(video_data=file_data)  # Call the video task
-            if not result:
-                logging.error(f"Video processing failed for: {filename}")
-                raise ValueError(f"Failed to process video: {filename}")
+            # Enqueue the video processing task
+            video_task = process_video_task.apply_async(args=(file_data,))
+            # Instead of waiting for the result, return the task ID or log that it's processing
+            logging.info(f"Video processing task for {filename} has been enqueued with task ID: {video_task.id}")
+            return {'task_id': video_task.id, 'status': 'processing'}
+
         else:
-            result = process_file(file_data, ext)  # Handle other files
+            result = process_file(file_data, ext)
 
-        logging.debug(f"File processed, result length: {len(result)}")
-
-        # Update the database with extracted content
+        # Store the result in the database
         store.update_file_with_extract(user_id, filename, result)
-        chunks = chunk_text(result)
         interpretations = []
-
-        topic = classify_content(result)  # Classify content topic
-        logging.info(f"Classified content under the topic: {topic}")
-
-        sources_list = get_sources(topic, belief_system='agnostic')
-        logging.info(f"Retrieved sources for the topic: {sources_list}")
-
-        for content_chunk in chunks:
-            try:
-                prompt = f"""
-                The content is classified under the topic: **{topic}**.
-
-                Provide a thoughtful interpretation using **2-4 relevant sources** from the belief system: 'agnostic'.
-
-                ### Content Chunk:
-                {content_chunk}
-
-                ### Relevant Sources:
-                {', '.join(sources_list)}
-
-                End with uplifting advice for the reader.
-                """
-                
-                logging.debug(f"Prompting LLM with chunk: {content_chunk}")
-                interpretation = prompt_llm(prompt)  # Generate interpretation
-                interpretations.append(interpretation)
-                time.sleep(1)  # Avoid rate limits or overload
-            except Exception as chunk_error:
-                logging.error(f"Error processing chunk: {chunk_error}")
-
-        # Join interpretations and store the result
+        last_output = ''
+        for content_chunk in chunk_text(result):
+            interpretation = syntext(content=content_chunk, last_output=last_output,  intent='educate', language='English')
+            interpretations.append(interpretation)
+            last_output = interpretation
         result_message = "\n\n".join(interpretations)
-        logging.info(f"Storing result for file: {filename}")
         store.add_message(content=result_message, sender='bot', user_id=user_id)
-
         logging.info(f"Processed and stored '{filename}' successfully.")
-
     except Exception as e:
         logging.error(f"Error processing {filename}: {e}")
+        return {'error': str(e)}
 
 
 @files_bp.route('', methods=['POST'])

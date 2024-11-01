@@ -84,8 +84,8 @@ def create_celery_app(app=None):
 
     # Celery task configuration
     celery_app.conf.update(
-        task_time_limit=300,  # 5 minutes
-        task_soft_time_limit=280,  # 4 minutes and 40 seconds
+        task_time_limit=900,  
+        task_soft_time_limit=600,  
         worker_prefetch_multiplier=1,  # Ensure tasks are not prefetched
     )
 
