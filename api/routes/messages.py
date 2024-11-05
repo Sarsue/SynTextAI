@@ -16,33 +16,39 @@ def get_id_helper(store, success, user_info):
     id = store.get_user_id_from_email(email)
     return id
 
-
 @messages_bp.route('', methods=['POST'])
 def create_message():
     store = current_app.store
     message_list = []
     message = request.args.get('message')
+    language = request.args.get('language', 'English')  # Default to 'English' if not provided
+    comprehension_level = request.args.get('comprehensionLevel', 'dropout')  # Set a default value if desired
     token = request.headers.get('Authorization')
+    
     success, user_info = get_user_id(token)
     id = get_id_helper(store, success, user_info)
     history_id = int(request.args.get('history-id'))
 
-    # process context first
-    # use history and current query
-    # what is it looking for 
+    # Process context first using history and current query
     formatted_history = store.format_user_chat_history(history_id, id)
 
+    # Save the user message to the history
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
-
     message_list.append(user_request)
-   
-    # context is information retrieval or summarize with language detected
 
-    response = syntext(content = message, last_output= formatted_history, intent= 'chat', language='English')  # Generate interpretation
+    # Generate the response with additional parameters for language and comprehension level
+    response = syntext(
+        content=message,
+        last_output=formatted_history,
+        intent='chat',
+        language=language,
+        comprehension_level=comprehension_level
+    )
+
+    # Save bot response to the history
     bot_response = store.add_message(
-            content=response, sender='bot', user_id=id, chat_history_id=history_id)
-
+        content=response, sender='bot', user_id=id, chat_history_id=history_id)
     message_list.append(bot_response)
-    return message_list
 
+    return message_list

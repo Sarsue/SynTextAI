@@ -2,9 +2,8 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 // Define the type for UserSettings
 interface UserSettings {
-    gender: string;
-    explanationLevel: string; // Added explanationLevel
-    numberOfAnswers: number;   // Added numberOfAnswers
+    comprehensionLevel: string; // Added comprehensionLevel
+    selectedLanguage: string;    // Added selectedLanguage
 }
 
 // Define the type for UserContext
@@ -22,9 +21,8 @@ const UserContext = createContext<UserContextType>({
     toggleDarkMode: () => { },
     setDarkMode: () => { }, // Provide a default empty function
     userSettings: {
-        gender: '',
-        explanationLevel: '', // Default explanationLevel
-        numberOfAnswers: 1,   // Default numberOfAnswers
+        comprehensionLevel: '', // Default comprehensionLevel
+        selectedLanguage: '',    // Default selectedLanguage
     },
     setUserSettings: () => { }, // Provide a default empty function
 });
@@ -36,9 +34,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Define state for userSettings
     const [userSettings, setUserSettings] = useState<UserSettings>({
-        gender: '',
-        explanationLevel: '', // Initial value for explanationLevel
-        numberOfAnswers: 1,   // Initial value for numberOfAnswers
+        comprehensionLevel: '', // Initial value for comprehensionLevel
+        selectedLanguage: '',    // Initial value for selectedLanguage
     });
 
     // Function to toggle dark mode

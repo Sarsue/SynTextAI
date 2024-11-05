@@ -20,10 +20,22 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
         });
     };
 
+    const isFileSupported = (file: File): boolean => {
+        const supportedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif'];
+        return supportedTypes.includes(file.type);
+    };
+
     const handleAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
-        setAttachedFiles((prevFiles) => [...prevFiles, ...files]);
-        e.target.value = '';
+        const validFiles = files.filter(isFileSupported); // Filter valid files
+
+        if (validFiles.length === 0) {
+            alert('Only PDF and image files (JPG, PNG, GIF) are supported.');
+        } else {
+            setAttachedFiles((prevFiles) => [...prevFiles, ...validFiles]);
+        }
+
+        e.target.value = ''; // Reset input value
     };
 
     const handleRemoveFile = (file: File) => {

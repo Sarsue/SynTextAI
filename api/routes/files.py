@@ -153,7 +153,7 @@ def delete_from_gcs(user_gc_id, filename):
 #         return None
 
 @celery_app.task
-def process_and_store_file(user_id, user_gc_id, filename):
+def process_and_store_file(user_id, user_gc_id, filename, language, comprehension_level):
     logging.info(f"Starting to process file: {filename} for user_id: {user_id}")
     try:
         if isinstance(filename, list):
@@ -181,7 +181,7 @@ def process_and_store_file(user_id, user_gc_id, filename):
         interpretations = []
         last_output = ''
         for content_chunk in chunk_text(result):
-            interpretation = syntext(content=content_chunk, last_output=last_output,  intent='educate', language='English')
+            interpretation = syntext(content=content_chunk, last_output=last_output,  intent='educate', language = language, comprehension_level = comprehension_level)
             interpretations.append(interpretation)
             last_output = interpretation
         result_message = "\n\n".join(interpretations)
@@ -195,6 +195,9 @@ def process_and_store_file(user_id, user_gc_id, filename):
 @files_bp.route('', methods=['POST'])
 def save_file():
     try:
+        language = request.args.get('language', 'English')  # Default to 'English' if not provided
+        comprehension_level = request.args.get('comprehensionLevel', 'dropout')  # Set a default value if desired
+
         user_id, user_gc_id = authenticate_user()
         logging.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_gc_id}")
         
@@ -223,7 +226,7 @@ def save_file():
                 return jsonify({'error': 'Database error'}), 500
 
             # Enqueue the file processing task
-            process_and_store_file.apply_async((user_id, user_gc_id, file.filename))
+            process_and_store_file.apply_async((user_id, user_gc_id, file.filename, language, comprehension_level))
             logging.info(f"Enqueued processing for {file.filename}")
 
         return jsonify({'message': 'File processing queued.'}), 202
