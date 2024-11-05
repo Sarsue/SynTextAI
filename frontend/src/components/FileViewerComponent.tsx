@@ -15,53 +15,56 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     const [pageNumber, setPageNumber] = useState<number>(1); // Default page number
 
     useEffect(() => {
-        const fetchFileContent = async () => {
-            try {
-                const baseUrl = fileUrl.split('?')[0];
-                console.log('Fetching file from:', baseUrl);
+        const fileType = getFileType(fileUrl);
+        if (!fileType) {
+            onError('Unsupported file type');
+            return; // Stop processing if the file type is not supported
+        }
 
-                const response = await fetch(baseUrl, { mode: 'cors' });
-
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const dataUrl = URL.createObjectURL(blob);
-                    setFileContent(dataUrl);
-                    setLoading(false);
-                    // Determine file type based on URL or response headers
-                    const fileType = getFileType(baseUrl);
-                    setFileType(fileType);
-
-                    // Extract page number from URL if provided
-                    const match = fileUrl.match(/[?&]page=(\d+)/);
-                    if (match) {
-                        const pageNum = parseInt(match[1], 10);
-                        setPageNumber(pageNum);
-                    }
-                } else {
-                    throw new Error('Failed to fetch file content');
-                }
-            } catch (error) {
-                onError(error.message);
-                setLoading(false);
-            }
-        };
-
-        fetchFileContent();
+        setFileType(fileType);
+        fetchFileContent(fileUrl, fileType);
     }, [fileUrl, onError]);
+
+    const fetchFileContent = async (url: string, type: string) => {
+        try {
+            const baseUrl = url.split('?')[0];
+            console.log('Fetching file from:', baseUrl);
+
+            const response = await fetch(baseUrl, { mode: 'cors' });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                const dataUrl = URL.createObjectURL(blob);
+                setFileContent(dataUrl);
+                setLoading(false);
+
+                // Extract page number from URL if provided
+                const match = url.match(/[?&]page=(\d+)/);
+                if (match) {
+                    const pageNum = parseInt(match[1], 10);
+                    setPageNumber(pageNum);
+                }
+            } else {
+                throw new Error('Failed to fetch file content');
+            }
+        } catch (error) {
+            onError(error.message);
+            setLoading(false);
+        }
+    };
 
     const getFileType = (fileUrl: string): string | null => {
         const extension = fileUrl.split('.').pop()?.toLowerCase();
         switch (extension) {
             case 'pdf':
                 return 'pdf';
-            case 'mp4':
-                return 'mp4';
-            case 'txt':
-                return 'txt';
-            case 'docx':
-                return 'docx';
+            case 'jpg':
+            case 'jpeg':
+            case 'png':
+            case 'gif':
+                return 'image'; // Handle common image formats
             default:
-                return null;
+                return null; // Unsupported file type
         }
     };
 
@@ -73,14 +76,10 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 return (
                     <embed src={`${fileContent}#page=${pageNumber}`} type="application/pdf" width="100%" height="750px" />
                 );
-            case 'mp4':
-                return <video src={fileContent!} controls width="100%" />;
-            case 'txt':
-                return <pre>{fileContent}</pre>;
-            case 'docx':
-                return <div>Render DOCX here</div>;
+            case 'image':
+                return <img src={fileContent!} alt="File content" style={{ width: '100%', height: 'auto' }} />;
             default:
-                return <div>{fileContent}</div>;
+                return <div>Unsupported file type</div>; // Handle unsupported types
         }
     };
 

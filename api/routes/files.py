@@ -95,62 +95,62 @@ def delete_from_gcs(user_gc_id, filename):
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
 
-@@celery_app.task
-def extract_audio_to_memory_chunked(video_data, chunk_size=1):
-    logging.info("Extracting audio in chunks...")
-    output_chunks = []
-    try:
-        process = (
-            ffmpeg
-            .input('pipe:0', format='mp4')
-            .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)  # Removed timeout argument
-        )
-        process.stdin.write(video_data)
-        process.stdin.close()
-        while True:
-            chunk = process.stdout.read(chunk_size * 1024 * 1024)
-            if not chunk:
-                break
-            output_chunks.append(io.BytesIO(chunk))
-        return_code = process.wait()
-        if return_code != 0:
-            logging.error(f"FFmpeg error: {return_code}")
-            return []
-    except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        return []
-    return output_chunks
+# @celery_app.task
+# def extract_audio_to_memory_chunked(video_data, chunk_size=1):
+#     logging.info("Extracting audio in chunks using ffmpeg-python...")
+#     output_chunks = []
+#     try:
+#         # Process video data and convert to audio in the specified format
+#         audio_stream, _ = (
+#             ffmpeg
+#             .input('pipe:', format='mp4')
+#             .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
+#             .run(input=video_data, capture_stdout=True, capture_stderr=True)
+#         )
 
-@celery_app.task
-def transcribe_audio_chunked(audio_stream):
-    logging.info("Transcribing audio in chunks...")
-    full_transcription = ""
-    try:
-        for audio_chunk in audio_stream:
-            audio_bytes = audio_chunk.getvalue()
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            if audio_array.ndim != 1 or audio_array.size == 0:
-                logging.warning("Skipping empty audio chunk.")
-                continue
-            result = model.transcribe(audio_array, fp16=False)
-            full_transcription += result["text"] + " "
-        return full_transcription.strip()
-    except Exception as e:
-        logging.error(f"Transcription error: {e}")
-        return None
+#         # Read audio in chunks and store in memory
+#         stream = io.BytesIO(audio_stream)
+#         while True:
+#             chunk = stream.read(chunk_size * 1024 * 1024)
+#             if not chunk:
+#                 break
+#             output_chunks.append(io.BytesIO(chunk))
 
-@celery_app.task
-def process_video_task(video_data):
-    logging.info("Processing video via Celery task...")
-    audio_stream = extract_audio_to_memory_chunked(video_data)
-    transcription = transcribe_audio_chunked(audio_stream)
-    if transcription:
-        logging.info("Video transcription completed successfully.")
-        return transcription
-    else:
-        logging.error("Failed to transcribe video.")
-        return None
+#     except ffmpeg.Error as e:
+#         logging.error(f"FFmpeg-python error: {e.stderr.decode()}")
+#         return []
+
+#     return output_chunks
+
+# @celery_app.task
+# def transcribe_audio_chunked(audio_stream):
+#     logging.info("Transcribing audio in chunks...")
+#     full_transcription = ""
+#     try:
+#         for audio_chunk in audio_stream:
+#             audio_bytes = audio_chunk.getvalue()
+#             audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+#             if audio_array.ndim != 1 or audio_array.size == 0:
+#                 logging.warning("Skipping empty audio chunk.")
+#                 continue
+#             result = model.transcribe(audio_array, fp16=False)
+#             full_transcription += result["text"] + " "
+#         return full_transcription.strip()
+#     except Exception as e:
+#         logging.error(f"Transcription error: {e}")
+#         return None
+
+# @celery_app.task
+# def process_video_task(video_data):
+#     logging.info("Processing video via Celery task...")
+#     audio_stream = extract_audio_to_memory_chunked(video_data)
+#     transcription = transcribe_audio_chunked(audio_stream)
+#     if transcription:
+#         logging.info("Video transcription completed successfully.")
+#         return transcription
+#     else:
+#         logging.error("Failed to transcribe video.")
+#         return None
 
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename):
@@ -166,15 +166,15 @@ def process_and_store_file(user_id, user_gc_id, filename):
         ext = ext.lstrip('.').lower()
         
         # Use a separate task to process the video
-        if ext in video_extensions:
-            # Enqueue the video processing task
-            video_task = process_video_task.apply_async(args=(file_data,))
-            # Instead of waiting for the result, return the task ID or log that it's processing
-            logging.info(f"Video processing task for {filename} has been enqueued with task ID: {video_task.id}")
-            return {'task_id': video_task.id, 'status': 'processing'}
+        # if ext in video_extensions:
+        #     # Enqueue the video processing task
+        #     video_task = process_video_task.apply_async(args=(file_data,))
+        #     # Instead of waiting for the result, return the task ID or log that it's processing
+        #     logging.info(f"Video processing task for {filename} has been enqueued with task ID: {video_task.id}")
+        #     return {'task_id': video_task.id, 'status': 'processing'}
 
-        else:
-            result = process_file(file_data, ext)
+        # else:
+        result = process_file(file_data, ext)
 
         # Store the result in the database
         store.update_file_with_extract(user_id, filename, result)
