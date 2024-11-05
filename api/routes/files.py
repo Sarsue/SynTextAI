@@ -94,7 +94,8 @@ def delete_from_gcs(user_gc_id, filename):
         logging.info(f"Deleted {filename} from GCS.")
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
-@celery_app.task
+
+@@celery_app.task
 def extract_audio_to_memory_chunked(video_data, chunk_size=1):
     logging.info("Extracting audio in chunks...")
     output_chunks = []
@@ -103,7 +104,7 @@ def extract_audio_to_memory_chunked(video_data, chunk_size=1):
             ffmpeg
             .input('pipe:0', format='mp4')
             .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True, timeout=60)
+            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)  # Removed timeout argument
         )
         process.stdin.write(video_data)
         process.stdin.close()
