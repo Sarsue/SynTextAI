@@ -1,5 +1,5 @@
 # Path to the SQLite database to replicate
-database: /app/api/docsynth.db
+database: app/db/docsynth.db
 
 # Destination GCS path for backup
 destination: gcs://docsynth-fbb02.appspot.com/backup/

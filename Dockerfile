@@ -31,8 +31,11 @@ WORKDIR /app
 # Copy only the build artifacts from the first stage (frontend build step), not node_modules
 COPY --from=build-step /app/build ./build
 
-# Copy backend files
+# Copy backend files (api directory)
 COPY api/ ./api/
+
+# Copy the db folder into the container (make sure db is in the same directory as the Dockerfile)
+COPY db/ /app/db/
 
 # Set the GOOGLE_APPLICATION_CREDENTIALS environment variable
 # This points to the credentials.json file inside the 'api' directory in the container
@@ -56,3 +59,4 @@ COPY litestream.yml /etc/litestream.yml
 
 # Start Supervisor to run all processes
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+
