@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from google.cloud import storage
 from redis.exceptions import RedisError
 from celery_worker import celery_app
-from postgresql_store import DocSynthStore
+from sqlite_store import DocSynthStore
 from llm_service import syntext, chunk_text
 from utils import get_user_id
 from doc_processor import process_file
@@ -21,15 +21,24 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(me
 bucket_name = 'docsynth-fbb02.appspot.com'
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
 
-# Database configuration
+# # Database configuration
+# database_config = {
+#     'dbname': os.getenv("DATABASE_NAME"),
+#     'user': os.getenv("DATABASE_USER"),
+#     'password': os.getenv("DATABASE_PASSWORD"),
+#     'host': os.getenv("DATABASE_HOST"),
+#     'port': os.getenv("DATABASE_PORT")
+# }
+# store = DocSynthStore(database_config)
+# Database configuration for SQLite
 database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT")
+        'dbname': os.getenv("DATABASE_PATH") #'/app/api/database.sqlite',  # Path to the SQLite database in the container
 }
-store = DocSynthStore(database_config)
+
+
+# Instantiate your store with the SQLite config
+store = DocSynthStore(os.getenv("DATABASE_PATH") )
+
 
 # Helper function to authenticate user and retrieve user ID
 def authenticate_user():

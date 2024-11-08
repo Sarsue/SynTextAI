@@ -1,0 +1,13 @@
+# Path to the SQLite database to replicate
+database: docsynth.db
+
+# Destination GCS path for backup
+destination: gcs://docsynth-fbb02.appspot.com/backup/
+
+# Optional: Periodic snapshot (every hour)
+snapshot-interval: 1h
+
+# Optional: Continuous replication settings
+replication:
+  - type: gcs
+    url: gcs://docsynth-fbb02.appspot.com/backup/

@@ -96,38 +96,24 @@ def truncate_for_context(last_output, new_content, max_tokens):
 
 def syntext(content, last_output, intent, language, comprehension_level):
     """
-    Generate either an explanation or translation for given content,
-    ensuring seamless integration with the previous output.
-
-    Parameters:
-    - content (str): Text to be explained or translated.
-    - last_output (str): Previous output from the LLM for context.
-    - intent (str): Either 'explain' or 'translate'.
-    - language (str): Language for the output (e.g., English, French).
-    - comprehension_level (str): Education level (e.g., dropout, graduate).
-
-    Returns:
-    - str: Generated output from the LLM.
+    Process a single chunk of text, ensuring continuity with the last response.
     """
-    
-    # Validation code here (omitted for brevity)
-
-    # Truncate last_output if necessary
+    # Truncate last output to fit within context window
     last_output = truncate_for_context(last_output, content, LLM_CONTEXT_WINDOW)
-
-    # Create the prompt with emphasis on continuity
+    
+    # Create a coherent prompt
     prompt = f"""
     ### Intent: {intent.capitalize()}
-
-    Please consider the previous response for context:
+    Previous Response Context:
     {last_output}
 
-    Now, based on the above response, please {intent} the following content in {language}, tailored to a comprehension level of a {comprehension_level}.
+    Now, based on the previous response, please {intent} the following content in {language}, 
+    tailored to a comprehension level of a {comprehension_level}.
 
-    #### New Content:
+    ### New Content:
     {content}
 
-    Ensure that the response flows naturally from the previous output, maintaining a similar tone and style.
+    Maintain a similar tone and ensure continuity with the last output.
     """
 
     return prompt_llm(prompt)

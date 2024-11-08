@@ -1,6 +1,6 @@
 from flask import Flask, send_from_directory
 from flask_cors import CORS
-from postgresql_store import DocSynthStore
+from sqlite_store import DocSynthStore
 from dotenv import load_dotenv
 from celery_worker import celery_app  # Import here to avoid circular import
 from firebase_setup import initialize_firebase
@@ -20,14 +20,19 @@ def create_app():
     CORS(app, supports_credentials=True)
 
     # Database configuration
-    database_config = {
-        'dbname': os.getenv("DATABASE_NAME"),
-        'user': os.getenv("DATABASE_USER"),
-        'password': os.getenv("DATABASE_PASSWORD"),
-        'host': os.getenv("DATABASE_HOST"),
-        'port': os.getenv("DATABASE_PORT"),
-    }
-    store = DocSynthStore(database_config)
+    # database_config = {
+    #     'dbname': os.getenv("DATABASE_NAME"),
+    #     'user': os.getenv("DATABASE_USER"),
+    #     'password': os.getenv("DATABASE_PASSWORD"),
+    #     'host': os.getenv("DATABASE_HOST"),
+    #     'port': os.getenv("DATABASE_PORT"),
+    # }
+    # store = DocSynthStore(database_config)
+    # Database configuration for SQLite
+
+    # Instantiate your store with the SQLite config
+    store = DocSynthStore(os.getenv("DATABASE_PATH"))
+
     app.store = store
 
     # Redis Configuration with Connection Pooling
