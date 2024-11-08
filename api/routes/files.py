@@ -31,9 +31,6 @@ files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
 # }
 # store = DocSynthStore(database_config)
 # Database configuration for SQLite
-database_config = {
-        'dbname': os.getenv("DATABASE_PATH") #'/app/api/database.sqlite',  # Path to the SQLite database in the container
-}
 
 
 # Instantiate your store with the SQLite config
