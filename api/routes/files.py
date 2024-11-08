@@ -13,8 +13,8 @@ import numpy as np
 import ffmpeg
 import whisper
 
-video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
-model = whisper.load_model("base")
+# video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
+# model = whisper.load_model("base")
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 

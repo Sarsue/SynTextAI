@@ -22,7 +22,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const [loading, setLoading] = useState(false);
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
-    const { darkMode, setDarkMode } = useUserContext(); // Access the darkMode state and setDarkMode function
+    const { darkMode, userSettings } = useUserContext();
+
+    // Language and comprehension level states
+    const [selectedLanguage, setSelectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
+    const [comprehensionLevel, setComprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
     const navigate = useNavigate();
@@ -92,7 +96,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
 
                 const fileDataResponse = await callApiWithToken(
-                    `api/v1/files`,
+                    `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                     'POST',
                     formData
                 );
@@ -162,7 +166,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     });
 
                     const linkDataResponse = await callApiWithToken(
-                        `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}`,
+                        `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                         'POST'
                     );
 
@@ -236,7 +240,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         setCurrentHistory(newHistory.id);
 
                         const linkDataResponse = await callApiWithToken(
-                            `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}`,
+                            `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                             'POST'
                         );
 

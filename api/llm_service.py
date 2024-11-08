@@ -94,7 +94,7 @@ def truncate_for_context(last_output, new_content, max_tokens):
 
     return last_output
 
-def syntext(content, last_output, intent, language, education_level='dropout'):
+def syntext(content, last_output, intent, language, comprehension_level):
     """
     Generate either an explanation or translation for given content,
     ensuring seamless integration with the previous output.
@@ -104,7 +104,7 @@ def syntext(content, last_output, intent, language, education_level='dropout'):
     - last_output (str): Previous output from the LLM for context.
     - intent (str): Either 'explain' or 'translate'.
     - language (str): Language for the output (e.g., English, French).
-    - education_level (str): Education level (e.g., dropout, graduate).
+    - comprehension_level (str): Education level (e.g., dropout, graduate).
 
     Returns:
     - str: Generated output from the LLM.
@@ -122,7 +122,7 @@ def syntext(content, last_output, intent, language, education_level='dropout'):
     Please consider the previous response for context:
     {last_output}
 
-    Now, based on the above response, please {intent} the following content in {language}, tailored to a comprehension level of a {education_level}.
+    Now, based on the above response, please {intent} the following content in {language}, tailored to a comprehension level of a {comprehension_level}.
 
     #### New Content:
     {content}
