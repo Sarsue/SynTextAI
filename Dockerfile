@@ -20,7 +20,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
-    curl && \
+    curl \
+    supervisor && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Litestream (download the latest release)
@@ -38,18 +39,14 @@ COPY api/ ./api/
 COPY db/ /app/db/
 
 # Set the GOOGLE_APPLICATION_CREDENTIALS environment variable
-# This points to the credentials.json file inside the 'api' directory in the container
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/api/config/credentials.json
 
 # Install Python dependencies and remove cache
-RUN pip install --no-cache-dir -r ./api/requirements.txt && \
+RUN pip install --no-cache-dir -r ./api/requirements.txt
+
+# Install Celery and Supervisor
+RUN pip install --no-cache-dir celery && \
     pip install --no-cache-dir supervisor
-
-# Create the log directory for supervisor
-RUN mkdir -p /var/log/supervisor
-
-# Copy the supervisord configuration file
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Expose the application port
 EXPOSE 3000
@@ -57,6 +54,11 @@ EXPOSE 3000
 # Install Litestream configuration
 COPY litestream.yml /etc/litestream.yml
 
-# Start Supervisor to run all processes
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Supervisor Configuration
+COPY supervisord.conf /etc/supervisor/supervisord.conf
 
+# Create the log directory for supervisor
+RUN mkdir -p /var/log/supervisor
+
+# Command to run Supervisor, which will manage Gunicorn, Celery, and Litestream
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
