@@ -24,7 +24,7 @@ RUN apt-get update && \
     supervisor && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user
+# Create a non-root user (optional step, we can change this later if we prefer to run as root)
 RUN useradd -ms /bin/bash nonrootuser
 
 WORKDIR /app
@@ -45,9 +45,10 @@ RUN pip install --no-cache-dir -r ./api/requirements.txt
 RUN pip install --no-cache-dir celery && \
     pip install --no-cache-dir supervisor
 
-# Set permissions for log files and directories
+# Set permissions for log files and directories (ensure directories are writable)
 RUN mkdir -p /var/log/supervisor && \
-    chown -R nonrootuser:nonrootuser /var/log/supervisor
+    chown -R root:root /var/log/supervisor && \
+    chmod -R 775 /var/log/supervisor
 
 # Expose the application port
 EXPOSE 3000
@@ -55,8 +56,8 @@ EXPOSE 3000
 # Supervisor Configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
-# Switch to the non-root user
-USER nonrootuser
+# Run as root (you can remove the useradd command if you want to run as root directly)
+USER root
 
 # Command to run Supervisor, which will manage Gunicorn and Celery
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
