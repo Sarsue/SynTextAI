@@ -63,6 +63,17 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             case 'png':
             case 'gif':
                 return 'image'; // Handle common image formats
+            case 'mp4':
+            case 'mkv':
+            case 'avi':
+            case 'mov':
+            case 'wmv':
+            case 'flv':
+            case 'webm':
+            case 'mpeg':
+            case 'mpg':
+            case '3gp':
+                return 'video'; // Handle common video formats
             default:
                 return null; // Unsupported file type
         }
@@ -78,6 +89,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 );
             case 'image':
                 return <img src={fileContent!} alt="File content" style={{ width: '100%', height: 'auto' }} />;
+            case 'video':
+                return (
+                    <video controls width="100%" height="auto">
+                        <source src={fileContent!} type="video/mp4" />
+                        Your browser does not support the video tag.
+                    </video>
+                );
             default:
                 return <div>Unsupported file type</div>; // Handle unsupported types
         }

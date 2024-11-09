@@ -13,10 +13,12 @@ import numpy as np
 import ffmpeg
 import whisper
 
-# video_extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
-# model = whisper.load_model("base")
+video_extensions = ["mp4", "mkv", "avi", "mov",
+                    "wmv", "flv", "webm", "mpeg", "mpg", "3gp"]
+model = whisper.load_model("base")
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(levelname)s: %(message)s')
 
 bucket_name = 'docsynth-fbb02.appspot.com'
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
@@ -34,7 +36,7 @@ files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
 
 
 # Instantiate your store with the SQLite config
-store = DocSynthStore(os.getenv("DATABASE_PATH") )
+store = DocSynthStore(os.getenv("DATABASE_PATH"))
 
 
 # Helper function to authenticate user and retrieve user ID
@@ -44,13 +46,14 @@ def authenticate_user():
         if not token:
             logging.error("Missing Authorization token in request headers")
             return None, None
-        
+
         # Attempt to get user information from token
         success, user_info = get_user_id(token)
         if not success:
-            logging.error("Failed to authenticate user with the provided token")
+            logging.error(
+                "Failed to authenticate user with the provided token")
             return None, None
-        
+
         logging.info(f"User info retrieved: {user_info}")
 
         # Get user ID from email
@@ -59,9 +62,10 @@ def authenticate_user():
             logging.error(f"No user ID found for email: {user_info['email']}")
             return None, user_info['user_id']
 
-        logging.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
+        logging.info(
+            f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
         return user_id, user_info['user_id']
-    
+
     except Exception as e:
         logging.exception(f"Error during user authentication: {e}")
         return None, None
@@ -81,6 +85,7 @@ def upload_to_gcs(file_data, user_gc_id, filename):
         logging.error(f"Error uploading to GCS: {e}")
         return None
 
+
 def download_from_gcs(user_gc_id, filename):
     try:
         client = storage.Client()
@@ -90,6 +95,7 @@ def download_from_gcs(user_gc_id, filename):
     except Exception as e:
         logging.error(f"Error downloading from GCS: {e}")
         return None
+
 
 def delete_from_gcs(user_gc_id, filename):
     try:
@@ -101,83 +107,93 @@ def delete_from_gcs(user_gc_id, filename):
     except Exception as e:
         logging.error(f"Error deleting from GCS: {e}")
 
-# @celery_app.task
-# def extract_audio_to_memory_chunked(video_data, chunk_size=1):
-#     logging.info("Extracting audio in chunks using ffmpeg-python...")
-#     output_chunks = []
-#     try:
-#         # Process video data and convert to audio in the specified format
-#         audio_stream, _ = (
-#             ffmpeg
-#             .input('pipe:', format='mp4')
-#             .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-#             .run(input=video_data, capture_stdout=True, capture_stderr=True)
-#         )
 
-#         # Read audio in chunks and store in memory
-#         stream = io.BytesIO(audio_stream)
-#         while True:
-#             chunk = stream.read(chunk_size * 1024 * 1024)
-#             if not chunk:
-#                 break
-#             output_chunks.append(io.BytesIO(chunk))
+@celery_app.task
+def extract_audio_to_memory_chunked(video_data, chunk_size=1):
+    logging.info("Extracting audio in chunks using ffmpeg-python...")
+    output_chunks = []
+    try:
+        # Process video data and convert to audio in the specified format
+        audio_stream, _ = (
+            ffmpeg
+            .input('pipe:', format='mp4')
+            .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
+            .run(input=video_data, capture_stdout=True, capture_stderr=True)
+        )
 
-#     except ffmpeg.Error as e:
-#         logging.error(f"FFmpeg-python error: {e.stderr.decode()}")
-#         return []
+        # Read audio in chunks and store in memory
+        stream = io.BytesIO(audio_stream)
+        while True:
+            chunk = stream.read(chunk_size * 1024 * 1024)
+            if not chunk:
+                break
+            output_chunks.append(io.BytesIO(chunk))
 
-#     return output_chunks
+    except ffmpeg.Error as e:
+        logging.error(f"FFmpeg-python error: {e.stderr.decode()}")
+        return []
+    except Exception as e:
+        logging.error(f"Error extracting audio: {e}")
+        return []
 
-# @celery_app.task
-# def transcribe_audio_chunked(audio_stream):
-#     logging.info("Transcribing audio in chunks...")
-#     full_transcription = ""
-#     try:
-#         for audio_chunk in audio_stream:
-#             audio_bytes = audio_chunk.getvalue()
-#             audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-#             if audio_array.ndim != 1 or audio_array.size == 0:
-#                 logging.warning("Skipping empty audio chunk.")
-#                 continue
-#             result = model.transcribe(audio_array, fp16=False)
-#             full_transcription += result["text"] + " "
-#         return full_transcription.strip()
-#     except Exception as e:
-#         logging.error(f"Transcription error: {e}")
-#         return None
+    return output_chunks
 
-# @celery_app.task
-# def process_video_task(video_data):
-#     logging.info("Processing video via Celery task...")
-#     audio_stream = extract_audio_to_memory_chunked(video_data)
-#     transcription = transcribe_audio_chunked(audio_stream)
-#     if transcription:
-#         logging.info("Video transcription completed successfully.")
-#         return transcription
-#     else:
-#         logging.error("Failed to transcribe video.")
-#         return None
+
+@celery_app.task
+def transcribe_audio_chunked(audio_stream):
+    logging.info("Transcribing audio in chunks...")
+    full_transcription = ""
+    try:
+        for audio_chunk in audio_stream:
+            audio_bytes = audio_chunk.getvalue()
+            audio_array = np.frombuffer(
+                audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            if audio_array.ndim != 1 or audio_array.size == 0:
+                logging.warning("Skipping empty audio chunk.")
+                continue
+            result = model.transcribe(audio_array, fp16=False)
+            full_transcription += result["text"] + " "
+        return full_transcription.strip()
+    except Exception as e:
+        logging.error(f"Transcription error: {e}")
+        return None
+
+
+@celery_app.task
+def process_video_task(video_data):
+    logging.info("Processing video via Celery task...")
+    audio_stream = extract_audio_to_memory_chunked(video_data)
+    transcription = transcribe_audio_chunked(audio_stream)
+    if transcription:
+        logging.info("Video transcription completed successfully.")
+        return transcription
+    else:
+        logging.error("Failed to transcribe video.")
+        return None
+
 
 @celery_app.task
 def process_and_store_file(user_id, user_gc_id, filename, language, comprehension_level):
-    logging.info(f"Starting to process file: {filename} for user_id: {user_id}")
+    logging.info(
+        f"Starting to process file: {filename} for user_id: {user_id}")
     try:
         if isinstance(filename, list):
             filename = filename[0]
         file_data = download_from_gcs(user_gc_id, filename)
         if not file_data:
             raise FileNotFoundError(f"{filename} not found.")
-        
+
         _, ext = os.path.splitext(filename)
         ext = ext.lstrip('.').lower()
-        
+
         # Use a separate task to process the video
-        # if ext in video_extensions:
-        #     # Enqueue the video processing task
-        #     video_task = process_video_task.apply_async(args=(file_data,))
-        #     # Instead of waiting for the result, return the task ID or log that it's processing
-        #     logging.info(f"Video processing task for {filename} has been enqueued with task ID: {video_task.id}")
-        #     return {'task_id': video_task.id, 'status': 'processing'}
+        if ext in video_extensions:
+            # Enqueue the video processing task
+            video_task = process_video_task.apply_async(args=(file_data,))
+            # Instead of waiting for the result, return the task ID or log that it's processing
+            logging.info(
+                f"Video processing task for {filename} has been enqueued with task ID: {video_task.id}")
+            return {'task_id': video_task.id, 'status': 'processing'}
 
         # else:
         result = process_file(file_data, ext)
@@ -187,11 +203,13 @@ def process_and_store_file(user_id, user_gc_id, filename, language, comprehensio
         interpretations = []
         last_output = ''
         for content_chunk in chunk_text(result):
-            interpretation = syntext(content=content_chunk, last_output=last_output,  intent='educate', language = language, comprehension_level = comprehension_level)
+            interpretation = syntext(content=content_chunk, last_output=last_output,
+                                     intent='educate', language=language, comprehension_level=comprehension_level)
             interpretations.append(interpretation)
             last_output = interpretation
         result_message = "\n\n".join(interpretations)
-        store.add_message(content=result_message, sender='bot', user_id=user_id)
+        store.add_message(content=result_message,
+                          sender='bot', user_id=user_id)
         logging.info(f"Processed and stored '{filename}' successfully.")
     except Exception as e:
         logging.error(f"Error processing {filename}: {e}")
@@ -201,12 +219,15 @@ def process_and_store_file(user_id, user_gc_id, filename, language, comprehensio
 @files_bp.route('', methods=['POST'])
 def save_file():
     try:
-        language = request.args.get('language', 'English')  # Default to 'English' if not provided
-        comprehension_level = request.args.get('comprehensionLevel', 'dropout')  # Set a default value if desired
+        # Default to 'English' if not provided
+        language = request.args.get('language', 'English')
+        comprehension_level = request.args.get(
+            'comprehensionLevel', 'dropout')  # Set a default value if desired
 
         user_id, user_gc_id = authenticate_user()
-        logging.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_gc_id}")
-        
+        logging.info(
+            f"Authenticated user_id: {user_id}, user_gc_id: {user_gc_id}")
+
         if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 
@@ -232,7 +253,8 @@ def save_file():
                 return jsonify({'error': 'Database error'}), 500
 
             # Enqueue the file processing task
-            process_and_store_file.apply_async((user_id, user_gc_id, file.filename, language, comprehension_level))
+            process_and_store_file.apply_async(
+                (user_id, user_gc_id, file.filename, language, comprehension_level))
             logging.info(f"Enqueued processing for {file.filename}")
 
         return jsonify({'message': 'File processing queued.'}), 202
@@ -259,6 +281,8 @@ def retrieve_files():
         return jsonify({'error': str(e)}), 500
 
 # Route to delete a file
+
+
 @files_bp.route('/<int:fileId>', methods=['DELETE'])
 def delete_file(fileId):
     try:

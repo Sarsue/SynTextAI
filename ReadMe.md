@@ -29,17 +29,17 @@ Delete the line: Ctrl + K
  Save and exit: Ctrl + X, Y, Enter
 
 
-scp /Users/osas/Documents/dev/docsynth/.env root@138.197.131.87:/home/root/app/.env
 
+scp deploy.sh .env root@138.197.131.87:/home/root/
 
 
 # mount volume
 docker run --rm -p 3000:3000 --env-file .env \
   -v /app/db:/app/db \
-  -v /litestream.yml:/etc/litestream.yml \
+  -v $(pwd)/litestream.yml:/etc/litestream.yml \
   syntextaiapp
 
 # dont mount volume
 docker run --rm -p 3000:3000 --env-file .env \
-  -v litestream.yml:/etc/litestream.yml \
+  -v $(pwd)/litestream.yml:/etc/litestream.yml \
   syntextaiapp
