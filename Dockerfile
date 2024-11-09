@@ -24,6 +24,9 @@ RUN apt-get update && \
     supervisor && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Create a non-root user
+RUN useradd -ms /bin/bash nonrootuser
+
 WORKDIR /app
 
 # Copy only the build artifacts from the first stage (frontend build step), not node_modules
@@ -42,14 +45,18 @@ RUN pip install --no-cache-dir -r ./api/requirements.txt
 RUN pip install --no-cache-dir celery && \
     pip install --no-cache-dir supervisor
 
+# Set permissions for log files and directories
+RUN mkdir -p /var/log/supervisor && \
+    chown -R nonrootuser:nonrootuser /var/log/supervisor
+
 # Expose the application port
 EXPOSE 3000
 
 # Supervisor Configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
-# Create the log directory for supervisor
-RUN mkdir -p /var/log/supervisor
+# Switch to the non-root user
+USER nonrootuser
 
 # Command to run Supervisor, which will manage Gunicorn and Celery
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
