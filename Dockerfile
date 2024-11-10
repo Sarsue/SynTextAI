@@ -46,9 +46,9 @@ RUN pip install --no-cache-dir celery && \
     pip install --no-cache-dir supervisor
 
 # Set permissions for log files and directories (ensure directories are writable)
-RUN mkdir -p /var/log/supervisor && \
-    chown -R root:root /var/log/supervisor && \
-    chmod -R 775 /var/log/supervisor
+RUN mkdir -p /var/log/syntextai && \
+    chown -R root:root /var/log/syntextai && \
+    chmod -R 775 /var/log/syntextai
 
 # Expose the application port
 EXPOSE 3000
