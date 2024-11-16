@@ -13,7 +13,7 @@ COPY frontend/ ./
 RUN npm run build && npm cache clean --force
 
 # Stage 2: Set up the Python backend with FFmpeg and Whisper
-FROM python:3.10-slim
+FROM python:3.10-slim AS base
 
 # Install FFmpeg, system dependencies, and other tools
 RUN apt-get update && \
@@ -23,9 +23,6 @@ RUN apt-get update && \
     curl \
     supervisor && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Create a non-root user (optional step, we can change this later if we prefer to run as root)
-RUN useradd -ms /bin/bash nonrootuser
 
 WORKDIR /app
 
@@ -45,10 +42,34 @@ RUN pip install --no-cache-dir -r ./api/requirements.txt
 RUN pip install --no-cache-dir celery && \
     pip install --no-cache-dir supervisor
 
+# Stage 3: Download Litestream binary
+FROM base AS litestream-download
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget && \
+    wget https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz -O /tmp/litestream.tar.gz && \
+    tar -xz -C /tmp -f /tmp/litestream.tar.gz && \
+    mv /tmp/litestream /usr/local/bin/litestream && \
+    rm /tmp/litestream.tar.gz && \
+    apt-get remove -y wget && \
+    apt-get autoremove -y && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Final stage: Combine everything
+FROM base
+
+# Copy Google Cloud credentials
+COPY api/config/credentials.json /app/service-account-key.json
+
+# Set Google Cloud credentials environment variable
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
+
 # Set permissions for log files and directories (ensure directories are writable)
 RUN mkdir -p /var/log/syntextai && \
     chown -R root:root /var/log/syntextai && \
     chmod -R 775 /var/log/syntextai
+
+# Copy Litestream binary from the download stage
+COPY --from=litestream-download /usr/local/bin/litestream /usr/local/bin/litestream
 
 # Expose the application port
 EXPOSE 3000
@@ -56,8 +77,11 @@ EXPOSE 3000
 # Supervisor Configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
+# Copy Litestream configuration
+COPY litestream.yml /etc/litestream.yml
+
 # Run as root (you can remove the useradd command if you want to run as root directly)
 USER root
 
-# Command to run Supervisor, which will manage Gunicorn and Celery
+# Command to run Supervisor, which will manage Gunicorn, Celery, and Litestream
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

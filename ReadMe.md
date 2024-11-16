@@ -33,7 +33,7 @@ Delete the line: Ctrl + K
 scp deploy.sh .env root@138.197.131.87:/home/root/
 
 
-# mount volume
+<!-- # mount volume
 docker run --rm -p 3000:3000 --env-file .env \
   -v /app/db:/app/db \
   -v $(pwd)/litestream.yml:/etc/litestream.yml \
@@ -42,4 +42,10 @@ docker run --rm -p 3000:3000 --env-file .env \
 # dont mount volume
 docker run --rm -p 3000:3000 --env-file .env \
   -v $(pwd)/litestream.yml:/etc/litestream.yml \
+  syntextaiapp -->
+
+/Users/osas/Documents/dev/app
+
+docker run --rm -p 3000:3000 --env-file .env \
+  -v /Users/osas/Documents/dev/app:/var/log/syntextai \
   syntextaiapp

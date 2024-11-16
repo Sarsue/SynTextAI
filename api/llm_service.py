@@ -117,3 +117,25 @@ def syntext(content, last_output, intent, language, comprehension_level):
     """
 
     return prompt_llm(prompt)
+
+
+test_prompt = """
+
+User Profile:
+- Age: 30
+- Gender: Male
+- Education Level: Bachelor's Degree
+- Occupation: Software Engineer
+- Beliefs: Atheist
+
+Media Content:
+- Image: [Description of the image content]
+- Video: [Transcription or key frames description]
+- PDF: [Extracted text or key points]
+
+-Query
+- Convo History
+-Files History
+
+adjust tone, explanation depth, subject focus based on
+"""

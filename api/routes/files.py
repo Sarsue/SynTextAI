@@ -95,39 +95,34 @@ def delete_from_gcs(user_gc_id, filename):
 # Audio extraction and transcription tasks
 
 
-@celery_app.task
-def extract_audio_to_memory_chunked(video_data, chunk_size=1):
+@celery_app.task(bind=True, max_retries=3)
+def extract_audio_to_memory_chunked(self, video_data, chunk_size=1):
     logging.info("Extracting audio in chunks using ffmpeg-python...")
     output_chunks = []
     try:
-        # Process video data and convert to audio in the specified format
         audio_stream, _ = (
             ffmpeg
             .input('pipe:', format='mp4')
             .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
             .run(input=video_data, capture_stdout=True, capture_stderr=True)
         )
-
-        # Read audio in chunks and store in memory
         stream = io.BytesIO(audio_stream)
         while True:
             chunk = stream.read(chunk_size * 1024 * 1024)
             if not chunk:
                 break
             output_chunks.append(base64.b64encode(chunk).decode('utf-8'))
-
     except ffmpeg.Error as e:
         logging.error(f"FFmpeg-python error: {e.stderr.decode()}")
-        return []
+        raise self.retry(exc=e, countdown=2 ** self.request.retries)
     except Exception as e:
         logging.error(f"Error extracting audio: {e}")
-        return []
-
+        raise self.retry(exc=e, countdown=2 ** self.request.retries)
     return output_chunks
 
 
-@celery_app.task
-def transcribe_audio_chunked(audio_stream):
+@celery_app.task(bind=True, max_retries=3)
+def transcribe_audio_chunked(self, audio_stream):
     logging.info("Transcribing audio in chunks...")
     full_transcription = ""
     try:
@@ -143,7 +138,7 @@ def transcribe_audio_chunked(audio_stream):
         return full_transcription.strip()
     except Exception as e:
         logging.error(f"Transcription error: {e}")
-        return None
+        raise self.retry(exc=e, countdown=2 ** self.request.retries)
 
 # File processing and storage
 
