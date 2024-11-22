@@ -1,4 +1,4 @@
 bs:
-  - path:/db/docsynth.db
+  - path: /db/docsynth.db
     replicas:
       - url: gcs://docsynth-fbb02.appspot.com/backup

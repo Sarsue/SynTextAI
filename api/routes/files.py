@@ -93,8 +93,6 @@ def delete_from_gcs(user_gc_id, filename):
         logging.error("Error deleting from GCS")
 
 # Audio extraction and transcription tasks
-
-
 @celery_app.task(bind=True, max_retries=5)
 def extract_audio_to_memory_chunked(self, video_data, chunk_size=5):
     try:
