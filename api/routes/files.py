@@ -95,100 +95,60 @@ def delete_from_gcs(user_gc_id, filename):
 # Audio extraction and transcription tasks
 
 
-@celery_app.task(bind=True, max_retries=3)
-def extract_audio_to_memory_chunked(self, video_data, chunk_size=1):
-    logging.info("Extracting audio in chunks using ffmpeg-python...")
-    output_chunks = []
+@celery_app.task(bind=True, max_retries=5)
+def extract_audio_to_memory_chunked(self, video_data, chunk_size=5):
     try:
         audio_stream, _ = (
             ffmpeg
             .input('pipe:', format='mp4')
             .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-            .run(input=video_data, capture_stdout=True, capture_stderr=True)
+            .run(input=video_data, capture_stdout=True, capture_stderr=True, timeout=300)
         )
-        stream = io.BytesIO(audio_stream)
-        while True:
-            chunk = stream.read(chunk_size * 1024 * 1024)
-            if not chunk:
-                break
-            output_chunks.append(base64.b64encode(chunk).decode('utf-8'))
-    except ffmpeg.Error as e:
-        logging.error(f"FFmpeg-python error: {e.stderr.decode()}")
-        raise self.retry(exc=e, countdown=2 ** self.request.retries)
+
+        def stream_audio_chunks(audio_stream, chunk_size):
+            stream = io.BytesIO(audio_stream)
+            while True:
+                chunk = stream.read(chunk_size * 1024 * 1024)
+                if not chunk:
+                    break
+                yield base64.b64encode(chunk).decode('utf-8')
+
+        return list(stream_audio_chunks(audio_stream, chunk_size))
+
     except Exception as e:
         logging.error(f"Error extracting audio: {e}")
-        raise self.retry(exc=e, countdown=2 ** self.request.retries)
-    return output_chunks
+        raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
 
 
-@celery_app.task(bind=True, max_retries=3)
-def transcribe_audio_chunked(self, audio_stream):
-    logging.info("Transcribing audio in chunks...")
-    full_transcription = ""
+@celery_app.task(bind=True, max_retries=5)
+def transcribe_audio_chunked(self, audio_chunks):
     try:
-        for audio_chunk in audio_stream:
-            audio_bytes = base64.b64decode(audio_chunk.encode('utf-8'))
-            audio_array = np.frombuffer(
-                audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            if audio_array.ndim != 1 or audio_array.size == 0:
-                logging.warning("Skipping empty audio chunk.")
+        full_transcription = ""
+        for chunk in audio_chunks:
+            try:
+                decoded_audio = base64.b64decode(chunk)
+                audio_array = np.frombuffer(decoded_audio, dtype=np.int16)
+
+                if audio_array.size == 0:
+                    logging.warning("Empty audio chunk detected. Skipping.")
+                    continue
+
+                # Use Whisper for transcription
+                result = model.transcribe(audio_array)
+                full_transcription += result["text"] + " "
+            except Exception as e:
+                logging.error(f"Error transcribing chunk: {e}")
                 continue
-            result = model.transcribe(audio_array, fp16=False)
-            full_transcription += result["text"] + " "
+
         return full_transcription.strip()
     except Exception as e:
-        logging.error(f"Transcription error: {e}")
-        raise self.retry(exc=e, countdown=2 ** self.request.retries)
+        logging.error(f"Error in transcription: {e}")
+        raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
 
 # File processing and storage
 
 
-@celery_app.task
-def process_and_store_file(user_id, user_gc_id, filename, language, comprehension_level):
-    logging.info(
-        f"Starting to process file: {filename} for user_id: {user_id}")
-    try:
-        file_data = download_from_gcs(user_gc_id, filename)
-        if not file_data:
-            raise FileNotFoundError(f"{filename} not found.")
-
-        _, ext = os.path.splitext(filename)
-        ext = ext.lstrip('.').lower()
-
-        if ext in video_extensions:
-            # Chain the video processing tasks together
-            video_task = chain(
-                extract_audio_to_memory_chunked.s(file_data),
-                transcribe_audio_chunked.s(),
-                store_video_transcription_result.s(
-                    user_id, filename, language, comprehension_level)
-            )
-            # Enqueue the video processing task
-            video_task.apply_async()
-            logging.info(
-                f"Video processing task for {filename} has been enqueued.")
-            return {'status': 'processing'}
-
-        else:
-            result = process_file(file_data, ext)
-            store.update_file_with_extract(user_id, filename, result)
-            interpretations = []
-            last_output = ''
-            for content_chunk in chunk_text(result):
-                interpretation = syntext(content=content_chunk, last_output=last_output,
-                                         intent='educate', language=language, comprehension_level=comprehension_level)
-                interpretations.append(interpretation)
-                last_output = interpretation
-            result_message = "\n\n".join(interpretations)
-            store.add_message(content=result_message,
-                              sender='bot', user_id=user_id)
-            logging.info(f"Processed and stored '{filename}' successfully.")
-    except Exception as e:
-        logging.error(f"Error processing {filename}: {e}")
-        return {'error': str(e)}
-
-
-@celery_app.task
+@celery_app.task(bind=True)
 def store_video_transcription_result(result, user_id, filename, language, comprehension_level):
     logging.info(f"Storing video transcription result for {filename}")
     try:
@@ -212,6 +172,48 @@ def store_video_transcription_result(result, user_id, filename, language, compre
     except Exception as e:
         logging.error(
             f"Error storing video transcription result for {filename}: {e}")
+        return {'error': str(e)}
+
+
+@celery_app.task(bind=True)
+def process_and_store_file(user_id, user_gc_id, filename, language, comprehension_level):
+    logging.info(
+        f"Starting to process file: {filename} for user_id: {user_id}")
+    try:
+        file_data = download_from_gcs(user_gc_id, filename)
+        if not file_data:
+            raise FileNotFoundError(f"{filename} not found.")
+
+        _, ext = os.path.splitext(filename)
+        ext = ext.lstrip('.').lower()
+
+        if ext in video_extensions:
+            video_task = chain(
+                extract_audio_to_memory_chunked.s(file_data),
+                transcribe_audio_chunked.s(),
+                store_video_transcription_result.s(
+                    user_id, filename, language, comprehension_level)
+            ).apply_async()
+            logging.info(
+                f"Video processing task for {filename} has been enqueued.")
+            return jsonify({'status': 'processing', 'task_id': video_task.id}), 202
+
+        else:
+            result = process_file(file_data, ext)
+            store.update_file_with_extract(user_id, filename, result)
+            interpretations = []
+            last_output = ''
+            for content_chunk in chunk_text(result):
+                interpretation = syntext(content=content_chunk, last_output=last_output,
+                                         intent='educate', language=language, comprehension_level=comprehension_level)
+                interpretations.append(interpretation)
+                last_output = interpretation
+            result_message = "\n\n".join(interpretations)
+            store.add_message(content=result_message,
+                              sender='bot', user_id=user_id)
+            logging.info(f"Processed and stored '{filename}' successfully.")
+    except Exception as e:
+        logging.error(f"Error processing {filename}: {e}")
         return {'error': str(e)}
 
 # Route to save file
