@@ -23,42 +23,41 @@ const Home: React.FC = () => {
             <main className="content-container">
                 {/* Hero Section */}
                 <section className="hero-section">
-                    <h2 className="hero-title">Unlock Knowledge, Transform Your Understanding</h2>
+                    <h2 className="hero-title">AI-Powered Insights for Your Documents</h2>
                     <p className="hero-description">
-                        With SynText AI, easily summarize and explain complex concepts, translate text into multiple languages, and retrieve relevant documents based on your queries.
-                        <strong> Sign In and Enhance Your Learning Today!</strong>
+                        Transform how you interact with information. Summarize, translate, and extract insights from your files in seconds. <strong>Start your knowledge journey today with SynText AI!</strong>
                     </p>
                 </section>
 
                 {/* Video and Features Section */}
                 <section className="video-features-section">
                     <div className="features-column">
-                        <h2 className="features-title">Why Choose SynText AI?</h2>
+                        <h2 className="features-title">What SynText AI Can Do for You</h2>
                         <ul className="features-list">
                             <li className="feature-item">
-                                <i className="fas fa-lightbulb feature-icon"></i>
-                                <h3>Concept Summarization</h3>
-                                <p>Transform complex ideas into clear, concise summaries tailored to your needs.</p>
+                                <i className="fas fa-signal feature-icon"></i>
+                                <h3>Automated Workflows</h3>
+                                <p>Auto-summarize and highlight key takeaways from documents instantly upon upload.</p>
                             </li>
                             <li className="feature-item">
                                 <i className="fas fa-language feature-icon"></i>
-                                <h3>Multilingual Translation</h3>
-                                <p>Translate documents and texts into various languages, making information accessible to everyone.</p>
+                                <h3>Multilingual Support</h3>
+                                <p>Translate and process documents in multiple languages seamlessly.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-image feature-icon"></i>
-                                <h3>Image Text Extraction</h3>
-                                <p>Extract text from images with ease, making data from visual content available for analysis.</p>
+                                <i className="fas fa-user-friends feature-icon"></i>
+                                <h3>Collaborative Sharing</h3>
+                                <p>Share insights, summaries, and conversations directly with your team or external tools like Slack and email.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-file-pdf feature-icon"></i>
-                                <h3>PDF Content Processing</h3>
-                                <p>Efficiently extract and summarize information from PDF documents.</p>
+                                <i className="fas fa-cog feature-icon"></i>
+                                <h3>Customizable Experience</h3>
+                                <p>Dark mode, adjustable font sizes, and more for a user-friendly interface.</p>
                             </li>
                             <li className="feature-item">
-                                <i className="fas fa-video feature-icon"></i>
-                                <h3>Video Transcription</h3>
-                                <p>Transcribe audio from videos to convert spoken content into written form.</p>
+                                <i className="fas fa-microphone feature-icon"></i>
+                                <h3>Voice Interaction</h3>
+                                <p>Enjoy hands-free interaction with text-to-speech and voice-to-text features.</p>
                             </li>
                         </ul>
                     </div>

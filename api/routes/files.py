@@ -93,6 +93,8 @@ def delete_from_gcs(user_gc_id, filename):
         logging.error("Error deleting from GCS")
 
 # Audio extraction and transcription tasks
+
+
 @celery_app.task(bind=True, max_retries=5)
 def extract_audio_to_memory_chunked(self, video_data, chunk_size=5):
     try:
@@ -147,23 +149,25 @@ def transcribe_audio_chunked(self, audio_chunks):
 
 
 @celery_app.task(bind=True)
-def store_video_transcription_result(result, user_id, filename, language, comprehension_level):
+def store_video_transcription_result(self, result, user_id, filename, language, comprehension_level):
     logging.info(f"Storing video transcription result for {filename}")
     try:
         if result:
-            store.update_file_with_extract(user_id, filename, result)
-            interpretations = []
-            last_output = ''
-            for content_chunk in chunk_text(result):
-                interpretation = syntext(content=content_chunk, last_output=last_output,
-                                         intent='educate', language=language, comprehension_level=comprehension_level)
-                interpretations.append(interpretation)
-                last_output = interpretation
+            with current_app.app_context():
+                store.update_file_with_extract(user_id, filename, result)
+                interpretations = []
+                last_output = ''
+                for content_chunk in chunk_text(result):
+                    interpretation = syntext(content=content_chunk, last_output=last_output,
+                                             intent='educate', language=language, comprehension_level=comprehension_level)
+                    interpretations.append(interpretation)
+                    last_output = interpretation
 
-            result_message = "\n\n".join(interpretations)
-            store.add_message(content=result_message,
-                              sender='bot', user_id=user_id)
-            logging.info(f"Processed and stored '{filename}' successfully.")
+                result_message = "\n\n".join(interpretations)
+                store.add_message(content=result_message,
+                                  sender='bot', user_id=user_id)
+                logging.info(
+                    f"Processed and stored '{filename}' successfully.")
         else:
             logging.error(f"Failed to transcribe video for {filename}.")
             return {'error': 'Failed to transcribe video'}
@@ -174,42 +178,44 @@ def store_video_transcription_result(result, user_id, filename, language, compre
 
 
 @celery_app.task(bind=True)
-def process_and_store_file(user_id, user_gc_id, filename, language, comprehension_level):
+def process_and_store_file(self, user_id, user_gc_id, filename, language, comprehension_level):
     logging.info(
         f"Starting to process file: {filename} for user_id: {user_id}")
     try:
-        file_data = download_from_gcs(user_gc_id, filename)
-        if not file_data:
-            raise FileNotFoundError(f"{filename} not found.")
+        with current_app.app_context():
+            file_data = download_from_gcs(user_gc_id, filename)
+            if not file_data:
+                raise FileNotFoundError(f"{filename} not found.")
 
-        _, ext = os.path.splitext(filename)
-        ext = ext.lstrip('.').lower()
+            _, ext = os.path.splitext(filename)
+            ext = ext.lstrip('.').lower()
 
-        if ext in video_extensions:
-            video_task = chain(
-                extract_audio_to_memory_chunked.s(file_data),
-                transcribe_audio_chunked.s(),
-                store_video_transcription_result.s(
-                    user_id, filename, language, comprehension_level)
-            ).apply_async()
-            logging.info(
-                f"Video processing task for {filename} has been enqueued.")
-            return jsonify({'status': 'processing', 'task_id': video_task.id}), 202
+            if ext in video_extensions:
+                video_task = chain(
+                    extract_audio_to_memory_chunked.s(file_data),
+                    transcribe_audio_chunked.s(),
+                    store_video_transcription_result.s(
+                        user_id, filename, language, comprehension_level)
+                ).apply_async()
+                logging.info(
+                    f"Video processing task for {filename} has been enqueued.")
+                return jsonify({'status': 'processing', 'task_id': video_task.id}), 202
 
-        else:
-            result = process_file(file_data, ext)
-            store.update_file_with_extract(user_id, filename, result)
-            interpretations = []
-            last_output = ''
-            for content_chunk in chunk_text(result):
-                interpretation = syntext(content=content_chunk, last_output=last_output,
-                                         intent='educate', language=language, comprehension_level=comprehension_level)
-                interpretations.append(interpretation)
-                last_output = interpretation
-            result_message = "\n\n".join(interpretations)
-            store.add_message(content=result_message,
-                              sender='bot', user_id=user_id)
-            logging.info(f"Processed and stored '{filename}' successfully.")
+            else:
+                result = process_file(file_data, ext)
+                store.update_file_with_extract(user_id, filename, result)
+                interpretations = []
+                last_output = ''
+                for content_chunk in chunk_text(result):
+                    interpretation = syntext(content=content_chunk, last_output=last_output,
+                                             intent='educate', language=language, comprehension_level=comprehension_level)
+                    interpretations.append(interpretation)
+                    last_output = interpretation
+                result_message = "\n\n".join(interpretations)
+                store.add_message(content=result_message,
+                                  sender='bot', user_id=user_id)
+                logging.info(
+                    f"Processed and stored '{filename}' successfully.")
     except Exception as e:
         logging.error(f"Error processing {filename}: {e}")
         return {'error': str(e)}
