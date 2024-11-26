@@ -2,10 +2,10 @@ from flask import Flask, send_from_directory
 from flask_cors import CORS
 from sqlite_store import DocSynthStore
 from dotenv import load_dotenv
-from celery_worker import celery_app  # Import here to avoid circular import
 from firebase_setup import initialize_firebase
 from redis import StrictRedis, ConnectionPool  # Added connection pooling
 import os
+
 
 # Load environment variables
 load_dotenv()
@@ -48,18 +48,6 @@ def create_app():
     redis_client = StrictRedis(connection_pool=pool)
     app.redis_client = redis_client  # Make Redis available in your app
 
-    # Celery configuration
-    app.config.update(
-        CELERY_BROKER_URL=redis_url,
-        CELERY_RESULT_BACKEND=redis_url,
-        CELERY_BROKER_TRANSPORT_OPTIONS={
-            'visibility_timeout': 3600,  # 1 hour timeout
-            'socket_timeout': 30,
-            'socket_connect_timeout': 10,
-        },
-    )
-    celery_app.conf.update(app.config)
-
     # Register Blueprints
     from routes.users import users_bp
     from routes.histories import histories_bp
@@ -83,21 +71,3 @@ def create_app():
 
     return app
 
-def create_celery_app(app=None):
-    app = app or create_app()
-    celery_app.conf.update(app.config)
-
-    # Celery task configuration
-    celery_app.conf.update(
-        task_time_limit=900,  
-        task_soft_time_limit=600,  
-        worker_prefetch_multiplier=1,  # Ensure tasks are not prefetched
-    )
-
-    # Ensure broker connection is always valid
-    celery_app.broker_connection_retry = True
-    celery_app.broker_connection_max_retries = None  # Infinite retries
-
-    celery_app.autodiscover_tasks(['routes.files'])  # Discover tasks in specified module
-
-    return celery_app

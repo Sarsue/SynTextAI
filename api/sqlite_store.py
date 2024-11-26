@@ -13,6 +13,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class DocSynthStore:
     def __init__(self, database_path):
         print(database_path)
@@ -289,7 +290,8 @@ class DocSynthStore:
                     chat_history_title = row[1]
 
                     # For each chat history, fetch the corresponding messages
-                    messages = self.get_messages_for_chat_history(chat_history_id, user_id)
+                    messages = self.get_messages_for_chat_history(
+                        chat_history_id, user_id)
 
                     chat_history = {
                         'id': chat_history_id,
@@ -349,7 +351,8 @@ class DocSynthStore:
                     DELETE FROM chat_histories
                     WHERE id = ? AND user_id = ?
                 ''', (history_id, user_id))
-            print(f'Deleted history {history_id} and associated messages for user {user_id}')
+            print(
+                f'Deleted history {history_id} and associated messages for user {user_id}')
         except Exception as e:
             logger.error(f"Error deleting chat history: {e}")
             raise
@@ -369,7 +372,8 @@ class DocSynthStore:
                     DELETE FROM chat_histories
                     WHERE user_id = ?
                 ''', (user_id,))
-                print(f'Deleted history and associated messages for user {user_id}')
+                print(
+                    f'Deleted history and associated messages for user {user_id}')
         except Exception as e:
             logger.error(f"Error deleting all user histories: {e}")
             raise
@@ -438,7 +442,8 @@ class DocSynthStore:
 
                 files = []
                 for row in rows:
-                    file_info = {'id': row[0], 'name': row[1], 'publicUrl': row[2]}
+                    file_info = {'id': row[0],
+                                 'name': row[1], 'publicUrl': row[2]}
                     file_info['processed'] = True
                     files.append(file_info)
 
@@ -536,6 +541,7 @@ class DocSynthStore:
         except Exception as e:
             logger.error(f"Error deleting file entry: {e}")
             raise
+
 
 # Example usage:
 if __name__ == "__main__":
