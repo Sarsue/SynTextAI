@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from google.cloud import storage
 from redis.exceptions import RedisError
 from utils import get_user_id
-#from celery_worker import process_file_data
+from celery_worker import process_file_data
 from sqlite_store import DocSynthStore
 
 
@@ -60,6 +60,9 @@ def download_from_gcs(user_gc_id, filename):
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
+        if not blob.exists():
+            logging.warning(f"File {filename} not found in GCS")
+            return None
         return blob.download_as_bytes()
     except Exception as e:
         logging.error("Error downloading from GCS")
@@ -96,11 +99,11 @@ def save_file():
                 logging.error(f"Failed to upload {file.filename} to GCS")
                 return jsonify({'error': 'File upload failed'}), 500
 
-            # task = process_file_data.apply_async(args=[
-            #     user_id, user_gc_id, file, file_url, language, comprehension_level
-            # ])
-            # logging.info(f"Enqueued processing for {file.filename}")
-            # return jsonify({'task_id': task.id, 'status': 'Processing'}), 202
+            task = process_file_data.apply_async(args=[
+                user_id, user_gc_id, file, file_url, language, comprehension_level
+            ])
+            logging.info(f"Enqueued processing for {file.filename}")
+            return jsonify({'task_id': task.id, 'status': 'Processing'}), 202
 
         return jsonify({'message': 'File processing queued.'}), 202
     except RedisError as e:
