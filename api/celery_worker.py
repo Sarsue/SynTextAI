@@ -17,9 +17,8 @@ redis_pwd = os.getenv('REDIS_PASSWORD')
 redis_host = os.getenv("REDIS_HOST")
 redis_port = os.getenv("REDIS_PORT")
 
-# Redis connection URL
-redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
-
+# Redis connection URL with SSL certificate verification
+redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_OPTIONAL'
 
 def make_celery(app_name: str):
     celery = Celery(
@@ -41,14 +40,18 @@ def make_celery(app_name: str):
         'broker_connection_retry': True,
         'broker_connection_max_retries': None,
     })
-    return celery
+    celery.conf.task_routes = {
+        'tasks.extract_audio_to_memory_chunked': {'queue': 'video_audio_queue'},
+        'tasks.transcribe_audio_chunked': {'queue': 'video_audio_queue'},
+        'tasks.process_file_data': {'queue': 'document_processing_queue'}
+    }
 
+    return celery
 
 celery_app = make_celery('api')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
 
 def validate_mime_type(file):
     """Validates the MIME type of the uploaded file."""
@@ -57,31 +60,38 @@ def validate_mime_type(file):
         raise ValueError(f"Unsupported file type: {file.filename} with MIME type {mime_type}")
     return mime_type
 
-
 @celery_app.task(bind=True, max_retries=5)
 def extract_audio_to_memory_chunked(self, video_data, chunk_size=5):
     try:
         # Process audio extraction
-        audio_stream, _ = (
+        process = (
             ffmpeg
             .input('pipe:', format='mp4')
             .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-            .run(input=video_data, capture_stdout=True, capture_stderr=True, timeout=300)
+            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)
         )
 
-        def stream_audio_chunks(audio_stream, chunk_size):
-            stream = io.BytesIO(audio_stream)
+        def stream_audio_chunks(process, chunk_size):
             while True:
-                chunk = stream.read(chunk_size * 1024 * 1024)
+                chunk = process.stdout.read(chunk_size * 1024 * 1024)
                 if not chunk:
                     break
                 yield base64.b64encode(chunk).decode('utf-8')
 
-        return list(stream_audio_chunks(audio_stream, chunk_size))
+        # Write video data to the process stdin
+        process.stdin.write(video_data)
+        process.stdin.close()
+
+        # Collect audio chunks
+        audio_chunks = list(stream_audio_chunks(process, chunk_size))
+
+        # Wait for the process to complete
+        process.wait()
+
+        return audio_chunks
     except Exception as e:
         logging.exception("Error extracting audio")
         raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
-
 
 @celery_app.task(bind=True, max_retries=5)
 def transcribe_audio_chunked(self, audio_chunks):
@@ -105,7 +115,6 @@ def transcribe_audio_chunked(self, audio_chunks):
     except Exception as e:
         logging.exception("Error in transcription")
         raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
-
 
 @celery_app.task(bind=True)
 def process_file_data(self, user_id, user_gc_id, file, language, comprehension_level):

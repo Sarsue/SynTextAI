@@ -100,10 +100,11 @@ def save_file():
                 return jsonify({'error': 'File upload failed'}), 500
 
             task = process_file_data.apply_async(args=[
-                user_id, user_gc_id, file, file_url, language, comprehension_level
+                user_id, user_gc_id, file, language, comprehension_level
             ])
             logging.info(f"Enqueued processing for {file.filename}")
             return jsonify({'task_id': task.id, 'status': 'Processing'}), 202
+
 
         return jsonify({'message': 'File processing queued.'}), 202
     except RedisError as e:
