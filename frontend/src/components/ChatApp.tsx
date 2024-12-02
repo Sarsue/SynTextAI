@@ -81,7 +81,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             });
     };
 
-    const MAX_TITLE_LENGTH = 50; // Set the max length for the title
+    const MAX_TITLE_LENGTH = 150; // Set the max length for the title
 
     const handleSend = async (message: string, files: File[]) => {
         try {
@@ -195,10 +195,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     }
                 }
             } else {
-                const truncatedTitle = message.slice(0, MAX_TITLE_LENGTH); // Truncate the message title
 
                 const createHistoryResponse = await callApiWithToken(
-                    `api/v1/histories?title=${encodeURIComponent(truncatedTitle || 'New Chat')}`,
+                    `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
                     'POST'
                 );
 

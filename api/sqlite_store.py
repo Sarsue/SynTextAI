@@ -295,7 +295,7 @@ class DocSynthStore:
 
                     chat_history = {
                         'id': chat_history_id,
-                        'title': chat_history_title,
+                        'title': chat_history_title[:150],
                         'messages': messages,
                     }
 
