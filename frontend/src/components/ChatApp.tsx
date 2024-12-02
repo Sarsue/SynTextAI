@@ -81,19 +81,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             });
     };
 
+    const MAX_TITLE_LENGTH = 50; // Set the max length for the title
+
     const handleSend = async (message: string, files: File[]) => {
         try {
             setLoading(true);
             console.log('Files to append:', files);
-            console.log(subscriptionStatus)
+            console.log(subscriptionStatus);
             if (files.length > 0) {
                 const formData = new FormData();
 
                 for (let i = 0; i < files.length; i++) {
-                    formData.append(files[i].name, files[i])
+                    formData.append(files[i].name, files[i]);
                 }
-
-
 
                 const fileDataResponse = await callApiWithToken(
                     `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
@@ -101,12 +101,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     formData
                 );
 
-
                 if (fileDataResponse && fileDataResponse.ok) {
                     const fileData = await fileDataResponse.json();
-                    // Handle file data as needed
-
-                    // Show a success notification
                     toast.success(fileData.message, {
                         position: 'top-right',
                         autoClose: 3000,
@@ -118,7 +114,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     });
                     fetchUserFiles();
                 } else {
-                    // Handle other responses (e.g., error responses) here
                     toast.error('File upload failed. Please try again.', {
                         position: 'top-right',
                         autoClose: 5000,
@@ -130,22 +125,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     });
                 }
 
-                // Check if the message is empty after sending files
                 if (!message.trim()) {
                     return; // Early return if the message is empty
                 }
             }
 
-
             if (currentHistory !== null && !isNaN(currentHistory)) {
                 const history = histories[currentHistory];
 
                 if (history) {
-                    // Simulate sending a temporary message with ID -1
                     const temporaryMessage: Message = {
                         id: -1,
                         content: message,
-                        sender: 'user', // You can update this with the actual sender information
+                        sender: 'user',
                         timestamp: new Date().toLocaleString('en-US', { hour12: false }),
                         liked: false,
                         disliked: false,
@@ -203,8 +195,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     }
                 }
             } else {
+                const truncatedTitle = message.slice(0, MAX_TITLE_LENGTH); // Truncate the message title
+
                 const createHistoryResponse = await callApiWithToken(
-                    `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
+                    `api/v1/histories?title=${encodeURIComponent(truncatedTitle || 'New Chat')}`,
                     'POST'
                 );
 
@@ -221,7 +215,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         const temporaryMessage: Message = {
                             id: -1,
                             content: message,
-                            sender: 'user', // You can update this with the actual sender information
+                            sender: 'user',
                             timestamp: new Date().toLocaleString('en-US', { hour12: false }),
                             liked: false,
                             disliked: false,
@@ -274,13 +268,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     }
                 }
             }
-
         } catch (error) {
             console.error('Error sending message:', error);
         } finally {
             setLoading(false);
         }
     };
+
 
 
     const handleClearHistory = async () => {
