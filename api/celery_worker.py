@@ -1,13 +1,12 @@
 from celery import Celery
 import os
 from dotenv import load_dotenv
-import io
-import base64
 import numpy as np
-import ffmpeg
 import logging
 import mimetypes  # For MIME type validation
-
+from faster_whisper import WhisperModel  # Initialize whisper locally to avoid global initialization
+from utils import format_timestamp, download_from_gcs
+from tempfile import NamedTemporaryFile
 # Load environment variables
 load_dotenv()
 
@@ -41,7 +40,6 @@ def make_celery(app_name: str):
         'broker_connection_max_retries': None,
     })
     celery.conf.task_routes = {
-        'tasks.extract_audio_to_memory_chunked': {'queue': 'video_audio_queue'},
         'tasks.transcribe_audio_chunked': {'queue': 'video_audio_queue'},
         'tasks.process_file_data': {'queue': 'document_processing_queue'}
     }
@@ -53,91 +51,59 @@ celery_app = make_celery('api')
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def validate_mime_type(file):
-    """Validates the MIME type of the uploaded file."""
-    mime_type, _ = mimetypes.guess_type(file.filename)
-    if mime_type is None or mime_type.split('/')[0] not in ['video', 'audio', 'text', 'application']:
-        raise ValueError(f"Unsupported file type: {file.filename} with MIME type {mime_type}")
-    return mime_type
+
 
 @celery_app.task(bind=True, max_retries=5)
-def extract_audio_to_memory_chunked(self, video_data, chunk_size=5):
+def transcribe_audio_chunked(self, file_path, lang):
+    model_size = "medium"
+
+    # Run on GPU with FP16
+    #model = WhisperModel(model_size, device="cuda", compute_type="float16")
+
+    # or run on GPU with INT8
+    # model = WhisperModel(model_size, device="cuda", compute_type="int8_float16")
+    # or run on CPU with INT8
+    model = WhisperModel(model_size, device="cpu", compute_type="int8")
+    srt_content = []
     try:
-        # Process audio extraction
-        process = (
-            ffmpeg
-            .input('pipe:', format='mp4')
-            .output('pipe:', format='wav', acodec='pcm_s16le', ac=1, ar='16000')
-            .run_async(pipe_stdin=True, pipe_stdout=True, pipe_stderr=True)
-        )
+        if lang == 'en':
+            segments, info = model.transcribe(file_path, beam_size=5, task="translate")
+        else:
+            segments, info = model.transcribe(file_path, beam_size=5)
+        print("Detected language '%s' with probability %f" % (info.language, info.language_probability))
 
-        def stream_audio_chunks(process, chunk_size):
-            while True:
-                chunk = process.stdout.read(chunk_size * 1024 * 1024)
-                if not chunk:
-                    break
-                yield base64.b64encode(chunk).decode('utf-8')
+        return [segment.text for segment in segments]
 
-        # Write video data to the process stdin
-        process.stdin.write(video_data)
-        process.stdin.close()
-
-        # Collect audio chunks
-        audio_chunks = list(stream_audio_chunks(process, chunk_size))
-
-        # Wait for the process to complete
-        process.wait()
-
-        return audio_chunks
-    except Exception as e:
-        logging.exception("Error extracting audio")
-        raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
-
-@celery_app.task(bind=True, max_retries=5)
-def transcribe_audio_chunked(self, audio_chunks):
-    from whisper import load_model  # Initialize whisper locally to avoid global initialization
-    model = load_model("base")
-
-    try:
-        full_transcription = ""
-        for chunk in audio_chunks:
-            decoded_audio = base64.b64decode(chunk)
-            audio_array = np.frombuffer(decoded_audio, dtype=np.int16)
-
-            if audio_array.size == 0:
-                logging.warning("Empty audio chunk detected. Skipping.")
-                continue
-
-            result = model.transcribe(audio_array)
-            full_transcription += result["text"] + " "
-
-        return full_transcription.strip()
     except Exception as e:
         logging.exception("Error in transcription")
         raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
 
 @celery_app.task(bind=True)
-def process_file_data(self, user_id, user_gc_id, file, language, comprehension_level):
+def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
     from llm_service import syntext, chunk_text  # Import here to avoid circular imports
     from doc_processor import process_file  # Ensures dependency is only imported when needed
 
-    logging.info(f"Processing file: {file.filename} for user_id: {user_id}")
+    logging.info(f"Processing file: {filename} for user_id: {user_id}")
+    file = download_from_gcs(user_gc_id,filename)
     try:
         if not file:
             raise FileNotFoundError(f"File not provided or not found.")
+          
+        with NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as temp_file:
+            temp_file.write(file)
+            temp_file_path = temp_file.name
+
 
         # Validate file type
-        mime_type = validate_mime_type(file)
-        logging.info(f"File MIME type: {mime_type}")
+        # mime_type = validate_mime_type(file)
+        # logging.info(f"File MIME type: {mime_type}")
 
-        _, ext = os.path.splitext(file.filename)
+        _, ext = os.path.splitext(filename)
         ext = ext.lstrip('.').lower()
 
-        if mime_type.startswith("video") or ext in ["mp4", "mkv", "avi"]:
+        if ext in ["mp4", "mkv", "avi"]:
             logging.info("Extracting audio from video...")
-            video_data = file.read()
-            audio_chunks = extract_audio_to_memory_chunked(video_data)
-            transcription = transcribe_audio_chunked(audio_chunks)
+            transcription = transcribe_audio_chunked(temp_file_path)
         else:
             logging.info("Processing document file...")
             transcription = process_file(file, ext)

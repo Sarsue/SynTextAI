@@ -2,8 +2,10 @@ from firebase_admin import auth
 import base64
 import re
 import hashlib
+from google.cloud import storage
+import logging
 
-
+bucket_name = 'docsynth-fbb02.appspot.com'
 
 def decode_firebase_token(token):
     try:
@@ -28,3 +30,49 @@ def get_user_id(token):
     success, user_info = decode_firebase_token(token)
     return success, user_info
    
+
+def format_timestamp(seconds: float) -> str:
+    """ Converts seconds to SRT timestamp format (hh:mm:ss, SSS)."""
+    mins, secs = divmod (seconds, 60)
+    hrs, mins = divmod(mins,60)
+    ms = int((secs - int(secs)) * 1000)
+    return f"{int(hrs):02}:{int(mins):02}:{int(secs):02}:{int(ms):03}"
+
+
+
+# Helper functions for GCS operations
+def upload_to_gcs(file_data, user_gc_id, filename):
+    try:
+        client = storage.Client()
+        bucket = client.get_bucket(bucket_name)
+        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        blob.upload_from_file(file_data, content_type=file_data.mimetype)
+        blob.make_public()
+        logging.info(f"Uploaded {filename} to GCS: {blob.public_url}")
+        return blob.public_url
+    except Exception as e:
+        logging.error("Error uploading to GCS")
+        return None
+
+def download_from_gcs(user_gc_id, filename):
+    try:
+        client = storage.Client()
+        bucket = client.get_bucket(bucket_name)
+        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        if not blob.exists():
+            logging.warning(f"File {filename} not found in GCS")
+            return None
+        return blob.download_as_bytes()
+    except Exception as e:
+        logging.error("Error downloading from GCS")
+        return None
+
+def delete_from_gcs(user_gc_id, filename):
+    try:
+        client = storage.Client()
+        bucket = client.get_bucket(bucket_name)
+        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        blob.delete()
+        logging.info(f"Deleted {filename} from GCS.")
+    except Exception as e:
+        logging.error("Error deleting from GCS")
