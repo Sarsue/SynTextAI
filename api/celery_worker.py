@@ -8,7 +8,7 @@ from utils import format_timestamp, download_from_gcs
 from tempfile import NamedTemporaryFile
 from llm_service import syntext, chunk_text  # Import here to avoid circular imports
 from doc_processor import process_file  # Ensures dependency is only imported when needed
-from flask import current_app 
+from flask import current_app,app 
 # Load environment variables
 load_dotenv()
 
@@ -69,59 +69,54 @@ def transcribe_audio_chunked(self, file_path, lang):
         logging.exception("Error in transcription")
         raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
 
+
 @celery_app.task(bind=True)
 def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
- 
+    # Ensure that the task is running within the Flask app context
+    with app.app_context():  # Push the app context manually
+        logging.info(f"Processing file: {filename} for user_id: {user_id}")
+        file = download_from_gcs(user_gc_id, filename)
+        store = current_app.store  # Now you can access current_app.store safely
+        try:
+            if not file:
+                raise FileNotFoundError(f"File not provided or not found.")
+              
+            # Use a temporary file only for video data
+            _, ext = os.path.splitext(filename)
+            ext = ext.lstrip('.').lower()
 
-    logging.info(f"Processing file: {filename} for user_id: {user_id}")
-    file = download_from_gcs(user_gc_id, filename)
-    store = current_app.store 
-    try:
-        if not file:
-            raise FileNotFoundError(f"File not provided or not found.")
-          
-        # Use a temporary file only for video data
-        _, ext = os.path.splitext(filename)
-        ext = ext.lstrip('.').lower()
+            if ext in ["mp4", "mkv", "avi"]:
+                logging.info("Extracting audio from video...")
+                with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
+                    temp_file.write(file)
+                    temp_file_path = temp_file.name
+                    transcriptions = transcribe_audio_chunked(temp_file_path, lang=None)  # Process the video file
+                    transcription = " ".join(transcriptions)
+            else:
+                logging.info("Processing document file...")
+                transcription = process_file(file, ext)  # Process document files directly
 
-        if ext in ["mp4", "mkv", "avi"]:
-            logging.info("Extracting audio from video...")
-            with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
-                temp_file.write(file)
-                temp_file_path = temp_file.name
-                transcriptions = transcribe_audio_chunked(temp_file_path, lang=None)  # Process the video file
-                transcription = " ".join(transcriptions)
-        else:
-            logging.info("Processing document file...")
-            transcription = process_file(file, ext)  # Process document files directly
+            # Interpret the transcription
+            interpretations = []
+            last_output = ""
+            for content_chunk in chunk_text(transcription):
+                interpretation = syntext(
+                    content=content_chunk,
+                    last_output=last_output,
+                    intent='educate',
+                    language=language,
+                    comprehension_level=comprehension_level
+                )
+                interpretations.append(interpretation)
+                last_output = interpretation
 
-        # Interpret the transcription
-        interpretations = []
-        last_output = ""
-        for content_chunk in chunk_text(transcription):
-            interpretation = syntext(
-                content=content_chunk,
-                last_output=last_output,
-                intent='educate',
-                language=language,
-                comprehension_level=comprehension_level
-            )
-            interpretations.append(interpretation)
-            last_output = interpretation
-
-        logging.info(f"File processed successfully for user_id: {user_id}")
-        # return {
-        #     'user_id': user_id,
-        #     'filename': filename,
-        #     'transcription': transcription,
-        #     'interpretations': interpretations
-        # }
-        store.update_file_with_extract(user_id, filename, transcription)
-        result_message = "\n\n".join(interpretations)
-        store.add_message(content=result_message, sender='bot', user_id=user_id)
-    except ValueError as ve:
-        logging.error(f"Validation error: {ve}")
-        return {'error': str(ve)}
-    except Exception as e:
-        logging.exception(f"Error processing {filename}")
-        return {'error': str(e)}
+            logging.info(f"File processed successfully for user_id: {user_id}")
+            store.update_file_with_extract(user_id, filename, transcription)
+            result_message = "\n\n".join(interpretations)
+            store.add_message(content=result_message, sender='bot', user_id=user_id)
+        except ValueError as ve:
+            logging.error(f"Validation error: {ve}")
+            return {'error': str(ve)}
+        except Exception as e:
+            logging.exception(f"Error processing {filename}")
+            return {'error': str(e)}
