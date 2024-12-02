@@ -1,17 +1,15 @@
 import os
-import logging
 from flask import Blueprint, request, jsonify, current_app
-from google.cloud import storage
 from redis.exceptions import RedisError
-from utils import get_user_id
+from utils import get_user_id, upload_to_gcs,delete_from_gcs
 from celery_worker import process_file_data
 from sqlite_store import DocSynthStore
-
+import logging
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
 
-bucket_name = 'docsynth-fbb02.appspot.com'
+
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
 store = DocSynthStore(os.getenv("DATABASE_PATH"))
 
@@ -41,43 +39,6 @@ def authenticate_user():
         logging.exception("Error during user authentication")
         return None, None
 
-# Helper functions for GCS operations
-def upload_to_gcs(file_data, user_gc_id, filename):
-    try:
-        client = storage.Client()
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(f"{user_gc_id}/{filename}")
-        blob.upload_from_file(file_data, content_type=file_data.mimetype)
-        blob.make_public()
-        logging.info(f"Uploaded {filename} to GCS: {blob.public_url}")
-        return blob.public_url
-    except Exception as e:
-        logging.error("Error uploading to GCS")
-        return None
-
-def download_from_gcs(user_gc_id, filename):
-    try:
-        client = storage.Client()
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(f"{user_gc_id}/{filename}")
-        if not blob.exists():
-            logging.warning(f"File {filename} not found in GCS")
-            return None
-        return blob.download_as_bytes()
-    except Exception as e:
-        logging.error("Error downloading from GCS")
-        return None
-
-def delete_from_gcs(user_gc_id, filename):
-    try:
-        client = storage.Client()
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(f"{user_gc_id}/{filename}")
-        blob.delete()
-        logging.info(f"Deleted {filename} from GCS.")
-    except Exception as e:
-        logging.error("Error deleting from GCS")
-
 # Route to save file
 @files_bp.route('', methods=['POST'])
 def save_file():
@@ -99,11 +60,9 @@ def save_file():
                 logging.error(f"Failed to upload {file.filename} to GCS")
                 return jsonify({'error': 'File upload failed'}), 500
 
-            task = process_file_data.apply_async(args=[
-                user_id, user_gc_id, file, language, comprehension_level
-            ])
-            logging.info(f"Enqueued processing for {file.filename}")
-            return jsonify({'task_id': task.id, 'status': 'Processing'}), 202
+            task = process_file_data.delay(user_id, user_gc_id, file.filename, language, comprehension_level)
+
+            logging.info(f"Enqueued Task {task.id}  for processing {file.filename}")
 
 
         return jsonify({'message': 'File processing queued.'}), 202
