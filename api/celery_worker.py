@@ -8,7 +8,7 @@ from utils import format_timestamp, download_from_gcs
 from tempfile import NamedTemporaryFile
 from llm_service import syntext, chunk_text  # Import here to avoid circular imports
 from doc_processor import process_file  # Ensures dependency is only imported when needed
-from flask import current_app,app 
+from sqlite_store import DocSynthStore
 # Load environment variables
 load_dotenv()
 
@@ -73,11 +73,10 @@ def transcribe_audio_chunked(self, file_path, lang):
 @celery_app.task(bind=True)
 def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
     # Ensure that the task is running within the Flask app context
-    with app.app_context():  # Push the app context manually
-        logging.info(f"Processing file: {filename} for user_id: {user_id}")
-        file = download_from_gcs(user_gc_id, filename)
-        store = current_app.store  # Now you can access current_app.store safely
-        try:
+    logging.info(f"Processing file: {filename} for user_id: {user_id}")
+    file = download_from_gcs(user_gc_id, filename)
+    store = DocSynthStore(os.getenv("DATABASE_PATH"))
+    try:
             if not file:
                 raise FileNotFoundError(f"File not provided or not found.")
               
@@ -114,9 +113,11 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             store.update_file_with_extract(user_id, filename, transcription)
             result_message = "\n\n".join(interpretations)
             store.add_message(content=result_message, sender='bot', user_id=user_id)
-        except ValueError as ve:
+    except ValueError as ve:
             logging.error(f"Validation error: {ve}")
             return {'error': str(ve)}
-        except Exception as e:
+    except Exception as e:
             logging.exception(f"Error processing {filename}")
             return {'error': str(e)}
+
+        
