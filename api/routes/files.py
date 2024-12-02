@@ -56,6 +56,7 @@ def save_file():
 
         for _, file in request.files.items():
             file_url = upload_to_gcs(file, user_gc_id, file.filename)
+            store.add_file(user_id,file.filename,file_url)
             if not file_url:
                 logging.error(f"Failed to upload {file.filename} to GCS")
                 return jsonify({'error': 'File upload failed'}), 500
@@ -101,52 +102,3 @@ def delete_file(fileId):
     except Exception as e:
         logging.error(f"Error deleting file: {e}")
         return jsonify({'error': str(e)}), 500
-
-@files_bp.route('/task_status/<task_id>', methods=['GET'])
-def get_task_status(task_id):
-    """
-    Endpoint to fetch task status by task ID.
-    """
-    from celery.result import AsyncResult
-
-    task_result = AsyncResult(task_id)
-    if task_result.state == 'PENDING':
-        response = {
-            'state': task_result.state,
-            'status': 'Task is pending...',
-        }
-    elif task_result.state == 'FAILURE':
-        response = {
-            'state': task_result.state,
-            'status': str(task_result.info),  # Include error message if task failed
-        }
-    else:
-        response = {
-            'state': task_result.state,
-            'result': task_result.info,  # Task return value
-        }
-
-    return jsonify(response)
-
-@files_bp.route('/task_result/<task_id>', methods=['POST'])
-def save_task_result(task_id):
-    """
-    Endpoint to save task result by task ID.
-    """
-    from celery.result import AsyncResult
-
-    task_result = AsyncResult(task_id)
-    if task_result.state == 'SUCCESS':
-        result = task_result.result
-        user_id = result['user_id']
-        filename = result['filename']
-        transcription = result['transcription']
-        interpretations = result['interpretations']
-
-        store.update_file_with_extract(user_id, filename, transcription)
-        result_message = "\n\n".join(interpretations)
-        store.add_message(content=result_message, sender='bot', user_id=user_id)
-
-        return jsonify({'status': 'Result saved successfully'}), 200
-    else:
-        return jsonify({'error': 'Task result not available'}), 404

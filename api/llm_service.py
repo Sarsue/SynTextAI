@@ -127,34 +127,34 @@ def syntext(content, last_output, intent, language, comprehension_level):
     return prompt_llm(prompt)
 
 
-response_prompt = """
+# response_prompt = """
 
-User Profile:
-- Age: 30
-- Gender: Male
-- Education Level: Bachelor's Degree
-- Occupation: Software Engineer
-- Beliefs: Atheist
+# User Profile:
+# - Age: 30
+# - Gender: Male
+# - Education Level: Bachelor's Degree
+# - Occupation: Software Engineer
+# - Beliefs: Atheist
 
-Media Content:
-- Image: [Description of the image content]
-- Video: [Transcription or key frames description]
-- PDF: [Extracted text or key points]
+# Media Content:
+# - Image: [Description of the image content]
+# - Video: [Transcription or key frames description]
+# - PDF: [Extracted text or key points]
 
--Query
-- Convo History
--Files History
+# -Query
+# - Convo History
+# -Files History
 
-adjust tone, explanation depth, subject focus based on
-"""
+# adjust tone, explanation depth, subject focus based on
+# """
 
-summarize_prompt = """
-Analyze the input text and generate 5 essential questions that when answered , capture the main points and core meaning of the text.
-when formulating your questions address the central theme or argment.
-Identify key supporting ideas
-Highlight important facts or evidence
-Reveal the author's purpose or perspective
-Explore any significant implications or conclusions
-Answer all your generated questions one by one in detail
+# summarize_prompt = """
+# Analyze the input text and generate 5 essential questions that when answered , capture the main points and core meaning of the text.
+# when formulating your questions address the central theme or argment.
+# Identify key supporting ideas
+# Highlight important facts or evidence
+# Reveal the author's purpose or perspective
+# Explore any significant implications or conclusions
+# Answer all your generated questions one by one in detail
 
-"""
+# """

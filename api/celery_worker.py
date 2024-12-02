@@ -6,7 +6,9 @@ import mimetypes  # For MIME type validation
 from faster_whisper import WhisperModel  # Initialize whisper locally to avoid global initialization
 from utils import format_timestamp, download_from_gcs
 from tempfile import NamedTemporaryFile
-
+from llm_service import syntext, chunk_text  # Import here to avoid circular imports
+from doc_processor import process_file  # Ensures dependency is only imported when needed
+from flask import current_app 
 # Load environment variables
 load_dotenv()
 
@@ -69,11 +71,11 @@ def transcribe_audio_chunked(self, file_path, lang):
 
 @celery_app.task(bind=True)
 def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
-    from llm_service import syntext, chunk_text  # Import here to avoid circular imports
-    from doc_processor import process_file  # Ensures dependency is only imported when needed
+ 
 
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
     file = download_from_gcs(user_gc_id, filename)
+    store = current_app.store 
     try:
         if not file:
             raise FileNotFoundError(f"File not provided or not found.")
@@ -87,7 +89,8 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
                 temp_file.write(file)
                 temp_file_path = temp_file.name
-                transcription = transcribe_audio_chunked(temp_file_path)  # Process the video file
+                transcriptions = transcribe_audio_chunked(temp_file_path, lang=None)  # Process the video file
+                transcription = " ".join(transcriptions)
         else:
             logging.info("Processing document file...")
             transcription = process_file(file, ext)  # Process document files directly
@@ -107,12 +110,15 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             last_output = interpretation
 
         logging.info(f"File processed successfully for user_id: {user_id}")
-        return {
-            'user_id': user_id,
-            'filename': filename,
-            'transcription': transcription,
-            'interpretations': interpretations
-        }
+        # return {
+        #     'user_id': user_id,
+        #     'filename': filename,
+        #     'transcription': transcription,
+        #     'interpretations': interpretations
+        # }
+        store.update_file_with_extract(user_id, filename, transcription)
+        result_message = "\n\n".join(interpretations)
+        store.add_message(content=result_message, sender='bot', user_id=user_id)
     except ValueError as ve:
         logging.error(f"Validation error: {ve}")
         return {'error': str(ve)}
