@@ -93,7 +93,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 return (
                     <video controls width="100%" height="auto">
                         <source src={fileContent!} type="video/mp4" />
-                        Your browser does not support the video tag.
+                        Your browser does not support the video tag or the video format.
                     </video>
                 );
             default:
