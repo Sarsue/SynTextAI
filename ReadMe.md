@@ -46,7 +46,7 @@ docker run --rm -p 3000:3000 --env-file .env \
 
 /Users/osas/Documents/dev/app
 
-docker run --rm \
+docker run -d \
   -p 3000:3000 \
   --env-file .env \
   -v docsynth_db:/app/db \

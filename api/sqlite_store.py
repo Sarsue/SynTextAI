@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 class DocSynthStore:
     def __init__(self, database_path):
-        print(database_path)
+        os.makedirs(os.path.dirname(database_path), exist_ok=True)
+        print(f"Database Path: {database_path}")
         self.database_path = database_path
         self.vectorizer = TfidfVectorizer()
         self.create_tables()
