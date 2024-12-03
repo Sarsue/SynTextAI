@@ -1,5 +1,6 @@
 from celery import Celery
 import os
+import json
 from dotenv import load_dotenv
 import logging
 import mimetypes  # For MIME type validation
@@ -9,6 +10,7 @@ from tempfile import NamedTemporaryFile
 from llm_service import syntext, chunk_text  # Import here to avoid circular imports
 from doc_processor import process_file  # Ensures dependency is only imported when needed
 from sqlite_store import DocSynthStore
+from redis import StrictRedis, ConnectionPool  # Added connection pooling
 # Load environment variables
 load_dotenv()
 
@@ -20,6 +22,9 @@ redis_port = os.getenv("REDIS_PORT")
 
 # Redis connection URL with SSL certificate verification
 redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_OPTIONAL'
+pool = ConnectionPool.from_url(redis_url, max_connections=10)  # Set a max connection pool
+
+redis_client = StrictRedis(connection_pool=pool)
 
 def make_celery(app_name: str):
     celery = Celery(
@@ -113,11 +118,18 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             store.update_file_with_extract(user_id, filename, transcription)
             result_message = "\n\n".join(interpretations)
             store.add_message(content=result_message, sender='bot', user_id=user_id)
+            result_data = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
+            redis_client.publish('task_events', json.dumps(result_data))
     except ValueError as ve:
-            logging.error(f"Validation error: {ve}")
-            return {'error': str(ve)}
+            logging.error(f"Error Validating {filename}: {str(ve)}")
+            result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(ve)}
+            redis_client.publish('task_events', json.dumps(result_data))
+          
     except Exception as e:
             logging.exception(f"Error processing {filename}")
-            return {'error': str(e)}
+            logging.error(f"Error processing {filename}: {str(e)}")
+            result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
+            redis_client.publish('task_events', json.dumps(result_data))
+        
 
         

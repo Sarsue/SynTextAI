@@ -81,7 +81,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             });
     };
 
-    const MAX_TITLE_LENGTH = 150; // Set the max length for the title
 
     const handleSend = async (message: string, files: File[]) => {
         try {
@@ -473,10 +472,27 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 await fetchHistories();
                 await fetchUserFiles();
             };
+            // Create EventSource connection to listen for updates
+            const eventSource = new EventSource('/api/v1/streams'); // Replace with your event URL
 
-            // Fetch files initially
-            fetchHistoriesandFiles();
+            // Event listener to handle updates
+            eventSource.onmessage = (event) => {
+                console.log('Event received:', event);
+                // Fetch histories and files when an event is received
+                // Fetch files initially
+                fetchHistoriesandFiles();
+            };
 
+            // Handle errors
+            eventSource.onerror = (error) => {
+                console.error('EventSource failed:', error);
+                eventSource.close(); // Close the connection if there's an error
+            };
+
+            // Cleanup when component is unmounted
+            return () => {
+                eventSource.close();
+            };
         }
     }, [user]); // Runs whenever `user` changes
 
