@@ -14,21 +14,25 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     const [loading, setLoading] = useState<boolean>(true);
     const [pageNumber, setPageNumber] = useState<number>(1); // Default page number
 
+  
     useEffect(() => {
         const fileType = getFileType(fileUrl);
         if (!fileType) {
+            console.error('Unsupported file type for:', fileUrl);
             onError('Unsupported file type');
-            return; // Stop processing if the file type is not supported
+            return;
         }
 
+        console.log('Detected file type:', fileType);
         setFileType(fileType);
         fetchFileContent(fileUrl, fileType);
     }, [fileUrl, onError]);
 
+
     const fetchFileContent = async (url: string, type: string) => {
         try {
             const baseUrl = url.split('?')[0];
-            console.log('Fetching file from:', baseUrl);
+            console.log('Fetching file from:', url);
 
             const response = await fetch(baseUrl, { mode: 'cors' });
 
@@ -48,7 +52,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 throw new Error('Failed to fetch file content');
             }
         } catch (error) {
-            onError(error.message);
+            console.error('Error fetching file content:', error);
+            onError('Failed to load file. Please try again later.');
             setLoading(false);
         }
     };

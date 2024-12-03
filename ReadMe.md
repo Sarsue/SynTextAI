@@ -46,9 +46,8 @@ docker run --rm -p 3000:3000 --env-file .env \
 
 /Users/osas/Documents/dev/app
 
-docker run --rm -p 3000:3000 --env-file .env \
-  -v /Users/osas/Documents/dev/app:/var/log/syntextai \
+docker run --rm \
+  -p 3000:3000 \
+  --env-file .env \
+  -v docsynth_db:/app/db \
   syntextaiapp
-
-
-docker run --rm -p 3000:3000 --env-file .env -v litestream.yml:/etc/litestream.yml syntextaiapp

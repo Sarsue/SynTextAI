@@ -46,7 +46,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                     >
                         <span className="history-content">
                             {history.messages.length > 0
-                                ? history.messages[0].content.slice(0, 200) + (history.messages[0].content.length > 200 ? '...' : '')
+                                ? history.messages[0].content.slice(0, 140) + (history.messages[0].content.length > 140 ? '...' : '')
                                 : 'No messages'}
                         </span>
                         <button
