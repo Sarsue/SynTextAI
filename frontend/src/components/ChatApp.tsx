@@ -473,7 +473,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 await fetchUserFiles();
             };
             // Create EventSource connection to listen for updates
-            const eventSource = new EventSource('/api/v1/streams'); // Replace with your event URL
+            const eventSource = new EventSource('api/v1/streams'); // Replace with your event URL
 
             // Event listener to handle updates
             eventSource.onmessage = (event) => {

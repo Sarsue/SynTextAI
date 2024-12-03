@@ -64,7 +64,7 @@ def create_app():
     app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
-    app.register_blueprint(sse, url_prefix='api/v1/stream')
+    app.register_blueprint(sse, url_prefix='/api/v1/stream')
 
     def listen_for_events():
         """Listen for events on Redis channel and push to SSE"""
