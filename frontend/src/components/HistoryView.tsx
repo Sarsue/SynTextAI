@@ -45,7 +45,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                         className={`history-item ${selectedHistoryId === history.id ? 'selected' : ''}`}
                     >
                         <span className="history-content">
-                            {history.messages.length > 0 ? history.messages[0].content : 'No messages'}
+                            {history.messages.length > 0
+                                ? history.messages[0].content.slice(0, 200) + (history.messages[0].content.length > 200 ? '...' : '')
+                                : 'No messages'}
                         </span>
                         <button
                             className="delete-button"
