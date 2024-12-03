@@ -208,15 +208,16 @@ class DocSynthStore:
 
     def add_chat_history(self, title, user_id):
         try:
+            truncated_title = title[:150]
             with sqlite3.connect(self.database_path, check_same_thread=False) as connection:
                 cursor = connection.cursor()
                 cursor.execute('''
                     INSERT INTO chat_histories (title, user_id)
                     VALUES (?, ?)
-                ''', (title, user_id))
+                ''', (truncated_title, user_id))
 
                 chat_history_id = cursor.lastrowid
-                return {'id': chat_history_id, 'title': title, 'user_id': user_id}
+                return {'id': chat_history_id, 'title': truncated_title, 'user_id': user_id}
         except Exception as e:
             logger.error(f"Error adding chat history: {e}")
             raise
@@ -295,7 +296,7 @@ class DocSynthStore:
 
                     chat_history = {
                         'id': chat_history_id,
-                        'title': chat_history_title[:150],
+                        'title': chat_history_title,
                         'messages': messages,
                     }
 
