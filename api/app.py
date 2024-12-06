@@ -22,11 +22,12 @@ def create_app():
     redis_port = os.getenv('REDIS_PORT')
 
     # Redis connection pool for Celery
-    redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+    redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
+
 
     app.config['REDIS_URL'] = redis_url
-    app.config['CELERY_BROKER_URL'] = app.config['REDIS_URL']
-    app.config['CELERY_RESULT_BACKEND'] = app.config['REDIS_URL']
+    app.config['broker_url'] = redis_url
+    app.config['result_backend'] = redis_url
     app.config['SSE_REDIS_URL'] = app.config['REDIS_URL']
 
 
@@ -84,16 +85,12 @@ def create_app():
     return app
 
 def make_celery(app):
-    celery = Celery(app.import_name, backend=app.config['CELERY_RESULT_BACKEND'], broker=app.config['CELERY_BROKER_URL'])
-  
-    celery.conf.broker_transport_options = {
-    'max_retries': 3,
-    'interval_start': 0,
-    'interval_step': 2,
-    'interval_max': 4,
-    }
+    celery = Celery(
+        app.import_name,
+        backend=app.config['result_backend'],
+        broker=app.config['broker_url']
+    )
     celery.conf.update(app.config)
-
 
     class ContextTask(celery.Task):
         def __call__(self, *args, **kwargs):
@@ -102,6 +99,7 @@ def make_celery(app):
 
     celery.Task = ContextTask
     return celery
+
 
 app = create_app()
 celery = make_celery(app)
