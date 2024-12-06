@@ -473,19 +473,23 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 await fetchUserFiles();
             };
 
-            const eventSource = new EventSource('/api/v1/stream');
+            // Initialize the EventSource connection
+            const eventSource = new EventSource(`/api/v1/stream?user_id=${user.getIdTokenResult()}`);
 
+            // Handle incoming messages
             eventSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 console.log('Event received:', data);
-                fetchHistoriesandFiles();
+                fetchHistoriesandFiles(); // Refresh data upon receiving updates
             };
 
+            // Handle errors
             eventSource.onerror = (error) => {
                 console.error('EventSource error:', error);
-                eventSource.close();
+                eventSource.close(); // Close the connection on error
             };
 
+            // Cleanup function
             return () => {
                 eventSource.close();
             };
