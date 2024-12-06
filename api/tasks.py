@@ -82,20 +82,20 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             result_message = "\n\n".join(interpretations)
             store.add_message(content=result_message, sender='bot', user_id=user_id)
             result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
-            sse.publish({"message": "Task completed", "result": result}, type='task_update', channel=f"user_{user_id}")
+            sse.publish({"message": "Task completed", "result": result}, type='task_update', channel=f"user_{user_gc_id}")
             return {"status": "success", "result": result}
            
     except ValueError as ve:
             result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(ve)}
             logging.error(f"Error Validating {filename}: {str(result_data)}")
-            sse.publish({"message": f"Task failed: {str(ve)}"}, type='task_error', channel=f"user_{user_id}")
+            sse.publish({"message": f"Task failed: {str(ve)}"}, type='task_error', channel=f"user_{user_gc_id}")
         
           
           
     except Exception as e:
             result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
             logging.error(f"Error processing  {filename}: {str(result_data)}")
-            sse.publish({"message": f"Task failed: {str(e)}"}, type='task_error', channel=f"user_{user_id}")
+            sse.publish({"message": f"Task failed: {str(e)}"}, type='task_error', channel=f"user_{user_gc_id}")
            
         
 
