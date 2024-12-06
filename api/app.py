@@ -85,7 +85,15 @@ def create_app():
 
 def make_celery(app):
     celery = Celery(app.import_name, backend=app.config['CELERY_RESULT_BACKEND'], broker=app.config['CELERY_BROKER_URL'])
+  
+    celery.conf.broker_transport_options = {
+    'max_retries': 3,
+    'interval_start': 0,
+    'interval_step': 2,
+    'interval_max': 4,
+    }
     celery.conf.update(app.config)
+
 
     class ContextTask(celery.Task):
         def __call__(self, *args, **kwargs):
