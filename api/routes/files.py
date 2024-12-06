@@ -2,7 +2,7 @@ import os
 from flask import Blueprint, request, jsonify, current_app
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs,delete_from_gcs
-from celery_worker import process_file_data
+from tasks import process_file_data
 from sqlite_store import DocSynthStore
 import logging
 
