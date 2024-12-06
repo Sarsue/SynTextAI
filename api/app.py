@@ -16,7 +16,15 @@ def create_app():
 
     # Initialize Firebase
     initialize_firebase()
-    app.config['REDIS_URL'] = os.getenv('REDIS_URL')
+    redis_username = os.getenv('REDIS_USERNAME')
+    redis_pwd = os.getenv('REDIS_PASSWORD')
+    redis_host = os.getenv('REDIS_HOST')
+    redis_port = os.getenv('REDIS_PORT')
+
+    # Redis connection pool for Celery
+    redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+
+    app.config['REDIS_URL'] = redis_url
     app.config['CELERY_BROKER_URL'] = app.config['REDIS_URL']
     app.config['CELERY_RESULT_BACKEND'] = app.config['REDIS_URL']
     app.config['SSE_REDIS_URL'] = app.config['REDIS_URL']
@@ -42,13 +50,7 @@ def create_app():
     app.store = store
 
     # Redis Configuration with Connection Pooling
-    redis_username = os.getenv('REDIS_USERNAME')
-    redis_pwd = os.getenv('REDIS_PASSWORD')
-    redis_host = os.getenv('REDIS_HOST')
-    redis_port = os.getenv('REDIS_PORT')
-
-    # Redis connection pool for Celery
-    redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+   
     pool = ConnectionPool.from_url(redis_url, max_connections=10)  # Set a max connection pool
 
     redis_client = StrictRedis(connection_pool=pool)
