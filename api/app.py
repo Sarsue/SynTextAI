@@ -22,7 +22,7 @@ def create_app():
     redis_port = os.getenv('REDIS_PORT')
 
     # Redis connection pool for Celery
-    redis_url = f"redis://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0"
+    redis_url = f"rediss://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE"
 
 
     app.config['REDIS_URL'] = redis_url
