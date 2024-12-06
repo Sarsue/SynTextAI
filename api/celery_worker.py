@@ -1,9 +1,9 @@
-from celery import Celery
+from celery import shared_task
 import os
 import json
 from dotenv import load_dotenv
 import logging
-import mimetypes  # For MIME type validation
+
 from faster_whisper import WhisperModel  # Initialize whisper locally to avoid global initialization
 from utils import format_timestamp, download_from_gcs
 from tempfile import NamedTemporaryFile
@@ -11,51 +11,14 @@ from llm_service import syntext, chunk_text  # Import here to avoid circular imp
 from doc_processor import process_file  # Ensures dependency is only imported when needed
 from sqlite_store import DocSynthStore
 from redis import StrictRedis, ConnectionPool  # Added connection pooling
-# Load environment variables
-load_dotenv()
-
-# Retrieve environment variables
-redis_username = os.getenv('REDIS_USERNAME')
-redis_pwd = os.getenv('REDIS_PASSWORD')
-redis_host = os.getenv("REDIS_HOST")
-redis_port = os.getenv("REDIS_PORT")
-
-# Redis connection URL with SSL certificate verification
-redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_OPTIONAL'
-pool = ConnectionPool.from_url(redis_url, max_connections=10)  # Set a max connection pool
-
-redis_client = StrictRedis(connection_pool=pool)
-
-def make_celery(app_name: str):
-    celery = Celery(
-        app_name,
-        backend=redis_url,
-        broker=redis_url,
-    )
-    celery.conf.update({
-        'broker_url': redis_url,
-        'result_backend': redis_url,
-        'broker_transport_options': {
-            'visibility_timeout': 3600,
-            'socket_timeout': 30,
-            'socket_connect_timeout': 10,
-        },
-        'task_time_limit': 900,
-        'task_soft_time_limit': 600,
-        'worker_prefetch_multiplier': 1,
-        'broker_connection_retry': True,
-        'broker_connection_max_retries': None,
-    })
-
-
-    return celery
-
-celery_app = make_celery('api')
+from celery import current_app as celery
+from flask_sse import sse
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-@celery_app.task(bind=True, max_retries=5)
+
+@shared_task(bind=True, max_retries=5)
 def transcribe_audio_chunked(self, file_path, lang):
     model_size = "medium"
 
@@ -75,7 +38,7 @@ def transcribe_audio_chunked(self, file_path, lang):
         raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
 
 
-@celery_app.task(bind=True)
+@shared_task(bind=True)
 def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
     # Ensure that the task is running within the Flask app context
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
@@ -118,18 +81,22 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             store.update_file_with_extract(user_id, filename, transcription)
             result_message = "\n\n".join(interpretations)
             store.add_message(content=result_message, sender='bot', user_id=user_id)
-            result_data = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
-            redis_client.publish('task_events', json.dumps(result_data))
+            result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
+            sse.publish({"message": "Task completed", "result": result}, type='task_update', channel=f"user_{user_id}")
+            return {"status": "success", "result": result}
+           
     except ValueError as ve:
-            logging.error(f"Error Validating {filename}: {str(ve)}")
             result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(ve)}
-            redis_client.publish('task_events', json.dumps(result_data))
+            logging.error(f"Error Validating {filename}: {str(result_data)}")
+            sse.publish({"message": f"Task failed: {str(ve)}"}, type='task_error', channel=f"user_{user_id}")
+        
+          
           
     except Exception as e:
-            logging.exception(f"Error processing {filename}")
-            logging.error(f"Error processing {filename}: {str(e)}")
             result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
-            redis_client.publish('task_events', json.dumps(result_data))
+            logging.error(f"Error processing  {filename}: {str(result_data)}")
+            sse.publish({"message": f"Task failed: {str(e)}"}, type='task_error', channel=f"user_{user_id}")
+           
         
 
         

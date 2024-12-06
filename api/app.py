@@ -6,8 +6,7 @@ from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
 from redis import StrictRedis, ConnectionPool  # Added connection pooling
 import os
-import threading
-import json
+from celery import Celery
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +16,11 @@ def create_app():
 
     # Initialize Firebase
     initialize_firebase()
+    app.config['REDIS_URL'] = os.getenv('REDIS_URL')
+    app.config['CELERY_BROKER_URL'] = app.config['REDIS_URL']
+    app.config['CELERY_RESULT_BACKEND'] = app.config['REDIS_URL']
+    app.config['SSE_REDIS_URL'] = app.config['REDIS_URL']
+
 
     # Set up CORS
     CORS(app, supports_credentials=True)
@@ -49,8 +53,6 @@ def create_app():
 
     redis_client = StrictRedis(connection_pool=pool)
     app.redis_client = redis_client  # Make Redis available in your app
-    pubsub = app.redis_client.pubsub()
-    pubsub.subscribe('task_events')  # Subscribe to Redis channel
 
     # Register Blueprints
     from routes.users import users_bp
@@ -64,23 +66,9 @@ def create_app():
     app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
+    #Initialize Flask-SSE
     app.register_blueprint(sse, url_prefix='/api/v1/stream')
-
-    def listen_for_events():
-        """Listen for events on Redis channel and push to SSE"""
-        for message in pubsub.listen():
-            if message['type'] == 'message':
-                # Parse the message
-                try:
-                    event_data = json.loads(message['data'])
-                    user_id = event_data['user_id']
-                    status = event_data.get('status', 'unknown')   
-                    # Push the message to the client via SSE
-                    sse.publish(event_data, type=str(user_id))  # Publish to the SSE client with user_id
-                except json.JSONDecodeError:
-                    continue 
-
- 
+   
 
     @app.route('/')
     def serve_react_app():
@@ -90,13 +78,20 @@ def create_app():
     def serve_static_file(path):
         return send_from_directory(app.static_folder, path)
     
-    @app.before_request
-    def start_event_listener():
-        """Start Redis event listener in a separate thread"""
-        thread = threading.Thread(target=listen_for_events)
-        thread.daemon = True
-        thread.start()
-
 
     return app
 
+def make_celery(app):
+    celery = Celery(app.import_name, backend=app.config['CELERY_RESULT_BACKEND'], broker=app.config['CELERY_BROKER_URL'])
+    celery.conf.update(app.config)
+
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+
+    celery.Task = ContextTask
+    return celery
+
+app = create_app()
+celery = make_celery(app)
