@@ -63,6 +63,7 @@ def create_app():
     from routes.messages import messages_bp
     from routes.files import files_bp
     from routes.subscriptions import subscriptions_bp
+    from routes.sse import sse_bp
 
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
@@ -70,7 +71,7 @@ def create_app():
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
     #Initialize Flask-SSE
-    app.register_blueprint(sse, url_prefix='/api/v1/stream')
+    app.register_blueprint(sse_bp, url_prefix='/api/v1/stream')
    
 
     @app.route('/')

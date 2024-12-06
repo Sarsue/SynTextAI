@@ -465,7 +465,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const handleCloseFileViewer = () => {
         setSelectedFile(null); // Clear selected file when closing viewer
     };
-
     useEffect(() => {
         if (user) {
             const fetchHistoriesandFiles = async () => {
@@ -473,26 +472,41 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 await fetchUserFiles();
             };
 
-            // Initialize the EventSource connection
-            const eventSource = new EventSource(`/api/v1/stream?user_id=${user.getIdTokenResult()}`);
+            const initializeSSE = async () => {
+                try {
+                    // Wait for the user token result to resolve
+                    const idToken = await user?.getIdToken();
 
-            // Handle incoming messages
-            eventSource.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                console.log('Event received:', data);
-                fetchHistoriesandFiles(); // Refresh data upon receiving updates
+
+                    if (idToken) {
+                        // Initialize the EventSource connection with the userId in the URL
+                        const eventSource = new EventSource(`api/v1/stream?user_id=${idToken}`);
+
+                        // Handle incoming messages
+                        eventSource.onmessage = (event) => {
+                            const data = JSON.parse(event.data);
+                            console.log('Event received:', data);
+                            fetchHistoriesandFiles(); // Refresh data upon receiving updates
+                        };
+
+                        // Handle errors
+                        eventSource.onerror = (error) => {
+                            console.error('EventSource error:', error);
+                            eventSource.close(); // Close the connection on error
+                        };
+
+                        // Cleanup function to close the connection when the component unmounts
+                        return () => {
+                            eventSource.close();
+                        };
+                    }
+                } catch (error) {
+                    console.error('Error getting user token:', error);
+                }
             };
 
-            // Handle errors
-            eventSource.onerror = (error) => {
-                console.error('EventSource error:', error);
-                eventSource.close(); // Close the connection on error
-            };
-
-            // Cleanup function
-            return () => {
-                eventSource.close();
-            };
+            // Initialize SSE and set up cleanup
+            initializeSSE();
         }
     }, [user]);
 
