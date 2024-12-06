@@ -1,28 +1,21 @@
 from celery import shared_task
-import os
-import json
-from dotenv import load_dotenv
+from flask import current_app
 import logging
-
-from faster_whisper import WhisperModel  # Initialize whisper locally to avoid global initialization
-from utils import format_timestamp, download_from_gcs
+import os
 from tempfile import NamedTemporaryFile
-from llm_service import syntext, chunk_text  # Import here to avoid circular imports
-from doc_processor import process_file  # Ensures dependency is only imported when needed
+from llm_service import syntext, chunk_text
+from doc_processor import process_file
 from sqlite_store import DocSynthStore
-from redis import StrictRedis, ConnectionPool  # Added connection pooling
-from celery import current_app as celery
-from flask_sse import sse
+from faster_whisper import WhisperModel
+from utils import format_timestamp, download_from_gcs
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-
 @shared_task(bind=True, max_retries=5)
 def transcribe_audio_chunked(self, file_path, lang):
     model_size = "medium"
-
-    # Run on CPU with INT8 for simplicity
     model = WhisperModel(model_size, device="cpu", compute_type="int8")
     try:
         if lang == 'en':
@@ -40,63 +33,67 @@ def transcribe_audio_chunked(self, file_path, lang):
 
 @shared_task(bind=True)
 def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
-    # Ensure that the task is running within the Flask app context
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
     file = download_from_gcs(user_gc_id, filename)
     store = DocSynthStore(os.getenv("DATABASE_PATH"))
+
     try:
-            if not file:
-                raise FileNotFoundError(f"File not provided or not found.")
-              
-            # Use a temporary file only for video data
-            _, ext = os.path.splitext(filename)
-            ext = ext.lstrip('.').lower()
+        if not file:
+            raise FileNotFoundError(f"File not provided or not found.")
+        
+        # Use a temporary file for video processing
+        _, ext = os.path.splitext(filename)
+        ext = ext.lstrip('.').lower()
 
-            if ext in ["mp4", "mkv", "avi"]:
-                logging.info("Extracting audio from video...")
-                with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
-                    temp_file.write(file)
-                    temp_file_path = temp_file.name
-                    transcriptions = transcribe_audio_chunked(temp_file_path, lang=None)  # Process the video file
-                    transcription = " ".join(transcriptions)
-            else:
-                logging.info("Processing document file...")
-                transcription = process_file(file, ext)  # Process document files directly
+        if ext in ["mp4", "mkv", "avi"]:
+            logging.info("Extracting audio from video...")
+            with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
+                temp_file.write(file)
+                temp_file_path = temp_file.name
+                transcriptions = transcribe_audio_chunked(temp_file_path, lang=None)
+                transcription = " ".join(transcriptions)
+        else:
+            logging.info("Processing document file...")
+            transcription = process_file(file, ext)
 
-            # Interpret the transcription
-            interpretations = []
-            last_output = ""
-            for content_chunk in chunk_text(transcription):
-                interpretation = syntext(
-                    content=content_chunk,
-                    last_output=last_output,
-                    intent='educate',
-                    language=language,
-                    comprehension_level=comprehension_level
-                )
-                interpretations.append(interpretation)
-                last_output = interpretation
+        # Interpret the transcription
+        interpretations = []
+        last_output = ""
+        for content_chunk in chunk_text(transcription):
+            interpretation = syntext(
+                content=content_chunk,
+                last_output=last_output,
+                intent='educate',
+                language=language,
+                comprehension_level=comprehension_level
+            )
+            interpretations.append(interpretation)
+            last_output = interpretation
 
-            logging.info(f"File processed successfully for user_id: {user_id}")
-            store.update_file_with_extract(user_id, filename, transcription)
-            result_message = "\n\n".join(interpretations)
-            store.add_message(content=result_message, sender='bot', user_id=user_id)
-            result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
-            sse.publish({"message": "Task completed", "result": result}, type='task_update', channel=f"user_{user_gc_id}")
-            return {"status": "success", "result": result}
-           
+        logging.info(f"File processed successfully for user_id: {user_id}")
+        store.update_file_with_extract(user_id, filename, transcription)
+        result_message = "\n\n".join(interpretations)
+        store.add_message(content=result_message, sender='bot', user_id=user_id)
+        
+        # Access Redis from current_app and publish result
+        redis_client = current_app.redis_client
+        result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
+        
+        # Publish the result to Redis
+        redis_client.publish(f"user_{user_gc_id}", json.dumps(result))
+
+        return {"status": "success", "result": result}
+    
     except ValueError as ve:
-            result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(ve)}
-            logging.error(f"Error Validating {filename}: {str(result_data)}")
-            sse.publish({"message": f"Task failed: {str(ve)}"}, type='task_error', channel=f"user_{user_gc_id}")
+        result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(ve)}
+        logging.error(f"Error Validating {filename}: {str(result_data)}")
         
-          
-          
+        # Publish error status to Redis
+        redis_client.publish(f"user_{user_gc_id}", json.dumps(result_data))
+    
     except Exception as e:
-            result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
-            logging.error(f"Error processing  {filename}: {str(result_data)}")
-            sse.publish({"message": f"Task failed: {str(e)}"}, type='task_error', channel=f"user_{user_gc_id}")
-           
+        result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
+        logging.error(f"Error processing {filename}: {str(result_data)}")
         
-
-        
+        # Publish error status to Redis
+        redis_client.publish(f"user_{user_gc_id}", json.dumps(result_data))
