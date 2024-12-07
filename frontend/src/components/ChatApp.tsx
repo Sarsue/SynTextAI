@@ -480,7 +480,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
                     if (idToken) {
                         // Initialize the EventSource connection with the userId in the URL
-                        const eventSource = new EventSource(`api/v1/stream?user_id=${idToken}`);
+                        const eventSource = new EventSource(`api/v1/stream?token=${idToken}`);
 
                         // Handle incoming messages
                         eventSource.onmessage = (event) => {

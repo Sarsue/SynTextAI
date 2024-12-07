@@ -1,42 +1,25 @@
-from flask import Flask, request, Blueprint, current_app, Response
-import redis
-import json
-
-# Initialize the Blueprint
+from flask import Flask, request, Blueprint, Response,current_app
+from utils import decode_firebase_token
+# Blueprint for SSE
 sse_bp = Blueprint("stream", __name__, url_prefix="/api/v1/stream")
 
-# Access the Redis client from Flask's app context
-def get_redis_client():
-    return current_app.redis_client
-
 # Function to handle the event stream for a specific user
-def event_stream(user_id):
-    # Get the Redis client
-    redis_client = get_redis_client()
-    
-    # Subscribe to the user's channel
+def event_stream(user_id, redis_client):
     pubsub = redis_client.pubsub()
     channel_name = f"user_{user_id}"
     pubsub.subscribe(channel_name)
     
-    # Listen for messages from the Redis channel
     for message in pubsub.listen():
         if message['type'] == 'message':
-            # Decode and yield the message in SSE format
             data = message['data'].decode('utf-8')
-            yield f"data: {data}\n\n"  # Proper SSE format (data: <message>\n\n)
+            yield f"data: {data}\n\n"
 
-# SSE Route to handle incoming connections
+# SSE route
 @sse_bp.route('', methods=['GET'])
 def stream():
-    # actuay google / external user id 
-    user_id = request.args.get('user_id')  # Get the user_id from the query parameters
-    if user_id:
-        # Log user connection (optional)
-        print(f"User {user_id} connected to SSE stream.")
-        
-        # Return the event stream with proper headers for SSE
-        return Response(event_stream(user_id), content_type='text/event-stream')
-    
-    # If no user_id is provided, return a bad request response
+    token = request.args.get('token')
+    if token:
+        success, user_info = decode_firebase_token(token)
+        redis_client = current_app.redis_client  # Access within the Flask app context
+        return Response(event_stream(user_info['user_id'], redis_client), content_type='text/event-stream')
     return "User ID is required", 400
