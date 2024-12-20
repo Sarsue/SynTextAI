@@ -5,16 +5,17 @@ from utils import get_user_id, upload_to_gcs,delete_from_gcs
 from tasks import process_file_data
 from sqlite_store import DocSynthStore
 import logging
+from celery.result import AsyncResult
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s: %(message)s')
 
 
 files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
-store = DocSynthStore(os.getenv("DATABASE_PATH"))
+
 
 # Helper function to authenticate user and retrieve user ID
-def authenticate_user():
+def authenticate_user(store):
     try:
         token = request.headers.get('Authorization')
         if not token:
@@ -45,8 +46,8 @@ def save_file():
     try:
         language = request.args.get('language', 'English')
         comprehension_level = request.args.get('comprehensionLevel', 'dropout')
-
-        user_id, user_gc_id = authenticate_user()
+        store = current_app.store
+        user_id, user_gc_id = authenticate_user(store)
         if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 
@@ -78,6 +79,7 @@ def save_file():
 @files_bp.route('', methods=['GET'])
 def retrieve_files():
     try:
+        store = current_app.store
         user_id, _ = authenticate_user()
         if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
@@ -92,7 +94,8 @@ def retrieve_files():
 @files_bp.route('/<int:fileId>', methods=['DELETE'])
 def delete_file(fileId):
     try:
-        user_id, user_gc_id = authenticate_user()
+        store = current_app.store
+        user_id, user_gc_id = authenticate_user(store)
         if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 
@@ -102,3 +105,12 @@ def delete_file(fileId):
     except Exception as e:
         logging.error(f"Error deleting file: {e}")
         return jsonify({'error': str(e)}), 500
+
+@files_bp.route('/result/<id>', methods=['GET'])
+def task_result(id: str) -> dict[str, object]:
+    result = AsyncResult(id)
+    return {
+        "ready": result.ready(),
+        "successful": result.successful(),
+        "value": result.result if result.ready() else None,
+    }

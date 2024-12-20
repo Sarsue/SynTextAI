@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
-from web_link_handler import process_newsletter_link
 from query_processor import process, summarize
 from llm_service import syntext  
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")

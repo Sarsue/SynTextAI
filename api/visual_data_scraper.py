@@ -1,10 +1,8 @@
 import io
 import logging
 from pdfminer.high_level import extract_text
-from llm_service import prompt_llm, extract_image_text
+from llm_service import  extract_image_text
 import base64
-import ffmpeg
-import whisper
 import numpy as np
 import os 
 
@@ -28,7 +26,7 @@ def extract_text_from_image(image_data):
         logging.error(f"Error extracting text from image: {e}")
         return None
 
-def process_file(file_data, file_extension):
+def process_data(file_data, file_extension):
     logging.info("processing file...")
     try:
         if file_extension == 'pdf':
@@ -48,15 +46,5 @@ def process_file(file_data, file_extension):
 if __name__ == "__main__":
     # Example usage with a video file
     current_directory = os.getcwd()
-    file_name = "api/pilotshowepisode2.mp4"  # Replace with your actual file name
-    file_path = os.path.join(current_directory, file_name)
-
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"The file '{file_path}' does not exist.")
-
-    # Test with in-memory video
-    with open(file_path, "rb") as video_file:
-        video_data= video_file.read()
-        print(process_file(video_data, 'mp4'))
-
+    pass 
 

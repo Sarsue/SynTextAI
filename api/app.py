@@ -1,6 +1,5 @@
 from flask import Flask, send_from_directory
 from flask_cors import CORS
-from flask_sse import sse
 from sqlite_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
@@ -9,53 +8,37 @@ import os
 from celery import Celery
 
 # Load environment variables
-load_dotenv()
 
+# from transformers import pipeline
+
+# # Load a small model for text classification or summarization
+# text_summarizer = pipeline("summarization", model="t5-small", device=-1)  # Runs on CPU
+
+load_dotenv()
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Construct paths relative to the base directory
+CELERY_FILESYSTEM_PATH = os.path.join(BASE_DIR, "db/")
+DATABASE_PATH = os.path.join(BASE_DIR, "db/docsynth.db")
+
+print(f"CELERY PATH: {CELERY_FILESYSTEM_PATH}")
 def create_app():
     app = Flask(__name__, static_folder='../build', static_url_path='/')
 
     # Initialize Firebase
     initialize_firebase()
-    redis_username = os.getenv('REDIS_USERNAME')
-    redis_pwd = os.getenv('REDIS_PASSWORD')
-    redis_host = os.getenv('REDIS_HOST')
-    redis_port = os.getenv('REDIS_PORT')
-
-    # Redis connection pool for Celery
-    redis_url = f"rediss://{redis_username}:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE"
-
-
-    app.config['REDIS_URL'] = redis_url
-    app.config['broker_url'] = redis_url
-    app.config['result_backend'] = redis_url
-    app.config['SSE_REDIS_URL'] = app.config['REDIS_URL']
-
+    
 
     # Set up CORS
     CORS(app, supports_credentials=True)
 
-    # Database configuration
-    # database_config = {
-    #     'dbname': os.getenv("DATABASE_NAME"),
-    #     'user': os.getenv("DATABASE_USER"),
-    #     'password': os.getenv("DATABASE_PASSWORD"),
-    #     'host': os.getenv("DATABASE_HOST"),
-    #     'port': os.getenv("DATABASE_PORT"),
-    # }
-    # store = DocSynthStore(database_config)
-    # Database configuration for SQLite
-
+  
     # Instantiate your store with the SQLite config
-    store = DocSynthStore(os.getenv("DATABASE_PATH"))
+    store = DocSynthStore(database_path=DATABASE_PATH)
 
     app.store = store
 
-    # Redis Configuration with Connection Pooling
-   
-    pool = ConnectionPool.from_url(redis_url, max_connections=10)  # Set a max connection pool
-
-    redis_client = StrictRedis(connection_pool=pool)
-    app.redis_client = redis_client  # Make Redis available in your app
+    
 
     # Register Blueprints
     from routes.users import users_bp
@@ -88,8 +71,8 @@ def create_app():
 def make_celery(app):
     celery = Celery(
         app.import_name,
-        backend=app.config['result_backend'],
-        broker=app.config['broker_url']
+        broker=f"filesystem://{CELERY_FILESYSTEM_PATH}",
+        backend=f"file://{CELERY_FILESYSTEM_PATH}"
     )
     celery.conf.update(app.config)
 

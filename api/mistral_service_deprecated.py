@@ -27,7 +27,14 @@ logging.basicConfig(level=logging.INFO)
 
 
 def get_text_embedding(input):
-    pass
+    client = MistralClient(api_key=mistral_key)
+
+    embeddings_batch_response = client.embeddings(
+        model="mistral-embed",
+        input=input
+    )
+    return embeddings_batch_response.data[0].embedding
+
 
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
     """Split text into manageable chunks."""
@@ -44,8 +51,35 @@ def prompt_llm(prompt):
 
 
 def extract_image_text(base64_image):
-    return f"extract_image_text is under test: {base64_image}"
-   
+    """Extract text from an image using the Mistral API."""
+    url = "https://api.mistral.ai/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {mistral_key}",
+    }
+    data = {
+        "model": "pixtral-12b-2409",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What’s in this image?"},
+                    {"type": "image_url",
+                        "image_url": f"data:image/jpeg;base64,{base64_image}"}
+                ]
+            }
+        ],
+        "max_tokens": 1500
+    }
+
+    response = requests.post(url, headers=headers,
+                             json=data, timeout=TIMEOUT_SECONDS)
+    if response.status_code == 200:
+        return response.json()['choices'][0]['message']['content']
+    else:
+        logging.error(
+            f"Error extracting text: {response.status_code} - {response.text}")
+        return ""
 
 
 def token_count(text):

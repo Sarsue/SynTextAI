@@ -465,6 +465,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const handleCloseFileViewer = () => {
         setSelectedFile(null); // Clear selected file when closing viewer
     };
+   
     useEffect(() => {
         if (user) {
             const fetchHistoriesandFiles = async () => {
@@ -472,41 +473,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 await fetchUserFiles();
             };
 
-            const initializeSSE = async () => {
-                try {
-                    // Wait for the user token result to resolve
-                    const idToken = await user?.getIdToken();
-
-
-                    if (idToken) {
-                        // Initialize the EventSource connection with the userId in the URL
-                        const eventSource = new EventSource(`api/v1/stream?token=${idToken}`);
-
-                        // Handle incoming messages
-                        eventSource.onmessage = (event) => {
-                            const data = JSON.parse(event.data);
-                            console.log('Event received:', data);
-                            fetchHistoriesandFiles(); // Refresh data upon receiving updates
-                        };
-
-                        // Handle errors
-                        eventSource.onerror = (error) => {
-                            console.error('EventSource error:', error);
-                            eventSource.close(); // Close the connection on error
-                        };
-
-                        // Cleanup function to close the connection when the component unmounts
-                        return () => {
-                            eventSource.close();
-                        };
-                    }
-                } catch (error) {
-                    console.error('Error getting user token:', error);
-                }
-            };
-
-            // Initialize SSE and set up cleanup
-            initializeSSE();
+            fetchHistoriesandFiles();
         }
     }, [user]);
 
@@ -514,7 +481,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const fetchUserFiles = async () => {
         if (!user) {
-            return;
+            return; 
         }
 
         try {
