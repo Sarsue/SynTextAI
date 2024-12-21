@@ -80,7 +80,7 @@ def save_file():
 def retrieve_files():
     try:
         store = current_app.store
-        user_id, _ = authenticate_user()
+        user_id, _ = authenticate_user(store)
         if user_id is None:
             return jsonify({'error': 'Unauthorized'}), 401
 

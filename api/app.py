@@ -69,13 +69,27 @@ def create_app():
     return app
 
 def make_celery(app):
+    # Initialize Celery with the application's import name, broker, and backend
     celery = Celery(
         app.import_name,
         broker=f"filesystem://{CELERY_FILESYSTEM_PATH}",
         backend=f"file://{CELERY_FILESYSTEM_PATH}"
     )
-    celery.conf.update(app.config)
+    CELERY_DATA_IN = os.path.join(CELERY_FILESYSTEM_PATH, 'data_in')
+    CELERY_DATA_OUT = os.path.join(CELERY_FILESYSTEM_PATH, 'data_out')
 
+    os.makedirs(CELERY_DATA_IN, exist_ok=True)
+    os.makedirs(CELERY_DATA_OUT, exist_ok=True)
+
+    # Update configuration for the filesystem broker
+    celery.conf.update(
+        broker_transport_options={
+            'data_folder_in': os.path.join(CELERY_FILESYSTEM_PATH, 'data_in'),
+            'data_folder_out': os.path.join(CELERY_FILESYSTEM_PATH, 'data_out'),
+        }
+    )
+
+    # Ensure that Celery tasks run within the Flask application context
     class ContextTask(celery.Task):
         def __call__(self, *args, **kwargs):
             with app.app_context():
@@ -83,6 +97,7 @@ def make_celery(app):
 
     celery.Task = ContextTask
     return celery
+
 
 
 app = create_app()

@@ -10,31 +10,15 @@ from requests.exceptions import Timeout, RequestException
 import requests
 # Load environment variables
 load_dotenv()
-mistral_key = os.getenv("MISTRAL_API_KEY")
-
-# Initialize MistralAI client
-mistral_client = MistralClient(api_key=mistral_key)
-
-# Constants
-LLM_CONTEXT_WINDOW = 8192
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
-TIMEOUT_SECONDS = 10  # Set timeout for network calls
-
 logging.basicConfig(level=logging.INFO)
 
+LLM_CONTEXT_WINDOW = 1024 
 # ---- Helper Functions ----
-
+from gpt4all import GPT4All
+model = GPT4All("Phi-3-mini-4k-instruct.Q4_0.gguf") # downloads / loads a 4.66GB LLM
 
 def get_text_embedding(input):
-    client = MistralClient(api_key=mistral_key)
-
-    embeddings_batch_response = client.embeddings(
-        model="mistral-embed",
-        input=input
-    )
-    return embeddings_batch_response.data[0].embedding
-
+    pass
 
 def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
     """Split text into manageable chunks."""
@@ -44,42 +28,14 @@ def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
 
 def prompt_llm(prompt):
     """Generate a chat completion using the Mistral API."""
-    model = "mistral-small-latest"
-    messages = [chat_completion.ChatMessage(role="user", content=prompt)]
-    response = mistral_client.chat(model=model, messages=messages)
-    return response.choices[0].message.content.strip()
+    with model.chat_session():
+        response = model.generate(prompt=prompt, max_tokens=1024)
+        return response
 
 
 def extract_image_text(base64_image):
-    """Extract text from an image using the Mistral API."""
-    url = "https://api.mistral.ai/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {mistral_key}",
-    }
-    data = {
-        "model": "pixtral-12b-2409",
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "What’s in this image?"},
-                    {"type": "image_url",
-                        "image_url": f"data:image/jpeg;base64,{base64_image}"}
-                ]
-            }
-        ],
-        "max_tokens": 1500
-    }
-
-    response = requests.post(url, headers=headers,
-                             json=data, timeout=TIMEOUT_SECONDS)
-    if response.status_code == 200:
-        return response.json()['choices'][0]['message']['content']
-    else:
-        logging.error(
-            f"Error extracting text: {response.status_code} - {response.text}")
-        return ""
+    return f"extract_image_text is under test: {base64_image}"
+   
 
 
 def token_count(text):
@@ -126,6 +82,17 @@ def syntext(content, last_output, intent, language, comprehension_level):
 
     return prompt_llm(prompt)
 
+
+if __name__ == "__main__":
+    message = "testing the slm what languages do you know fluently for translation tasks?"
+    response = syntext(
+        content=message,
+        last_output="",
+        intent='chat',
+        language="English",
+        comprehension_level='dropout'
+    )
+    print(response)
 
 # response_prompt = """
 
