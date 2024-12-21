@@ -383,19 +383,31 @@ class DocSynthStore:
         try:
             session = self.get_session()
 
+            # Check if user exists before adding file
+            user = session.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise ValueError(f"User with ID {user_id} does not exist.")
+            
             # Add a new file record
             new_file = File(user_id=user_id, file_name=file_name, file_url=file_url)
             session.add(new_file)
+
+            logger.info(f"Adding file: {file_name} for user {user_id}")
+
             session.commit()
 
-            # Return the file information
+            logger.info(f"File added successfully: {new_file.id}")
+
             return {'id': new_file.id, 'user_id': user_id, 'file_url': file_url}
+
         except Exception as e:
             session.rollback()  # Rollback in case of error
             logger.error(f"Error adding file: {e}")
-            raise
+            raise  # Re-raise the exception for further handling
+
         finally:
             session.close()
+
 
     def update_file_with_extract(self, user_id, file_name, extract):
         try:

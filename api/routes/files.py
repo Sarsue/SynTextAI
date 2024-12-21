@@ -61,7 +61,7 @@ def save_file():
                 logging.error(f"Failed to upload {file.filename} to GCS")
                 return jsonify({'error': 'File upload failed'}), 500
 
-            task = process_file_data.delay(store, user_id, user_gc_id, file.filename, language, comprehension_level)
+            task = process_file_data.delay(user_id, user_gc_id, file.filename, language, comprehension_level)
 
             logging.info(f"Enqueued Task {task.id}  for processing {file.filename}")
 

@@ -8,10 +8,22 @@ from visual_data_scraper import process_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
 import json
-
+from docsynth_store import DocSynthStore
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+# Construct paths relative to the base directory
+database_config = {
+    'dbname': os.getenv("DATABASE_NAME"),
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': os.getenv("DATABASE_PORT"),
+}
+DATABASE_URL = (
+    f"postgresql://{database_config['user']}:{database_config['password']}"
+    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+)
 @shared_task(bind=True, max_retries=5)
 def transcribe_audio_chunked(self, file_path, lang):
     model_size = "medium"
@@ -31,8 +43,9 @@ def transcribe_audio_chunked(self, file_path, lang):
 
 
 @shared_task(bind=True)
-def process_file_data(self, store, user_id, user_gc_id, filename, language, comprehension_level):
+def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
+    store = DocSynthStore(database_url=DATABASE_URL)
     file = download_from_gcs(user_gc_id, filename)
 
     try:

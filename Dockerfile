@@ -25,6 +25,7 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+\
 
 # Copy only the build artifacts from the first stage (frontend build step), not node_modules
 COPY --from=build-step /app/build ./build
@@ -48,7 +49,7 @@ RUN mkdir -p /var/log/syntextai && \
     chown -R root:root /var/log/syntextai && \
     chmod -R 775 /var/log/syntextai
 
-# Expose the application port
+# Expose thc v=e application port
 EXPOSE 3000
 
 # Supervisor Configuration

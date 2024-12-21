@@ -6,7 +6,7 @@ from firebase_setup import initialize_firebase
 from redis import StrictRedis, ConnectionPool  # Added connection pooling
 import os
 from celery import Celery
-
+from kombu.utils.url import safequote
 # Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -33,7 +33,11 @@ redis_port = os.getenv('REDIS_PORT')
 ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 
 # Redis connection pool for Celery with SSL configuration
-redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+redis_url = (
+    f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
+    "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
+)
+
 redis_connection_pool_options = {
     'ssl_cert_reqs': 'CERT_REQUIRED',
     'ssl_ca_certs': ssl_cert_path,
@@ -99,7 +103,7 @@ def make_celery(app):
         'task_time_limit': 900,
         'task_soft_time_limit': 600,
         'worker_prefetch_multiplier': 1,
-        'broker_connection_retry': True,
+        'broker_connection_retry_on_startup': True,
         'broker_connection_max_retries': None,
     })
 
