@@ -13,25 +13,31 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Construct paths relative to the base directory
 database_config = {
-        'dbname': os.getenv("DATABASE_NAME"),
-        'user': os.getenv("DATABASE_USER"),
-        'password': os.getenv("DATABASE_PASSWORD"),
-        'host': os.getenv("DATABASE_HOST"),
-        'port': os.getenv("DATABASE_PORT"),
-    }
+    'dbname': os.getenv("DATABASE_NAME"),
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': os.getenv("DATABASE_PORT"),
+}
 DATABASE_URL = (
     f"postgresql://{database_config['user']}:{database_config['password']}"
     f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
 )
-
 
 redis_username = os.getenv('REDIS_USERNAME')
 redis_pwd = os.getenv('REDIS_PASSWORD')
 redis_host = os.getenv('REDIS_HOST')
 redis_port = os.getenv('REDIS_PORT')
 
-# Redis connection pool for Celery
-redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0?ssl_cert_reqs=CERT_NONE'
+# Path to the certificate
+ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
+
+# Redis connection pool for Celery with SSL configuration
+redis_url = f'rediss://:{redis_pwd}@{redis_host}:{redis_port}/0'
+redis_connection_pool_options = {
+    'ssl_cert_reqs': 'CERT_REQUIRED',
+    'ssl_ca_certs': ssl_cert_path,
+}
 
 def create_app():
     app = Flask(__name__, static_folder='../build', static_url_path='/')
@@ -42,13 +48,17 @@ def create_app():
     # Set up CORS
     CORS(app, supports_credentials=True)
 
-    # Instantiate your store with the SQLite config
+    # Instantiate your store with the database config
     store = DocSynthStore(database_url=DATABASE_URL)
     app.store = store
-    # Redis Configuration with Connection Pooling
-   
-    pool = ConnectionPool.from_url(redis_url, max_connections=10)  # Set a max connection pool
 
+    # Redis Configuration with Connection Pooling
+    pool = ConnectionPool.from_url(
+        redis_url, 
+        max_connections=10, 
+        connection_class=StrictRedis,
+        **redis_connection_pool_options
+    )
     redis_client = StrictRedis(connection_pool=pool)
     app.redis_client = redis_client  # Make Redis available in your app
 
@@ -58,7 +68,6 @@ def create_app():
     from routes.messages import messages_bp
     from routes.files import files_bp
     from routes.subscriptions import subscriptions_bp
-
 
     app.register_blueprint(users_bp, url_prefix="/api/v1/users")
     app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
@@ -86,18 +95,13 @@ def make_celery(app):
     celery.conf.update({
         'broker_url': redis_url,
         'result_backend': redis_url,
-        'broker_transport_options': {
-            'visibility_timeout': 3600,
-            'socket_timeout': 30,
-            'socket_connect_timeout': 10,
-        },
+        'broker_transport_options': redis_connection_pool_options,
         'task_time_limit': 900,
         'task_soft_time_limit': 600,
         'worker_prefetch_multiplier': 1,
         'broker_connection_retry': True,
         'broker_connection_max_retries': None,
     })
-
 
     # Ensure that Celery tasks run within the Flask application context
     class ContextTask(celery.Task):
