@@ -104,7 +104,7 @@ class DocSynthStore:
         session = self.get_session()
         try:
             user = session.query(User).filter(User.email == email).first()
-            return user
+            return user.id
         finally:
             session.close()
 
