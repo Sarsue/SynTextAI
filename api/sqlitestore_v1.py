@@ -379,31 +379,6 @@ class DocSynthStore:
             logger.error(f"Error deleting all user histories: {e}")
             raise
 
-    def get_messages_for_chathistory(self, user_id, chat_history_id):
-        try:
-            with sqlite3.connect(self.database_path, check_same_thread=False) as connection:
-                cursor = connection.cursor()
-                cursor.execute('''
-                    SELECT * FROM messages
-                    WHERE chat_history_id = ? AND user_id = ?
-                ''', (chat_history_id, user_id))
-
-                messages = cursor.fetchall()
-                result_messages = []
-                for message in messages:
-                    result_messages.append({
-                        'id': message[0],
-                        'content': message[1],
-                        'timestamp': message[2],
-                        'user_id': message[3],
-                        'chat_history_id': message[4],
-                        'sender': message[5]
-                    })
-                return result_messages
-        except Exception as e:
-            logger.error(f"Error retrieving messages for chat history: {e}")
-            raise
-
     def format_user_chat_history(self, chat_history_id, user_id):
         # only last 5 messages
         try:

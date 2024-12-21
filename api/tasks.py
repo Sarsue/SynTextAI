@@ -5,7 +5,6 @@ import os
 from tempfile import NamedTemporaryFile
 from llm_service import syntext, chunk_text
 from visual_data_scraper import process_data
-from sqlite_store import DocSynthStore
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
 import json
@@ -32,10 +31,9 @@ def transcribe_audio_chunked(self, file_path, lang):
 
 
 @shared_task(bind=True)
-def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
+def process_file_data(self, store, user_id, user_gc_id, filename, language, comprehension_level):
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
     file = download_from_gcs(user_gc_id, filename)
-    store = DocSynthStore(os.getenv("DATABASE_PATH"))
 
     try:
         if not file:

@@ -3,7 +3,6 @@ from flask import Blueprint, request, jsonify, current_app
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs,delete_from_gcs
 from tasks import process_file_data
-from sqlite_store import DocSynthStore
 import logging
 from celery.result import AsyncResult
 
@@ -62,7 +61,7 @@ def save_file():
                 logging.error(f"Failed to upload {file.filename} to GCS")
                 return jsonify({'error': 'File upload failed'}), 500
 
-            task = process_file_data.delay(user_id, user_gc_id, file.filename, language, comprehension_level)
+            task = process_file_data.delay(store, user_id, user_gc_id, file.filename, language, comprehension_level)
 
             logging.info(f"Enqueued Task {task.id}  for processing {file.filename}")
 
