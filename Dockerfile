@@ -82,6 +82,13 @@ COPY litestream.yml /etc/litestream.yml
 
 # Run as root (you can remove the useradd command if you want to run as root directly)
 USER root
+# Copy the entrypoint script
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Command to run Supervisor, which will manage Gunicorn, Celery, and Litestream
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Set the entrypoint to the script
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# Command to start Supervisor (or your application)
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
