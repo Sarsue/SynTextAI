@@ -9,7 +9,19 @@ import os
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(message)s')
 
+"""
+        I Infer from reading PDF's and describing images mentally.
+        The best way to get data extracted out of PDF's and Images for the machine would be 
+        A multi modal model describing an IMAGE. 
+        A multi modal model reading a PDF Page
+"""
+
 def extract_text_from_pdf(pdf_data):
+    """
+        Naive extraction and the cause of poor performance 
+        Improve extraction and the problem is trivial.
+        Will use Multimodal model next ine experiments 
+    """
     logging.info("Extracting text from PDF...")
     try:
         return extract_text(io.BytesIO(pdf_data))
@@ -26,7 +38,7 @@ def extract_text_from_image(image_data):
         logging.error(f"Error extracting text from image: {e}")
         return None
 
-def process_data(file_data, file_extension):
+def extract_data(file_data, file_extension):
     logging.info("processing file...")
     try:
         if file_extension == 'pdf':

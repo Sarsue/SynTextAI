@@ -1,5 +1,8 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, Index
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker,  mapped_column, Mapped
+from sqlalchemy import func
+from pgvector.sqlalchemy import Vector
+from typing import List
 from datetime import datetime
 import logging
 
@@ -63,15 +66,32 @@ class Message(Base):
 
 class File(Base):
     __tablename__ = 'files'
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
+    
+    id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
     file_name = Column(String)
     file_url = Column(String)
-    extract = Column(Text)
-
+    created_at = Column(DateTime, default=func.now())
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    
+    # Relationship to chunks
+    chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
+    
     user = relationship("User", back_populates="files")
 
+
+class Chunk(Base):
+    __tablename__ = 'chunks'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content = Column(String)
+    page = Column(Integer, nullable=True)
+    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
+    
+    # Relationship to file
+    file = relationship("File", back_populates="chunks")
+    
+    # Vector embedding for each chunk
+    embedding = Column(Vector(1024), nullable=True)  # Example size (e.g., 1536 for OpenAI embeddings)
 
 class DocSynthStore:
     def __init__(self, database_url):
@@ -360,115 +380,7 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def get_files_for_user(self, user_id):
-        try:
-            session = self.get_session()
-
-            # Fetch the files for the user
-            files = session.query(File.id, File.file_name, File.file_url).filter(File.user_id == user_id).all()
-
-            file_info_list = []
-            for file in files:
-                file_info = {'id': file[0], 'name': file[1], 'publicUrl': file[2], 'processed': True}
-                file_info_list.append(file_info)
-
-            return file_info_list
-        except Exception as e:
-            logger.error(f"Error getting files for user: {e}")
-            raise
-        finally:
-            session.close()
-
-    def add_file(self, user_id, file_name, file_url):
-        try:
-            session = self.get_session()
-
-            # Check if user exists before adding file
-            user = session.query(User).filter(User.id == user_id).first()
-            if not user:
-                raise ValueError(f"User with ID {user_id} does not exist.")
-            
-            # Add a new file record
-            new_file = File(user_id=user_id, file_name=file_name, file_url=file_url)
-            session.add(new_file)
-
-            logger.info(f"Adding file: {file_name} for user {user_id}")
-
-            session.commit()
-
-            logger.info(f"File added successfully: {new_file.id}")
-
-            return {'id': new_file.id, 'user_id': user_id, 'file_url': file_url}
-
-        except Exception as e:
-            session.rollback()  # Rollback in case of error
-            logger.error(f"Error adding file: {e}")
-            raise  # Re-raise the exception for further handling
-
-        finally:
-            session.close()
-
-
-    def update_file_with_extract(self, user_id, file_name, extract):
-        try:
-            session = self.get_session()
-
-            # Fetch the file by user_id and file_name
-            file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
-
-            if file:
-                # Update the file's extract field
-                file.extract = extract
-                session.commit()
-            else:
-                raise ValueError("File not found")
-
-        except Exception as e:
-            session.rollback()  # Rollback in case of error
-            logger.error(f"Error updating file with extract: {e}")
-            raise
-        finally:
-            session.close()
-
-    def get_file_extract(self, user_id, file_name):
-        try:
-            session = self.get_session()
-
-            # Fetch the file by user_id and file_name
-            file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
-
-            if file:
-                return file.extract
-            else:
-                raise ValueError("File not found")
-        except Exception as e:
-            logger.error(f"Error retrieving file extract: {e}")
-            raise
-        finally:
-            session.close()
-
-    def delete_file_entry(self, user_id, file_id):
-        try:
-            session = self.get_session()
-
-            # Fetch the file by user_id and file_id
-            file = session.query(File).filter(File.user_id == user_id, File.id == file_id).first()
-
-            if file:
-                # Delete the file record
-                file_name = file.file_name
-                session.delete(file)
-                session.commit()
-
-                return {'file_name': file_name, 'file_id': file_id}
-            else:
-                raise ValueError("File not found")
-        except Exception as e:
-            session.rollback()  # Rollback in case of error
-            logger.error(f"Error deleting file entry: {e}")
-            raise
-        finally:
-            session.close()
+   
 
 # Example usage
 # db = DocSynthStore("sqlite:///test.db")

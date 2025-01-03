@@ -52,5 +52,3 @@ docker run -d \
   -v docsynth_db:/app/db \
   syntextaiapp
 
-
-PGPASSWORD= pg_restore -U doadmin -h db-postgresql-tor1-98599-do-user-13053452-0.g.db.ondigitalocean.com -p 25060 -d defaultdb 

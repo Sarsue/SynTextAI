@@ -105,6 +105,27 @@ def delete_file(fileId):
         logging.error(f"Error deleting file: {e}")
         return jsonify({'error': str(e)}), 500
 
+@files_bp.route('/<int:fileId>/reextract', methods=['PATCH'])
+def reextract_file(fileId):
+    try:
+        store = current_app.store
+        user_id, _ = authenticate_user(store)
+        if user_id is None:
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        # # Check if the file exists
+        # file_info = store.get_file_entry(user_id, fileId)
+        # if not file_info:
+        #     return jsonify({'error': 'File not found'}), 404
+
+        # # Trigger re-extraction logic
+        # process_file(file_info['file_path'])  # Replace with your re-processing logic
+
+        return jsonify({'message': 'File re-extraction initiated'}), 202
+    except Exception as e:
+        logging.error(f"Error reextracting file: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @files_bp.route('/result/<id>', methods=['GET'])
 def task_result(id: str) -> dict[str, object]:
     result = AsyncResult(id)

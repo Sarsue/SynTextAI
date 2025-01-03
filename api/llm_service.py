@@ -8,6 +8,7 @@ from mistralai.client import MistralClient
 from mistralai.models import chat_completion
 from requests.exceptions import Timeout, RequestException
 import requests
+import tiktoken
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
@@ -15,15 +16,11 @@ mistral_key = os.getenv("MISTRAL_API_KEY")
 # Initialize MistralAI client
 mistral_client = MistralClient(api_key=mistral_key)
 
-# Constants
-LLM_CONTEXT_WINDOW = 8192
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
-TIMEOUT_SECONDS = 10  # Set timeout for network calls
+# Model and Token Limit
+MODEL_NAME = "mistral-small-latest"
+MAX_TOKENS = 4096  # Example token limit for the model (adjust as needed)
 
 logging.basicConfig(level=logging.INFO)
-
-# ---- Helper Functions ----
 
 
 def get_text_embedding(input):
@@ -35,18 +32,11 @@ def get_text_embedding(input):
     )
     return embeddings_batch_response.data[0].embedding
 
-
-def chunk_text(text, max_tokens=LLM_CONTEXT_WINDOW):
-    """Split text into manageable chunks."""
-    words = text.split()
-    return [" ".join(words[i:i + max_tokens]) for i in range(0, len(words), max_tokens)]
-
-
 def prompt_llm(prompt):
     """Generate a chat completion using the Mistral API."""
-    model = "mistral-small-latest"
+
     messages = [chat_completion.ChatMessage(role="user", content=prompt)]
-    response = mistral_client.chat(model=model, messages=messages)
+    response = mistral_client.chat(model=MODEL_NAME, messages=messages)
     return response.choices[0].message.content.strip()
 
 
@@ -71,7 +61,7 @@ def extract_image_text(base64_image):
         ],
         "max_tokens": 1500
     }
-
+    TIMEOUT_SECONDS = 10 
     response = requests.post(url, headers=headers,
                              json=data, timeout=TIMEOUT_SECONDS)
     if response.status_code == 200:
@@ -81,91 +71,50 @@ def extract_image_text(base64_image):
             f"Error extracting text: {response.status_code} - {response.text}")
         return ""
 
-
 def token_count(text):
-    """Estimate the number of tokens in the text."""
-    # This is a simple approximation; you may need a more accurate tokenizer depending on your LLM.
-    return len(text.split())
+    """Count the number of tokens in the text."""
+    return  len(text.split()) 
 
+def chunk_text(text, token_limit):
+    """Chunk the text into parts that fit within the token limit."""
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    for word in text.split():
+        word_length = token_count(word)
+        if current_length + word_length > token_limit:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = [word]
+            current_length = word_length
+        else:
+            current_chunk.append(word)
+            current_length += word_length
 
-def truncate_for_context(last_output, new_content, max_tokens):
-    """Truncate the last output or new content if necessary to fit within the context window."""
-    total_tokens = token_count(last_output) + token_count(new_content)
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
 
-    # If the total exceeds the max tokens, truncate the last output
-    while total_tokens > max_tokens:
-        # Remove the first word
-        last_output = " ".join(last_output.split()[1:])
-        total_tokens = token_count(last_output) + token_count(new_content)
+def summarize(text, prompt="Summarize:", max_iterations=10):
+    """Summarize text by chunking it based on the model's token limit."""
+    max_tokens = MAX_TOKENS - token_count(prompt)  # Subtract the token count of the prompt
+    token_limit = max_tokens  # Set the token limit to the model's available tokens
 
-    return last_output
+    for _ in range(max_iterations):
+        # If the text is within the token limit, return it
+        if token_count(text) <= token_limit:
+            break
 
+        # Chunk the text into parts
+        chunks = chunk_text(text, token_limit)
 
-def syntext(content, last_output, intent, language, comprehension_level):
-    """
-    Process a single chunk of text, ensuring continuity with the last response.
-    """
-    # Truncate last output to fit within context window
-    last_output = truncate_for_context(
-        last_output, content, LLM_CONTEXT_WINDOW)
+        # Summarize each chunk
+        text = "\n\n".join(
+            prompt_llm(f"{prompt} {chunk}")
+            for chunk in chunks
+        )
 
-    # Create a coherent prompt
-    prompt = f"""
-    ### Intent: {intent.capitalize()}
-    Previous Response Context:
-    {last_output}
+    return text
 
-    Now, based on the previous response, please {intent} the following content in {language}, 
-    tailored to a comprehension level of a {comprehension_level}.
-
-    ### New Content:
-    {content}
-
-    Maintain a similar tone and ensure continuity with the last output.
-    """
-
-    return prompt_llm(prompt)
 
 if __name__ == "__main__":
-    
-    message = "testing the slm what languages do you know fluently for translation tasks?"
-    response = syntext(
-        content=message,
-        last_output="",
-        intent='chat',
-        language="English",
-        comprehension_level='dropout'
-    )
-    print(response)
-
-# response_prompt = """
-
-# User Profile:
-# - Age: 30
-# - Gender: Male
-# - Education Level: Bachelor's Degree
-# - Occupation: Software Engineer
-# - Beliefs: Atheist
-
-# Media Content:
-# - Image: [Description of the image content]
-# - Video: [Transcription or key frames description]
-# - PDF: [Extracted text or key points]
-
-# -Query
-# - Convo History
-# -Files History
-
-# adjust tone, explanation depth, subject focus based on
-# """
-
-# summarize_prompt = """
-# Analyze the input text and generate 5 essential questions that when answered , capture the main points and core meaning of the text.
-# when formulating your questions address the central theme or argment.
-# Identify key supporting ideas
-# Highlight important facts or evidence
-# Reveal the author's purpose or perspective
-# Explore any significant implications or conclusions
-# Answer all your generated questions one by one in detail
-
-# """
+    pass

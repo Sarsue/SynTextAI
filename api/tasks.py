@@ -4,7 +4,7 @@ import logging
 import os
 from tempfile import NamedTemporaryFile
 from llm_service import syntext, chunk_text
-from visual_data_scraper import process_data
+from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
 import json
@@ -65,7 +65,7 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
                 extracted_data = " ".join(process_results)
         else:
             logging.info("Processing document file...")
-            extracted_data = process_data(file, ext)
+            extracted_data = extract_data(file, ext)
 
         # Interpret the transcription
         llm_responses = []
