@@ -1,11 +1,11 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker,  mapped_column, Mapped
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.types import JSON
 from pgvector.sqlalchemy import Vector
 from typing import List
 from datetime import datetime
 import logging
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class Chunk(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     content = Column(String)
-    page = Column(Integer, nullable=True)
+    data = Column(JSON)  
     file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
     
     # Relationship to file
@@ -92,6 +92,8 @@ class Chunk(Base):
     
     # Vector embedding for each chunk
     embedding = Column(Vector(1024), nullable=True)  # Example size (e.g., 1536 for OpenAI embeddings)
+    def __repr__(self):
+        return f"<Chunk(id={self.id}, file_id={self.file_id}, content={self.content[:50]}..., metadata={self.metadata})>"
 
 class DocSynthStore:
     def __init__(self, database_url):
@@ -376,6 +378,197 @@ class DocSynthStore:
             return chat_history.strip()  # Remove trailing newline
         except Exception as e:
             logger.error(f"Error formatting user chat history: {e}")
+            raise
+        finally:
+            session.close()
+
+    def add_file(self, user_id, file_name, file_url):
+        try:
+            session = self.get_session()
+
+            # Check if user exists before adding file
+            user = session.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise ValueError(f"User with ID {user_id} does not exist.")
+            
+            # Add a new file record
+            new_file = File(user_id=user_id, file_name=file_name, file_url=file_url)
+            session.add(new_file)
+
+            logger.info(f"Adding file: {file_name} for user {user_id}")
+
+            session.commit()
+
+            logger.info(f"File added successfully: {new_file.id}")
+
+            return {'id': new_file.id, 'user_id': user_id, 'file_url': file_url}
+
+        except Exception as e:
+            session.rollback()  # Rollback in case of error
+            logger.error(f"Error adding file: {e}")
+            raise  # Re-raise the exception for further handling
+
+        finally:
+            session.close()
+
+    def update_file_with_chunks(self, user_id, file_name, file_type, chunks, embeddings):
+        """
+        Updates a file with its processed chunks and embeddings, handling different file types like PDF and video.
+        
+        Args:
+            user_id (int): ID of the user who owns the file.
+            file_name (str): Name of the file to update.
+            file_type (str): Type of the file ('pdf' or 'video').
+            chunks (list): List of content chunks extracted from the file.
+            embeddings (list): List of embeddings corresponding to the chunks.
+        """
+        try:
+            session = self.get_session()
+
+            # Fetch the file by user_id and file_name
+            file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
+
+            if file:
+                # Ensure chunks and embeddings have the same length
+                if len(chunks) != len(embeddings):
+                    raise ValueError("Chunks and embeddings lists must have the same length.")
+
+                # Create chunk objects and associate them with the file
+                for i, chunk in enumerate(chunks):
+                    # Set metadata based on the file type (PDF or video)
+                    data = {}
+                    if file_type == 'pdf':
+                        data = {"type": "pdf", "page_number": chunk["page_number"]}  # Assuming 'chunk' contains page_number
+                    elif file_type == 'video':
+                        data = {"type": "video", "start_time": chunk["start_time"], "end_time": chunk["end_time"]}  # Assuming 'chunk' contains time intervals
+
+                    # Add the chunk to the database
+                    new_chunk = Chunk(
+                        file_id=file.id,
+                        content=chunk["content"],
+                        embedding=embeddings[i].embedding,
+                        data=data
+                    )
+                    session.add(new_chunk)
+
+                session.commit()
+                logger.info(f"Updated file '{file_name}' for user {user_id} with {len(chunks)} chunks of type '{file_type}'.")
+            else:
+                raise ValueError(f"File '{file_name}' not found for user ID {user_id}.")
+
+        except Exception as e:
+            session.rollback()  # Rollback in case of error
+            logger.error(f"Error updating file with chunks: {e}")
+            raise  # Re-raise the exception for further handling
+        finally:
+            session.close()
+
+
+    def get_files_for_user(self, user_id):
+        try:
+            session = self.get_session()
+
+            # Fetch the files for the user along with a count of their chunks
+            files = session.query(
+                File.id, 
+                File.file_name, 
+                File.file_url, 
+                func.count(Chunk.id).label('chunk_count')
+            ).outerjoin(Chunk, Chunk.file_id == File.id) \
+            .filter(File.user_id == user_id) \
+            .group_by(File.id, File.file_name, File.file_url) \
+            .all()
+
+            file_info_list = []
+            for file in files:
+                file_info = {
+                    'id': file[0],
+                    'name': file[1],
+                    'publicUrl': file[2],
+                    'processed': file[3] > 0  # True if chunk_count > 0, otherwise False
+                }
+                file_info_list.append(file_info)
+
+            return file_info_list
+        except Exception as e:
+            logger.error(f"Error getting files for user: {e}")
+            raise
+        finally:
+            session.close()
+
+    def get_file_chunks(self, user_id, file_name):
+        try:
+            session = self.get_session()
+
+            # Fetch the file by user_id and file_name
+            file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
+
+            if file:
+                # Fetch all chunks associated with the file
+                chunks = session.query(Chunk).filter(Chunk.file_id == file.id).all()
+
+                # Return the content of each chunk
+                return [{'id': chunk.id, 'content': chunk.content, 'data': chunk.data} for chunk in chunks]
+            else:
+                raise ValueError("File not found")
+        except Exception as e:
+            logger.error(f"Error retrieving file chunks: {e}")
+            raise
+        finally:
+            session.close()
+
+    def delete_file_entry(self, user_id, file_id):
+        """
+        Deletes a file and its associated chunks from the database.
+        Args:
+            user_id (int): ID of the user who owns the file.
+            file_id (int): ID of the file to delete.
+        """
+        try:
+            session = self.get_session()
+
+            # Fetch the file by user_id and file_id
+            file = session.query(File).filter(File.user_id == user_id, File.id == file_id).first()
+
+            if file:
+                # Log file name before deletion
+                file_name = file.file_name
+
+                # Delete associated chunks (assuming a relationship is defined on File for chunks)
+                session.query(Chunk).filter(Chunk.file_id == file.id).delete()
+
+                # Delete the file record
+                session.delete(file)
+                session.commit()
+
+                logger.info(f"Deleted file '{file_name}' and its chunks for user {user_id}.")
+                return {'file_name': file_name, 'file_id': file_id}
+            else:
+                raise ValueError(f"File with ID {file_id} not found for user ID {user_id}.")
+
+        except Exception as e:
+            session.rollback()  # Rollback in case of error
+            logger.error(f"Error deleting file and its chunks: {e}")
+            raise  # Re-raise the exception for further handling
+        finally:
+            session.close()
+
+    def query_chunks_by_embedding(self,user_id, query_embedding, top_k=5):
+        try:
+            # Assuming `query_embedding` is a list or numpy array with the embedding to compare against
+            # We will pass it as a Vector for use in pgvector query
+            # Query to select the top-k chunks for a given user by similarity to the query embedding
+            session = self.get_session()
+            result = session.scalars(
+            select(Chunk)
+            .filter(Chunk.file_id.in_(select(File.id).filter(File.user_id == user_id)))
+            .order_by(Chunk.embedding.l2_distance(query_embedding))  # Use l2_distance or <=> for cosine similarity
+            .limit(top_k)
+            ).all()
+
+            return result
+        except Exception as e:
+            logger.error(f"Error querying chunks: {e}")
             raise
         finally:
             session.close()
