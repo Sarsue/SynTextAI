@@ -3,7 +3,7 @@ from flask import current_app
 import logging
 import os
 from tempfile import NamedTemporaryFile
-from llm_service import syntext, chunk_text
+from llm_service import chunk_text
 from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
@@ -71,20 +71,12 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
         llm_responses = []
         last_output = ""
         for content_chunk in chunk_text(extracted_data):
-            llm_response = syntext(
-                content=content_chunk,
-                last_output=last_output,
-                intent='educate',
-                language=language,
-                comprehension_level=comprehension_level
-            )
-            llm_responses.append(llm_response)
-            last_output = llm_response
-
+            pass
         logging.info(f"File processed successfully for user_id: {user_id}")
-        store.update_file_with_extract(user_id, filename, extracted_data)
-        result_message = "\n\n".join(llm_responses)
-        store.add_message(content=result_message, sender='bot', user_id=user_id)
+        
+        #store.update_file_with_extract(user_id, filename, extracted_data)
+        #result_message = "\n\n".join(llm_responses)
+        #store.add_message(content=result_message, sender='bot', user_id=user_id)
         
   
         result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}

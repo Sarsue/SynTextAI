@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
 from query_processor import process, summarize
-from llm_service import syntext  
+from syntext_agent import WebSearch
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
-
+searcher = WebSearch()
 
 def get_id_helper(store, success, user_info):
     if not success:
@@ -37,14 +37,14 @@ def create_message():
     message_list.append(user_request)
 
     # Generate the response with additional parameters for language and comprehension level
-    response = syntext(
-        content=message,
-        last_output=formatted_history,
-        intent='chat',
-        language=language,
-        comprehension_level=comprehension_level
-    )
-
+    # response = syntext(
+    #     content=message,
+    #     last_output=formatted_history,
+    #     intent='chat',
+    #     language=language,
+    #     comprehension_level=comprehension_level
+    # )
+    response = searcher.search_topic(message)
     # Save bot response to the history
     bot_response = store.add_message(
         content=response, sender='bot', user_id=id, chat_history_id=history_id)
