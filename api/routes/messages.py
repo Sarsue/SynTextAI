@@ -44,6 +44,7 @@ def create_message():
     #     language=language,
     #     comprehension_level=comprehension_level
     # )
+    topK_chunks = store.query_chunks_by_embedding(id,message)
     response = searcher.search_topic(message)
     # Save bot response to the history
     bot_response = store.add_message(

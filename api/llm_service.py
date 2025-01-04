@@ -134,6 +134,5 @@ def summarize(text, prompt="Summarize:", max_iterations=10):
 
     return text
 
-
 if __name__ == "__main__":
     pass

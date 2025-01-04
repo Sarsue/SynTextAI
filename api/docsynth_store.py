@@ -567,7 +567,9 @@ class DocSynthStore:
             .limit(top_k)
             ).all()
 
-            return result
+            # Extract the content of the chunks
+            contents = [chunk.content for chunk in result]  
+            return contents
         except Exception as e:
             logger.error(f"Error querying chunks: {e}")
             raise
