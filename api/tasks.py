@@ -8,6 +8,7 @@ from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
 import json
 from docsynth_store import DocSynthStore
+from llm_service import get_text_embeddings_in_batches
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -77,7 +78,8 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
 
   
         logging.info(f"File processed successfully for user_id: {user_id}")
-        extracted_data_embeddings = [] # get the chunk content  embeddings from Mistral
+        chunk_content = [extracted_data_point['content'] for extracted_data_point in extract_data]
+        extracted_data_embeddings =  get_text_embeddings_in_batches(chunk_content, batch_size=5)
         store.update_file_with_chunks(user_id, filename, ext, extracted_data, extracted_data_embeddings)
   
         result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}

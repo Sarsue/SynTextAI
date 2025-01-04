@@ -442,7 +442,7 @@ class DocSynthStore:
                     if file_type == 'video':
                         data = {"type": "video", "start_time": chunk["start_time"], "end_time": chunk["end_time"]}  # Assuming 'chunk' contains time intervals
                     else:
-                        data = {"type": "pdf", "page_number": chunk["page_number"]}
+                        data = {"type": file_type, "page_number": chunk["page_number"]}
                     # Add the chunk to the database
                     new_chunk = Chunk(
                         file_id=file.id,
