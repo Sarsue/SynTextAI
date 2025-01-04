@@ -3,7 +3,6 @@ from flask import current_app
 import logging
 import os
 from tempfile import NamedTemporaryFile
-from llm_service import chunk_text
 from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
@@ -35,7 +34,16 @@ def transcribe_audio_chunked(self, file_path, lang):
             segments, info = model.transcribe(file_path, beam_size=5)
         
         logging.info(f"Detected language '{info.language}' with probability {info.language_probability}")
-        return [segment.text for segment in segments]
+        transcription_chunks = [
+            {
+                "start_time": segment.start,
+                "end_time": segment.end,
+                "content": segment.text
+            }
+            for segment in segments
+        ]
+
+        return transcription_chunks
 
     except Exception as e:
         logging.exception("Error in transcription")
@@ -43,7 +51,7 @@ def transcribe_audio_chunked(self, file_path, lang):
 
 
 @shared_task(bind=True)
-def process_file_data(self, user_id, user_gc_id, filename, language, comprehension_level):
+def process_file_data(self, user_id, user_gc_id, filename, language):
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
     store = DocSynthStore(database_url=DATABASE_URL)
     file = download_from_gcs(user_gc_id, filename)
@@ -61,23 +69,16 @@ def process_file_data(self, user_id, user_gc_id, filename, language, comprehensi
             with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
                 temp_file.write(file)
                 temp_file_path = temp_file.name
-                process_results = transcribe_audio_chunked(temp_file_path, lang=None)
-                extracted_data = " ".join(process_results)
+                extracted_data = transcribe_audio_chunked(temp_file_path, lang=language) 
+                ext = "video"
         else:
             logging.info("Processing document file...")
             extracted_data = extract_data(file, ext)
 
-        # Interpret the transcription
-        llm_responses = []
-        last_output = ""
-        for content_chunk in chunk_text(extracted_data):
-            pass
+  
         logging.info(f"File processed successfully for user_id: {user_id}")
-        
-        #store.update_file_with_extract(user_id, filename, extracted_data)
-        #result_message = "\n\n".join(llm_responses)
-        #store.add_message(content=result_message, sender='bot', user_id=user_id)
-        
+        extracted_data_embeddings = [] # get the chunk content  embeddings from Mistral
+        store.update_file_with_chunks(user_id, filename, ext, extracted_data, extracted_data_embeddings)
   
         result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
         return {"status": "success", "result": result}

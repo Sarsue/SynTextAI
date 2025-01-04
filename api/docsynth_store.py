@@ -437,16 +437,17 @@ class DocSynthStore:
                 for i, chunk in enumerate(chunks):
                     # Set metadata based on the file type (PDF or video)
                     data = {}
-                    if file_type == 'pdf':
-                        data = {"type": "pdf", "page_number": chunk["page_number"]}  # Assuming 'chunk' contains page_number
-                    elif file_type == 'video':
+                    # if file_type == 'pdf':
+                    #     data = {"type": "pdf", "page_number": chunk["page_number"]}  # Assuming 'chunk' contains page_number
+                    if file_type == 'video':
                         data = {"type": "video", "start_time": chunk["start_time"], "end_time": chunk["end_time"]}  # Assuming 'chunk' contains time intervals
-
+                    else:
+                        data = {"type": "pdf", "page_number": chunk["page_number"]}
                     # Add the chunk to the database
                     new_chunk = Chunk(
                         file_id=file.id,
                         content=chunk["content"],
-                        embedding=embeddings[i].embedding,
+                        embedding=embeddings[i],
                         data=data
                     )
                     session.add(new_chunk)
