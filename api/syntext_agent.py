@@ -74,50 +74,52 @@ class SyntextAgent:
         Main pipeline to process a user query using history, document chunks, and web search.
         """
         # Combine conversation history and top-k results for relevance evaluation
-        combined_contexts = [
-            {"type": "history", "content": convo_history},
-            *[
-                {"type": "chunk", "content": chunk['chunk'], "metadata": chunk}
-                for chunk in top_k_results
-            ],
-        ]
+        return self.searcher.search_topic(query)
 
-        # Evaluate relevance scores
-        relevance_scores = [
-            {
-                "type": context["type"],
-                "content": context["content"],
-                "metadata": context.get("metadata"),
-                "score": self.assess_relevance(query, context["content"])
-            }
-            for context in combined_contexts
-        ]
+        # combined_contexts = [
+        #     {"type": "history", "content": convo_history},
+        #     *[
+        #         {"type": "chunk", "content": chunk['chunk'], "metadata": chunk}
+        #         for chunk in top_k_results
+        #     ],
+        # ]
 
-        # Determine the best approach based on relevance
-        best_context = max(relevance_scores, key=lambda x: x["score"])
-        best_score = best_context["score"]
+        # # Evaluate relevance scores
+        # relevance_scores = [
+        #     {
+        #         "type": context["type"],
+        #         "content": context["content"],
+        #         "metadata": context.get("metadata"),
+        #         "score": self.assess_relevance(query, context["content"])
+        #     }
+        #     for context in combined_contexts
+        # ]
 
-        if best_score >= self.relevance_thresholds["high"]:
-            # High relevance: Use the most relevant context to answer
-            if best_context["type"] == "chunk":
-                return self.choose_best_answer(query, top_k_results, language)
-            else:  # Best context is history
-                response_prompt = f"Answer the following question based on the conversation history (Respond in {language}):\n\n"
-                response_prompt += f"{convo_history}\n\nQuestion: {query}\n\n"
-                return prompt_llm(response_prompt)
+        # # Determine the best approach based on relevance
+        # best_context = max(relevance_scores, key=lambda x: x["score"])
+        # best_score = best_context["score"]
 
-        elif self.relevance_thresholds["low"] <= best_score < self.relevance_thresholds["high"]:
-            # Medium relevance: Use both the context and web search
-            web_response = self.searcher.search_topic(query)
-            response_prompt = f"Answer the following question using the provided text and web information (Respond in {language}):\n\n"
-            response_prompt += f"Text: {best_context['content']}\n\nWeb Info: {web_response}\n\n"
-            response_prompt += f"Question: {query}\n\n"
-            return prompt_llm(response_prompt)
+        # if best_score >= self.relevance_thresholds["high"]:
+        #     # High relevance: Use the most relevant context to answer
+        #     if best_context["type"] == "chunk":
+        #         return self.choose_best_answer(query, top_k_results, language)
+        #     else:  # Best context is history
+        #         response_prompt = f"Answer the following question based on the conversation history (Respond in {language}):\n\n"
+        #         response_prompt += f"{convo_history}\n\nQuestion: {query}\n\n"
+        #         return prompt_llm(response_prompt)
 
-        else:
-            # Low relevance: Use only web search
-            web_response = self.searcher.search_topic(query)
-            response_prompt = f"Answer the following question using the provided web information (Respond in {language}):\n\n"
-            response_prompt += f"Web Info: {web_response}\n\n"
-            response_prompt += f"Question: {query}\n\n"
-            return prompt_llm(response_prompt)
+        # elif self.relevance_thresholds["low"] <= best_score < self.relevance_thresholds["high"]:
+        #     # Medium relevance: Use both the context and web search
+        #     web_response = self.searcher.search_topic(query)
+        #     response_prompt = f"Answer the following question using the provided text and web information (Respond in {language}):\n\n"
+        #     response_prompt += f"Text: {best_context['content']}\n\nWeb Info: {web_response}\n\n"
+        #     response_prompt += f"Question: {query}\n\n"
+        #     return prompt_llm(response_prompt)
+
+        # else:
+        #     # Low relevance: Use only web search
+        #     web_response = self.searcher.search_topic(query)
+        #     response_prompt = f"Answer the following question using the provided web information (Respond in {language}):\n\n"
+        #     response_prompt += f"Web Info: {web_response}\n\n"
+        #     response_prompt += f"Question: {query}\n\n"
+        #     return prompt_llm(response_prompt)

@@ -465,7 +465,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const handleCloseFileViewer = () => {
         setSelectedFile(null); // Clear selected file when closing viewer
     };
-   
+
     useEffect(() => {
         if (user) {
             const fetchHistoriesandFiles = async () => {
@@ -481,7 +481,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const fetchUserFiles = async () => {
         if (!user) {
-            return; 
+            return;
         }
 
         try {
@@ -494,15 +494,27 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             });
 
             if (response.ok) {
-                const files = await response.json();
+                const files: UploadedFile[] = await response.json();
                 setKnowledgeBaseFiles(files);
+
+                // Count the unprocessed files (processed = false)
+                const unprocessedFilesCount = files.filter(file => !file.processed).length;
+
+                if (unprocessedFilesCount > 0) {
+                    const pollingInterval = unprocessedFilesCount * 300000; // 5 minutes per unprocessed file
+
+                    // Set the next polling with the dynamic interval
+                    setTimeout(() => {
+                        fetchUserFiles(); // Poll again after the calculated timeout
+                    }, pollingInterval);
+                }
             } else {
                 console.error('Failed to fetch user files:', response.statusText);
             }
         } catch (error) {
             console.error('Error fetching user files:', error);
         }
-    }
+    };
 
     const handleDeleteFile = async (fileId: number) => {
         if (!user) {

@@ -175,5 +175,5 @@ class WebSearch:
 # Example usage
 if __name__ == "__main__":
     searcher = WebSearch()
-    searcher.search_topic(topic= "How much did perplexity ai make?")
+    searcher.search_topic(topic= "How do i replace the water filter in my frigidaire refrigerator?")
    

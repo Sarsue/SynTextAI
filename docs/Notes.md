@@ -48,8 +48,6 @@ save chunks and Page / Segment summary
 
 2. CHUNK TEXT AND STORE IN DB
 Same DB store for vectors and app state aka  no specialty vectorDB. sqlite supports vectors if we could figure out the litestream docker replication and backup to google cloud storage I'd use it.
-https://www.enterprisedb.com/blog/rag-app-postgres-and-pgvector
-https://medium.com/@brechterlaurin/how-to-use-postgresdb-as-your-one-stop-rag-solution-8536ef7d762e
 
 
 We need to retrieve documents  chunk alongside the page / segment summary they belong to  
@@ -59,7 +57,9 @@ if scores less than 0.3 generate response from web search
 else concatenate document and web search
 
 IMPROVEMENTS
+- Use SqlAlchemy as ORM so there isnt sql specific code for Postgres or Sqllite in code.  Use Alembic for handing migrations. I abandoned using litestream and sqllite for replication and back up for using a managed instance on Digital Ocean.
 
+OUTSTANDING
 - PDF to Markdown FOR BETTER CAPTURING OF  FIGURES AND TABLES EXTRACTS*
 Later using a Multi Modal Model (Pixtral / Qwen / GPT Vision), we ingest information from these type of documents visually let the LLM extract information for us visually
 https://github.com/kkaarrss/pdf-to-markup/blob/main/pdf_reader.py
