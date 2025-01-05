@@ -1,9 +1,9 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
 from query_processor import process, summarize
-from syntext_agent import WebSearch
+from syntext_agent import SyntextAgent
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
-searcher = WebSearch()
+syntext = SyntextAgent()
 
 def get_id_helper(store, success, user_info):
     if not success:
@@ -28,24 +28,14 @@ def create_message():
     id = get_id_helper(store, success, user_info)
     history_id = int(request.args.get('history-id'))
 
-    # Process context first using history and current query
-    formatted_history = store.format_user_chat_history(history_id, id)
-
     # Save the user message to the history
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
     message_list.append(user_request)
-
-    # Generate the response with additional parameters for language and comprehension level
-    # response = syntext(
-    #     content=message,
-    #     last_output=formatted_history,
-    #     intent='chat',
-    #     language=language,
-    #     comprehension_level=comprehension_level
-    # )
+    # Gather context for agent message history , top similar doocuments and current query
+    formatted_history = store.format_user_chat_history(history_id, id)
     topK_chunks = store.query_chunks_by_embedding(id,message)
-    response = searcher.search_topic(message)
+    response = syntext.query_pipeline(message,formatted_history,topK_chunks)
     # Save bot response to the history
     bot_response = store.add_message(
         content=response, sender='bot', user_id=id, chat_history_id=history_id)

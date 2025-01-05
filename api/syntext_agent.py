@@ -1,179 +1,123 @@
-from llm_service import prompt_llm, summarize # Import the LLM service
+from llm_service import prompt_llm, summarize
+from web_searcher import WebSearch
 import re
-import json
-from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
-from markdownify import MarkdownConverter
-import requests
-import datetime
-import textwrap
 
-safety_settings = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-]
+class SyntextAgent:
+    """ Interface for conversing with document and web content. """
+    def __init__(self):
+        self.searcher = WebSearch()
+        self.relevance_thresholds = {"high": 0.7, "low": 0.3}
 
-def simplify_html(html):
-    """Convert HTML to markdown, removing some tags and links."""
-    soup = BeautifulSoup(html, 'html.parser')
-
-    # Remove unwanted tags
-    for tag in soup.find_all(["script", "style"]):
-        tag.decompose()
-
-    # Remove links. They're not helpful.
-    for tag in soup.find_all("a"):
-        del tag["href"]
-    for tag in soup.find_all("img"):
-        del tag["src"]
-    soup.smooth()
-
-    # Turn HTML into markdown, preserving some formatting
-    text = MarkdownConverter().convert_soup(soup)
-    text = re.sub(r"\n(\s*\n)+", "\n\n", text)
-    return text
-
-def extract_title(html):
-    """Extract the title from an HTML document."""
-    soup = BeautifulSoup(html, 'html.parser')
-    return soup.title.string if soup.title else "Untitled"
-
-class WebSearch:
-    """Perform DuckDuckGo searches and fetch web content."""
-    
-    def __init__(self, verbose=False):
-        self.verbose = verbose
-
-    def fetch(self, url):
-        """Fetch a URL."""
-        if self.verbose:
-            print(f"Fetching: {url}")
+    def assess_relevance(self, query, context):
+        """
+        Assess the relevance of the given context (chunk or history) for the query.
+        Calls an LLM to evaluate similarity.
+        """
+        prompt = f"Evaluate the relevance of the following context to the query '{query}':\n\n{context}\n\n" \
+                 f"Respond with a relevance score between 0 and 1."
+        relevance_score = prompt_llm(prompt)
         try:
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                return response.content
+            score = float(relevance_score.strip())
+        except ValueError:
+            score = 0.0  # Default to 0 if the response isn't a valid score
+        return score
+
+    def choose_best_answer(self, query, top_k_results, language):
+        """
+        Find the most relevant chunk and generate an answer.
+        """
+        prompt = f"Here are some chunks of text along with their details (Respond in {language}):\n"
+        for result in top_k_results:
+            if 'page_number' in result:
+                chunk_details = f"Chunk: {result['chunk']} (Page: {result['page_number']})"
+            elif 'start_time' in result and 'end_time' in result:
+                chunk_details = f"Chunk: {result['chunk']} (Start: {result['start_time']} - End: {result['end_time']})"
             else:
-                print(f"Error fetching {url}: {response.status_code}")
-                return None
-        except requests.RequestException as e:
-            print(f"Error fetching {url}: {e}")
-            return None
+                chunk_details = f"Chunk: {result['chunk']}"
+            prompt += f"{chunk_details} with ID: {result['chunk_id']}\n"
 
-    def ddg_search(self, topic):
-        """Search DuckDuckGo for a topic."""
-        if self.verbose:
-            print(f"Searching DuckDuckGo for: {topic}")
-        return DDGS().text(topic)
+        prompt += f"Which of the above is the best match for the provided query: '{query}'?\n"
+        prompt += "Return only the ID of the best matching chunk."
+        best_rank = prompt_llm(prompt)
 
-    def ddg_top_hit(self, topic, skip=()):
-        """Search DuckDuckGo for a topic and return the top hit."""
-        results = self.ddg_search(topic)
-        for result in results:
-            if result['href'] in skip:
-                continue
-            if self.verbose:
-                print(f"Fetching content from: {result['href']}")
-            html = self.fetch(result['href'])
-            if html:
-                title = extract_title(html)
-                content = simplify_html(html)
-                if content:
-                    return result['href'], title, content
-        return None, None, None
+        # Extract chunk ID from LLM's response
+        match = re.search(r'id:\s*(\d+)', best_rank)
+        result = None
+        if match:
+            chunk_id = int(match.group(1))
+            result = next((r for r in top_k_results if r['chunk_id'] == chunk_id), None)
 
+        if result is None:
+            result = top_k_results[0]  # Default to the first result if no match
 
-    def extract_json_from_markdown(self,markdown_text):
-        """
-        Extracts JSON from a Markdown-formatted string.
-        
-        Args:
-            markdown_text (str): The Markdown-formatted string returned by the LLM.
-        
-        Returns:
-            list: The parsed JSON list.
-        """
-        # Use a regular expression to find the JSON part
-        json_match = re.search(r'```json\s*(\[\s*.+\s*\])\s*```', markdown_text, re.DOTALL)
+        response_prompt = f"Answer the following question based on the provided text (Respond in {language}):\n\n"
+        response_prompt += f"{result['chunk']}\n\nQuestion: {query}\n\n"
+        answer = prompt_llm(response_prompt)
 
-        if json_match:
-            # Extract the JSON part and remove any extra spaces
-            json_str = json_match.group(1).strip()
-            
-            # Now load the JSON string into a Python list
-            try:
-                return json.loads(json_str)
-            except json.JSONDecodeError as e:
-                print(f"Error decoding JSON: {e}")
-                return None
+        file_name = result['file_url'].split('/')[-1]
+        if 'page_number' in result:
+            file_name += f" page {result['page_number']}"
+            file_url = f"{result['file_url']}?page={result['page_number']}"
+        elif 'start_time' in result and 'end_time' in result:
+            file_name += f" from {result['start_time']} to {result['end_time']}"
+            file_url = result['file_url']
         else:
-            print("No JSON found in the Markdown.")
-            return None
+            file_url = result['file_url']
 
-    def fetch_sources(self, search_prompt):
-            """Fetch sources for a question."""
-            search_text = prompt_llm(search_prompt)
-            print(search_text)
-            searches = self.extract_json_from_markdown(search_text)
-            print(searches)
-            background_text = ""
-            sources = []
-            for search in searches:
-                source, title, content = self.ddg_top_hit(search,
-                                                        skip=[source for source, _ in sources])
-                if not source:
-                    continue
-                background_text += f"# {search}\n\n{content}\n\n"
-                sources.append((source, title))
-            return background_text, sources
-  
+        references = [f"[{file_name}]({file_url})"]
+        reference_links = "\n".join(references)
 
-    def format_answer(self, answer, sources):
-        paragraphs = answer.splitlines()
-        wrapped_paragraphs = [textwrap.wrap(p) for p in paragraphs]
-        
-        # Format wrapped paragraphs into a single string
-        formatted_paragraphs = "\n".join("\n".join(p) for p in wrapped_paragraphs)
-        
-        # Format sources
-        sources_str = "\nSources:"
-        for source, title in sources:
-            sources_str += f"\n* [{title}]({source})"
-        
-        # Return the formatted output
-        return formatted_paragraphs + "\n" + sources_str
+        return answer + "\n\n" + reference_links
 
+    def query_pipeline(self, query, convo_history, top_k_results, language):
+        """
+        Main pipeline to process a user query using history, document chunks, and web search.
+        """
+        # Combine conversation history and top-k results for relevance evaluation
+        combined_contexts = [
+            {"type": "history", "content": convo_history},
+            *[
+                {"type": "chunk", "content": chunk['chunk'], "metadata": chunk}
+                for chunk in top_k_results
+            ],
+        ]
 
-    def search_topic(self, topic):
-        today_prompt = f"Today is {datetime.date.today().strftime('%a, %b %e, %Y')}."
-        search_prompt = ("# Background\n\n"
-                            f"{today_prompt}\n\n"
-                            f"Prepare for this prompt: {topic}\n\n"
-                            "# Prompt\n\n"
-                            "What 3 Internet search topics would help you answer this "
-                            "question? Answer in a JSON list only.")
-        background_text, sources = self.fetch_sources(search_prompt)
-        background_text = summarize(background_text,
-                    prompt=f"{today_prompt}\n\n"
-                    "You provide helpful and complete answers.\n\n"
-                    f"Make a list of facts that would help with: {topic}\n\n")
-      
-        answer = prompt_llm("\n\n".join([
-                "# Background",
-                background_text,
-                today_prompt,
-                "You provide helpful and complete answers.",
-                "# Prompt",
-                f"{topic}"]))
-        ans = self.format_answer(answer,sources)
-        print(ans)
+        # Evaluate relevance scores
+        relevance_scores = [
+            {
+                "type": context["type"],
+                "content": context["content"],
+                "metadata": context.get("metadata"),
+                "score": self.assess_relevance(query, context["content"])
+            }
+            for context in combined_contexts
+        ]
 
+        # Determine the best approach based on relevance
+        best_context = max(relevance_scores, key=lambda x: x["score"])
+        best_score = best_context["score"]
 
+        if best_score >= self.relevance_thresholds["high"]:
+            # High relevance: Use the most relevant context to answer
+            if best_context["type"] == "chunk":
+                return self.choose_best_answer(query, top_k_results, language)
+            else:  # Best context is history
+                response_prompt = f"Answer the following question based on the conversation history (Respond in {language}):\n\n"
+                response_prompt += f"{convo_history}\n\nQuestion: {query}\n\n"
+                return prompt_llm(response_prompt)
 
+        elif self.relevance_thresholds["low"] <= best_score < self.relevance_thresholds["high"]:
+            # Medium relevance: Use both the context and web search
+            web_response = self.searcher.search_topic(query)
+            response_prompt = f"Answer the following question using the provided text and web information (Respond in {language}):\n\n"
+            response_prompt += f"Text: {best_context['content']}\n\nWeb Info: {web_response}\n\n"
+            response_prompt += f"Question: {query}\n\n"
+            return prompt_llm(response_prompt)
 
-# Example usage
-if __name__ == "__main__":
-    searcher = WebSearch()
-    searcher.search_topic(topic= "Did america fake the moon landing?")
-   
+        else:
+            # Low relevance: Use only web search
+            web_response = self.searcher.search_topic(query)
+            response_prompt = f"Answer the following question using the provided web information (Respond in {language}):\n\n"
+            response_prompt += f"Web Info: {web_response}\n\n"
+            response_prompt += f"Question: {query}\n\n"
+            return prompt_llm(response_prompt)

@@ -554,27 +554,41 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def query_chunks_by_embedding(self,user_id, query_embedding, top_k=5):
+    def query_chunks_by_embedding(self, user_id, query_embedding, top_k=5):
         try:
-            # Assuming `query_embedding` is a list or numpy array with the embedding to compare against
-            # We will pass it as a Vector for use in pgvector query
-            # Query to select the top-k chunks for a given user by similarity to the query embedding
             session = self.get_session()
             result = session.scalars(
-            select(Chunk)
-            .filter(Chunk.file_id.in_(select(File.id).filter(File.user_id == user_id)))
-            .order_by(Chunk.embedding.l2_distance(query_embedding))  # Use l2_distance or <=> for cosine similarity
-            .limit(top_k)
+                select(Chunk)
+                .filter(Chunk.file_id.in_(select(File.id).filter(File.user_id == user_id)))
+                .order_by(Chunk.embedding.l2_distance(query_embedding))
+                .limit(top_k)
             ).all()
 
-            # Extract the content of the chunks
-            contents = [chunk.content for chunk in result]  
-            return contents
+            # Prepare the result with all necessary metadata
+            chunk_info = []
+            for chunk in result:
+                chunk_data = {
+                    'chunk_id': chunk.id,
+                    'chunk': chunk.content,
+                    'data': chunk.data,  # Includes type-specific metadata
+                    'file_url': chunk.file.url,  # Assuming file URL is a relation
+                }
+                # Add type-specific metadata
+                if chunk.data.get('type') == 'video':
+                    chunk_data['start_time'] = chunk.data.get('start_time')
+                    chunk_data['end_time'] = chunk.data.get('end_time')
+                else:  # Assuming it's a document
+                    chunk_data['page_number'] = chunk.data.get('page_number')
+
+                chunk_info.append(chunk_data)
+
+            return chunk_info
         except Exception as e:
             logger.error(f"Error querying chunks: {e}")
             raise
         finally:
             session.close()
+
 
    
 
