@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
-from query_processor import process, summarize
 from syntext_agent import SyntextAgent
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
 syntext = SyntextAgent()
