@@ -560,7 +560,7 @@ class DocSynthStore:
                     'chunk_id': chunk.id,
                     'chunk': chunk.content,
                     'data': chunk.data,  # Includes type-specific metadata
-                    'file_url': chunk.file.url,  # Assuming file URL is a relation
+                    'file_url': chunk.file.file_url,  # Assuming file URL is a relation
                 }
                 # Add type-specific metadata
                 if chunk.data.get('type') == 'video':
