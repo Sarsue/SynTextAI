@@ -1,6 +1,10 @@
 from llm_service import prompt_llm, summarize
 from web_searcher import WebSearch
 import re
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class SyntextAgent:
     """ Interface for conversing with document and web content. """
@@ -74,39 +78,40 @@ class SyntextAgent:
         Main pipeline to process a user query using history, document chunks, and web search.
         """
         # Combine conversation history and top-k results for relevance evaluation
-        return self.searcher.search_topic(query)
+       # return self.searcher.search_topic(query)
 
-        # combined_contexts = [
-        #     {"type": "history", "content": convo_history},
-        #     *[
-        #         {"type": "chunk", "content": chunk['chunk'], "metadata": chunk}
-        #         for chunk in top_k_results
-        #     ],
-        # ]
+        combined_contexts = [
+            {"type": "history", "content": convo_history},
+            *[
+                {"type": "chunk", "content": chunk['chunk'], "metadata": chunk}
+                for chunk in top_k_results
+            ],
+        ]
 
-        # # Evaluate relevance scores
-        # relevance_scores = [
-        #     {
-        #         "type": context["type"],
-        #         "content": context["content"],
-        #         "metadata": context.get("metadata"),
-        #         "score": self.assess_relevance(query, context["content"])
-        #     }
-        #     for context in combined_contexts
-        # ]
+        # Evaluate relevance scores
+        relevance_scores = [
+            {
+                "type": context["type"],
+                "content": context["content"],
+                "metadata": context.get("metadata"),
+                "score": self.assess_relevance(query, context["content"])
+            }
+            for context in combined_contexts
+        ]
 
-        # # Determine the best approach based on relevance
-        # best_context = max(relevance_scores, key=lambda x: x["score"])
-        # best_score = best_context["score"]
+        # Determine the best approach based on relevance
+        best_context = max(relevance_scores, key=lambda x: x["score"])
+        best_score = best_context["score"]
+        logger.info(f"context choosen is  {best_context} score is {best_score}")
 
         # if best_score >= self.relevance_thresholds["high"]:
         #     # High relevance: Use the most relevant context to answer
         #     if best_context["type"] == "chunk":
-        #         return self.choose_best_answer(query, top_k_results, language)
-        #     else:  # Best context is history
-        #         response_prompt = f"Answer the following question based on the conversation history (Respond in {language}):\n\n"
-        #         response_prompt += f"{convo_history}\n\nQuestion: {query}\n\n"
-        #         return prompt_llm(response_prompt)
+        return self.choose_best_answer(query, top_k_results, language)
+            # else:  # Best context is history
+            #     response_prompt = f"Answer the following question based on the conversation history (Respond in {language}):\n\n"
+            #     response_prompt += f"{convo_history}\n\nQuestion: {query}\n\n"
+            #     return prompt_llm(response_prompt)
 
         # elif self.relevance_thresholds["low"] <= best_score < self.relevance_thresholds["high"]:
         #     # Medium relevance: Use both the context and web search

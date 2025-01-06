@@ -117,7 +117,7 @@ class DocSynthStore:
             return {'id': user.id, 'email': user.email, 'username': user.username}
         except Exception as e:
             session.rollback()
-            logging.error(f"Error adding user: {e}")
+            logger.error(f"Error adding user: {e}")
             raise
         finally:
             session.close()
@@ -157,7 +157,7 @@ class DocSynthStore:
             }
         except Exception as e:
             session.rollback()
-            logging.error(f"Error adding/updating subscription: {e}")
+            logger.error(f"Error adding/updating subscription: {e}")
             raise
         finally:
             session.close()
@@ -228,7 +228,7 @@ class DocSynthStore:
             return {'id': chat_history.id, 'title': chat_history.title, 'user_id': chat_history.user_id}
         except Exception as e:
             session.rollback()
-            logging.error(f"Error adding chat history: {e}")
+            logger.error(f"Error adding chat history: {e}")
             raise
         finally:
             session.close()
@@ -263,7 +263,7 @@ class DocSynthStore:
             }
         except Exception as e:
             session.rollback()
-            logging.error(f"Error adding message: {e}")
+            logger.error(f"Error adding message: {e}")
             raise
         finally:
             session.close()
