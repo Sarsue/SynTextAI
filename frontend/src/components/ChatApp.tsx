@@ -501,7 +501,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 const unprocessedFilesCount = files.filter(file => !file.processed).length;
 
                 if (unprocessedFilesCount > 0) {
-                    const pollingInterval = unprocessedFilesCount * 300000; // 5 minutes per unprocessed file
+                    const pollingInterval = unprocessedFilesCount * 90000; // 5 minutes per unprocessed file
 
                     // Set the next polling with the dynamic interval
                     setTimeout(() => {

@@ -74,15 +74,16 @@ def extract_pdf_chunks_with_metadata(pdf_data, chunk_size=500):
             chunks = chunk_text(page_text, chunk_size)
 
             # Add metadata to each chunk
-            for chunk in enumerate(chunks, start=1):
+            for index, chunk in enumerate(chunks, start=1):  # Use index and chunk here
                 data.append({
                     "page_number": page_number,
-                    "content": chunk.strip()
+                    "content": chunk.strip()  # chunk is already a string now
                 })
     except Exception as e:
         logging.error(f"Error processing PDF: {e}")
 
     return data
+
 
 
 
