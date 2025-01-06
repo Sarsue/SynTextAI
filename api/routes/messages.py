@@ -35,7 +35,7 @@ def create_message():
     # Gather context for agent message history , top similar doocuments and current query
     formatted_history = store.format_user_chat_history(history_id, id)
     topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
-    response = syntext.query_pipeline(message,formatted_history,topK_chunks)
+    response = syntext.query_pipeline(message,formatted_history,topK_chunks,language)
     # Save bot response to the history
     bot_response = store.add_message(
         content=response, sender='bot', user_id=id, chat_history_id=history_id)
