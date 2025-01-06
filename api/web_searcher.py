@@ -119,6 +119,8 @@ class WebSearch:
             print(searches)
             background_text = ""
             sources = []
+            if searches is None:
+                return background_text, sources
             for search in searches:
                 source, title, content = self.ddg_top_hit(search,
                                                         skip=[source for source, _ in sources])

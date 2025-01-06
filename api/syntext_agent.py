@@ -102,7 +102,7 @@ class SyntextAgent:
             # Determine the best approach based on relevance
             best_context = max(relevance_scores, key=lambda x: x["score"])
             best_score = best_context["score"]
-            logger.info(best_context, best_score)
+            logger.info(f"context: {best_context} and score: {best_score}")
          
             if best_score >= self.relevance_thresholds["high"]:
                 # High relevance: Use the most relevant context to answer

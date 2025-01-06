@@ -111,7 +111,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         draggable: true,
                         progress: undefined,
                     });
-                    fetchUserFiles();
+                    fetchUserFiles();  // Ensure this fetch triggers the update
                 } else {
                     toast.error('File upload failed. Please try again.', {
                         position: 'top-right',
@@ -191,6 +191,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 [currentHistory]: updatedHistory,
                             };
                         });
+
+                        fetchHistories();  // Call here after message response is handled
                     }
                 }
             } else {
@@ -262,6 +264,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                     messages: updatedMessages,
                                 },
                             }));
+
+                            fetchHistories();  // Ensure polling is triggered after creation
                         }
                     }
                 }
@@ -271,7 +275,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         } finally {
             setLoading(false);
         }
-        fetchHistories();
     };
 
 
