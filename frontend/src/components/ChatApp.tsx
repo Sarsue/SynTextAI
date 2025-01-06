@@ -271,6 +271,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         } finally {
             setLoading(false);
         }
+        fetchHistories();
     };
 
 
@@ -341,6 +342,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             console.error('Error deleting history:', error);
         }
     };
+
     const fetchHistories = async () => {
         try {
             const historiesResponse = await callApiWithToken(`api/v1/histories`, 'GET');
@@ -387,10 +389,32 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             setCurrentHistory(latestHistoryId);
 
             console.log('Loaded Histories:', histories);
+
+            // Check if polling is needed
+            if (currentHistory && historiesObject[currentHistory]) {
+                const messages = historiesObject[currentHistory].messages;
+                const lastMessage = messages[messages.length - 1];
+
+                if (lastMessage?.sender === 'user') {
+                    const unprocessedMessageCount = messages.filter(msg => msg.sender === 'user').length;
+
+                    const pollingInterval = 15000; // 15 seconds per unprocessed message
+
+                    console.log(`Polling again in ${pollingInterval / 1000} seconds...`);
+
+                    // Set the next polling with the dynamic interval
+                    setTimeout(() => {
+                        fetchHistories(); // Poll again after the calculated timeout
+                    }, pollingInterval);
+                } else {
+                    console.log('No need to poll. Last message is from bot.');
+                }
+            }
         } catch (error) {
             console.error('Error fetching chat histories:', error);
         }
     };
+
 
     const handleLogout = () => {
         onLogout();
