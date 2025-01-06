@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
 from syntext_agent import SyntextAgent
+from llm_service import get_text_embedding
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
 syntext = SyntextAgent()
 
@@ -33,7 +34,7 @@ def create_message():
     message_list.append(user_request)
     # Gather context for agent message history , top similar doocuments and current query
     formatted_history = store.format_user_chat_history(history_id, id)
-    topK_chunks = store.query_chunks_by_embedding(id,message)
+    topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
     response = syntext.query_pipeline(message,formatted_history,topK_chunks)
     # Save bot response to the history
     bot_response = store.add_message(

@@ -78,8 +78,8 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
             extracted_data = extract_data(file, ext)
 
   
-        logging.info(f"File processed successfully for user_id: {user_id}")
-        chunk_content = [extracted_data_point['content'] for extracted_data_point in extract_data]
+        logging.info(f"File processed successfully for user_id: {user_id} with {len(extracted_data)} chunks")
+        chunk_content = [extracted_data_point['content'] for extracted_data_point in extracted_data]
         extracted_data_embeddings =  get_text_embeddings_in_batches(chunk_content, batch_size=5)
         store.update_file_with_chunks(user_id, filename, ext, extracted_data, extracted_data_embeddings)
   
