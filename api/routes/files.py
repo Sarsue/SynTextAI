@@ -61,7 +61,7 @@ def save_file():
                 logging.error(f"Failed to upload {file.filename} to GCS")
                 return jsonify({'error': 'File upload failed'}), 500
 
-            task = process_file_data.delay(user_id, user_gc_id, file.filename, language, comprehension_level)
+            task = process_file_data.delay(user_id, user_gc_id, file.filename, language)
 
             logging.info(f"Enqueued Task {task.id}  for processing {file.filename}")
 
@@ -71,7 +71,7 @@ def save_file():
         logging.error("Redis error")
         return jsonify({'error': 'Failed to enqueue job'}), 500
     except Exception as e:
-        logging.error("Exception occurred")
+        logging.error(f"Exception occurred: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 # Route to retrieve files

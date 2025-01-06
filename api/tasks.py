@@ -73,6 +73,7 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
                 extracted_data = transcribe_audio_chunked(temp_file_path, lang=language) 
                 ext = "video"
         else:
+            # good place to have the pdf to image for better extraction logic
             logging.info("Processing document file...")
             extracted_data = extract_data(file, ext)
 
