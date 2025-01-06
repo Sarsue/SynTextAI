@@ -1,9 +1,15 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import get_user_id
-from syntext_agent import SyntextAgent
+
 from llm_service import get_text_embedding
+from tasks import process_query_data
+import logging
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(levelname)s: %(message)s')
+
+
 messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
-syntext = SyntextAgent()
+
 
 def get_id_helper(store, success, user_info):
     if not success:
@@ -32,13 +38,8 @@ def create_message():
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
     message_list.append(user_request)
-    # Gather context for agent message history , top similar doocuments and current query
-    formatted_history = store.format_user_chat_history(history_id, id)
-    topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
-    response = syntext.query_pipeline(message,formatted_history,topK_chunks,language)
-    # Save bot response to the history
-    bot_response = store.add_message(
-        content=response, sender='bot', user_id=id, chat_history_id=history_id)
-    message_list.append(bot_response)
-
+    task = process_query_data.delay(id, history_id, message, language)
+    logging.info(f"Enqueued Task {task.id}  for processing {message}")
     return message_list
+   
+  

@@ -8,7 +8,8 @@ from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs
 import json
 from docsynth_store import DocSynthStore
-from llm_service import get_text_embeddings_in_batches
+from llm_service import get_text_embeddings_in_batches, get_text_embedding
+from syntext_agent import SyntextAgent
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -24,6 +25,9 @@ DATABASE_URL = (
     f"postgresql://{database_config['user']}:{database_config['password']}"
     f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
 )
+store = DocSynthStore(database_url=DATABASE_URL)
+syntext = SyntextAgent()
+
 @shared_task(bind=True, max_retries=5)
 def transcribe_audio_chunked(self, file_path, lang):
     model_size = "medium"
@@ -54,7 +58,6 @@ def transcribe_audio_chunked(self, file_path, lang):
 @shared_task(bind=True)
 def process_file_data(self, user_id, user_gc_id, filename, language):
     logging.info(f"Processing file: {filename} for user_id: {user_id}")
-    store = DocSynthStore(database_url=DATABASE_URL)
     file = download_from_gcs(user_gc_id, filename)
 
     try:
@@ -93,3 +96,15 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
     except Exception as e:
         result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
         logging.error(f"Error processing {filename}: {str(result_data)}")
+
+
+@shared_task(bind=True)
+def process_query_data(self, id, history_id, message, language):
+    # Gather context for agent message history , top similar doocuments and current query
+    formatted_history = store.format_user_chat_history(history_id, id)
+    topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
+    response = syntext.query_pipeline(message,formatted_history,topK_chunks,language)
+    store.add_message(
+        content=response, sender='bot', user_id=id, chat_history_id=history_id)
+  
+
