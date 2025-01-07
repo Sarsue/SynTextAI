@@ -19,7 +19,7 @@ interface ChatAppProps {
 }
 
 const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus }) => {
-    const [loading, setLoading] = useState(false);
+    const { loading, setLoading } = useUserContext();
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
     const { darkMode, userSettings } = useUserContext();
@@ -84,6 +84,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const handleSend = async (message: string, files: File[]) => {
         try {
+            if (loading) return; // Prevent multiple sends while loading
             setLoading(true);
             console.log('Files to append:', files);
             console.log(subscriptionStatus);
@@ -348,7 +349,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const fetchHistories = async () => {
         try {
-            setLoading(true);
             const historiesResponse = await callApiWithToken(`api/v1/histories`, 'GET');
 
             if (!historiesResponse?.ok) {
@@ -402,7 +402,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 if (lastMessage?.sender === 'user') {
                     const unprocessedMessageCount = messages.filter(msg => msg.sender === 'user').length;
 
-                    const pollingInterval = 15000; // 15 seconds per unprocessed message
+                    const pollingInterval = 20000; // 20 seconds 
 
                     console.log(`Polling again in ${pollingInterval / 1000} seconds...`);
 
@@ -412,14 +412,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     }, pollingInterval);
                 } else {
                     console.log('No need to poll. Last message is from bot.');
-                    setLoading(false)
                 }
             }
         } catch (error) {
             console.error('Error fetching chat histories:', error);
-        }
-        finally {
-            setLoading(false)
         }
     };
 

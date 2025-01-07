@@ -13,6 +13,8 @@ interface UserContextType {
     setDarkMode: (darkMode: boolean) => void; // Add setDarkMode function
     userSettings: UserSettings; // Add userSettings to context type
     setUserSettings: (settings: UserSettings) => void; // Add setUserSettings function
+    loading: boolean; // Add loading state
+    setLoading: (isLoading: boolean) => void; // Add setLoading function
 }
 
 // Create the UserContext with initial values
@@ -25,6 +27,8 @@ const UserContext = createContext<UserContextType>({
         selectedLanguage: '',    // Default selectedLanguage
     },
     setUserSettings: () => { }, // Provide a default empty function
+    loading: false, // Default loading state
+    setLoading: () => { },
 });
 
 // Define UserProvider component
@@ -38,6 +42,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         selectedLanguage: '',    // Initial value for selectedLanguage
     });
 
+    const [loading, setLoading] = useState<boolean>(false); // Add loading state
+
     // Function to toggle dark mode
     const toggleDarkMode = () => {
         setDarkMode((prevMode) => !prevMode);
@@ -45,7 +51,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Return UserContext.Provider with value and children
     return (
-        <UserContext.Provider value={{ darkMode, toggleDarkMode, setDarkMode, userSettings, setUserSettings }}>
+        <UserContext.Provider value={{ darkMode, toggleDarkMode, setDarkMode, userSettings, setUserSettings, loading, setLoading }}>
             {children}
         </UserContext.Provider>
     );
