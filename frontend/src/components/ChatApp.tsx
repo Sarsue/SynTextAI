@@ -272,9 +272,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            setLoading(false);
         } finally {
-            //setLoading(false);
+            setLoading(false);
         }
     };
 
@@ -349,6 +348,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const fetchHistories = async () => {
         try {
+            setLoading(true);
             const historiesResponse = await callApiWithToken(`api/v1/histories`, 'GET');
 
             if (!historiesResponse?.ok) {
@@ -417,6 +417,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
         } catch (error) {
             console.error('Error fetching chat histories:', error);
+        }
+        finally {
+            setLoading(false)
         }
     };
 

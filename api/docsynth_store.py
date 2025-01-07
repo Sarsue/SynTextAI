@@ -3,6 +3,7 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker,  mapped
 from sqlalchemy import func, select
 from sqlalchemy.types import JSON
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.exc import IntegrityError
 from typing import List
 from datetime import datetime
 import logging
@@ -110,17 +111,19 @@ class DocSynthStore:
 
     def add_user(self, email, username):
         session = self.get_session()
+        existing_user = session.query(User).filter_by(username=username).first()
+        if existing_user:
+            return {'id': existing_user.id, 'email': existing_user.email, 'username': existing_user.username}
+        
         try:
             user = User(email=email, username=username)
             session.add(user)
             session.commit()
             return {'id': user.id, 'email': user.email, 'username': user.username}
-        except Exception as e:
+        except IntegrityError:
             session.rollback()
             logger.error(f"Error adding user: {e}")
             raise
-        finally:
-            session.close()
 
     def get_user_id_from_email(self, email):
         session = self.get_session()
