@@ -381,7 +381,7 @@ class DocSynthStore:
             return chat_history.strip()  # Remove trailing newline
         except Exception as e:
             logger.error(f"Error formatting user chat history: {e}")
-            raise
+            return ""
         finally:
             session.close()
 
