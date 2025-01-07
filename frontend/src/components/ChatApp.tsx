@@ -272,8 +272,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
         } catch (error) {
             console.error('Error sending message:', error);
-        } finally {
             setLoading(false);
+        } finally {
+            //setLoading(false);
         }
     };
 
@@ -411,6 +412,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     }, pollingInterval);
                 } else {
                     console.log('No need to poll. Last message is from bot.');
+                    setLoading(false)
                 }
             }
         } catch (error) {
