@@ -192,7 +192,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             };
                         });
 
-                        //fetchHistories();  // Call here after message response is handled
+                        startPolling();
                     }
                 }
             } else {
@@ -265,15 +265,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 },
                             }));
 
-                            // fetchHistories();  // Ensure polling is triggered after creation
+                            startPolling();
                         }
                     }
                 }
             }
-            startPolling();
+
         } catch (error) {
             console.error('Error sending message:', error);
-        } finally {
             setLoading(false);
         }
     };
