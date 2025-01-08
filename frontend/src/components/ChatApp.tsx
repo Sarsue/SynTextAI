@@ -12,6 +12,7 @@ import { useUserContext } from '../UserContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
+
 interface ChatAppProps {
     user: User | null;
     onLogout: () => void;
@@ -35,8 +36,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         navigate('/settings');
     };
 
-
-
     const callApiWithToken = async (url: string, method: string, body?: any) => {
         try {
             const idToken = await user?.getIdToken();
@@ -49,8 +48,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             const headers: HeadersInit = {
                 'Authorization': `Bearer ${idToken}`,
             };
-
-
 
             const response = await fetch(url, {
                 method,
@@ -67,8 +64,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     };
 
-
-
     const handleCopy = (message: Message) => {
         const textToCopy = message.content;
 
@@ -81,12 +76,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             });
     };
 
-
     const handleSend = async (message: string, files: File[]) => {
         try {
-            setLoading(true);
+            setLoading(true); // Set loading to true at the start of the operation
             console.log('Files to append:', files);
             console.log(subscriptionStatus);
+
             if (files.length > 0) {
                 const formData = new FormData();
 
@@ -194,7 +189,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     }
                 }
             } else {
-
                 const createHistoryResponse = await callApiWithToken(
                     `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
                     'POST'
@@ -262,19 +256,15 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                     messages: updatedMessages,
                                 },
                             }));
-
                         }
                     }
                 }
             }
-
         } catch (error) {
             console.error('Error sending message:', error);
-            setLoading(false);
+            setLoading(false); // Set loading to false if there's an error
         }
     };
-
-
 
     const handleClearHistory = async () => {
         try {
@@ -316,7 +306,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     };
 
-
     const handleDeleteHistory = async (historyId: number | History) => {
         try {
             const idToDelete = typeof historyId === 'number' ? historyId : historyId.id;
@@ -342,8 +331,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             console.error('Error deleting history:', error);
         }
     };
-
-
 
     const fetchHistories = async () => {
         try {
@@ -395,7 +382,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             console.error('Error fetching chat histories:', error);
         }
     };
-
 
     const handleLogout = () => {
         onLogout();
@@ -459,7 +445,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     };
 
-
     const handleFileError = (error: string) => {
         setSelectedFile(null);
     };
@@ -472,50 +457,46 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
 
     useEffect(() => {
-        if (user) {
-            const fetchHistoriesandFiles = async () => {
-                await fetchHistories();
-                await fetchUserFiles();
-            };
-
-            fetchHistoriesandFiles();
-        }
-    }, [user]);
-
-    useEffect(() => {
         let pollingInterval: NodeJS.Timeout;
 
-        const startPolling = () => {
-            const pollInterval = 20000; // Poll every 20 seconds
-            const poll = async () => {
-                await fetchHistories();
-                if (loading) {
-                    pollingInterval = setTimeout(poll, pollInterval);
-                }
-            };
-            poll();
+        const fetchHistoriesAndFiles = async () => {
+            await fetchHistories();
+            await fetchUserFiles();
         };
 
+        const pollForBotResponse = async () => {
+            try {
+                if (currentHistory === null || !histories[currentHistory]) return;
+                const history = histories[currentHistory];
+                if (!history) return;
+
+                const lastMessage = history.messages[history.messages.length - 1];
+                if (lastMessage?.sender === 'bot') {
+                    setLoading(false); // Bot responded; stop polling
+                    return;
+                }
+
+                await fetchHistories(); // Refresh histories
+            } catch (error) {
+                console.error('Error during polling:', error);
+                setLoading(false); // Stop polling on error
+            }
+        };
+
+        if (user) {
+            fetchHistoriesAndFiles();
+        }
+
         if (loading) {
-            startPolling();
+            pollingInterval = setInterval(pollForBotResponse, 20000);
+            //pollForBotResponse();
         }
 
         return () => {
             clearTimeout(pollingInterval);
         };
-    }, [loading]);
+    }, [user, loading, currentHistory, histories]);
 
-    useEffect(() => {
-        if (currentHistory && histories[currentHistory]) {
-            const messages = histories[currentHistory].messages;
-            const lastMessage = messages[messages.length - 1];
-
-            if (lastMessage?.sender === 'bot') {
-                console.log('No need to poll. Last message is from bot.');
-                setLoading(false);
-            }
-        }
-    }, [histories, currentHistory]);
 
     const fetchUserFiles = async () => {
         if (!user) {
@@ -635,8 +616,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             </div>
         </div>
     );
-
-
 };
 
 export default ChatApp;
