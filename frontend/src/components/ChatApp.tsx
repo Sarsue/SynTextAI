@@ -84,7 +84,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const handleSend = async (message: string, files: File[]) => {
         try {
-            if (loading) return; // Prevent multiple sends while loading
             setLoading(true);
             console.log('Files to append:', files);
             console.log(subscriptionStatus);
@@ -193,7 +192,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             };
                         });
 
-                        fetchHistories();  // Call here after message response is handled
+                        //fetchHistories();  // Call here after message response is handled
                     }
                 }
             } else {
@@ -266,11 +265,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 },
                             }));
 
-                            fetchHistories();  // Ensure polling is triggered after creation
+                            // fetchHistories();  // Ensure polling is triggered after creation
                         }
                     }
                 }
             }
+            startPolling();
         } catch (error) {
             console.error('Error sending message:', error);
         } finally {
@@ -346,6 +346,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             console.error('Error deleting history:', error);
         }
     };
+    const startPolling = () => {
+        const pollInterval = 5000; // Poll every 5 seconds
+        const poll = async () => {
+            await fetchHistories();
+            if (loading) {
+                setTimeout(poll, pollInterval);
+            }
+        };
+        poll();
+    };
+
 
     const fetchHistories = async () => {
         try {
@@ -393,25 +404,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             setCurrentHistory(latestHistoryId);
 
             console.log('Loaded Histories:', histories);
-
-            // Check if polling is needed
             if (currentHistory && historiesObject[currentHistory]) {
                 const messages = historiesObject[currentHistory].messages;
                 const lastMessage = messages[messages.length - 1];
 
-                if (lastMessage?.sender === 'user') {
-                    const unprocessedMessageCount = messages.filter(msg => msg.sender === 'user').length;
-
-                    const pollingInterval = 20000; // 20 seconds 
-
-                    console.log(`Polling again in ${pollingInterval / 1000} seconds...`);
-
-                    // Set the next polling with the dynamic interval
-                    setTimeout(() => {
-                        fetchHistories(); // Poll again after the calculated timeout
-                    }, pollingInterval);
-                } else {
+                if (lastMessage?.sender === 'bot') {
                     console.log('No need to poll. Last message is from bot.');
+                    setLoading(false);
                 }
             }
         } catch (error) {
