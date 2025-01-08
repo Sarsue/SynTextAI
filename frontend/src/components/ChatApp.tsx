@@ -191,8 +191,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 [currentHistory]: updatedHistory,
                             };
                         });
-
-                        startPolling();
                     }
                 }
             } else {
@@ -265,7 +263,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 },
                             }));
 
-                            startPolling();
                         }
                     }
                 }
@@ -345,16 +342,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             console.error('Error deleting history:', error);
         }
     };
-    const startPolling = () => {
-        const pollInterval = 20000; // Poll every 20 seconds
-        const poll = async () => {
-            await fetchHistories();
-            if (loading) {
-                setTimeout(poll, pollInterval);
-            }
-        };
-        poll();
-    };
+
 
 
     const fetchHistories = async () => {
@@ -403,15 +391,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             setCurrentHistory(latestHistoryId);
 
             console.log('Loaded Histories:', histories);
-            if (currentHistory && historiesObject[currentHistory]) {
-                const messages = historiesObject[currentHistory].messages;
-                const lastMessage = messages[messages.length - 1];
-
-                if (lastMessage?.sender === 'bot') {
-                    console.log('No need to poll. Last message is from bot.');
-                    setLoading(false);
-                }
-            }
         } catch (error) {
             console.error('Error fetching chat histories:', error);
         }
@@ -503,7 +482,40 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     }, [user]);
 
+    useEffect(() => {
+        let pollingInterval: NodeJS.Timeout;
 
+        const startPolling = () => {
+            const pollInterval = 20000; // Poll every 20 seconds
+            const poll = async () => {
+                await fetchHistories();
+                if (loading) {
+                    pollingInterval = setTimeout(poll, pollInterval);
+                }
+            };
+            poll();
+        };
+
+        if (loading) {
+            startPolling();
+        }
+
+        return () => {
+            clearTimeout(pollingInterval);
+        };
+    }, [loading]);
+
+    useEffect(() => {
+        if (currentHistory && histories[currentHistory]) {
+            const messages = histories[currentHistory].messages;
+            const lastMessage = messages[messages.length - 1];
+
+            if (lastMessage?.sender === 'bot') {
+                console.log('No need to poll. Last message is from bot.');
+                setLoading(false);
+            }
+        }
+    }, [histories, currentHistory]);
 
     const fetchUserFiles = async () => {
         if (!user) {
