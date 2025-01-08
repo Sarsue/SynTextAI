@@ -346,7 +346,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
     };
     const startPolling = () => {
-        const pollInterval = 5000; // Poll every 5 seconds
+        const pollInterval = 20000; // Poll every 20 seconds
         const poll = async () => {
             await fetchHistories();
             if (loading) {
