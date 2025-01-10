@@ -30,6 +30,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const [comprehensionLevel, setComprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
+    const [isPollingFiles, setIsPollingFiles] = useState(false); // State to track if we are polling for files
+    const [isPollingMessages, setIsPollingMessages] = useState(false); // State to track if we are polling for messages
     const navigate = useNavigate();
 
     const handleSettingsClick = () => {
@@ -106,6 +108,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         draggable: true,
                         progress: undefined,
                     });
+                    setIsPollingFiles(true); // Start polling for files
                     fetchUserFiles();  // Ensure this fetch triggers the update
                 } else {
                     toast.error('File upload failed. Please try again.', {
@@ -198,6 +201,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             [currentHistory]: updatedHistory,
                         };
                     });
+
+                    setIsPollingMessages(true); // Start polling for messages
                 }
             }
         } else {
@@ -268,12 +273,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 messages: updatedMessages,
                             },
                         }));
+
+                        setIsPollingMessages(true); // Start polling for messages
                     }
                 }
             }
         }
     };
-    ;
 
     const handleClearHistory = async () => {
         try {
@@ -418,7 +424,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             // Convert the histories object to a JSON string
             const dataStr = JSON.stringify(historiesArray, null, 2);
             const blob = new Blob([dataStr], { type: 'application/json' });
-            const username = user?.displayName
+            const username = user?.displayName;
             // Create a download link
             const url = URL.createObjectURL(blob);
             const now = new Date();
@@ -480,11 +486,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     const lastMessage = history.messages[history.messages.length - 1];
                     if (lastMessage?.sender === 'bot') {
                         setLoading(false); // Bot responded; stop polling
+                        setIsPollingMessages(false); // Stop polling for messages
                         return;
                     }
                 } else if (type === 'file') {
                     const unprocessedFilesCount = knowledgeBaseFiles.filter(file => !file.processed).length;
                     if (unprocessedFilesCount === 0) {
+                        setIsPollingFiles(false); // Stop polling for files
                         return;
                     }
                 }
@@ -493,6 +501,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             } catch (error) {
                 console.error('Error during polling:', error);
                 setLoading(false); // Stop polling on error
+                setIsPollingMessages(false); // Stop polling for messages
+                setIsPollingFiles(false); // Stop polling for files
             }
         };
 
@@ -500,16 +510,20 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             fetchHistoriesAndFiles();
         }
 
-        if (loading) {
-            pollingInterval = setInterval(() => pollForResponse('message'), 15000);
-        } else {
-            pollingInterval = setInterval(() => pollForResponse('file'), 15000);
-        }
+        const startPolling = () => {
+            if (isPollingMessages) {
+                pollingInterval = setInterval(() => pollForResponse('message'), 15000);
+            } else if (isPollingFiles) {
+                pollingInterval = setInterval(() => pollForResponse('file'), 15000);
+            }
+        };
+
+        startPolling();
 
         return () => {
             clearInterval(pollingInterval);
         };
-    }, [user, loading, currentHistory, histories, knowledgeBaseFiles]);
+    }, [user, isPollingMessages, isPollingFiles, currentHistory, histories, knowledgeBaseFiles]);
 
     const fetchUserFiles = async () => {
         if (!user) {
