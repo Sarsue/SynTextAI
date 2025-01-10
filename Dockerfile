@@ -35,13 +35,7 @@ COPY api/ ./api/
 # Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt
 
-# Install Celery and Supervisor
-RUN pip install --no-cache-dir celery && \
-    pip install --no-cache-dir supervisor
-
 FROM base
-
-
 
 # Set permissions for log files and directories (ensure directories are writable)
 RUN mkdir -p /var/log/syntextai && \
