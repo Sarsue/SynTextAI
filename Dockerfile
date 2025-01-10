@@ -1,7 +1,4 @@
-# Stage 1: Build the React frontend
 FROM node:18-alpine AS build-step
-
-# Set working directory
 WORKDIR /app
 
 # Copy only package files first to leverage caching
@@ -10,7 +7,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 # Install dependencies
 RUN npm ci --only=production && npm prune --production
 
-# Copy the remaining files and build the app
+# Copy the remaining files and build
 COPY frontend/ ./
 RUN npm run build && npm cache clean --force
 
@@ -26,27 +23,36 @@ RUN apt-get update && \
     supervisor && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
+\
 
-# Copy the React build artifacts from the first stage
-COPY --from=build-step /app/build ./frontend/build
+# Copy only the build artifacts from the first stage (frontend build step), not node_modules
+COPY --from=build-step /app/build ./build
 
-# Copy backend files
+# Copy backend files (api directory)
 COPY api/ ./api/
 
-# Install Python dependencies
+# Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt
 
-# Set permissions for log files and directories
+# Install Celery and Supervisor
+RUN pip install --no-cache-dir celery && \
+    pip install --no-cache-dir supervisor
+
+FROM base
+
+
+
+# Set permissions for log files and directories (ensure directories are writable)
 RUN mkdir -p /var/log/syntextai && \
+    chown -R root:root /var/log/syntextai && \
     chmod -R 775 /var/log/syntextai
 
-# Expose the application port
+# Expose thc v=e application port
 EXPOSE 3000
 
-# Supervisor configuration
+# Supervisor Configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 
-# Command to start Supervisor
+# Command to start Supervisor (or your application)
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
