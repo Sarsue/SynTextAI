@@ -125,19 +125,67 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
 
             if (currentHistory !== null && !isNaN(currentHistory)) {
-                const history = histories[currentHistory];
+                await sendMessage(message);
+            } else {
+                await sendMessage(message);
+            }
+        } catch (error) {
+            console.error('Error sending message:', error);
+            setLoading(false); // Set loading to false if there's an error
+        }
+    };
 
-                if (history) {
-                    const temporaryMessage: Message = {
-                        id: -1,
-                        content: message,
-                        sender: 'user',
-                        timestamp: new Date().toLocaleString('en-US', { hour12: false }),
-                        liked: false,
-                        disliked: false,
+    const sendMessage = async (message: string) => {
+        if (currentHistory !== null && !isNaN(currentHistory)) {
+            const history = histories[currentHistory];
+
+            if (history) {
+                const temporaryMessage: Message = {
+                    id: -1,
+                    content: message,
+                    sender: 'user',
+                    timestamp: new Date().toLocaleString('en-US', { hour12: false }),
+                    liked: false,
+                    disliked: false,
+                };
+
+                const updatedMessages = [...history.messages, temporaryMessage];
+
+                setHistories((prevHistories) => {
+                    const updatedHistory = {
+                        ...prevHistories[currentHistory],
+                        messages: updatedMessages,
                     };
 
-                    const updatedMessages = [...history.messages, temporaryMessage];
+                    return {
+                        ...prevHistories,
+                        [currentHistory]: updatedHistory,
+                    };
+                });
+
+                const linkDataResponse = await callApiWithToken(
+                    `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                    'POST'
+                );
+
+                if (linkDataResponse) {
+                    const linkData = await linkDataResponse.json();
+
+                    const newMessages = Array.isArray(linkData)
+                        ? linkData.map((messageData: any) => ({
+                            id: messageData.id,
+                            content: messageData.content,
+                            sender: messageData.sender,
+                            timestamp: messageData.timestamp,
+                            liked: messageData.is_liked === 1,
+                            disliked: messageData.is_disliked === 1,
+                        }))
+                        : [];
+
+                    const updatedMessages = [
+                        ...history.messages.filter((msg) => msg.id !== -1),
+                        ...newMessages,
+                    ];
 
                     setHistories((prevHistories) => {
                         const updatedHistory = {
@@ -150,9 +198,47 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             [currentHistory]: updatedHistory,
                         };
                     });
+                }
+            }
+        } else {
+            const createHistoryResponse = await callApiWithToken(
+                `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
+                'POST'
+            );
+
+            if (createHistoryResponse) {
+                const createHistoryData = await createHistoryResponse.json();
+
+                if (createHistoryData?.id) {
+                    const newHistory: History = {
+                        id: createHistoryData.id,
+                        title: createHistoryData.title,
+                        messages: [],
+                    };
+
+                    const temporaryMessage: Message = {
+                        id: -1,
+                        content: message,
+                        sender: 'user',
+                        timestamp: new Date().toLocaleString('en-US', { hour12: false }),
+                        liked: false,
+                        disliked: false,
+                    };
+
+                    const updatedMessages = [...newHistory.messages, temporaryMessage];
+
+                    setHistories((prevHistories) => ({
+                        ...prevHistories,
+                        [newHistory.id]: {
+                            ...newHistory,
+                            messages: updatedMessages,
+                        },
+                    }));
+
+                    setCurrentHistory(newHistory.id);
 
                     const linkDataResponse = await callApiWithToken(
-                        `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                        `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                         'POST'
                     );
 
@@ -171,49 +257,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             : [];
 
                         const updatedMessages = [
-                            ...history.messages.filter((msg) => msg.id !== -1),
+                            ...newHistory.messages.filter((msg) => msg.id !== -1),
                             ...newMessages,
                         ];
-
-                        setHistories((prevHistories) => {
-                            const updatedHistory = {
-                                ...prevHistories[currentHistory],
-                                messages: updatedMessages,
-                            };
-
-                            return {
-                                ...prevHistories,
-                                [currentHistory]: updatedHistory,
-                            };
-                        });
-                    }
-                }
-            } else {
-                const createHistoryResponse = await callApiWithToken(
-                    `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
-                    'POST'
-                );
-
-                if (createHistoryResponse) {
-                    const createHistoryData = await createHistoryResponse.json();
-
-                    if (createHistoryData?.id) {
-                        const newHistory: History = {
-                            id: createHistoryData.id,
-                            title: createHistoryData.title,
-                            messages: [],
-                        };
-
-                        const temporaryMessage: Message = {
-                            id: -1,
-                            content: message,
-                            sender: 'user',
-                            timestamp: new Date().toLocaleString('en-US', { hour12: false }),
-                            liked: false,
-                            disliked: false,
-                        };
-
-                        const updatedMessages = [...newHistory.messages, temporaryMessage];
 
                         setHistories((prevHistories) => ({
                             ...prevHistories,
@@ -222,49 +268,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 messages: updatedMessages,
                             },
                         }));
-
-                        setCurrentHistory(newHistory.id);
-
-                        const linkDataResponse = await callApiWithToken(
-                            `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
-                            'POST'
-                        );
-
-                        if (linkDataResponse) {
-                            const linkData = await linkDataResponse.json();
-
-                            const newMessages = Array.isArray(linkData)
-                                ? linkData.map((messageData: any) => ({
-                                    id: messageData.id,
-                                    content: messageData.content,
-                                    sender: messageData.sender,
-                                    timestamp: messageData.timestamp,
-                                    liked: messageData.is_liked === 1,
-                                    disliked: messageData.is_disliked === 1,
-                                }))
-                                : [];
-
-                            const updatedMessages = [
-                                ...newHistory.messages.filter((msg) => msg.id !== -1),
-                                ...newMessages,
-                            ];
-
-                            setHistories((prevHistories) => ({
-                                ...prevHistories,
-                                [newHistory.id]: {
-                                    ...newHistory,
-                                    messages: updatedMessages,
-                                },
-                            }));
-                        }
                     }
                 }
             }
-        } catch (error) {
-            console.error('Error sending message:', error);
-            setLoading(false); // Set loading to false if there's an error
         }
     };
+    ;
 
     const handleClearHistory = async () => {
         try {
@@ -464,19 +473,23 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             await fetchUserFiles();
         };
 
-        const pollForBotResponse = async () => {
+        const pollForResponse = async (type: 'message' | 'file') => {
             try {
-                if (currentHistory === null || !histories[currentHistory]) return;
-                const history = histories[currentHistory];
-                if (!history) return;
-
-                const lastMessage = history.messages[history.messages.length - 1];
-                if (lastMessage?.sender === 'bot') {
-                    setLoading(false); // Bot responded; stop polling
-                    return;
+                if (type === 'message' && currentHistory !== null && histories[currentHistory]) {
+                    const history = histories[currentHistory];
+                    const lastMessage = history.messages[history.messages.length - 1];
+                    if (lastMessage?.sender === 'bot') {
+                        setLoading(false); // Bot responded; stop polling
+                        return;
+                    }
+                } else if (type === 'file') {
+                    const unprocessedFilesCount = knowledgeBaseFiles.filter(file => !file.processed).length;
+                    if (unprocessedFilesCount === 0) {
+                        return;
+                    }
                 }
 
-                await fetchHistories(); // Refresh histories
+                await fetchHistoriesAndFiles(); // Refresh histories and files
             } catch (error) {
                 console.error('Error during polling:', error);
                 setLoading(false); // Stop polling on error
@@ -488,15 +501,15 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         }
 
         if (loading) {
-            pollingInterval = setInterval(pollForBotResponse, 20000);
-            //pollForBotResponse();
+            pollingInterval = setInterval(() => pollForResponse('message'), 15000);
+        } else {
+            pollingInterval = setInterval(() => pollForResponse('file'), 15000);
         }
 
         return () => {
-            clearTimeout(pollingInterval);
+            clearInterval(pollingInterval);
         };
-    }, [user, loading, currentHistory, histories]);
-
+    }, [user, loading, currentHistory, histories, knowledgeBaseFiles]);
 
     const fetchUserFiles = async () => {
         if (!user) {
@@ -515,18 +528,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             if (response.ok) {
                 const files: UploadedFile[] = await response.json();
                 setKnowledgeBaseFiles(files);
-
-                // Count the unprocessed files (processed = false)
-                const unprocessedFilesCount = files.filter(file => !file.processed).length;
-
-                if (unprocessedFilesCount > 0) {
-                    const pollingInterval = unprocessedFilesCount * 90000; // 5 minutes per unprocessed file
-
-                    // Set the next polling with the dynamic interval
-                    setTimeout(() => {
-                        fetchUserFiles(); // Poll again after the calculated timeout
-                    }, pollingInterval);
-                }
             } else {
                 console.error('Failed to fetch user files:', response.statusText);
             }

@@ -8,7 +8,7 @@ from typing import List
 from datetime import datetime
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 Base = declarative_base()
 
