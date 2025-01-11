@@ -512,9 +512,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
         const startPolling = () => {
             if (isPollingMessages) {
-                pollingInterval = setInterval(() => pollForResponse('message'), 15000);
+                pollingInterval = setInterval(() => pollForResponse('message'), 20000);
             } else if (isPollingFiles) {
-                pollingInterval = setInterval(() => pollForResponse('file'), 15000);
+                pollingInterval = setInterval(() => pollForResponse('file'), 60000);
             }
         };
 
