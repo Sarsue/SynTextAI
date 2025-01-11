@@ -535,7 +535,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
             const response = await fetch(`api/v1/files`, {
                 headers: {
-                    Authorization: `Bearer ${token}`,
+                    'Authorization': `Bearer ${token}`,
                 },
             });
 
@@ -563,7 +563,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             const deleteResponse = await fetch(`api/v1/files/${fileId}`, {
                 method: 'DELETE',
                 headers: {
-                    Authorization: `Bearer ${token}`,
+                    'Authorization': `Bearer ${token}`,
                 },
             });
 
