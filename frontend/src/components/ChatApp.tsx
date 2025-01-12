@@ -472,13 +472,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
 
     useEffect(() => {
-        let pollingInterval: NodeJS.Timeout;
+        let messagePollingInterval: NodeJS.Timeout | null = null;
+        let filePollingInterval: NodeJS.Timeout | null = null;
 
         const fetchHistoriesAndFiles = async () => {
             await fetchHistories();
             await fetchUserFiles();
         };
-
         const pollForResponse = async (type: 'message' | 'file') => {
             try {
                 if (type === 'message' && currentHistory !== null && histories[currentHistory]) {
@@ -506,22 +506,36 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
         };
 
+        const pollMessages = async () => {
+            if (isPollingMessages) {
+                await pollForResponse('message');
+            }
+        };
+
+        const pollFiles = async () => {
+            if (isPollingFiles) {
+                await pollForResponse('file');
+            }
+        };
+
         if (user) {
             fetchHistoriesAndFiles();
         }
 
         const startPolling = () => {
             if (isPollingMessages) {
-                pollingInterval = setInterval(() => pollForResponse('message'), 20000);
-            } else if (isPollingFiles) {
-                pollingInterval = setInterval(() => pollForResponse('file'), 60000);
+                messagePollingInterval = setInterval(pollMessages, 20000);
+            }
+            if (isPollingFiles) {
+                filePollingInterval = setInterval(pollFiles, 60000);
             }
         };
 
         startPolling();
 
         return () => {
-            clearInterval(pollingInterval);
+            if (messagePollingInterval) clearInterval(messagePollingInterval);
+            if (filePollingInterval) clearInterval(filePollingInterval);
         };
     }, [user, isPollingMessages, isPollingFiles, currentHistory, histories, knowledgeBaseFiles]);
 
