@@ -123,6 +123,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 }
 
                 if (!message.trim()) {
+                    setLoading(false);
                     return; // Early return if the message is empty
                 }
             }
@@ -487,6 +488,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         const lastMessage = history.messages[history.messages.length - 1];
                         if (lastMessage?.sender === 'bot') {
                             setIsPollingMessages(false); // Stop message polling
+                            setLoading(false);
                         }
                     }
                     if (isPollingFiles) {
