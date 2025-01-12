@@ -472,70 +472,44 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     };
 
     useEffect(() => {
-        let messagePollingInterval: NodeJS.Timeout | null = null;
-        let filePollingInterval: NodeJS.Timeout | null = null;
-
+        let pollingInterval: NodeJS.Timeout | null = null;
         const fetchHistoriesAndFiles = async () => {
             await fetchHistories();
             await fetchUserFiles();
         };
-        const pollForResponse = async (type: 'message' | 'file') => {
+
+        const fetchData = async () => {
             try {
-                if (type === 'message' && currentHistory !== null && histories[currentHistory]) {
-                    const history = histories[currentHistory];
-                    const lastMessage = history.messages[history.messages.length - 1];
-                    if (lastMessage?.sender === 'bot') {
-                        setLoading(false); // Bot responded; stop polling
-                        setIsPollingMessages(false); // Stop polling for messages
-                        return;
+                if (isPollingMessages || isPollingFiles) {
+                    await fetchHistoriesAndFiles();
+                    if (isPollingMessages && currentHistory !== null && histories[currentHistory]) {
+                        const history = histories[currentHistory];
+                        const lastMessage = history.messages[history.messages.length - 1];
+                        if (lastMessage?.sender === 'bot') {
+                            setIsPollingMessages(false); // Stop message polling
+                        }
                     }
-                } else if (type === 'file') {
-                    const unprocessedFilesCount = knowledgeBaseFiles.filter(file => !file.processed).length;
-                    if (unprocessedFilesCount === 0) {
-                        setIsPollingFiles(false); // Stop polling for files
-                        return;
+                    if (isPollingFiles) {
+                        const unprocessedFilesCount = knowledgeBaseFiles.filter(file => !file.processed).length;
+                        if (unprocessedFilesCount === 0) {
+                            setIsPollingFiles(false); // Stop file polling
+                        }
                     }
                 }
-
-                await fetchHistoriesAndFiles(); // Refresh histories and files
             } catch (error) {
                 console.error('Error during polling:', error);
-                setLoading(false); // Stop polling on error
-                setIsPollingMessages(false); // Stop polling for messages
-                setIsPollingFiles(false); // Stop polling for files
-            }
-        };
-
-        const pollMessages = async () => {
-            if (isPollingMessages) {
-                await pollForResponse('message');
-            }
-        };
-
-        const pollFiles = async () => {
-            if (isPollingFiles) {
-                await pollForResponse('file');
+                setIsPollingMessages(false);
+                setIsPollingFiles(false);
             }
         };
 
         if (user) {
-            fetchHistoriesAndFiles();
+            fetchHistoriesAndFiles(); // Initial fetch
+            pollingInterval = setInterval(fetchData, 30000); // Poll every 30 seconds
         }
 
-        const startPolling = () => {
-            if (isPollingMessages) {
-                messagePollingInterval = setInterval(pollMessages, 20000);
-            }
-            if (isPollingFiles) {
-                filePollingInterval = setInterval(pollFiles, 60000);
-            }
-        };
-
-        startPolling();
-
         return () => {
-            if (messagePollingInterval) clearInterval(messagePollingInterval);
-            if (filePollingInterval) clearInterval(filePollingInterval);
+            if (pollingInterval) clearInterval(pollingInterval);
         };
     }, [user, isPollingMessages, isPollingFiles, currentHistory, histories, knowledgeBaseFiles]);
 
