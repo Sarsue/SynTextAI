@@ -474,8 +474,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     useEffect(() => {
         let pollingInterval: NodeJS.Timeout | null = null;
+        const fetchInitialData = async () => {
+            try {
+                // Fetch histories and files unconditionally on initial load
+                await fetchHistories();
+                await fetchUserFiles();
+            } catch (error) {
+                console.error('Error fetching initial data:', error);
+            }
+        };
 
-        const fetchData = async () => {
+        const pollData = async () => {
             try {
                 if (isPollingMessages || isPollingFiles) {
                     await fetchHistories();
@@ -505,8 +514,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         };
 
         if (user) {
-            fetchData(); // Initial fetch
-            pollingInterval = setInterval(fetchData, 30000); // Poll every 30 seconds
+            fetchInitialData(); // Initial fetch
+            pollingInterval = setInterval(pollData, 30000); // Poll every 30 seconds
         }
 
         return () => {
