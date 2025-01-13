@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker,  mapped_column, Mapped
+from sqlalchemy.orm import declarative_base, relationship,  mapped_column, Mapped
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 from sqlalchemy.types import JSON
 from pgvector.sqlalchemy import Vector
