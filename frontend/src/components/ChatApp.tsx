@@ -474,27 +474,26 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     useEffect(() => {
         let pollingInterval: NodeJS.Timeout | null = null;
-        const fetchHistoriesAndFiles = async () => {
-            await fetchHistories();
-            await fetchUserFiles();
-        };
 
         const fetchData = async () => {
             try {
                 if (isPollingMessages || isPollingFiles) {
-                    await fetchHistoriesAndFiles();
-                    if (isPollingMessages && currentHistory !== null && histories[currentHistory]) {
+                    await fetchHistories();
+                    await fetchUserFiles();
+
+                    if (isPollingMessages && currentHistory !== null) {
                         const history = histories[currentHistory];
-                        const lastMessage = history.messages[history.messages.length - 1];
+                        const lastMessage = history?.messages?.slice(-1)[0];
                         if (lastMessage?.sender === 'bot') {
-                            setIsPollingMessages(false); // Stop message polling
+                            setIsPollingMessages(false);
                             setLoading(false);
                         }
                     }
+
                     if (isPollingFiles) {
-                        const unprocessedFilesCount = knowledgeBaseFiles.filter(file => !file.processed).length;
-                        if (unprocessedFilesCount === 0) {
-                            setIsPollingFiles(false); // Stop file polling
+                        const unprocessedFiles = knowledgeBaseFiles.some((file) => !file.processed);
+                        if (!unprocessedFiles) {
+                            setIsPollingFiles(false);
                         }
                     }
                 }
@@ -506,14 +505,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         };
 
         if (user) {
-            fetchHistoriesAndFiles(); // Initial fetch
+            fetchData(); // Initial fetch
             pollingInterval = setInterval(fetchData, 30000); // Poll every 30 seconds
         }
 
         return () => {
             if (pollingInterval) clearInterval(pollingInterval);
         };
-    }, [user, isPollingMessages, isPollingFiles, currentHistory, histories, knowledgeBaseFiles]);
+    }, [user, isPollingMessages, isPollingFiles, currentHistory]);
 
     const fetchUserFiles = async () => {
         if (!user) {
