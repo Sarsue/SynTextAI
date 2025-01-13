@@ -20,7 +20,7 @@ interface ChatAppProps {
 }
 
 const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus }) => {
-    const { loading, setLoading } = useUserContext();
+    // const { loading, setLoading } = useUserContext();
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
     const { darkMode, userSettings } = useUserContext();
@@ -80,7 +80,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     const handleSend = async (message: string, files: File[]) => {
         try {
-            setLoading(true); // Set loading to true at the start of the operation
+            //setLoading(true); // Set loading to true at the start of the operation
             console.log('Files to append:', files);
             console.log(subscriptionStatus);
 
@@ -123,7 +123,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 }
 
                 if (!message.trim()) {
-                    setLoading(false);
+                    // setLoading(false);
                     return; // Early return if the message is empty
                 }
             }
@@ -135,7 +135,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            setLoading(false); // Set loading to false if there's an error
+            //  setLoading(false); // Set loading to false if there's an error
         }
     };
 
@@ -479,6 +479,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 // Fetch histories and files unconditionally on initial load
                 await fetchHistories();
                 await fetchUserFiles();
+
+
             } catch (error) {
                 console.error('Error fetching initial data:', error);
             }
@@ -495,7 +497,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         const lastMessage = history?.messages?.slice(-1)[0];
                         if (lastMessage?.sender === 'bot') {
                             // setIsPollingMessages is a dependency of UseEffect so we must change it after we have setLoading false else we wont be able to get the GUI enabled again
-                            setLoading(false);
+                            //  setLoading(false);
                             setIsPollingMessages(false);
 
                         }
@@ -608,7 +610,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         history={currentHistory !== null ? histories[currentHistory] : null}
                         onCopy={handleCopy}
                     />
-                    <InputArea onSend={handleSend} isSending={loading} />
+                    <InputArea onSend={handleSend} isSending={isPollingMessages} />
                     <ToastContainer />
                 </div>
 
