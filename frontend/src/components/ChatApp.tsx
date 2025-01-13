@@ -494,8 +494,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         const history = histories[currentHistory];
                         const lastMessage = history?.messages?.slice(-1)[0];
                         if (lastMessage?.sender === 'bot') {
-                            setIsPollingMessages(false);
+                            // setIsPollingMessages is a dependency of UseEffect so we must change it after we have setLoading false else we wont be able to get the GUI enabled again
                             setLoading(false);
+                            setIsPollingMessages(false);
+
                         }
                     }
 
