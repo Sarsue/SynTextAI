@@ -33,6 +33,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const { isPollingFiles, setIsPollingFiles } = useUserContext(); // State to track if we are polling for files
     const { isPollingMessages, setIsPollingMessages } = useUserContext(); // State to track if we are polling for messages
     const navigate = useNavigate();
+    const parentIsPollingMessages = isPollingMessages;
 
     const handleSettingsClick = () => {
         navigate('/settings');
@@ -523,7 +524,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         return () => {
             if (pollingInterval) clearInterval(pollingInterval);
         };
+
     }, [user, isPollingMessages, isPollingFiles, currentHistory]);
+
+    useEffect(() => {
+        console.log('isPollingMessages updated:', isPollingMessages);
+    }, [isPollingMessages]);
+
 
     const fetchUserFiles = async () => {
         if (!user) {
@@ -608,7 +615,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         history={currentHistory !== null ? histories[currentHistory] : null}
                         onCopy={handleCopy}
                     />
-                    <InputArea onSend={handleSend} isSending={useUserContext().isPollingMessages} />
+                    <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
                     <ToastContainer />
                 </div>
 
