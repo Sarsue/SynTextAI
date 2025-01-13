@@ -13,8 +13,10 @@ interface UserContextType {
     setDarkMode: (darkMode: boolean) => void; // Add setDarkMode function
     userSettings: UserSettings; // Add userSettings to context type
     setUserSettings: (settings: UserSettings) => void; // Add setUserSettings function
-    loading: boolean; // Add loading state
-    setLoading: (isLoading: boolean) => void; // Add setLoading function
+    isPollingFiles: boolean; // Add isPollingFiles state
+    setIsPollingFiles: (isPollingFile: boolean) => void; // Add setIsPollingFiles function
+    isPollingMessages: boolean; // Add isPollingFiles state
+    setIsPollingMessages: (isPollingMsg: boolean) => void; // Add setIsPollingFiles function
 }
 
 // Create the UserContext with initial values
@@ -27,8 +29,10 @@ const UserContext = createContext<UserContextType>({
         selectedLanguage: '',    // Default selectedLanguage
     },
     setUserSettings: () => { }, // Provide a default empty function
-    loading: false, // Default loading state
-    setLoading: () => { },
+    isPollingFiles: false, // Default poling file state
+    setIsPollingFiles: () => { },
+    isPollingMessages: false, // Default polling message state
+    setIsPollingMessages: () => { },
 });
 
 // Define UserProvider component
@@ -42,7 +46,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         selectedLanguage: '',    // Initial value for selectedLanguage
     });
 
-    const [loading, setLoading] = useState<boolean>(false); // Add loading state
+    const [isPollingFiles, setIsPollingFiles] = useState<boolean>(false); // Add poling files state
+    const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false); // Add poling messages state
 
     // Function to toggle dark mode
     const toggleDarkMode = () => {
@@ -51,7 +56,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Return UserContext.Provider with value and children
     return (
-        <UserContext.Provider value={{ darkMode, toggleDarkMode, setDarkMode, userSettings, setUserSettings, loading, setLoading }}>
+        <UserContext.Provider value={{ darkMode, toggleDarkMode, setDarkMode, userSettings, setUserSettings, isPollingFiles, setIsPollingFiles, isPollingMessages, setIsPollingMessages }}>
             {children}
         </UserContext.Provider>
     );

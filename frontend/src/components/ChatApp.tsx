@@ -30,8 +30,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
     const [comprehensionLevel, setComprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
-    const [isPollingFiles, setIsPollingFiles] = useState(false); // State to track if we are polling for files
-    const [isPollingMessages, setIsPollingMessages] = useState(false); // State to track if we are polling for messages
+    const { isPollingFiles, setIsPollingFiles } = useUserContext(); // State to track if we are polling for files
+    const { isPollingMessages, setIsPollingMessages } = useUserContext(); // State to track if we are polling for messages
     const navigate = useNavigate();
 
     const handleSettingsClick = () => {
