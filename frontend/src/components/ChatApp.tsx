@@ -395,10 +395,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             setCurrentHistory(latestHistoryId);
 
             console.log('Loaded Histories:', histories);
+
+            // Stop polling messages if the latest message is from the bot
+            if (isPollingMessages && latestHistoryId !== null) {
+                const lastMessage = histories[histories.length - 1]?.messages?.slice(-1)[0];
+                if (lastMessage?.sender === 'bot') {
+                    setIsPollingMessages(false);
+                }
+            }
         } catch (error) {
             console.error('Error fetching chat histories:', error);
         }
     };
+
 
     const handleLogout = () => {
         onLogout();
@@ -475,13 +484,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
     useEffect(() => {
         let pollingInterval: NodeJS.Timeout | null = null;
+
         const fetchInitialData = async () => {
             try {
                 // Fetch histories and files unconditionally on initial load
                 await fetchHistories();
                 await fetchUserFiles();
-
-
             } catch (error) {
                 console.error('Error fetching initial data:', error);
             }
@@ -489,30 +497,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
         const pollData = async () => {
             try {
-                if (isPollingMessages || isPollingFiles) {
+                if (isPollingMessages) {
                     await fetchHistories();
+                }
+                if (isPollingFiles) {
                     await fetchUserFiles();
-
-                    if (isPollingMessages && currentHistory !== null) {
-                        const history = histories[currentHistory];
-                        const lastMessage = history?.messages?.slice(-1)[0];
-                        if (lastMessage?.sender === 'bot') {
-                            setIsPollingMessages(false);
-
-                        }
-                    }
-
-                    if (isPollingFiles) {
-                        const unprocessedFiles = knowledgeBaseFiles.some((file) => !file.processed);
-                        if (!unprocessedFiles) {
-                            setIsPollingFiles(false);
-                        }
-                    }
                 }
             } catch (error) {
                 console.error('Error during polling:', error);
-                setIsPollingMessages(false);
-                setIsPollingFiles(false);
             }
         };
 
@@ -524,18 +516,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         return () => {
             if (pollingInterval) clearInterval(pollingInterval);
         };
-
-    }, [user, isPollingMessages, isPollingFiles, currentHistory]);
-
-    useEffect(() => {
-        console.log('isPollingMessages updated:', isPollingMessages);
-    }, [isPollingMessages]);
+    }, [user, isPollingMessages, isPollingFiles]);
 
 
     const fetchUserFiles = async () => {
-        if (!user) {
-            return;
-        }
+        if (!user) return;
 
         try {
             const token = await user.getIdToken();
@@ -549,6 +534,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             if (response.ok) {
                 const files: UploadedFile[] = await response.json();
                 setKnowledgeBaseFiles(files);
+
+                // Stop polling files if all are processed
+                if (isPollingFiles) {
+                    const unprocessedFiles = files.some((file) => !file.processed);
+                    if (!unprocessedFiles) {
+                        setIsPollingFiles(false);
+                    }
+                }
             } else {
                 console.error('Failed to fetch user files:', response.statusText);
             }
@@ -556,6 +549,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             console.error('Error fetching user files:', error);
         }
     };
+
 
     const handleDeleteFile = async (fileId: number) => {
         if (!user) {

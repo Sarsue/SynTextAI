@@ -120,25 +120,25 @@ class SyntextAgent:
                     )
                     response = prompt_llm(response_prompt)
 
-            elif self.relevance_thresholds["low"] <= best_score < self.relevance_thresholds["high"]:
-                # Medium relevance: Use both the context and web search
-                web_response = self.searcher.search_topic(query)
-                response_prompt = (
-                    f"Answer the following question using the provided text and web information (Respond in {language}):\n\n"
-                    f"Text: {best_context['content']}\n\nWeb Info: {web_response}\n\n"
-                    f"Question: {query}\n\n"
-                )
-                response = prompt_llm(response_prompt)
+            # elif self.relevance_thresholds["low"] <= best_score < self.relevance_thresholds["high"]:
+            #     # Medium relevance: Use both the context and web search
+            #     web_response = self.searcher.search_topic(query)
+            #     response_prompt = (
+            #         f"Answer the following question using the provided text and web information (Respond in {language}):\n\n"
+            #         f"Text: {best_context['content']}\n\nWeb Info: {web_response}\n\n"
+            #         f"Question: {query}\n\n"
+            #     )
+            #     response = prompt_llm(response_prompt)
 
-            else:
-                # Low relevance: Use only web search
-                web_response = self.searcher.search_topic(query)
-                response_prompt = (
-                    f"Answer the following question using the provided web information (Respond in {language}):\n\n"
-                    f"Web Info: {web_response}\n\n"
-                    f"Question: {query}\n\n"
-                )
-                response = prompt_llm(response_prompt)
+            # else:
+            #     # Low relevance: Use only web search
+            #     web_response = self.searcher.search_topic(query)
+            #     response_prompt = (
+            #         f"Answer the following question using the provided web information (Respond in {language}):\n\n"
+            #         f"Web Info: {web_response}\n\n"
+            #         f"Question: {query}\n\n"
+            #     )
+            #     response = prompt_llm(response_prompt)
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)
         return response
