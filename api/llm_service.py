@@ -29,17 +29,31 @@ def get_text_embeddings_in_batches(inputs, batch_size=10):
     """
     Generate embeddings for a list of inputs in batches.
     """
-   
+    client = MistralClient(api_key=mistral_key)
     all_embeddings = []
-    for i in inputs:
-        all_embeddings.append(get_text_embedding(i))
+
+    for i in range(0, len(inputs), batch_size):
+        batch = inputs[i:i + batch_size]
+        embeddings_batch_response = client.embeddings(
+            model="mistral-embed",
+            input=batch
+        )
+        # Extract embeddings for the batch
+        embeddings = [response.embedding for response in embeddings_batch_response.data]
+        all_embeddings.extend(embeddings)
 
     return all_embeddings
 
 
 def get_text_embedding(input):
-    return sentence_transformer_model.encode(input)
-    
+    client = MistralClient(api_key=mistral_key)
+
+    embeddings_batch_response = client.embeddings(
+        model="mistral-embed",
+        input=input
+    )
+    return embeddings_batch_response.data[0].embedding
+
 
 
 def prompt_llm(prompt):
