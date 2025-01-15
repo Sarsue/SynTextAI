@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from typing import List
 from datetime import datetime
 import logging
-
+from sklearn.metrics.pairwise import cosine_similarity
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 Base = declarative_base()
@@ -557,25 +557,40 @@ class DocSynthStore:
                 .limit(top_k)
             ).all()
 
-            # Prepare the result with all necessary metadata
-            chunk_info = []
+                # Prepare the result with all necessary metadata
+                # List to hold (chunk, similarity) pairs
+            similarities = []
+            
             for chunk in result:
-                chunk_data = {
-                    'chunk_id': chunk.id,
-                    'chunk': chunk.content,
-                    'data': chunk.data,  # Includes type-specific metadata
-                    'file_url': chunk.file.file_url,  # Assuming file URL is a relation
-                }
-                # Add type-specific metadata
-                if chunk.data.get('type') == 'video':
-                    chunk_data['start_time'] = chunk.data.get('start_time')
-                    chunk_data['end_time'] = chunk.data.get('end_time')
-                else:  # Assuming it's a document
-                    chunk_data['page_number'] = chunk.data.get('page_number')
+                similarity = cosine_similarity([query_embedding], [chunk.embedding])[0][0]
+                similarities.append((chunk, similarity))
+            
+            # Sort chunks by similarity score in descending order
+            similarities.sort(key=lambda x: x[1], reverse=True)
 
-                chunk_info.append(chunk_data)
+            # Collect top-k chunks and group them by page number
+            top_chunks = []
+            page_numbers = set()  # To avoid multiple chunks from the same page
+            
+            for chunk, _ in similarities[:top_k]:
+                if chunk.data.get("page_number") not in page_numbers:
+                    page_numbers.add(chunk.data.get("page_number"))
+                    chunk_data = {
+                        'chunk_id': chunk.id,
+                        'chunk': chunk.content,
+                        'data': chunk.data,  # Includes type-specific metadata
+                        'file_url': chunk.file.file_url,  # Assuming file URL is a relation
+                    }
+                    # Add type-specific metadata
+                    if chunk.data.get('type') == 'video':
+                        chunk_data['start_time'] = chunk.data.get('start_time')
+                        chunk_data['end_time'] = chunk.data.get('end_time')
+                    else:  # Assuming it's a document
+                        chunk_data['page_number'] = chunk.data.get('page_number')
 
-            return chunk_info
+                    top_chunks.append(chunk_data)
+
+            return top_chunks
         except Exception as e:
             logger.error(f"Error querying chunks: {e}")
             raise

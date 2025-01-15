@@ -9,6 +9,7 @@ from mistralai.models import chat_completion
 from requests.exceptions import Timeout, RequestException
 import requests
 import tiktoken
+from sentence_transformers import SentenceTransformer
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
@@ -20,36 +21,26 @@ mistral_client = MistralClient(api_key=mistral_key)
 MODEL_NAME = "mistral-small-latest"
 MAX_TOKENS = 4096  # Example token limit for the model (adjust as needed)
 
+sentence_transformer_model = SentenceTransformer('all-MiniLM-L6-v2')  # Example model
+
 logging.basicConfig(level=logging.INFO)
 
 def get_text_embeddings_in_batches(inputs, batch_size=10):
     """
     Generate embeddings for a list of inputs in batches.
     """
-    client = MistralClient(api_key=mistral_key)
+   
     all_embeddings = []
-
-    for i in range(0, len(inputs), batch_size):
-        batch = inputs[i:i + batch_size]
-        embeddings_batch_response = client.embeddings(
-            model="mistral-embed",
-            input=batch
-        )
-        # Extract embeddings for the batch
-        embeddings = [response.embedding for response in embeddings_batch_response.data]
-        all_embeddings.extend(embeddings)
+    for i in inputs:
+        all_embeddings.append(get_text_embedding(i))
 
     return all_embeddings
 
 
 def get_text_embedding(input):
-    client = MistralClient(api_key=mistral_key)
+    return sentence_transformer_model.encode(input)
+    
 
-    embeddings_batch_response = client.embeddings(
-        model="mistral-embed",
-        input=input
-    )
-    return embeddings_batch_response.data[0].embedding
 
 def prompt_llm(prompt):
     """Generate a chat completion using the Mistral API."""
