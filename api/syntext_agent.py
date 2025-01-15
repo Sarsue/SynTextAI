@@ -1,7 +1,7 @@
 import re
 import logging
 from llm_service import prompt_llm, summarize
-from web_searcher import WebSearch
+#from web_searcher import WebSearch
 from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
