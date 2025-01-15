@@ -1,6 +1,8 @@
+import re
+import logging
 from llm_service import prompt_llm, summarize
 from web_searcher import WebSearch
-import logging
+from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,7 +26,12 @@ class SyntextAgent:
             chunk_details.append(f"Time Range ({result['start_time']} - {result['end_time']}), Chunk ID: {result['chunk_id']}, Content: {result['chunk']}")
         else:
             chunk_details.append(f"Chunk ID: {result['chunk_id']}, Content: {result['chunk']}")
-        return chunk_details
+
+        # Add source information
+        source = result.get("metadata", {}).get("source", "Unknown Source")
+        chunk_details.append(f"Source: {source}")
+        
+        return "\n".join(chunk_details)
 
     def assess_relevance(self, query: str, context: str) -> float:
         """
@@ -69,17 +76,43 @@ class SyntextAgent:
         try:
             # Step 1: Evaluate relevance scores for each chunk
             relevance_scores = self.assess_relevance_scores(query, top_k_results)
-            print(relevance_scores)
-
             
+            # Step 2: Get the best context based on relevance score
+            best_context, best_score = self.determine_best_context(relevance_scores)
+
+            # Optional: You can choose to summarize the best context if it's too long
+            if best_score > self.relevance_thresholds["high"]:
+                # If the score is high, use the full context
+                context = best_context["content"]
+            else:
+                # If the score is lower, you may choose to summarize it or adjust based on your needs
+                context = summarize(best_context["content"])
+
+            # Step 3: Process the final response with the selected context
+            response = prompt_llm(
+                f"Based on the query: '{query}', and the context: {context}, provide a detailed and relevant response in {language}. "
+                "Include references to the source(s) from where the information is derived. Ensure the response is in markdown format with clickable links to the source files."
+            )
+
+            # Step 4: Append source references in markdown format (file link with page number)
+            # Construct markdown with clickable file references
+            markdown_response = response.strip()
+            for result in top_k_results:
+                file_name = result['file_url'].split('/')[-1]
+                if result['page_number'] > 1:
+                    file_name += f' page {result["page_number"]}'
+                file_url = f"{result['file_url']}?page={result['page_number']}"
+                markdown_response += f"\n\n[Source: {file_name}]({file_url})"
+
+            return markdown_response
+
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)
             return "Syntext ran into issues processing this query. Please rephrase your question."
 
 if __name__ == "__main__":
     import os
-    from docsynth_store import DocSynthStore
-    from llm_service import get_text_embeddings_in_batches, get_text_embedding
+    from llm_service import get_text_embedding
     
     # Construct paths relative to the base directory
     database_config = {
@@ -99,5 +132,5 @@ if __name__ == "__main__":
     id = 1
     language = "french"
     topK_chunks = store.query_chunks_by_embedding(id, get_text_embedding(message))
-    syntext.query_pipeline(message, None, topK_chunks, language)
-
+    response = syntext.query_pipeline(message, None, topK_chunks, language)
+    print(response)

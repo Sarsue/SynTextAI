@@ -35,6 +35,11 @@ COPY api/ ./api/
 # Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt
 
+# Install Playwright and the necessary browsers
+RUN pip install playwright && \
+    python -m playwright install
+
+
 FROM base
 
 # Set permissions for log files and directories (ensure directories are writable)
