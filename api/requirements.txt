@@ -160,6 +160,5 @@ duckduckgo_search==7.2.0
 markdownify==0.14.1
 pgvector==0.3.6
 psycopg2-binary
-playwright
 supervisor
 

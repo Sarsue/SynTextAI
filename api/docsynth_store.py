@@ -8,7 +8,9 @@ from sqlalchemy.exc import IntegrityError
 from typing import List
 from datetime import datetime
 import logging
-from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+from scipy.spatial.distance import cosine
+
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 Base = declarative_base()
@@ -66,6 +68,7 @@ class Message(Base):
     chat_history = relationship("ChatHistory", back_populates="messages")
 
 
+
 class File(Base):
     __tablename__ = 'files'
     
@@ -78,24 +81,50 @@ class File(Base):
     # Relationship to chunks
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     
+    # Relationship to segments
+    segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
+    
     user = relationship("User", back_populates="files")
+
+
+class Segment(Base):
+    __tablename__ = 'segments'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
+    page_number = Column(Integer)  # This represents the page number within the file
+    content = Column(String)  # Content of the segment/page (optional, or could be derived from chunks)
+    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
+    metadata = Column(JSON, nullable=True) 
+    
+    # Relationship to file
+    file = relationship("File", back_populates="segments")
+    
+    # Relationship to chunks
+    chunks = relationship("Chunk", back_populates="segment", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Segment(id={self.id}, file_id={self.file_id}, page_number={self.page_number}, content={self.content[:50]}...)>"
 
 
 class Chunk(Base):
     __tablename__ = 'chunks'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    content = Column(String)
-    data = Column(JSON)  
     file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
+    segment_id = Column(Integer, ForeignKey('segments.id', ondelete='CASCADE'))  # Link to the segment
+    
+    # Vector embedding for each chunk
+    embedding = Column(Vector(1024), nullable=True)  # Example size (e.g., 1536 for OpenAI embeddings)
     
     # Relationship to file
     file = relationship("File", back_populates="chunks")
     
-    # Vector embedding for each chunk
-    embedding = Column(Vector(1024), nullable=True)  # Example size (e.g., 1536 for OpenAI embeddings)
+    # Relationship to segment
+    segment = relationship("Segment", back_populates="chunks")
+    
     def __repr__(self):
-        return f"<Chunk(id={self.id}, file_id={self.file_id}, content={self.content[:50]}..., metadata={self.metadata})>"
+        return f"<Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:50]}...)>"
+
 
 class DocSynthStore:
     def __init__(self, database_url):
@@ -404,59 +433,64 @@ class DocSynthStore:
             raise
 
 
-    def update_file_with_chunks(self, user_id, file_name, file_type, chunks, embeddings):
+    def update_file_with_chunks(self,user_id, filename, file_type, extracted_data):
         """
-        Updates a file with its processed chunks and embeddings, handling different file types like PDF and video.
-        
+        Stores the processed file data in the database with embeddings, segments, and metadata.
+
         Args:
-            user_id (int): ID of the user who owns the file.
-            file_name (str): Name of the file to update.
-            file_type (str): Type of the file ('pdf' or 'video').
-            chunks (list): List of content chunks extracted from the file.
-            embeddings (list): List of embeddings corresponding to the chunks.
+            user_id (int): The ID of the user who owns the file.
+            filename (str): The name of the file.
+            file_type (str): The type of file (e.g., 'pdf', 'video').
+            extracted_data (list): The processed data containing chunks and embeddings.
         """
         try:
             session = self.get_session()
 
-            # Fetch the file by user_id and file_name
-            file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
+            # Create or fetch the file entry
+            file_entry = session.query(File).filter(File.user_id == user_id, File.file_name == filename).first()
+            if not file_entry:
+                file_entry = File(file_name=filename, file_type=file_type, user_id=user_id)
+                session.add(file_entry)
+                session.flush()  # Ensure file_id is generated
 
-            if file:
-                # Ensure chunks and embeddings have the same length
-                if len(chunks) != len(embeddings):
-                    raise ValueError("Chunks and embeddings lists must have the same length.")
+            # Process each segment/page
+            for data in extracted_data:
+                # Metadata for the segment
+                metadata = {}
+                if file_type == 'video':
+                    metadata = {"type": "video", "start_time": data.get("start_time"), "end_time": data.get("end_time")}
+                else:
+                    metadata = {"type": "pdf", "page_number": data.get("page_num")}
 
-                # Create chunk objects and associate them with the file
-                for i, chunk in enumerate(chunks):
-                    # Set metadata based on the file type (PDF or video)
-                    data = {}
-                    # if file_type == 'pdf':
-                    #     data = {"type": "pdf", "page_number": chunk["page_number"]}  # Assuming 'chunk' contains page_number
-                    if file_type == 'video':
-                        data = {"type": "video", "start_time": chunk["start_time"], "end_time": chunk["end_time"]}  # Assuming 'chunk' contains time intervals
-                    else:
-                        data = {"type": file_type, "page_number": chunk["page_number"]}
-                    # Add the chunk to the database
+                # Create segment entry with metadata
+                segment_entry = Segment(
+                    page_number=data.get("page_num"),  # For PDF documents
+                    file_id=file_entry.id,
+                    content = data.get("content"),
+                    metadata=metadata  # Store metadata at the segment level
+                )
+                session.add(segment_entry)
+                session.flush()  # Ensure segment_id is generated
+
+                # Create chunk entries for each embedding
+                page_chunks = data["chunks"]
+                for chunk in page_chunks:
                     new_chunk = Chunk(
-                        file_id=file.id,
-                        content=chunk["content"],
-                        embedding=embeddings[i],
-                        data=data
+                        file_id=file_entry.id,
+                        segment_id=segment_entry.id,
+                        embedding=chunk["embedding"]
                     )
                     session.add(new_chunk)
 
-                session.commit()
-                logger.info(f"Updated file '{file_name}' for user {user_id} with {len(chunks)} chunks of type '{file_type}'.")
-            else:
-                raise ValueError(f"File '{file_name}' not found for user ID {user_id}.")
-
+            # Commit all changes
+            session.commit()
+            logging.info(f"File '{filename}' stored successfully with processed data.")
         except Exception as e:
-            session.rollback()  # Rollback in case of error
-            logger.error(f"Error updating file with chunks: {e}")
-            raise  # Re-raise the exception for further handling
+            session.rollback()
+            logging.error(f"Error storing file data: {e}")
+            raise
         finally:
             session.close()
-
 
     def get_files_for_user(self, user_id):
         try:
@@ -548,57 +582,52 @@ class DocSynthStore:
             session.close()
 
     def query_chunks_by_embedding(self, user_id, query_embedding, top_k=5):
+        """
+        Retrieves the top-k segments with the highest cosine similarity to the query embedding.
+
+        Args:
+            user_id (int): The ID of the user.
+            query_embedding (list): The embedding of the user's query.
+            top_k (int): The number of top similar segments to retrieve.
+
+        Returns:
+            list: A list of segments with the highest cosine similarity to the query.
+        """
         try:
             session = self.get_session()
-            result = session.scalars(
-                select(Chunk)
-                .filter(Chunk.file_id.in_(select(File.id).filter(File.user_id == user_id)))
-                .order_by(Chunk.embedding.l2_distance(query_embedding))
-                .limit(top_k)
-            ).all()
 
-                # Prepare the result with all necessary metadata
-                # List to hold (chunk, similarity) pairs
-            similarities = []
-            
-            for chunk in result:
-                similarity = cosine_similarity([query_embedding], [chunk.embedding])[0][0]
-                similarities.append((chunk, similarity))
-            
-            # Sort chunks by similarity score in descending order
-            similarities.sort(key=lambda x: x[1], reverse=True)
+            # Convert query_embedding to Postgres-compatible format (vector)
+            query_embedding_pg = func.vector(query_embedding)
 
-            # Collect top-k chunks and group them by page number
-            top_chunks = []
-            page_numbers = set()  # To avoid multiple chunks from the same page
-            
-            for chunk, _ in similarities[:top_k]:
-                if chunk.data.get("page_number") not in page_numbers:
-                    page_numbers.add(chunk.data.get("page_number"))
-                    chunk_data = {
-                        'chunk_id': chunk.id,
-                        'chunk': chunk.content,
-                        'data': chunk.data,  # Includes type-specific metadata
-                        'file_url': chunk.file.file_url,  # Assuming file URL is a relation
-                    }
-                    # Add type-specific metadata
-                    if chunk.data.get('type') == 'video':
-                        chunk_data['start_time'] = chunk.data.get('start_time')
-                        chunk_data['end_time'] = chunk.data.get('end_time')
-                    else:  # Assuming it's a document
-                        chunk_data['page_number'] = chunk.data.get('page_number')
+            # Query chunks for the user and calculate cosine similarity using pgvector
+            chunks = session.query(
+                Chunk,
+                func.cosine_similarity(Chunk.embedding, query_embedding_pg).label("similarity_score")
+            ).join(Segment).join(File).filter(
+                Segment.file_id == File.id, 
+                File.user_id == user_id
+            ).order_by(func.cosine_similarity(Chunk.embedding, query_embedding_pg).desc()).limit(top_k).all()
 
-                    top_chunks.append(chunk_data)
+            # Prepare the top-k segments
+            top_segments = []
+            for chunk, score in chunks:
+                segment_entry = session.query(Segment).filter(Segment.id == chunk.segment_id).first()
+                top_segments.append({
+                    'segment': segment_entry,
+                    'similarity_score': score
+                })
 
-            return top_chunks
+            return top_segments
+
+
         except Exception as e:
-            logger.error(f"Error querying chunks: {e}")
+            logging.error(f"Error retrieving similar segments: {e}")
             raise
         finally:
             session.close()
 
 
-   
+    
 
 # Example usage
 # db = DocSynthStore("sqlite:///test.db")

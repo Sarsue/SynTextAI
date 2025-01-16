@@ -38,8 +38,6 @@ def format_timestamp(seconds: float) -> str:
     ms = int((secs - int(secs)) * 1000)
     return f"{int(hrs):02}:{int(mins):02}:{int(secs):02}:{int(ms):03}"
 
-
-
 # Helper functions for GCS operations
 def upload_to_gcs(file_data, user_gc_id, filename):
     try:
@@ -76,3 +74,21 @@ def delete_from_gcs(user_gc_id, filename):
         logging.info(f"Deleted {filename} from GCS.")
     except Exception as e:
         logging.error("Error deleting from GCS")
+
+
+def chunk_text(text):
+    chunks = []
+    paragraphs = text.split("\n")
+        
+    for paragraph in paragraphs:
+        paragraph = paragraph.strip()
+        if paragraph:
+                # Create a chunk with content and page metadata
+            chunk = {
+                    "content": paragraph,
+                  #  "page_number": page_num
+            }
+        chunks.append(chunk)
+    return chunks
+
+      

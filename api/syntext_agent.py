@@ -71,44 +71,49 @@ class SyntextAgent:
 
     def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str) -> str:
         """
-        Main pipeline to process a user query using document chunks.
+        Main pipeline to process a user query using document chunks and relevance scores.
         """
         try:
             # Step 1: Evaluate relevance scores for each chunk
             relevance_scores = self.assess_relevance_scores(query, top_k_results)
-            
-            # Step 2: Get the best context based on relevance score
+
+            # Step 2: Get the best context based on the highest relevance score
             best_context, best_score = self.determine_best_context(relevance_scores)
 
-            # Optional: You can choose to summarize the best context if it's too long
+            # Step 3: Decide the context based on the relevance score threshold
             if best_score > self.relevance_thresholds["high"]:
-                # If the score is high, use the full context
+                # Use the full context for high scores
                 context = best_context["content"]
             else:
-                # If the score is lower, you may choose to summarize it or adjust based on your needs
+                # Summarize the context for lower scores
                 context = summarize(best_context["content"])
 
-            # Step 3: Process the final response with the selected context
-            response = prompt_llm(
-                f"Based on the query: '{query}', and the context: {context}, provide a detailed and relevant response in {language}. "
-                "Include references to the source(s) from where the information is derived. Ensure the response is in markdown format with clickable links to the source files."
+            # Step 4: Create the LLM prompt with the selected context
+            resp_prompt = (
+                f"Answer the following question based on the provided text (Respond in {language}): {context}\n\n"
+                f"Question: {query}\n\n"
             )
+            print(resp_prompt)
 
-            # Step 4: Append source references in markdown format (file link with page number)
-            # Construct markdown with clickable file references
-            markdown_response = response.strip()
-            for result in top_k_results:
-                file_name = result['file_url'].split('/')[-1]
-                if result['page_number'] > 1:
-                    file_name += f' page {result["page_number"]}'
-                file_url = f"{result['file_url']}?page={result['page_number']}"
-                markdown_response += f"\n\n[Source: {file_name}]({file_url})"
+            # Step 5: Get the answer from the LLM
+            ans = prompt_llm(resp_prompt)
 
-            return markdown_response
+            # Step 6: Construct the file reference for the selected chunk
+            file_name = best_context['file_url'].split('/')[-1]
+            if best_context['page_number'] > 1:
+                file_name += f" page {best_context['page_number']}"
+            file_url = f"{best_context['file_url']}?page={best_context['page_number']}"
+
+            # Step 7: Format the references as clickable links
+            reference_links = f"[{file_name}]({file_url})"
+
+            # Step 8: Return the final response with references
+            return ans + "\n\n" + reference_links
 
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)
             return "Syntext ran into issues processing this query. Please rephrase your question."
+
 
 if __name__ == "__main__":
     import os
@@ -130,7 +135,9 @@ if __name__ == "__main__":
     syntext = SyntextAgent()
     message = "how does a timestamp server work?"
     id = 1
-    language = "french"
+    language = "english"
     topK_chunks = store.query_chunks_by_embedding(id, get_text_embedding(message))
-    response = syntext.query_pipeline(message, None, topK_chunks, language)
-    print(response)
+    print(topK_chunks)
+    
+    #response = syntext.query_pipeline(message, None, topK_chunks, language)
+    #print(response)

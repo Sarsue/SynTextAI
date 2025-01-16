@@ -7,7 +7,7 @@ from pdfminer.pdfdevice import PDFDevice
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.converter import TextConverter
-
+from utils import chunk_text
 
 def extract_text_with_page_numbers(pdf_data):
     """
@@ -34,7 +34,8 @@ def extract_text_with_page_numbers(pdf_data):
             output.truncate()
             interpreter.process_page(page)
             text = output.getvalue().decode("utf-8")
-            page_texts.append({"page_num": page_num, "text": text})
+            chunks =  chunk_text(text)
+            page_texts.append({"page_num": page_num, "text": text, "chunks" : chunks})
 
     return page_texts
 
@@ -49,27 +50,7 @@ def extract_document_hierarchy(pdf_data):
         list: A list of chunks containing text and page metadata.
     """
     page_texts = extract_text_with_page_numbers(pdf_data)
-    chunks = []
-
-    # Iterate over the extracted pages and build chunk data
-    for page in page_texts:
-        page_num = page["page_num"]
-        text = page["text"]
-        
-        # Split text into paragraphs (you could adjust based on structure)
-        paragraphs = text.split("\n")
-        
-        for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if paragraph:
-                # Create a chunk with content and page metadata
-                chunk = {
-                    "content": paragraph,
-                    "page_number": page_num
-                }
-                chunks.append(chunk)
-
-    return chunks
+    return page_texts
 
 
 def main():

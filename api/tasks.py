@@ -10,6 +10,7 @@ import json
 from docsynth_store import DocSynthStore
 from llm_service import get_text_embeddings_in_batches, get_text_embedding
 from syntext_agent import SyntextAgent
+from utils import chunk_text
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -39,11 +40,12 @@ def transcribe_audio_chunked(self, file_path, lang):
             segments, info = model.transcribe(file_path, beam_size=5)
         
         logging.info(f"Detected language '{info.language}' with probability {info.language_probability}")
-        transcription_chunks = [
+        transcription_segments = [
             {
                 "start_time": segment.start,
                 "end_time": segment.end,
                 "content": segment.text
+                "chunk": chunk_text(segment.text)
             }
             for segment in segments
         ]
