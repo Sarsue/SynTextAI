@@ -579,7 +579,7 @@ class DocSynthStore:
             session = self.get_session()
 
             # Convert query_embedding to Postgres-compatible format (vector)
-            query_embedding_pg = func.vector(query_embedding)
+            query_embedding_pg = func.array(query_embedding).cast('vector')  # Convert array to vector type
 
             # Query chunks for the user and calculate cosine similarity using pgvector
             chunks = session.query(
