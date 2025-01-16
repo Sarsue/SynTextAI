@@ -21,17 +21,32 @@ class SyntextAgent:
     def assess_relevance(self, query: str, context: str) -> float:
         """
         Assess the relevance of the given context (chunk or history) for the query.
-        Calls an LLM to evaluate similarity.
+        Calls an LLM to evaluate similarity and extracts a relevance score.
+
+        Args:
+            query (str): The query string.
+            context (str): The context string.
+
+        Returns:
+            float: The relevance score between 0 and 1.
         """
         prompt = (
             f"Evaluate the relevance of the following context to the query '{query}':\n\n{context}\n\n"
             f"Respond with a relevance score between 0 and 1."
         )
-        relevance_score = prompt_llm(prompt)
+        relevance_score: str = prompt_llm(prompt)
+        logging.debug(f"LLM Response: {relevance_score}")
+
         try:
-            score = float(relevance_score.strip())
+            # Extract the float score from the response
+            score_match = re.search(r"\b\d+\.\d+\b", relevance_score)
+            if score_match:
+                score = float(score_match.group())
+            else:
+                score = 0.0  # Default to 0 if no valid score is found
         except ValueError:
-            score = 0.0  # Default to 0 if the response isn't a valid score
+            score = 0.0  # Default to 0 if an error occurs during parsing
+
         return score
 
     def assess_relevance_scores(self, query, top_k_results):
@@ -42,16 +57,17 @@ class SyntextAgent:
             score = self.assess_relevance(query, segment )
             relevance_scores.append({
                 "content": segment,
-                "metadata": result.get("metadata"),
+                "meta_data": result.get("meta_data"),
                 "cosine_similarity" : result["similarity_score"],
-                "relevance_score": score
+                "relevance_score": score,
+                "file_url": result["file_url"],
             })
         return relevance_scores
 
     def determine_best_context(self, relevance_scores):
         """Determine the best context based on relevance score."""
-        best_context = max(relevance_scores, key=lambda x: x["score"])
-        best_score = best_context["score"]
+        best_context = max(relevance_scores, key=lambda x: x["relevance_score"])
+        best_score = best_context["relevance_score"]
         return best_context, best_score
 
     def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str) -> str:
@@ -64,9 +80,9 @@ class SyntextAgent:
 
             # Step 2: Get the best context based on the highest relevance score
             best_context, best_score = self.determine_best_context(relevance_scores)
-
+            print( best_context, best_score )
             # Step 3: Decide the context based on the relevance score threshold
-            if best_score > self.relevance_thresholds["high"]:
+            if best_score > self.relevance_thresholds["low"]:
                 # Use the full context for high scores
                 context = best_context["content"]
           
@@ -80,34 +96,38 @@ class SyntextAgent:
 
                 # Step 5: Get the answer from the LLM
                 ans = prompt_llm(resp_prompt)
-
-                # Step 6: Construct the file reference for the selected chunk
-                # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
-                meta_data = best_context['meta_data']
-
-                # Determine the file type based on metadata
-                if meta_data.get("type") == "video":
-                    # If it's a video, use start_time and end_time for file_name and file_url
-                    file_name = best_context['file_url'].split('/')[-1]
-                    if meta_data.get("start_time"):
-                        file_name += f" from {meta_data['start_time']} to {meta_data['end_time']}"
-                    file_url = f"{best_context['file_url']}?start_time={meta_data['start_time']}&end_time={meta_data['end_time']}"
-                else:
-                    # If it's a PDF, use page_number for file_name and file_url
-                    file_name = best_context['file_url'].split('/')[-1]
-                    if best_context['page_number'] > 1:
-                        file_name += f" page {best_context['page_number']}"
-                    file_url = f"{best_context['file_url']}?page={best_context['page_number']}"
-
-
-
-                # Step 7: Format the references as clickable links
-                reference_links = f"[{file_name}]({file_url})"
-
-                # Step 8: Return the final response with references
-                return ans + "\n\n" + reference_links
             else:
-                return "There is no information Available for this query, Please rephrase your Query"
+                ans =  "There is no relevant information for this query, Please rephrase your Query"
+            # Step 6: Construct the file reference for the selected chunk
+            # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
+            meta_data = best_context['meta_data']
+
+            # Determine the file type based on metadata
+            if meta_data.get("type") == "video":
+                    # If it's a video, use start_time and end_time for file_name and file_url
+                file_name = best_context['file_url'].split('/')[-1]
+                if meta_data.get("start_time"):
+                    file_name += f" from {meta_data['start_time']} to {meta_data['end_time']}"
+                file_url = f"{best_context['file_url']}?start_time={meta_data['start_time']}&end_time={meta_data['end_time']}"
+            else:
+                # If it's a PDF, use page_number for file_name and file_url
+                file_name = best_context['file_url'].split('/')[-1]
+                if meta_data.get("page_number") > 1:
+                    pg_num =  meta_data.get("page_number")
+                    file_name += f" page {pg_num}"
+                file_url = f"{best_context['file_url']}?page={pg_num}"
+
+
+
+            # Step 7: Format the references as clickable links
+            reference_links = f"[{file_name}]({file_url})"
+
+            # Step 8: Return the final response with references
+            return ans + "\n\n" + reference_links    
+
+
+               
+          
 
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)
@@ -132,13 +152,12 @@ if __name__ == "__main__":
     )
     store = DocSynthStore(database_url=DATABASE_URL)
     syntext = SyntextAgent()
-    message = "how does a timestamp server work?"
+    message = "how do we address privacy in Bitcoin ?"
     id = 1
     language = "english"
     query_embedding = get_text_embedding(message)
   
     topK_chunks = store.query_chunks_by_embedding(id,query_embedding)
     print(topK_chunks)
-    
-    #response = syntext.query_pipeline(message, None, topK_chunks, language)
-    #print(response)
+    response = syntext.query_pipeline(message, None, topK_chunks, language)
+    print(response)

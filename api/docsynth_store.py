@@ -574,7 +574,7 @@ class DocSynthStore:
             top_k (int): The number of top similar segments to retrieve.
 
         Returns:
-            list: A list of segments with the highest cosine similarity to the query.
+            list: A list of segments with the highest cosine or l2ß similarity to the query.
         """
         try:
             
@@ -601,8 +601,14 @@ class DocSynthStore:
 
             # Prepare the top-k segments with additional information
             top_segments = []
+            seen_segments = set()  # A set to track unique segment IDs
             for chunk in result:
+                # Ensure that only distinct segments are added
                 segment_entry = session.query(Segment).filter(Segment.id == chunk.segment_id).first()
+                if segment_entry.id in seen_segments:
+                    continue  # Skip if this segment has already been added
+                seen_segments.add(segment_entry.id)
+
                 file_entry = session.query(File).join(Segment).filter(Segment.id == chunk.segment_id).first()
 
                 # Compute similarity score
