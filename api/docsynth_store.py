@@ -604,7 +604,7 @@ class DocSynthStore:
                     'meta_data': segment_entry.meta_data,
                     'similarity_score': score,
                     'file_name': file_entry.file_name,  # File name
-                    'url': file_entry.file_url,  # File URL
+                    'file_url': file_entry.file_url,  # File URL
                     'page_number': segment_entry.page_number,  # Page number of the segment
                     'content': segment_entry.content  # Content of the segment
                 })

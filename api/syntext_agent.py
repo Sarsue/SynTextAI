@@ -16,22 +16,7 @@ class SyntextAgent:
             "low": 0.3
         }
 
-    def get_chunk_details(self, result):
-        """Format chunk details into clear, digestible content."""
-        chunk_details = []
    
-        if 'page_number' in result:
-            chunk_details.append(f"Page {result['page_number']}, Chunk ID: {result['chunk_id']}, Content: {result['chunk']}")
-        elif 'start_time' in result and 'end_time' in result:
-            chunk_details.append(f"Time Range ({result['start_time']} - {result['end_time']}), Chunk ID: {result['chunk_id']}, Content: {result['chunk']}")
-        else:
-            chunk_details.append(f"Chunk ID: {result['chunk_id']}, Content: {result['chunk']}")
-
-        # Add source information
-        source = result.get("metadata", {}).get("source", "Unknown Source")
-        chunk_details.append(f"Source: {source}")
-        
-        return "\n".join(chunk_details)
 
     def assess_relevance(self, query: str, context: str) -> float:
         """
@@ -53,13 +38,13 @@ class SyntextAgent:
         """Evaluate relevance scores for each chunk individually."""
         relevance_scores = []
         for result in top_k_results:
-            chunk = self.get_chunk_details(result)
-            score = self.assess_relevance(query, chunk)
+            segment = result["content"]
+            score = self.assess_relevance(query, segment )
             relevance_scores.append({
-                "type": "chunk",
-                "content": chunk,
+                "content": segment,
                 "metadata": result.get("metadata"),
-                "score": score
+                "cosine_similarity" : result["similarity_score"],
+                "relevance_score": score
             })
         return relevance_scores
 
@@ -84,31 +69,31 @@ class SyntextAgent:
             if best_score > self.relevance_thresholds["high"]:
                 # Use the full context for high scores
                 context = best_context["content"]
+          
+
+                # Step 4: Create the LLM prompt with the selected context
+                resp_prompt = (
+                    f"Answer the following question based on the provided text (Respond in {language}): {context}\n\n"
+                    f"Question: {query}\n\n"
+                )
+                print(resp_prompt)
+
+                # Step 5: Get the answer from the LLM
+                ans = prompt_llm(resp_prompt)
+
+                # Step 6: Construct the file reference for the selected chunk
+                file_name = best_context['file_url'].split('/')[-1]
+                if best_context['page_number'] > 1:
+                    file_name += f" page {best_context['page_number']}"
+                file_url = f"{best_context['file_url']}?page={best_context['page_number']}"
+
+                # Step 7: Format the references as clickable links
+                reference_links = f"[{file_name}]({file_url})"
+
+                # Step 8: Return the final response with references
+                return ans + "\n\n" + reference_links
             else:
-                # Summarize the context for lower scores
-                context = summarize(best_context["content"])
-
-            # Step 4: Create the LLM prompt with the selected context
-            resp_prompt = (
-                f"Answer the following question based on the provided text (Respond in {language}): {context}\n\n"
-                f"Question: {query}\n\n"
-            )
-            print(resp_prompt)
-
-            # Step 5: Get the answer from the LLM
-            ans = prompt_llm(resp_prompt)
-
-            # Step 6: Construct the file reference for the selected chunk
-            file_name = best_context['file_url'].split('/')[-1]
-            if best_context['page_number'] > 1:
-                file_name += f" page {best_context['page_number']}"
-            file_url = f"{best_context['file_url']}?page={best_context['page_number']}"
-
-            # Step 7: Format the references as clickable links
-            reference_links = f"[{file_name}]({file_url})"
-
-            # Step 8: Return the final response with references
-            return ans + "\n\n" + reference_links
+                return "There is no information Available for this query, Please rephrase your Query"
 
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)
