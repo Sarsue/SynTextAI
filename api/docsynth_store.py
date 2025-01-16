@@ -524,27 +524,6 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def get_file_chunks(self, user_id, file_name):
-        try:
-            session = self.get_session()
-
-            # Fetch the file by user_id and file_name
-            file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
-
-            if file:
-                # Fetch all chunks associated with the file
-                chunks = session.query(Chunk).filter(Chunk.file_id == file.id).all()
-
-                # Return the content of each chunk
-                return [{'id': chunk.id, 'content': chunk.content, 'data': chunk.data} for chunk in chunks]
-            else:
-                raise ValueError("File not found")
-        except Exception as e:
-            logger.error(f"Error retrieving file chunks: {e}")
-            raise
-        finally:
-            session.close()
-
     def delete_file_entry(self, user_id, file_id):
         """
         Deletes a file, its associated chunks, and segments from the database.
@@ -611,23 +590,33 @@ class DocSynthStore:
                 File.user_id == user_id
             ).order_by(func.cosine_similarity(Chunk.embedding, query_embedding_pg).desc()).limit(top_k).all()
 
-            # Prepare the top-k segments
+            # Prepare the top-k segments with additional information
             top_segments = []
             for chunk, score in chunks:
+                # Fetch the segment entry
                 segment_entry = session.query(Segment).filter(Segment.id == chunk.segment_id).first()
+
+                # Fetch the file entry associated with the segment
+                file_entry = session.query(File).filter(File.id == segment_entry.file_id).first()
+
+                # Add the details to the result
                 top_segments.append({
-                    'segment': segment_entry,
-                    'similarity_score': score
+                    'meta_data': segment_entry.meta_data,
+                    'similarity_score': score,
+                    'file_name': file_entry.file_name,  # File name
+                    'url': file_entry.file_url,  # File URL
+                    'page_number': segment_entry.page_number,  # Page number of the segment
+                    'content': segment_entry.content  # Content of the segment
                 })
 
             return top_segments
 
-
         except Exception as e:
-            logging.error(f"Error retrieving similar segments: {e}")
+            logger.error(f"Error retrieving similar segments: {e}")
             raise
         finally:
             session.close()
+
 
 
     
