@@ -82,10 +82,24 @@ class SyntextAgent:
                 ans = prompt_llm(resp_prompt)
 
                 # Step 6: Construct the file reference for the selected chunk
-                file_name = best_context['file_url'].split('/')[-1]
-                if best_context['page_number'] > 1:
-                    file_name += f" page {best_context['page_number']}"
-                file_url = f"{best_context['file_url']}?page={best_context['page_number']}"
+                # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
+                meta_data = best_context['meta_data']
+
+                # Determine the file type based on metadata
+                if meta_data.get("type") == "video":
+                    # If it's a video, use start_time and end_time for file_name and file_url
+                    file_name = best_context['file_url'].split('/')[-1]
+                    if meta_data.get("start_time"):
+                        file_name += f" from {meta_data['start_time']} to {meta_data['end_time']}"
+                    file_url = f"{best_context['file_url']}?start_time={meta_data['start_time']}&end_time={meta_data['end_time']}"
+                else:
+                    # If it's a PDF, use page_number for file_name and file_url
+                    file_name = best_context['file_url'].split('/')[-1]
+                    if best_context['page_number'] > 1:
+                        file_name += f" page {best_context['page_number']}"
+                    file_url = f"{best_context['file_url']}?page={best_context['page_number']}"
+
+
 
                 # Step 7: Format the references as clickable links
                 reference_links = f"[{file_name}]({file_url})"

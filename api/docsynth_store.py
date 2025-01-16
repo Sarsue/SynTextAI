@@ -460,7 +460,7 @@ class DocSynthStore:
                 if file_type == 'video':
                     meta_data = {"type": "video", "start_time": data.get("start_time"), "end_time": data.get("end_time")}
                 else:
-                    meta_data = {"type": "pdf", "page_number": data.get("page_num")}
+                    meta_data = {"type": file_type, "page_number": data.get("page_num")}
 
                 # Create segment entry with metadata
                 segment_entry = Segment(
