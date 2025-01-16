@@ -5,6 +5,7 @@ from llm_service import  extract_image_text
 import base64
 import numpy as np
 import os 
+from utils import chunk_text
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s:%(message)s')
@@ -25,7 +26,8 @@ def extract_text_from_image(image_data):
         
         data.append({
                     "page_number": 0,
-                    "content": image_text
+                    "content": image_text,
+                    "chunks" : chunk_text(image_text)
         })
         return data
     except Exception as e:
@@ -45,7 +47,8 @@ def extract_data(file_data, file_extension):
             # Add metadata to each chunk
             data.append({
                     "page_number": 0,
-                    "content": txt_data
+                    "content": txt_data,
+                    "chunks" : chunk_text(txt_data)
             })
    
             result = data

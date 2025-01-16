@@ -44,13 +44,13 @@ def transcribe_audio_chunked(self, file_path, lang):
             {
                 "start_time": segment.start,
                 "end_time": segment.end,
-                "content": segment.text
-                "chunk": chunk_text(segment.text)
+                "content": segment.text,
+                "chunks": chunk_text(segment.text)
             }
             for segment in segments
         ]
 
-        return transcription_chunks
+        return transcription_segments
 
     except Exception as e:
         logging.exception("Error in transcription")
@@ -82,11 +82,22 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
             logging.info("Processing document file...")
             extracted_data = extract_data(file, ext)
 
-  
-        logging.info(f"File processed successfully for user_id: {user_id} with {len(extracted_data)} chunks")
-        chunk_content = [extracted_data_point['content'] for extracted_data_point in extracted_data]
-        extracted_data_embeddings =  get_text_embeddings_in_batches(chunk_content, batch_size=5)
-        store.update_file_with_chunks(user_id, filename, ext, extracted_data, extracted_data_embeddings)
+        # Iterate over each page and process its chunks
+        for data in extracted_data:
+            page_chunks = data["chunks"]
+
+            # Extract content of chunks for the current page
+            chunk_contents = [chunk["content"] for chunk in page_chunks]
+
+            # Generate embeddings for the current page's chunks
+            chunk_embeddings = get_text_embeddings_in_batches(chunk_contents, batch_size=5)
+
+            # Assign embeddings back to each chunk
+            for chunk, embedding in zip(page_chunks, chunk_embeddings):
+                chunk["embedding"] = embedding  # Attach the embedding to the chunk
+
+
+        store.update_file_with_chunks(user_id, filename, ext, extracted_data)
   
         result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
         return {"status": "success", "result": result}
