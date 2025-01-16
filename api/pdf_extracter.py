@@ -35,7 +35,7 @@ def extract_text_with_page_numbers(pdf_data):
             interpreter.process_page(page)
             text = output.getvalue().decode("utf-8")
             chunks =  chunk_text(text)
-            page_texts.append({"page_num": page_num, "text": text, "chunks" : chunks})
+            page_texts.append({"page_num": page_num, "content": text, "chunks" : chunks})
 
     return page_texts
 

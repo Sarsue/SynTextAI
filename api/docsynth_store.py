@@ -9,7 +9,8 @@ from typing import List
 from datetime import datetime
 import logging
 import numpy as np
-from scipy.spatial.distance import cosine
+from scipy.spatial.distance import cosine, euclidean
+
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -563,7 +564,7 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def query_chunks_by_embedding(self, user_id, query_embedding, top_k=5):
+    def query_chunks_by_embedding(self, user_id, query_embedding, top_k=5,similarity_type='l2'):
         """
         Retrieves the top-k segments with the highest cosine similarity to the query embedding.
 
@@ -576,40 +577,50 @@ class DocSynthStore:
             list: A list of segments with the highest cosine similarity to the query.
         """
         try:
+            
+            # Query chunks for the user and calculate cosine similarity using pgvector
             session = self.get_session()
 
-            # Convert query_embedding to Postgres-compatible format (vector)
-            query_embedding_pg = func.array(query_embedding).cast('vector')  # Convert array to vector type
+            # Determine the similarity function to use
+            if similarity_type == 'cosine':
+                similarity_func = cosine
+                order_by_clause = Chunk.embedding.op('<=>')(query_embedding)  # Use <=> for cosine similarity
+            elif similarity_type == 'l2':
+                similarity_func = euclidean
+                order_by_clause = Chunk.embedding.op('<->')(query_embedding)  # Use <-> for L2 distance
+            else:
+                raise ValueError("similarity_type must be 'cosine' or 'l2'")
 
-            # Query chunks for the user and calculate cosine similarity using pgvector
-            chunks = session.query(
-                Chunk,
-                func.cosine_similarity(Chunk.embedding, query_embedding_pg).label("similarity_score")
-            ).join(Segment).join(File).filter(
-                Segment.file_id == File.id, 
-                File.user_id == user_id
-            ).order_by(func.cosine_similarity(Chunk.embedding, query_embedding_pg).desc()).limit(top_k).all()
+            # Query chunks for the user and calculate similarity using pgvector
+            result = session.scalars(
+                select(Chunk)
+                .filter(Chunk.file_id.in_(select(File.id).filter(File.user_id == user_id)))
+                .order_by(order_by_clause)
+                .limit(top_k)
+            ).all()
 
             # Prepare the top-k segments with additional information
             top_segments = []
-            for chunk, score in chunks:
-                # Fetch the segment entry
+            for chunk in result:
                 segment_entry = session.query(Segment).filter(Segment.id == chunk.segment_id).first()
+                file_entry = session.query(File).join(Segment).filter(Segment.id == chunk.segment_id).first()
 
-                # Fetch the file entry associated with the segment
-                file_entry = session.query(File).filter(File.id == segment_entry.file_id).first()
+                # Compute similarity score
+                query_embedding_list = np.array(query_embedding)
+                chunk_embedding_list = np.array(chunk.embedding)
+                similarity_score = similarity_func(chunk_embedding_list, query_embedding_list)
 
-                # Add the details to the result
                 top_segments.append({
-                    'meta_data': segment_entry.meta_data,
-                    'similarity_score': score,
-                    'file_name': file_entry.file_name,  # File name
-                    'file_url': file_entry.file_url,  # File URL
-                    'page_number': segment_entry.page_number,  # Page number of the segment
-                    'content': segment_entry.content  # Content of the segment
+                    'meta_data': segment_entry.meta_data if segment_entry else None,
+                    'similarity_score': similarity_score,
+                    'file_name': file_entry.file_name if file_entry else None,
+                    'file_url': file_entry.file_url if file_entry else None,
+                    'page_number': segment_entry.page_number if segment_entry else None,
+                    'content': segment_entry.content if segment_entry else None
                 })
 
             return top_segments
+
 
         except Exception as e:
             logger.error(f"Error retrieving similar segments: {e}")

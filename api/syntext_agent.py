@@ -117,7 +117,7 @@ class SyntextAgent:
 if __name__ == "__main__":
     import os
     from llm_service import get_text_embedding
-    
+    import numpy as np
     # Construct paths relative to the base directory
     database_config = {
         'dbname': os.getenv("DATABASE_NAME"),
@@ -135,7 +135,9 @@ if __name__ == "__main__":
     message = "how does a timestamp server work?"
     id = 1
     language = "english"
-    topK_chunks = store.query_chunks_by_embedding(id, get_text_embedding(message))
+    query_embedding = get_text_embedding(message)
+  
+    topK_chunks = store.query_chunks_by_embedding(id,query_embedding)
     print(topK_chunks)
     
     #response = syntext.query_pipeline(message, None, topK_chunks, language)
