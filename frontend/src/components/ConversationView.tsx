@@ -12,7 +12,7 @@ interface ConversationViewProps {
 }
 
 const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) => {
-    const [selectedFile, setSelectedFile] = useState<string | null>(null); // Adjusted to store file URL string
+    const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [fileError, setFileError] = useState<string | null>(null);
     const { darkMode } = useUserContext();
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -27,7 +27,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
 
     const handleFileLinkClick = (url: string) => {
         try {
-            // Ensure the URL is valid
             const parsedUrl = new URL(url);
             console.log("Parsed URL:", parsedUrl.href);
             setSelectedFile(parsedUrl.toString());
@@ -44,30 +43,25 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
         setSelectedFile(null);
     };
 
-    const renderMarkdown = (markdown: string) => {
-        return (
-            <ReactMarkdown
-                children={markdown}
-                remarkPlugins={[remarkGfm]}
-                components={{
-                    a: ({ href, children }) => {
-                        if (href && href.startsWith('https://')) {
-                            const regex = /https:\/\/(.*?)(?:\?page=(\d+))?/;
-                            const match = regex.exec(href);
-                            if (match && match.length >= 2) {
-                                return (
-                                    <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
-                                        {children}
-                                    </a>
-                                );
-                            }
-                        }
-                        return <a href={href}>{children}</a>;
-                    },
-                }}
-            />
-        );
-    };
+    const renderMarkdown = (markdown: string) => (
+        <ReactMarkdown
+            children={markdown}
+            remarkPlugins={[remarkGfm]}
+            components={{
+                a: ({ href, children }) => (
+                    <a
+                        href="#"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            if (href) handleFileLinkClick(href);
+                        }}
+                    >
+                        {children}
+                    </a>
+                ),
+            }}
+        />
+    );
 
     return (
         <div className={`conversation-view ${darkMode ? 'dark-mode' : ''}`}>
@@ -83,18 +77,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
                         <div className="message-timestamp">{message.timestamp}</div>
                         {message.sender === 'bot' && (
                             <div className="actions">
-                                {/* <button
-                                    className={`icon-button like-button ${message.liked ? 'active' : ''}`}
-                                    onClick={() => onLike(message)}
-                                >
-                                    👍
-                                </button>
-                                <button
-                                    className={`icon-button dislike-button ${message.disliked ? 'active' : ''}`}
-                                    onClick={() => onDislike(message)}
-                                >
-                                    👎
-                                </button> */}
                                 <button className="icon-button copy-button" onClick={() => onCopy(message)}>
                                     📋
                                 </button>
@@ -103,9 +85,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
                     </div>
                 </div>
             ))}
-
-
-
             {fileError && <div className="error-message">{fileError}</div>}
             {selectedFile && (
                 <div className="file-viewer-modal">
@@ -122,7 +101,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
             <div ref={messagesEndRef} />
         </div>
     );
-
 };
 
 export default ConversationView;
