@@ -547,7 +547,7 @@ class DocSynthStore:
 
     def delete_file_entry(self, user_id, file_id):
         """
-        Deletes a file and its associated chunks from the database.
+        Deletes a file, its associated chunks, and segments from the database.
         Args:
             user_id (int): ID of the user who owns the file.
             file_id (int): ID of the file to delete.
@@ -562,21 +562,24 @@ class DocSynthStore:
                 # Log file name before deletion
                 file_name = file.file_name
 
-                # Delete associated chunks (assuming a relationship is defined on File for chunks)
+                # Delete associated chunks (including embeddings)
                 session.query(Chunk).filter(Chunk.file_id == file.id).delete()
+
+                # Delete associated segments
+                session.query(Segment).filter(Segment.file_id == file.id).delete()
 
                 # Delete the file record
                 session.delete(file)
                 session.commit()
 
-                logger.info(f"Deleted file '{file_name}' and its chunks for user {user_id}.")
+                logger.info(f"Deleted file '{file_name}', its chunks, and segments for user {user_id}.")
                 return {'file_name': file_name, 'file_id': file_id}
             else:
                 raise ValueError(f"File with ID {file_id} not found for user ID {user_id}.")
 
         except Exception as e:
             session.rollback()  # Rollback in case of error
-            logger.error(f"Error deleting file and its chunks: {e}")
+            logger.error(f"Error deleting file, its chunks, and segments: {e}")
             raise  # Re-raise the exception for further handling
         finally:
             session.close()
