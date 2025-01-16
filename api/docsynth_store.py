@@ -94,7 +94,7 @@ class Segment(Base):
     page_number = Column(Integer)  # This represents the page number within the file
     content = Column(String)  # Content of the segment/page (optional, or could be derived from chunks)
     file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
-    metadata = Column(JSON, nullable=True) 
+    meta_data = Column(JSON, nullable=True) 
     
     # Relationship to file
     file = relationship("File", back_populates="segments")
@@ -456,18 +456,18 @@ class DocSynthStore:
             # Process each segment/page
             for data in extracted_data:
                 # Metadata for the segment
-                metadata = {}
+                meta_data = {}
                 if file_type == 'video':
-                    metadata = {"type": "video", "start_time": data.get("start_time"), "end_time": data.get("end_time")}
+                    meta_data = {"type": "video", "start_time": data.get("start_time"), "end_time": data.get("end_time")}
                 else:
-                    metadata = {"type": "pdf", "page_number": data.get("page_num")}
+                    meta_data = {"type": "pdf", "page_number": data.get("page_num")}
 
                 # Create segment entry with metadata
                 segment_entry = Segment(
                     page_number=data.get("page_num"),  # For PDF documents
                     file_id=file_entry.id,
                     content = data.get("content"),
-                    metadata=metadata  # Store metadata at the segment level
+                    meta_data=meta_data  # Store metadata at the segment level
                 )
                 session.add(segment_entry)
                 session.flush()  # Ensure segment_id is generated
