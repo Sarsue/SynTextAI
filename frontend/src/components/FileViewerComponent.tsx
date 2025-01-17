@@ -14,52 +14,45 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     const [loading, setLoading] = useState<boolean>(true);
     const [pageNumber, setPageNumber] = useState<number>(1); // Default page number
 
-  
     useEffect(() => {
-        const fileType = getFileType(fileUrl);
-        if (!fileType) {
+        const type = getFileType(fileUrl);
+        if (!type) {
             console.error('Unsupported file type for:', fileUrl);
             onError('Unsupported file type');
             return;
         }
 
-        console.log('Detected file type:', fileType);
-        setFileType(fileType);
-        fetchFileContent(fileUrl, fileType);
+        console.log('Detected file type:', type);
+        setFileType(type);
+        fetchFileContent(fileUrl);
+
+        // Extract page number from URL
+        const page = extractPageNumber(fileUrl);
+        if (page) setPageNumber(page);
     }, [fileUrl, onError]);
 
-
-    const fetchFileContent = async (url: string, type: string) => {
+    const fetchFileContent = async (url: string) => {
         try {
-            const baseUrl = url.split('?')[0];
             console.log('Fetching file from:', url);
-
-            const response = await fetch(baseUrl, { mode: 'cors' });
+            const response = await fetch(url, { mode: 'cors' });
 
             if (response.ok) {
                 const blob = await response.blob();
                 const dataUrl = URL.createObjectURL(blob);
                 setFileContent(dataUrl);
-                setLoading(false);
-
-                // Extract page number from URL if provided
-                const match = url.match(/[?&]page=(\d+)/);
-                if (match) {
-                    const pageNum = parseInt(match[1], 10);
-                    setPageNumber(pageNum);
-                }
             } else {
-                throw new Error('Failed to fetch file content');
+                throw new Error(`Failed to fetch file: ${response.statusText}`);
             }
         } catch (error) {
             console.error('Error fetching file content:', error);
             onError('Failed to load file. Please try again later.');
+        } finally {
             setLoading(false);
         }
     };
 
-    const getFileType = (fileUrl: string): string | null => {
-        const extension = fileUrl.split('.').pop()?.toLowerCase();
+    const getFileType = (url: string): string | null => {
+        const extension = url.split('.').pop()?.toLowerCase();
         switch (extension) {
             case 'pdf':
                 return 'pdf';
@@ -67,42 +60,48 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             case 'jpeg':
             case 'png':
             case 'gif':
-                return 'image'; // Handle common image formats
+                return 'image';
             case 'mp4':
             case 'mkv':
             case 'avi':
             case 'mov':
-            case 'wmv':
-            case 'flv':
-            case 'webm':
-            case 'mpeg':
-            case 'mpg':
-            case '3gp':
-                return 'video'; // Handle common video formats
+                return 'video';
             default:
-                return null; // Unsupported file type
+                return null;
         }
+    };
+
+    const extractPageNumber = (url: string): number | null => {
+        const params = new URLSearchParams(url.split('?')[1]);
+        const page = params.get('page');
+        return page ? parseInt(page, 10) : null;
     };
 
     const renderFileContent = () => {
         if (loading) return <p>Loading...</p>;
+        if (!fileContent) return <p>Failed to load file. Please try again.</p>;
 
         switch (fileType) {
             case 'pdf':
                 return (
-                    <embed src={`${fileContent}#page=${pageNumber}`} type="application/pdf" width="100%" height="750px" />
+                    <embed
+                        src={`${fileContent}#page=${pageNumber}`}
+                        type="application/pdf"
+                        width="100%"
+                        height="750px"
+                    />
                 );
             case 'image':
-                return <img src={fileContent!} alt="File content" style={{ width: '100%', height: 'auto' }} />;
+                return <img src={fileContent} alt="File content" style={{ width: '100%', height: 'auto' }} />;
             case 'video':
                 return (
                     <video controls width="100%" height="auto">
-                        <source src={fileContent!} type="video/mp4" />
-                        Your browser does not support the video tag or the video format.
+                        <source src={fileContent} type="video/mp4" />
+                        Your browser does not support the video tag.
                     </video>
                 );
             default:
-                return <div>Unsupported file type</div>; // Handle unsupported types
+                return <div>Unsupported file type</div>;
         }
     };
 
@@ -110,7 +109,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
                 {renderFileContent()}
-                <button onClick={onClose}>❌</button>
+                <button onClick={onClose} aria-label="Close file viewer">
+                    ❌
+                </button>
             </div>
         </div>
     );
