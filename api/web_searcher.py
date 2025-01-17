@@ -8,6 +8,8 @@ from markdownify import MarkdownConverter
 import requests
 import datetime
 import textwrap
+import time
+import random
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 
@@ -24,9 +26,10 @@ class WebSearch:
     def __init__(self, verbose=False, retry_limit=3):
         self.verbose = verbose
         self.retry_limit = retry_limit
+        self.cache = {}
 
     def fetch(self, url):
-        """Fetch a URL with retry logic."""
+        """Fetch a URL with retry logic and exponential backoff."""
         for attempt in range(self.retry_limit):
             try:
                 if self.verbose:
@@ -38,15 +41,21 @@ class WebSearch:
             except requests.RequestException as e:
                 logging.warning(f"Error fetching {url}: {e}")
             logging.info(f"Retrying ({attempt + 1}/{self.retry_limit})...")
+            time.sleep(2 ** attempt + random.uniform(0, 1))  # Exponential backoff with jitter
         logging.error(f"Failed to fetch URL after {self.retry_limit} attempts: {url}")
         return None
 
     def ddg_search(self, topic):
-        """Search DuckDuckGo for a topic."""
+        """Search DuckDuckGo for a topic with rate limiting handling."""
         try:
             if self.verbose:
                 logging.info(f"Searching DuckDuckGo for: {topic}")
-            return DDGS().text(topic)
+            results = DDGS().text(topic)
+            if '202 Ratelimit' in results:
+                logging.warning(f"Rate limited by DuckDuckGo for topic: {topic}")
+                time.sleep(10)  # Add a delay to handle rate limiting
+                results = DDGS().text(topic)
+            return results
         except Exception as e:
             logging.error(f"Error during DuckDuckGo search for '{topic}': {e}")
             return []
@@ -99,8 +108,11 @@ class WebSearch:
         return None
 
     def fetch_sources(self, search_prompt):
-        """Fetch sources for a question."""
+        """Fetch sources for a question with caching."""
         try:
+            if search_prompt in self.cache:
+                return self.cache[search_prompt]
+
             search_text = prompt_llm(search_prompt)
             logging.info(f"LLM search text: {search_text}")
             searches = self.extract_json_from_markdown(search_text)
@@ -114,6 +126,7 @@ class WebSearch:
                 if source:
                     background_text += f"# {search}\n\n{content}\n\n"
                     sources.append((source, title))
+            self.cache[search_prompt] = (background_text, sources)
             return background_text, sources
         except Exception as e:
             logging.error(f"Error during source fetching: {e}")
@@ -152,5 +165,5 @@ class WebSearch:
 # Example usage
 if __name__ == "__main__":
     searcher = WebSearch()
-    ans = searcher.search_topic(topic="How do I replace the water filter in my Frigidaire refrigerator?")
+    ans = searcher.search_topic(topic="How does Tariff work?")
     print(ans)

@@ -1,7 +1,7 @@
 import re
 import logging
 from llm_service import prompt_llm, summarize
-#from web_searcher import WebSearch
+from web_searcher import WebSearch
 from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +15,7 @@ class SyntextAgent:
             "high": 0.8,
             "low": 0.3
         }
-
+        self.searcher = WebSearch() 
    
 
     def assess_relevance(self, query: str, context: str) -> float:
@@ -82,7 +82,7 @@ class SyntextAgent:
             best_context, best_score = self.determine_best_context(relevance_scores)
             print( best_context, best_score )
             # Step 3: Decide the context based on the relevance score threshold
-            if best_score > self.relevance_thresholds["low"]:
+            if best_score >= self.relevance_thresholds["high"]:
                 # Use the full context for high scores
                 context = best_context["content"]
           
@@ -96,34 +96,36 @@ class SyntextAgent:
 
                 # Step 5: Get the answer from the LLM
                 ans = prompt_llm(resp_prompt)
+           
+                # Step 6: Construct the file reference for the selected chunk
+                # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
+                meta_data = best_context['meta_data']
+
+                # Determine the file type based on metadata
+                if meta_data.get("type") == "video":
+                        # If it's a video, use start_time and end_time for file_name and file_url
+                    file_name = best_context['file_url'].split('/')[-1]
+                    if meta_data.get("start_time"):
+                        file_name += f" from {meta_data['start_time']} to {meta_data['end_time']}"
+                    file_url = f"{best_context['file_url']}?start_time={meta_data['start_time']}&end_time={meta_data['end_time']}"
+                else:
+                    # If it's a PDF, use page_number for file_name and file_url
+                    file_name = best_context['file_url'].split('/')[-1]
+                    if meta_data.get("page_number") > 1:
+                        pg_num =  meta_data.get("page_number")
+                        file_name += f" page {pg_num}"
+                    file_url = f"{best_context['file_url']}?page={pg_num}"
+
+
+
+                # Step 7: Format the references as clickable links
+                reference_links = f"[{file_name}]({file_url})"
+
+                # Step 8: Return the final response with references
+                return ans + "\n\n" + reference_links    
             else:
-                ans =  "There is no relevant information for this query, Please rephrase your Query"
-            # Step 6: Construct the file reference for the selected chunk
-            # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
-            meta_data = best_context['meta_data']
+                ans = self.searcher.search_topic(query)
 
-            # Determine the file type based on metadata
-            if meta_data.get("type") == "video":
-                    # If it's a video, use start_time and end_time for file_name and file_url
-                file_name = best_context['file_url'].split('/')[-1]
-                if meta_data.get("start_time"):
-                    file_name += f" from {meta_data['start_time']} to {meta_data['end_time']}"
-                file_url = f"{best_context['file_url']}?start_time={meta_data['start_time']}&end_time={meta_data['end_time']}"
-            else:
-                # If it's a PDF, use page_number for file_name and file_url
-                file_name = best_context['file_url'].split('/')[-1]
-                if meta_data.get("page_number") > 1:
-                    pg_num =  meta_data.get("page_number")
-                    file_name += f" page {pg_num}"
-                file_url = f"{best_context['file_url']}?page={pg_num}"
-
-
-
-            # Step 7: Format the references as clickable links
-            reference_links = f"[{file_name}]({file_url})"
-
-            # Step 8: Return the final response with references
-            return ans + "\n\n" + reference_links    
 
 
                
@@ -152,12 +154,11 @@ if __name__ == "__main__":
     )
     store = DocSynthStore(database_url=DATABASE_URL)
     syntext = SyntextAgent()
-    message = "how do we address privacy in Bitcoin ?"
-    id = 1
-    language = "english"
-    query_embedding = get_text_embedding(message)
-  
-    topK_chunks = store.query_chunks_by_embedding(id,query_embedding)
-    print(topK_chunks)
-    response = syntext.query_pipeline(message, None, topK_chunks, language)
-    print(response)
+    message = "How does attention in LLM work?"
+    # id = 1
+    # language = "english"
+    # query_embedding = get_text_embedding(message)
+    # topK_chunks = store.query_chunks_by_embedding(id,query_embedding)
+    # response = syntext.query_pipeline(message, None, topK_chunks, language)
+    ans = syntext.searcher.search_topic(message)
+    print(ans)
