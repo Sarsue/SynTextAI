@@ -111,11 +111,10 @@ class SyntextAgent:
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
-                    # if meta_data.get("page_number") > 1:
-                    #     pg_num =  meta_data.get("page_number")
-                    #     file_name += f" page {pg_num}"
-                    # file_url = f"{best_context['file_url']}?page={pg_num}"
-                    file_url = best_context['file_url']
+                    if meta_data.get("page_number") > 1:
+                        pg_num =  meta_data.get("page_number")
+                        file_name += f" page {pg_num}"
+                    file_url = f"{best_context['file_url']}?page={pg_num}"
 
 
                 # Step 7: Format the references as clickable links
@@ -124,7 +123,27 @@ class SyntextAgent:
                 # Step 8: Return the final response with references
                 ans +=  "\n\n" + reference_links    
             else:
-                ans = self.searcher.search_topic(query)
+                ans = "Syntext couldnt generate the right response from the retrieved files"
+                context = best_context["content"]
+                # Testing file link logic 
+                if meta_data.get("type") == "video":
+                        # If it's a video, use start_time and end_time for file_name and file_url
+                    file_name = best_context['file_url'].split('/')[-1]
+                    if meta_data.get("start_time"):
+                        file_name += f" from {meta_data['start_time']} to {meta_data['end_time']}"
+                    file_url = f"{best_context['file_url']}?start_time={meta_data['start_time']}&end_time={meta_data['end_time']}"
+                else:
+                    # If it's a PDF, use page_number for file_name and file_url
+                    file_name = best_context['file_url'].split('/')[-1]
+                    if meta_data.get("page_number") > 1:
+                        pg_num =  meta_data.get("page_number")
+                        file_name += f" page {pg_num}"
+                    file_url = f"{best_context['file_url']}?page={pg_num}"
+
+
+                # Step 7: Format the references as clickable links
+                reference_links = f"[{file_name}]({file_url})"
+                ans +=  "\n\n" + reference_links    
             
             return ans
 
