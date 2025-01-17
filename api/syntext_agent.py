@@ -111,7 +111,7 @@ class SyntextAgent:
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
-                    if meta_data.get("page_number") > 1:
+                    if meta_data.get("page_number") > 0:
                         pg_num =  meta_data.get("page_number")
                         file_name += ' page ' + str(pg_num)
                     file_url = f"{best_context['file_url']}?page={pg_num}"
@@ -139,7 +139,7 @@ class SyntextAgent:
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
-                    if meta_data.get("page_number") > 1:
+                    if meta_data.get("page_number") > 0:
                         pg_num =  meta_data.get("page_number")
                         file_name += ' page ' + str(pg_num)
                     file_url = f"{best_context['file_url']}?page={pg_num}"
