@@ -133,9 +133,9 @@ class SyntextAgent:
                 meta_data = best_context['meta_data']
 
                 # Determine the file type based on metadata
+                file_name = best_context['file_url'].split('/')[-1]
                 if meta_data.get("type") == "video":
                     # If it's a video, use start_time and end_time for file_name and file_url
-                    file_name = best_context['file_url'].split('/')[-1]
                     vid = ""
                     if meta_data.get("start_time"):
                         vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
@@ -143,7 +143,6 @@ class SyntextAgent:
                     file_url = f"{best_context['file_url']}?{vid}"
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
-                    file_name = best_context['file_url'].split('/')[-1]
                     pg_num = 0
                     if meta_data.get("page_number") > 0:
                         pg_num =  meta_data.get("page_number")
