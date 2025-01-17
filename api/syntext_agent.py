@@ -105,12 +105,15 @@ class SyntextAgent:
                 if meta_data.get("type") == "video":
                         # If it's a video, use start_time and end_time for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
+                    vid = ""
                     if meta_data.get("start_time"):
-                        file_name += f"{meta_data['start_time']} - {meta_data['end_time']}"
-                    file_url = f"{best_context['file_url']}?{meta_data['start_time']}-{meta_data['end_time']}"
+                        vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
+                        file_name += vid
+                    file_url = f"{best_context['file_url']}?{vid}"
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
+                    pg_num = 0
                     if meta_data.get("page_number") > 0:
                         pg_num =  meta_data.get("page_number")
                         file_name += ' page ' + str(pg_num)
@@ -126,25 +129,26 @@ class SyntextAgent:
                 return ans + "\n\n" + reference_links
 
             else:
+                ans = "Syntext couldnt generate the right response from the retrieved files"             
                 meta_data = best_context['meta_data']
-                ans = "Syntext couldnt generate the right response from the retrieved files"
-                context = best_context["content"]
-                # Testing file link logic 
+
+                # Determine the file type based on metadata
                 if meta_data.get("type") == "video":
-                        # If it's a video, use start_time and end_time for file_name and file_url
+                    # If it's a video, use start_time and end_time for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
+                    vid = ""
                     if meta_data.get("start_time"):
-                        file_name += f"{meta_data['start_time']} - {meta_data['end_time']}"
-                    file_url = f"{best_context['file_url']}?{meta_data['start_time']}-{meta_data['end_time']}"
+                        vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
+                        file_name += vid
+                    file_url = f"{best_context['file_url']}?{vid}"
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
+                    pg_num = 0
                     if meta_data.get("page_number") > 0:
                         pg_num =  meta_data.get("page_number")
                         file_name += ' page ' + str(pg_num)
                     file_url = f"{best_context['file_url']}?page={pg_num}"
-
-
 
                 # Construct the JSON response with the formatted file link
                 references = [
