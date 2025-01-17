@@ -126,6 +126,7 @@ class SyntextAgent:
                 return ans + "\n\n" + reference_links
 
             else:
+                meta_data = best_context['meta_data']
                 ans = "Syntext couldnt generate the right response from the retrieved files"
                 context = best_context["content"]
                 # Testing file link logic 
