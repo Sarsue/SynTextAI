@@ -1,87 +1,156 @@
+import logging
+from llm_service import prompt_llm, summarize  # Import the LLM service
 import re
-import requests
+import json
 from bs4 import BeautifulSoup
-from readability import Document
-from urllib.parse import urlparse, parse_qs
+from duckduckgo_search import DDGS
+from markdownify import MarkdownConverter
+import requests
+import datetime
+import textwrap
 
-def clean_source_text(text):
-    """
-    Cleans the input text by removing unnecessary whitespace, tabs, and excessive newlines.
-    
-    Args:
-        text (str): The input text to clean.
-    
-    Returns:
-        str: The cleaned text.
-    """
-    return (
-        text.strip()  # Remove leading and trailing whitespace
-        .replace("\t", "")  # Remove all tab characters
-        .replace("\n\n", " ")  # Replace double newlines with a space
-        .replace("   ", "  ")  # Replace triple spaces with double spaces
-        .replace("\n\n\n\n", "\n\n\n")  # Replace 4+ newlines with 3
-        .replace("\n+(\s*\n)*", "\n")  # Collapse multiple newlines into one
-    )
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 
-def search_handler(query, source_count=4):
-    try:
-        # GET LINKS
-        google_search_url = f"https://www.google.com/search?q={query}"
-        response = requests.get(google_search_url, headers={"User-Agent": "Mozilla/5.0"})
-        response.raise_for_status()
+safety_settings = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        links = []
+class WebSearch:
+    """Perform DuckDuckGo searches and fetch web content."""
 
-        # Extracting links from the search results
-        for link_tag in soup.find_all("a"):
-            href = link_tag.get("href")
-            if href and href.startswith("/url?q="):
-                cleaned_href = href.replace("/url?q=", "").split("&")[0]
-                if cleaned_href not in links:
-                    links.append(cleaned_href)
+    def __init__(self, verbose=False, retry_limit=3):
+        self.verbose = verbose
+        self.retry_limit = retry_limit
 
-        # Filter links by excluding certain domains
-        exclude_list = ["google", "facebook", "twitter", "instagram", "youtube", "tiktok"]
-        filtered_links = []
-
-        for link in links:
+    def fetch(self, url):
+        """Fetch a URL with retry logic."""
+        for attempt in range(self.retry_limit):
             try:
-                domain = urlparse(link).hostname
-                if not any(excluded in domain for excluded in exclude_list):
-                    if not any(urlparse(l).hostname == domain for l in filtered_links):
-                        filtered_links.append(link)
-            except Exception:
+                if self.verbose:
+                    logging.info(f"Attempting to fetch URL: {url} (Attempt {attempt + 1})")
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    return response.content
+                logging.warning(f"Failed to fetch {url}: HTTP {response.status_code}")
+            except requests.RequestException as e:
+                logging.warning(f"Error fetching {url}: {e}")
+            logging.info(f"Retrying ({attempt + 1}/{self.retry_limit})...")
+        logging.error(f"Failed to fetch URL after {self.retry_limit} attempts: {url}")
+        return None
+
+    def ddg_search(self, topic):
+        """Search DuckDuckGo for a topic."""
+        try:
+            if self.verbose:
+                logging.info(f"Searching DuckDuckGo for: {topic}")
+            return DDGS().text(topic)
+        except Exception as e:
+            logging.error(f"Error during DuckDuckGo search for '{topic}': {e}")
+            return []
+
+    def ddg_top_hit(self, topic, skip=()):
+        """Search DuckDuckGo for a topic and return the top hit."""
+        results = self.ddg_search(topic)
+        logging.info(f"Search results for '{topic}': {results}")
+        for result in results:
+            if result.get('href') in skip:
                 continue
+            html = self.fetch(result.get('href'))
+            if html:
+                title = self.extract_title(html)
+                content = self.simplify_html(html)
+                logging.info(f"Fetched content for '{topic}': {content}")
+                if content:
+                    return result['href'], title, content
+        return None, None, None
 
-        final_links = filtered_links[:source_count]
+    @staticmethod
+    def extract_title(html):
+        """Extract the title from an HTML document."""
+        soup = BeautifulSoup(html, 'html.parser')
+        return soup.title.string.strip() if soup.title else "Untitled"
 
-        # SCRAPE TEXT FROM LINKS
-        sources = []
+    @staticmethod
+    def simplify_html(html):
+        """Convert HTML to markdown, removing some tags and links."""
+        soup = BeautifulSoup(html, 'html.parser')
+        for tag in soup.find_all(["script", "style"]):
+            tag.decompose()
+        for tag in soup.find_all("a"):
+            del tag["href"]
+        for tag in soup.find_all("img"):
+            del tag["src"]
+        text = MarkdownConverter().convert_soup(soup)
+        return re.sub(r"\n(\s*\n)+", "\n\n", text)
 
-        for link in final_links:
+    @staticmethod
+    def extract_json_from_markdown(markdown_text):
+        """Extract JSON from Markdown-formatted string."""
+        json_match = re.search(r'json\s*(\[\s*.+\s*\])\s*', markdown_text, re.DOTALL)
+        if json_match:
             try:
-                page_response = requests.get(link, headers={"User-Agent": "Mozilla/5.0"})
-                page_response.raise_for_status()
+                return json.loads(json_match.group(1).strip())
+            except json.JSONDecodeError as e:
+                logging.error(f"Error decoding JSON: {e}")
+        logging.warning("No JSON found in Markdown.")
+        return None
 
-                # Parse the page content using Readability
-                doc = Document(page_response.text)
-                parsed_content = doc.summary()
+    def fetch_sources(self, search_prompt):
+        """Fetch sources for a question."""
+        try:
+            search_text = prompt_llm(search_prompt)
+            logging.info(f"LLM search text: {search_text}")
+            searches = self.extract_json_from_markdown(search_text)
+            logging.info(f"Extracted searches: {searches}")
+            if not searches:
+                logging.warning("No search topics generated by LLM.")
+                return "", []
+            background_text, sources = "", []
+            for search in searches:
+                source, title, content = self.ddg_top_hit(search, skip=[s[0] for s in sources])
+                if source:
+                    background_text += f"# {search}\n\n{content}\n\n"
+                    sources.append((source, title))
+            return background_text, sources
+        except Exception as e:
+            logging.error(f"Error during source fetching: {e}")
+            return "", []
 
-                if parsed_content:
-                    cleaned_text = clean_source_text(doc.text())
-                    sources.append({"url": link, "text": cleaned_text[:1500]})
-            except Exception:
-                continue
+    def format_answer(self, answer, sources):
+        """Format the answer with sources."""
+        paragraphs = answer.splitlines()
+        wrapped_paragraphs = [textwrap.fill(p, width=80) for p in paragraphs if p.strip()]
+        sources_str = "\nSources:" + "\n".join([f"* [{title}]({url})" for url, title in sources])
+        return "\n".join(wrapped_paragraphs) + "\n\n" + sources_str
 
-        return {"sources": sources}
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return {"sources": []}
+    def search_topic(self, topic):
+        """Search a topic and format the response."""
+        try:
+            today_prompt = f"Today is {datetime.date.today().strftime('%a, %b %e, %Y')}."
+            search_prompt = (
+                f"{today_prompt}\nPrepare for this prompt: {topic}\n\n"
+                "What 3 Internet search topics would help you answer this question? "
+                "Answer in a JSON list only."
+            )
+            background_text, sources = self.fetch_sources(search_prompt)
+            logging.info(f"Background text: {background_text}")
+            logging.info(f"Sources: {sources}")
+            summarized_text = summarize(background_text)
+            logging.info(f"Summarized text: {summarized_text}")
+            answer = prompt_llm("\n".join([today_prompt, summarized_text, f"# Prompt\n{topic}"]))
+            logging.info(f"LLM answer: {answer}")
+            formatted_answer = self.format_answer(answer, sources)
+            logging.info("Final Answer:\n" + formatted_answer)
+            return formatted_answer  # Ensure the answer is returned
+        except Exception as e:
+            logging.error(f"Error during topic search: {e}")
+            return None
 
 # Example usage
 if __name__ == "__main__":
-    query = "How much has Arsenal spent on signings under Arteta?"
-    result = search_handler(query)
-    print(result)
+    searcher = WebSearch()
+    ans = searcher.search_topic(topic="How do I replace the water filter in my Frigidaire refrigerator?")
+    print(ans)

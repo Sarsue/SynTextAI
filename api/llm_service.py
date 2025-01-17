@@ -8,6 +8,7 @@ from mistralai.client import MistralClient
 from mistralai.models import chat_completion
 from requests.exceptions import Timeout, RequestException
 import requests
+from openai import OpenAI
 import tiktoken
 from sentence_transformers import SentenceTransformer
 # Load environment variables
@@ -138,6 +139,20 @@ def summarize(text, prompt="Summarize:", max_iterations=10):
         )
 
     return text
+
+def prompt_openai_llm(query):
+    API_KEY = os.getenv("OPENAI_API_KEY")
+    client = OpenAI(api_key= API_KEY)
+    completion = client.chat.completions.create(
+    model="gpt-4o-mini",
+    store=True,
+    messages=[
+        {"role": "user", "content": query}
+    ]
+    )
+    response = completion.choices[0].message
+    print(response)
+    return response 
 
 if __name__ == "__main__":
     pass
