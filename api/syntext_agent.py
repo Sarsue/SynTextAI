@@ -100,11 +100,10 @@ class SyntextAgent:
                 # Step 6: Construct the file reference for the selected chunk
                 # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
                 meta_data = best_context['meta_data']
-
+                file_name = best_context['file_url'].split('/')[-1]
                 # Determine the file type based on metadata
                 if meta_data.get("type") == "video":
                         # If it's a video, use start_time and end_time for file_name and file_url
-                    file_name = best_context['file_url'].split('/')[-1]
                     vid = ""
                     if meta_data.get("start_time"):
                         vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
@@ -112,7 +111,6 @@ class SyntextAgent:
                     file_url = f"{best_context['file_url']}?{vid}"
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
-                    file_name = best_context['file_url'].split('/')[-1]
                     pg_num = 0
                     if meta_data.get("page_number") > 0:
                         pg_num =  meta_data.get("page_number")
@@ -126,6 +124,7 @@ class SyntextAgent:
                     f"[{file_name}]({file_url})"
                 ]
                 reference_links = "\n".join(references)
+                logger.info(reference_links)
                 return ans + "\n\n" + reference_links
 
             else:
@@ -154,6 +153,7 @@ class SyntextAgent:
                     f"[{file_name}]({file_url})"
                 ]
                 reference_links = "\n".join(references)
+                logger.info(reference_links)
                 return ans + "\n\n" + reference_links
                      
 
