@@ -111,20 +111,22 @@ class SyntextAgent:
                 else:
                     # If it's a PDF, use page_number for file_name and file_url
                     file_name = best_context['file_url'].split('/')[-1]
-                    if meta_data.get("page_number") > 1:
-                        pg_num =  meta_data.get("page_number")
-                        file_name += f" page {pg_num}"
-                    file_url = f"{best_context['file_url']}?page={pg_num}"
-
+                    # if meta_data.get("page_number") > 1:
+                    #     pg_num =  meta_data.get("page_number")
+                    #     file_name += f" page {pg_num}"
+                    # file_url = f"{best_context['file_url']}?page={pg_num}"
+                    file_url = best_context['file_url']
 
 
                 # Step 7: Format the references as clickable links
                 reference_links = f"[{file_name}]({file_url})"
 
                 # Step 8: Return the final response with references
-                return ans + "\n\n" + reference_links    
+                ans +=  "\n\n" + reference_links    
             else:
                 ans = self.searcher.search_topic(query)
+            
+            return ans
 
 
 
