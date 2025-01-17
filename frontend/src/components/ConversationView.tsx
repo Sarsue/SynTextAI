@@ -18,20 +18,29 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        console.log("Component mounted or history updated:", history);
         scrollToBottom();
     }, [history]);
+
+    useEffect(() => {
+        console.log("Selected file changed:", selectedFile);
+    }, [selectedFile]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
     const handleFileLinkClick = (url: string) => {
+        console.log("File link clicked:", url);
         try {
-            // Ensure the URL is valid
-            const parsedUrl = new URL(url);
-            console.log("Parsed URL:", parsedUrl.href);
-            setSelectedFile(parsedUrl.toString());
-            setFileError(null);
+            if (url) {
+                const parsedUrl = new URL(url);
+                console.log("Parsed URL is valid:", parsedUrl.href);
+                setSelectedFile(parsedUrl.toString());
+                setFileError(null);
+            } else {
+                throw new Error('Invalid URL');
+            }
         } catch (error) {
             console.error('Error parsing URL:', error);
             setFileError('Invalid file URL.');
@@ -47,13 +56,14 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
     const renderMarkdown = (markdown: string) => {
         return (
             <ReactMarkdown
-                children={markdown}
                 remarkPlugins={[remarkGfm]}
+                children={markdown}
                 components={{
                     a: ({ href, children }) => {
                         if (href && href.startsWith('https://')) {
                             const regex = /https:\/\/(.*?)(?:\?page=(\d+))?/;
                             const match = regex.exec(href);
+                            console.log("Regex match for link:", match);
                             if (match && match.length >= 2) {
                                 return (
                                     <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
