@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './FileViewerComponent.css';
+import { LogUIActions } from '../apiUtils';
 
 interface FileViewerComponentProps {
     fileUrl: string;
@@ -18,7 +19,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     useEffect(() => {
         const fileType = getFileType(fileUrl);
         if (!fileType) {
-            console.error('Unsupported file type for:', fileUrl);
+            const message = `Unsupported file type for: ${fileUrl}`;
+            LogUIActions('api/v1/logs', 'POST', `User attempted to view unsupported file type: ${message}`, 'error');
             onError('Unsupported file type');
             return;
         }
@@ -48,11 +50,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                     const time = parseInt(urlParams.get('time') || '0', 10);
                     setVideoStartTime(time);
                 }
+
+                LogUIActions('api/v1/logs', 'POST', `File successfully loaded: ${baseUrl}`, 'info');
             } else {
                 throw new Error('Failed to fetch file content');
             }
         } catch (error) {
             console.error('Error fetching file content:', error);
+            LogUIActions('api/v1/logs', 'POST', `Error loading file: ${url}. Error: ${error.message}`, 'error');
             onError('Failed to load file. Please try again later.');
             setLoading(false);
         }
@@ -99,11 +104,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         }
     };
 
+    const handleClose = () => {
+        LogUIActions('api/v1/logs', 'POST', `User closed file viewer for: ${fileUrl}`, 'info');
+        onClose();
+    };
+
     return (
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
                 {renderFileContent()}
-                <button onClick={onClose}>❌</button>
+                <button onClick={handleClose}>❌</button>
             </div>
         </div>
     );

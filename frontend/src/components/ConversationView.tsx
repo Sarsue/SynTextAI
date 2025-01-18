@@ -5,6 +5,7 @@ import './ConversationView.css';
 import { History, Message } from './types';
 import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
+import { LogUIActions } from '../apiUtils';
 
 interface ConversationViewProps {
     history: History | null;
@@ -12,7 +13,7 @@ interface ConversationViewProps {
 }
 
 const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) => {
-    const [selectedFile, setSelectedFile] = useState<string | null>(null); // Adjusted to store file URL string
+    const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [fileError, setFileError] = useState<string | null>(null);
     const { darkMode } = useUserContext();
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -25,9 +26,21 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    const handleFileLinkClick = (url: string) => {
+    const handleFileLinkClick = async (url: string) => {
         setSelectedFile(url);
         setFileError(null);
+
+        // Log file link click
+        const logUrl = 'api/v1/logs';
+        await LogUIActions(logUrl, 'POST', `User clicked file link: ${url}`, 'info');
+    };
+
+    const handleCopy = async (message: Message) => {
+        onCopy(message);
+
+        // Log message copy
+        // const logUrl = 'api/v1/logs';
+        // await LogUIActions(logUrl, 'POST', `User copied message: ${message.content}`, 'info');
     };
 
     const handleFileError = (error: string) => {
@@ -35,26 +48,24 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
         setSelectedFile(null);
     };
 
-    const renderMarkdown = (markdown: string) => {
-        return (
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                children={markdown}
-                components={{
-                    a: ({ href, children }) => {
-                        if (href && href.startsWith('https://')) {
-                            return (
-                                <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
-                                    {children}
-                                </a>
-                            );
-                        }
-                        return <a href={href}>{children}</a>;
-                    },
-                }}
-            />
-        );
-    };
+    const renderMarkdown = (markdown: string) => (
+        <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            children={markdown}
+            components={{
+                a: ({ href, children }) => {
+                    if (href && href.startsWith('https://')) {
+                        return (
+                            <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
+                                {children}
+                            </a>
+                        );
+                    }
+                    return <a href={href}>{children}</a>;
+                },
+            }}
+        />
+    );
 
     return (
         <div className={`conversation-view ${darkMode ? 'dark-mode' : ''}`}>
@@ -69,7 +80,10 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
                     <div className="message-metadata">
                         <div className="message-timestamp">{message.timestamp}</div>
                         {message.sender === 'bot' && (
-                            <button className="icon-button copy-button" onClick={() => onCopy(message)}>
+                            <button
+                                className="icon-button copy-button"
+                                onClick={() => handleCopy(message)}
+                            >
                                 📋
                             </button>
                         )}

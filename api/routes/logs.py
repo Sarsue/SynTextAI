@@ -13,5 +13,5 @@ def capture_logs():
     log_level = data.get('level', 'info').upper()
     message = data.get('message', '')
     timestamp = data.get('timestamp', '')
-    logging.info(f"Enqueued Task {log_level}  for processing [{timestamp}] {message}")
+    logging.info(f" {log_level} [{timestamp}] {message}")
     return '', 204
