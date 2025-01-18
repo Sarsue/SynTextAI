@@ -12,9 +12,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [fileType, setFileType] = useState<string | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
-    const [pageNumber, setPageNumber] = useState<number>(1); // Default page number
-    const [videoStartTime, setVideoStartTime] = useState<string | null>(null); // Start time for video
-    const [videoEndTime, setVideoEndTime] = useState<string | null>(null); // End time for video
+    const [pageNumber, setPageNumber] = useState<number | null>(null);
+    const [videoStartTime, setVideoStartTime] = useState<number | null>(null);
 
     useEffect(() => {
         const fileType = getFileType(fileUrl);
@@ -24,33 +23,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             return;
         }
 
-        console.log('Detected file type:', fileType);
         setFileType(fileType);
-
-        // Extract page number or video start/end times from URL
-        const urlParams = new URLSearchParams(new URL(fileUrl).search);
-        const pageParam = urlParams.get('page');
-        const startTimeParam = urlParams.get('start_time');
-        const endTimeParam = urlParams.get('end_time');
-
-        if (pageParam) {
-            setPageNumber(parseInt(pageParam, 10));
-        }
-        if (startTimeParam) {
-            setVideoStartTime(startTimeParam);
-        }
-        if (endTimeParam) {
-            setVideoEndTime(endTimeParam);
-        }
-
         fetchFileContent(fileUrl, fileType);
     }, [fileUrl, onError]);
 
     const fetchFileContent = async (url: string, type: string) => {
         try {
-            const baseUrl = url.split('?')[0]; // Remove query params for fetch URL
-            console.log('Fetching file from:', url);
-
+            const baseUrl = url.split('?')[0]; // Ensure to remove query params for fetching the file
             const response = await fetch(baseUrl, { mode: 'cors' });
 
             if (response.ok) {
@@ -58,6 +37,17 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 const dataUrl = URL.createObjectURL(blob);
                 setFileContent(dataUrl);
                 setLoading(false);
+
+                // Handle query params for page number or video start time
+                const urlParams = new URLSearchParams(url.split('?')[1]);
+                if (urlParams.has('page')) {
+                    const pageNum = parseInt(urlParams.get('page') || '1', 10);
+                    setPageNumber(pageNum);
+                }
+                if (urlParams.has('time')) {
+                    const time = parseInt(urlParams.get('time') || '0', 10);
+                    setVideoStartTime(time);
+                }
             } else {
                 throw new Error('Failed to fetch file content');
             }
@@ -77,20 +67,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             case 'jpeg':
             case 'png':
             case 'gif':
-                return 'image'; // Handle common image formats
+                return 'image';
             case 'mp4':
             case 'mkv':
             case 'avi':
-            case 'mov':
-            case 'wmv':
-            case 'flv':
-            case 'webm':
-            case 'mpeg':
-            case 'mpg':
-            case '3gp':
-                return 'video'; // Handle common video formats
+                return 'video';
             default:
-                return null; // Unsupported file type
+                return null;
         }
     };
 
@@ -106,20 +89,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 return <img src={fileContent!} alt="File content" style={{ width: '100%', height: 'auto' }} />;
             case 'video':
                 return (
-                    <video controls width="100%" height="auto" currentTime={parseTime(videoStartTime || '0')}>
+                    <video controls width="100%" height="auto">
                         <source src={fileContent!} type="video/mp4" />
                         Your browser does not support the video tag or the video format.
                     </video>
                 );
             default:
-                return <div>Unsupported file type</div>; // Handle unsupported types
+                return <div>Unsupported file type</div>;
         }
-    };
-
-    // Helper function to convert start time to seconds for the video player
-    const parseTime = (timeStr: string): number => {
-        const [hours, minutes, seconds] = timeStr.split(':').map(Number);
-        return hours * 3600 + minutes * 60 + seconds;
     };
 
     return (

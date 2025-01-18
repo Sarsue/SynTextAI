@@ -18,37 +18,19 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        console.log("Component mounted or history updated:", history);
         scrollToBottom();
     }, [history]);
-
-    useEffect(() => {
-        console.log("Selected file changed:", selectedFile);
-    }, [selectedFile]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
     const handleFileLinkClick = (url: string) => {
-        console.log("File link clicked:", url);
-        try {
-            if (url) {
-                const parsedUrl = new URL(url);
-                console.log("Parsed URL is valid:", parsedUrl.href);
-                setSelectedFile(parsedUrl.toString());
-                setFileError(null);
-            } else {
-                throw new Error('Invalid URL');
-            }
-        } catch (error) {
-            console.error('Error parsing URL:', error);
-            setFileError('Invalid file URL.');
-        }
+        setSelectedFile(url);
+        setFileError(null);
     };
 
     const handleFileError = (error: string) => {
-        console.error('File error:', error);
         setFileError(error);
         setSelectedFile(null);
     };
@@ -61,16 +43,11 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
                 components={{
                     a: ({ href, children }) => {
                         if (href && href.startsWith('https://')) {
-                            const regex = /https:\/\/(.*?)(?:\?page=(\d+))?/;
-                            const match = regex.exec(href);
-                            console.log("Regex match for link:", match);
-                            if (match && match.length >= 2) {
-                                return (
-                                    <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
-                                        {children}
-                                    </a>
-                                );
-                            }
+                            return (
+                                <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
+                                    {children}
+                                </a>
+                            );
                         }
                         return <a href={href}>{children}</a>;
                     },
@@ -92,29 +69,13 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
                     <div className="message-metadata">
                         <div className="message-timestamp">{message.timestamp}</div>
                         {message.sender === 'bot' && (
-                            <div className="actions">
-                                {/* <button
-                                    className={`icon-button like-button ${message.liked ? 'active' : ''}`}
-                                    onClick={() => onLike(message)}
-                                >
-                                    👍
-                                </button>
-                                <button
-                                    className={`icon-button dislike-button ${message.disliked ? 'active' : ''}`}
-                                    onClick={() => onDislike(message)}
-                                >
-                                    👎
-                                </button> */}
-                                <button className="icon-button copy-button" onClick={() => onCopy(message)}>
-                                    📋
-                                </button>
-                            </div>
+                            <button className="icon-button copy-button" onClick={() => onCopy(message)}>
+                                📋
+                            </button>
                         )}
                     </div>
                 </div>
             ))}
-
-
 
             {fileError && <div className="error-message">{fileError}</div>}
             {selectedFile && (
@@ -132,7 +93,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
             <div ref={messagesEndRef} />
         </div>
     );
-
 };
 
 export default ConversationView;
