@@ -14,4 +14,5 @@ def capture_logs():
     message = data.get('message', '')
     timestamp = data.get('timestamp', '')
     logging.info(f" {log_level} [{timestamp}] {message}")
+    print(f" {log_level} [{timestamp}] {message}")
     return '', 204
