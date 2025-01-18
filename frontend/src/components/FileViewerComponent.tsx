@@ -13,7 +13,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     const [fileType, setFileType] = useState<string | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
     const [pageNumber, setPageNumber] = useState<number>(1); // Default page number
-
+    const [videoStartTime, setVideoStartTime] = useState<string | null>(null); // Start time for video
+    const [videoEndTime, setVideoEndTime] = useState<string | null>(null); // End time for video
 
     useEffect(() => {
         const fileType = getFileType(fileUrl);
@@ -25,13 +26,29 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
 
         console.log('Detected file type:', fileType);
         setFileType(fileType);
+
+        // Extract page number or video start/end times from URL
+        const urlParams = new URLSearchParams(new URL(fileUrl).search);
+        const pageParam = urlParams.get('page');
+        const startTimeParam = urlParams.get('start_time');
+        const endTimeParam = urlParams.get('end_time');
+
+        if (pageParam) {
+            setPageNumber(parseInt(pageParam, 10));
+        }
+        if (startTimeParam) {
+            setVideoStartTime(startTimeParam);
+        }
+        if (endTimeParam) {
+            setVideoEndTime(endTimeParam);
+        }
+
         fetchFileContent(fileUrl, fileType);
     }, [fileUrl, onError]);
 
-
     const fetchFileContent = async (url: string, type: string) => {
         try {
-            const baseUrl = url.split('?')[0];
+            const baseUrl = url.split('?')[0]; // Remove query params for fetch URL
             console.log('Fetching file from:', url);
 
             const response = await fetch(baseUrl, { mode: 'cors' });
@@ -41,13 +58,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 const dataUrl = URL.createObjectURL(blob);
                 setFileContent(dataUrl);
                 setLoading(false);
-
-                // Extract page number from URL if provided
-                const match = url.match(/[?&]page=(\d+)/);
-                if (match) {
-                    const pageNum = parseInt(match[1], 10);
-                    setPageNumber(pageNum);
-                }
             } else {
                 throw new Error('Failed to fetch file content');
             }
@@ -96,7 +106,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 return <img src={fileContent!} alt="File content" style={{ width: '100%', height: 'auto' }} />;
             case 'video':
                 return (
-                    <video controls width="100%" height="auto">
+                    <video controls width="100%" height="auto" currentTime={parseTime(videoStartTime || '0')}>
                         <source src={fileContent!} type="video/mp4" />
                         Your browser does not support the video tag or the video format.
                     </video>
@@ -104,6 +114,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             default:
                 return <div>Unsupported file type</div>; // Handle unsupported types
         }
+    };
+
+    // Helper function to convert start time to seconds for the video player
+    const parseTime = (timeStr: string): number => {
+        const [hours, minutes, seconds] = timeStr.split(':').map(Number);
+        return hours * 3600 + minutes * 60 + seconds;
     };
 
     return (
