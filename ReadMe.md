@@ -1,6 +1,6 @@
 Build docker build --no-cache -t syntextaiapp .
 
-RUN docker run --rm -p 3000:3000 --env-file .env syntextaiapp
+RUN docker run --rm -p 3000:3000 --env-file .env --memory 2g syntextaiapp
 
 TAG docker tag syntextaiapp:latest osasdeeon/syntextai:latest
 
