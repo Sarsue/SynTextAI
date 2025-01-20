@@ -36,7 +36,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
     };
 
     const validLanguages = ['English', 'French', 'German', 'Spanish', 'Chinese', 'Japanese'];
-    const validEducationLevels = ['dropout', 'high school graduate', 'university', 'masters'];
+    const validEducationLevels = ['Beginner', '', 'Intermediate', 'Advanced'];
 
     return (
         <div className={`settings-container ${darkMode ? 'dark-mode' : ''}`}>
