@@ -64,7 +64,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     };
 
     const getFileType = (fileUrl: string): string | null => {
-        const extension = fileUrl.split('.').pop()?.toLowerCase();
+        const url = new URL(fileUrl);
+        // Extract the pathname without query params or fragments
+        const pathname = url.pathname;
+        // Get the file extension
+        const extension = pathname.split('.').pop()?.toLowerCase();
+
         switch (extension) {
             case 'pdf':
                 return 'pdf';
