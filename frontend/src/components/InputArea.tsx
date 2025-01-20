@@ -20,22 +20,14 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
         });
     };
 
+    // Updated the valid file types to exclude video files
     const isFileSupported = (file: File): boolean => {
         const supportedTypes = [
-            'application/pdf',
-            'image/jpeg',
-            'image/png',
-            'image/gif',
-            'video/mp4',
-            'video/mkv',
-            'video/avi',
-            'video/mov',
-            'video/wmv',
-            'video/flv',
-            'video/webm',
-            'video/mpeg',
-            'video/mpg',
-            'video/3gp'
+            'application/pdf',         // PDF files
+            'image/jpeg',               // JPEG image
+            'image/png',                // PNG image
+            'image/gif',                // GIF image
+            'text/plain',               // Plain text files
         ];
         return supportedTypes.includes(file.type);
     };
@@ -45,7 +37,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
         const validFiles = files.filter(isFileSupported); // Filter valid files
 
         if (validFiles.length === 0) {
-            alert('Only PDF, image (JPG, PNG, GIF), and video files (MP4, MKV, AVI, MOV, WMV, FLV, WEBM, MPEG, MPG, 3GP) are supported.');
+            alert('Only PDF, image (JPG, PNG, GIF), and text files are supported.');
         } else {
             setAttachedFiles((prevFiles) => [...prevFiles, ...validFiles]);
         }
