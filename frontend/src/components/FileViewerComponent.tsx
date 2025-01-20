@@ -17,8 +17,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     const [videoStartTime, setVideoStartTime] = useState<number | null>(null);
 
     useEffect(() => {
-        const fileType = getFileType(fileUrl);
-        if (!fileType) {
+        const detectedFileType = getFileType(fileUrl);
+        if (!detectedFileType) {
             const message = `Unsupported file type for: ${fileUrl}`;
             LogUIActions('api/v1/logs', 'POST', `User attempted to view unsupported file type: ${message}`, 'error');
             console.log(message);
@@ -26,13 +26,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             return;
         }
 
-        setFileType(fileType);
-        fetchFileContent(fileUrl, fileType);
+        setFileType(detectedFileType);
+        fetchFileContent(fileUrl, detectedFileType);
     }, [fileUrl, onError]);
 
     const fetchFileContent = async (url: string, type: string) => {
         try {
-            const baseUrl = url.split('?')[0]; // Ensure to remove query params for fetching the file
+            const [baseUrl, queryParams] = url.split('?');
             const response = await fetch(baseUrl, { mode: 'cors' });
 
             if (response.ok) {
@@ -41,14 +41,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 setFileContent(dataUrl);
                 setLoading(false);
 
-                // Handle query params for page number or video start time
-                const urlParams = new URLSearchParams(url.split('?')[1]);
-                if (urlParams.has('page')) {
-                    const pageNum = parseInt(urlParams.get('page') || '1', 10);
+                const params = new URLSearchParams(queryParams);
+                if (params.has('page')) {
+                    const pageNum = parseInt(params.get('page') || '1', 10);
                     setPageNumber(pageNum);
                 }
-                if (urlParams.has('time')) {
-                    const time = parseInt(urlParams.get('time') || '0', 10);
+                if (params.has('time')) {
+                    const time = parseInt(params.get('time') || '0', 10);
                     setVideoStartTime(time);
                 }
 
@@ -89,13 +88,26 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         switch (fileType) {
             case 'pdf':
                 return (
-                    <embed src={`${fileContent}#page=${pageNumber}`} type="application/pdf" width="100%" height="750px" />
+                    <embed
+                        src={`${fileContent}#page=${pageNumber || 1}`}
+                        type="application/pdf"
+                        width="100%"
+                        height="750px"
+                    />
                 );
             case 'image':
                 return <img src={fileContent!} alt="File content" style={{ width: '100%', height: 'auto' }} />;
             case 'video':
                 return (
-                    <video controls width="100%" height="auto">
+                    <video
+                        controls
+                        width="100%"
+                        height="auto"
+                        autoPlay={!!videoStartTime}
+                        onLoadedMetadata={(e: any) => {
+                            if (videoStartTime) e.target.currentTime = videoStartTime;
+                        }}
+                    >
                         <source src={fileContent!} type="video/mp4" />
                         Your browser does not support the video tag or the video format.
                     </video>
