@@ -14,13 +14,19 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
 
     const handleSendClick = () => {
         if (!message.trim() && attachedFiles.length === 0) return;
-        onSend(message, attachedFiles).then(() => {
-            setMessage('');
-            setAttachedFiles([]);
-        });
+
+        // Filter out unsupported files before sending to the backend
+        const validFiles = attachedFiles.filter(isFileSupported);
+        if (validFiles.length !== attachedFiles.length) {
+            alert('Only PDF, image (JPG, PNG, GIF), and text files are supported.');
+        } else {
+            onSend(message, validFiles).then(() => {
+                setMessage('');
+                setAttachedFiles([]);
+            });
+        }
     };
 
-    // Updated the valid file types to exclude video files
     const isFileSupported = (file: File): boolean => {
         const supportedTypes = [
             'application/pdf',         // PDF files
