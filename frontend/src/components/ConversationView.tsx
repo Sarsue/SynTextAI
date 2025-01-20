@@ -33,6 +33,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
         // Log file link click
         const logUrl = 'api/v1/logs';
         await LogUIActions(logUrl, 'POST', `User clicked file link: ${url}`, 'info');
+        console.log(`User clicked file link: ${url}`);
     };
 
     const handleCopy = async (message: Message) => {

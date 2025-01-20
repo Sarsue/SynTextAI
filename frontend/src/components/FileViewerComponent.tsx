@@ -21,6 +21,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         if (!fileType) {
             const message = `Unsupported file type for: ${fileUrl}`;
             LogUIActions('api/v1/logs', 'POST', `User attempted to view unsupported file type: ${message}`, 'error');
+            console.log(message);
             onError('Unsupported file type');
             return;
         }
@@ -57,7 +58,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             }
         } catch (error) {
             console.error('Error fetching file content:', error);
-            LogUIActions('api/v1/logs', 'POST', `Error loading file: ${url}. Error: ${error.message}`, 'error');
+            LogUIActions('api/v1/logs', 'POST', `Error loading file: ${url}. Error: ${error}`, 'error');
             onError('Failed to load file. Please try again later.');
             setLoading(false);
         }
