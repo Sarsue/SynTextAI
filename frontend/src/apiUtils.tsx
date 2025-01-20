@@ -1,26 +1,18 @@
 // apiUtils.ts
 
 
-export const LogUIActions = async (url: string, method: string, message: string, level: string = 'info') => {
+export const LogUIActions = async (url: string, method: string, message: string, level: string) => {
     try {
-        const payload = JSON.stringify({
-            level: level.toLowerCase(), // Convert to lowercase if needed
-            message: message,
-            timestamp: new Date().toISOString(), // Add a timestamp
-        });
-
         const response = await fetch(url, {
             method,
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            mode: 'cors',
-            body: payload,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level, message, timestamp: new Date().toISOString() }),
         });
 
-        return response;
+        if (!response.ok) {
+            console.error(`Failed to log action: ${response.statusText}`);
+        }
     } catch (error) {
-        console.error('Unexpected error logging UI action:', error);
-        return null;
+        console.error('Error logging UI action:', error);
     }
 };
