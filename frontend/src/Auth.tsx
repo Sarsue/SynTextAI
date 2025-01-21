@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { auth } from './firebase';
+import { useUserContext } from './UserContext';  // Import UserContext to access darkMode
 
 interface AuthProps {
     setUser: React.Dispatch<React.SetStateAction<FirebaseUser | null>>;
@@ -15,6 +16,7 @@ interface AuthProps {
 
 const Auth: FC<AuthProps> = ({ setUser }) => {
     const navigate = useNavigate();
+    const { darkMode } = useUserContext();  // Get darkMode from context
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -70,10 +72,6 @@ const Auth: FC<AuthProps> = ({ setUser }) => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${idToken}`,
                 },
-                // body: JSON.stringify({
-                //     email: user.email,
-                //     displayName: user.displayName,
-                // }),
             });
 
             if (!response.ok) {
@@ -87,7 +85,7 @@ const Auth: FC<AuthProps> = ({ setUser }) => {
     };
 
     return (
-        <div className="auth-container">
+        <div className={`auth-container ${darkMode ? 'dark-mode' : ''}`}> {/* Bind to darkMode */}
             <button className="google-sign-in-button" onClick={signInWithGoogle}>
                 Sign in with Google
             </button>

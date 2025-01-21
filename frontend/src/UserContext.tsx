@@ -37,7 +37,7 @@ const UserContext = createContext<UserContextType>({
 
 // Define UserProvider component
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [darkMode, setDarkMode] = useState<boolean>(true);
+    const [darkMode, setDarkMode] = useState<boolean>(false);
     const [userSettings, setUserSettings] = useState<UserSettings>({
         comprehensionLevel: '',
         selectedLanguage: '',
