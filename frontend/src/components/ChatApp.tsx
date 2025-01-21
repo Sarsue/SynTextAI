@@ -624,6 +624,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
                 {/* History Column on the right */}
                 <div className="history-column">
+                    {user !== null && (
+                        <div className="logout-button-container">
+                            <button onClick={handleLogout}>Logout</button>
+                        </div>
+                    )}
                     <HistoryView
                         histories={Object.values(histories)}
                         setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
