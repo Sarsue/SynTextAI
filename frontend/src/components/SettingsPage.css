@@ -1,22 +1,47 @@
+/* Ensure the body and html elements fill the screen */
+body,
+html {
+    height: 100%;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: var(--background-color);
+    color: var(--text-color);
+}
+
+/* Settings container styles */
 .settings-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    height: 100vh;
     padding: 20px;
     background-color: var(--background-color);
     color: var(--text-color);
     transition: background-color 0.3s ease, color 0.3s ease;
+    position: relative;
+    /* Ensure the close button can be positioned inside this container */
 }
 
+/* Settings content to take up remaining space */
 .settings-content {
     display: flex;
     flex-direction: column;
     gap: 20px;
+    flex-grow: 1;
+    overflow-y: auto;
 }
 
+/* Settings section */
 .settings-section {
     padding: 16px;
     background-color: var(--header-footer-bg);
     border-radius: 8px;
 }
 
+/* Section title */
 .section-title {
     margin: 0 0 10px;
     font-size: 18px;
@@ -24,6 +49,7 @@
     color: var(--text-color);
 }
 
+/* Section select input */
 .section-content select {
     width: 100%;
     padding: 8px;
@@ -34,12 +60,14 @@
     transition: border-color 0.3s ease, background-color 0.3s ease;
 }
 
+/* Hover/focus effect for select */
 .section-content select:hover,
 .section-content select:focus {
     border-color: var(--link-color);
     outline: none;
 }
 
+/* Close button styles */
 button.close-button {
     background: none;
     border: none;
@@ -47,8 +75,25 @@ button.close-button {
     cursor: pointer;
     color: var(--text-color);
     transition: opacity 0.3s ease, background-color 0.3s ease;
+    position: absolute;
+    right: 20px;
+    /* Align close button to the right */
+    top: 20px;
+    /* Position it at the top */
 }
 
+/* Hover effect for close button */
 button.close-button:hover {
     opacity: 0.8;
+}
+
+/* Media query for smaller screens */
+@media (max-width: 768px) {
+    .settings-container {
+        padding: 10px;
+    }
+
+    .settings-section {
+        padding: 12px;
+    }
 }

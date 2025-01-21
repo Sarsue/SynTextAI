@@ -17,20 +17,34 @@
   --link-color: #4a90e2;
 }
 
-/* Apply global styles */
-body {
+/* Global reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
   margin: 0;
+  padding: 0;
+}
+
+/* Set up body and html to fill the entire screen */
+body,
+html {
+  height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.3s ease, color 0.3s ease;
   background-color: var(--background-color);
   color: var(--text-color);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* App container styling */
+/* App container styles using Flexbox */
 .app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  /* Ensure it fills at least the viewport height */
   background-color: var(--background-color);
   color: var(--text-color);
 }
@@ -63,4 +77,22 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+/* Ensure the main content area expands to fill remaining space */
+main {
+  flex-grow: 1;
+  padding: 16px;
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
+/* Styling for forms, inputs, and other elements can go here */
+
+/* Media queries for responsiveness */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 8px;
+    /* Adjust padding for smaller screens */
+  }
 }
