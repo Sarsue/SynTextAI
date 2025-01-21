@@ -599,7 +599,16 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                     )}
                     {/* Settings Button at the bottom left */}
                     {user !== null && (
-                        <button className="settings-button" onClick={handleSettingsClick}>⚙️</button>
+                        <button
+                            className="settings-button"
+                            onClick={handleSettingsClick}
+                            style={{
+                                backgroundColor: darkMode ? 'var(--button-bg)' : 'var(--light-bg)',
+                                color: darkMode ? 'var(--button-text-color)' : 'var(--light-text-color)',
+                            }}
+                        >
+                            ⚙️
+                        </button>
                     )}
                 </div>
 
@@ -615,11 +624,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
 
                 {/* History Column on the right */}
                 <div className="history-column">
-                    {user !== null && (
-                        <div className="logout-button-container">
-                            <button onClick={handleLogout}>Logout</button>
-                        </div>
-                    )}
                     <HistoryView
                         histories={Object.values(histories)}
                         setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
@@ -632,6 +636,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             </div>
         </div>
     );
+
 };
 
 export default ChatApp;

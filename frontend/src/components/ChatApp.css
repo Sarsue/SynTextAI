@@ -1,215 +1,61 @@
-/* General container styling */
+/* Dark and Light Mode Variables */
 .chat-app-container {
+    background-color: var(--background-color);
+    color: var(--text-color);
     display: flex;
+    flex-direction: column;
     height: 100vh;
-    flex-direction: row;
-    background-color: #fafafa;
-    /* Default light background color */
-    transition: background-color 0.3s, color 0.3s;
-    /* Smooth transition for theme changes */
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Dark mode styles */
-.dark-mode .chat-app-container {
-    background-color: #222;
-    color: #fff;
-}
-
-/* Layout container for three columns */
 .layout-container {
     display: flex;
-    /* Aligns the columns horizontally */
     flex: 1;
-    /* Allow the container to take up available space */
-}
-
-/* Conversation column styling */
-.conversation-column {
-    flex: 2;
-    /* Takes up two parts of the layout */
-    display: flex;
-    flex-direction: column;
-    padding: 15px;
-    border-left: 1px solid #e0e0e0;
-    /* Adjust border to separate from the history column */
-    border-right: 1px solid #e0e0e0;
-    /* Add border to separate from files column */
-    overflow-y: auto;
-    transition: background-color 0.3s, border-color 0.3s;
-}
-
-.dark-mode .conversation-column {
-    background-color: #444;
-    border-color: #555;
-}
-
-/* History column styling */
-.history-column {
-    flex: 1;
-    /* Takes up one part of the layout */
-    display: flex;
-    flex-direction: column;
-    padding: 15px;
-    background-color: #f0f0f0;
-    overflow-y: auto;
-    transition: background-color 0.3s;
     height: 100%;
-    /* Ensure it occupies the full height */
 }
 
-.dark-mode .history-column {
-    background-color: #333;
+/* Column Styles */
+.files-column,
+.conversation-column,
+.history-column {
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    height: 100%;
+    transition: background-color 0.3s ease;
 }
 
-/* Files column styling */
+/* Responsive column widths */
 .files-column {
     flex: 1;
-    /* Takes up one part of the layout */
-    padding: 15px;
-    background-color: #f0f0f0;
-    /* Same background as history column */
-    overflow-y: auto;
-    transition: background-color 0.3s;
-    height: 100%;
+    background-color: var(--column-bg);
 }
 
-.dark-mode .files-column {
-    background-color: #333;
-    /* Dark mode background for files column */
+.conversation-column {
+    flex: 2;
+    background-color: var(--column-bg);
 }
 
-/* Make sure buttons are visible and well-spaced */
-button {
-    padding: 10px 15px;
-    margin: 5px 0;
+.history-column {
+    flex: 1;
+    background-color: var(--column-bg);
+}
+
+/* Buttons */
+.settings-button,
+.logout-button-container button {
+    padding: 10px 20px;
+    font-size: 1rem;
     border: none;
     border-radius: 4px;
-    background-color: #007bff;
-    color: white;
-    font-size: 16px;
-    transition: background-color 0.3s, color 0.3s;
     cursor: pointer;
+    margin-top: auto;
+    /* Align at the bottom */
+    transition: background-color 0.3s ease;
 }
 
-button:hover {
-    background-color: #0056b3;
-}
-
-.dark-mode button {
-    background-color: #555;
-    color: white;
-}
-
-/* Mobile styles */
-@media (max-width: 768px) {
-    .chat-app-container {
-        flex-direction: column;
-        /* Stacks columns vertically on small screens */
-    }
-
-    .conversation-column,
-    .history-column,
-    .files-column {
-        width: 100%;
-        padding: 10px;
-        flex: none;
-        position: relative;
-        /* Set posi
-        /* Remove flex-grow for mobile layout */
-    }
-
-    .conversation-column {
-        height: 70vh;
-        border-left: none;
-        /* No left border in mobile */
-        border-bottom: 1px solid #e0e0e0;
-        /* Bottom border for separation */
-    }
-
-    .dark-mode .conversation-column {
-        border-bottom: 1px solid #555;
-    }
-
-    .history-column {
-        height: 30vh;
-        /* Adjust height for history on mobile */
-    }
-
-    /* Buttons are spaced and easier to tap on mobile */
-    .user-actions {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 10px;
-    }
-
-    .user-actions button {
-        flex: 1;
-        margin: 0 5px;
-        padding: 15px;
-        /* Increased padding for touch targets */
-    }
-
-    /* Improve the size of text on smaller screens */
-    button {
-        font-size: 14px;
-        /* Adjust button font size for mobile */
-    }
-}
-
-/* Dark mode chat input */
-.chat-input {
-    padding: 15px;
-    border: 1px solid #ccc;
-    width: 100%;
-    border-radius: 4px;
-}
-
-.dark-mode .chat-input {
-    border: 1px solid #666;
-}
-
-/* Scrollbar styling */
-.conversation-column::-webkit-scrollbar,
-.history-column::-webkit-scrollbar,
-.files-column::-webkit-scrollbar {
-    width: 8px;
-    /* Set scrollbar width */
-}
-
-.conversation-column::-webkit-scrollbar-thumb,
-.history-column::-webkit-scrollbar-thumb,
-.files-column::-webkit-scrollbar-thumb {
-    background-color: #ccc;
-    /* Scrollbar color */
-    border-radius: 8px;
-    /* Rounded scrollbar */
-}
-
-.dark-mode .conversation-column::-webkit-scrollbar-thumb,
-.dark-mode .history-column::-webkit-scrollbar-thumb,
-.dark-mode .files-column::-webkit-scrollbar-thumb {
-    background-color: #555;
-    /* Dark mode scrollbar color */
-}
-
-.settings-button {
-    position: absolute;
-    /* Position button absolutely within the files column */
-    bottom: 15px;
-    /* Adjust this value for desired spacing from the bottom */
-    left: 15px;
-    /* Adjust this value for desired spacing from the left */
-    padding: 10px 15px;
-    /* Add padding for button */
-}
-
-.logout-button-container {
-    display: flex;
-    /* Use flexbox for alignment */
-    justify-content: flex-end;
-    /* Align to the right */
-    padding: 15px;
-    /* Add padding for spacing */
-    position: relative;
-    top: 0;
+/* Hover Effect */
+.settings-button:hover,
+.logout-button-container button:hover {
+    opacity: 0.9;
 }

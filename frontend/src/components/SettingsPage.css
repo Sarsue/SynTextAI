@@ -1,93 +1,54 @@
-/* General settings container styling */
 .settings-container {
-    position: relative;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    /* Full height of the viewport */
-    max-width: 100%;
-    /* Allow it to take full width */
-    margin: 0;
-    /* Remove auto centering */
-    background-color: #f9f9f9;
-    border-radius: 10px;
-    transition: background-color 0.3s;
-    box-sizing: border-box;
-    /* Ensure padding doesn't affect width */
+    padding: 20px;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-.dark-mode .settings-container {
-    background-color: #333;
-}
-
-/* Close button styling */
-.close-button {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: transparent;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-}
-
-/* Settings content structure */
 .settings-content {
     display: flex;
     flex-direction: column;
     gap: 20px;
-    height: 100%;
-    overflow-y: auto;
-    /* Allow scrolling if content overflows */
 }
 
-/* Section styling */
 .settings-section {
-    padding: 20px;
-    background-color: white;
+    padding: 16px;
+    background-color: var(--header-footer-bg);
     border-radius: 8px;
-    transition: background-color 0.3s;
 }
 
-.dark-mode .settings-section {
-    background-color: #444;
-}
-
-/* Title styling */
 .section-title {
+    margin: 0 0 10px;
     font-size: 18px;
-    margin-bottom: 10px;
-    color: #333;
+    font-weight: bold;
+    color: var(--text-color);
 }
 
-.dark-mode .section-title {
-    color: white;
+.section-content select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--text-color);
+    border-radius: 4px;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    transition: border-color 0.3s ease, background-color 0.3s ease;
 }
 
-/* Content styling within sections */
-.section-content {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-
-/* Dropdown styling */
-select {
-    padding: 10px;
-    border-radius: 5px;
-    border: 1px solid #ccc;
-    background-color: white;
-    font-size: 16px;
-    transition: border-color 0.3s;
-}
-
-select:focus {
-    border-color: #666;
+.section-content select:hover,
+.section-content select:focus {
+    border-color: var(--link-color);
     outline: none;
 }
 
-.dark-mode select {
-    background-color: #444;
-    color: white;
-    border: 1px solid #666;
+button.close-button {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text-color);
+    transition: opacity 0.3s ease, background-color 0.3s ease;
+}
+
+button.close-button:hover {
+    opacity: 0.8;
 }

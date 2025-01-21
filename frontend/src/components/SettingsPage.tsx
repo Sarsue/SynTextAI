@@ -46,7 +46,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
             </button>
 
             {/* Settings Content */}
-            <div className={`settings-content ${darkMode ? 'dark-mode' : ''}`}>
+            <div className="settings-content">
                 {/* Payment Section */}
                 <div className="settings-section">
                     <h2 className="section-title">Payment</h2>
@@ -103,6 +103,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
             </div>
         </div>
     );
+
 };
 
 export default SettingsPage;
