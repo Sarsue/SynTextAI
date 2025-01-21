@@ -1,20 +1,28 @@
 .input-area {
     display: flex;
     flex-direction: column;
-    background-color: #fff;
+    background-color: var(--background-color);
+    /* Uses the background-color from theme */
+    color: var(--text-color);
+    /* Uses the text color from theme */
     padding: 16px;
     border-radius: 8px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     justify-content: space-between;
     position: relative;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    /* Smooth transition for light/dark mode */
 }
 
-/* Dark mode styles */
+/* Dark mode specific styling */
 .dark-mode .input-area {
-    background-color: #333;
-    color: #fff;
+    background-color: var(--background-color);
+    /* Background color for dark mode */
+    color: var(--text-color);
+    /* Text color for dark mode */
 }
 
+/* Text input styling */
 .text-input {
     padding: 12px;
     border: 1px solid #ccc;
@@ -33,12 +41,24 @@
 /* File upload styling */
 .custom-file-upload {
     display: inline-block;
-    background-color: #0078d4;
-    color: #fff;
+    background-color: var(--button-bg);
+    /* Uses button background from theme */
+    color: var(--button-text-color);
+    /* Uses button text color from theme */
     padding: 8px 16px;
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.3s ease;
+    font-size: 16px;
+    /* Adjusted font size for consistency */
+}
+
+/* Ensure the file upload button is more visible in dark mode */
+.dark-mode .custom-file-upload {
+    background-color: var(--button-bg);
+    /* Keeps button visible in dark mode */
+    color: var(--button-text-color);
+    /* Ensures text is visible */
 }
 
 .custom-file-upload:hover {
@@ -51,8 +71,10 @@
 }
 
 .send-button {
-    background-color: #0078d4;
-    color: #fff;
+    background-color: var(--button-bg);
+    /* Uses button background from theme */
+    color: var(--button-text-color);
+    /* Uses button text color from theme */
     padding: 10px 18px;
     border: none;
     border-radius: 6px;
@@ -84,8 +106,13 @@
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 /* Attached files */
@@ -98,7 +125,7 @@
 .attached-file {
     display: flex;
     align-items: center;
-    background-color: #f0f0f0;
+    background-color: var(--background-color);
     padding: 6px;
     border-radius: 6px;
     margin-right: 8px;
