@@ -20,73 +20,74 @@ const Home: React.FC = () => {
                 </div>
             </header>
 
+            {/* Main Content */}
             <main className="content-container">
                 {/* Hero Section */}
                 <section className="hero-section">
-                    <h2 className="hero-title">AI-Powered Insights for Your Documents</h2>
+                    <h2 className="hero-title">AI-Powered Insights, Anytime, Anywhere</h2>
                     <p className="hero-description">
-                        Transform how you interact with information. Summarize, translate, and extract insights from your files in seconds. <strong>Start your knowledge journey today with SynText AI!</strong>
+                        SynText AI transforms how professionals learn, analyze, and communicate. Extract insights, summarize, and translate knowledge from documents, web pages, and multimedia—all in one platform.
+                        <strong> Elevate your expertise with SynText AI today.</strong>
                     </p>
+                    {/* <Link to="/signup">
+                        <button className="cta-button">Get Started Now</button>
+                    </Link> */}
                 </section>
 
-                {/* Video and Features Section */}
-                <section className="video-features-section">
-                    <div className="features-column">
-                        <h2 className="features-title">What SynText AI Can Do for You</h2>
-                        <ul className="features-list">
-                            <li className="feature-item">
-                                <i className="fas fa-signal feature-icon"></i>
-                                <h3>Automated Workflows</h3>
-                                <p>Auto-summarize and highlight key takeaways from documents instantly upon upload.</p>
-                            </li>
-                            <li className="feature-item">
-                                <i className="fas fa-language feature-icon"></i>
-                                <h3>Multilingual Support</h3>
-                                <p>Translate and process documents in multiple languages seamlessly.</p>
-                            </li>
-                            <li className="feature-item">
-                                <i className="fas fa-user-friends feature-icon"></i>
-                                <h3>Collaborative Sharing</h3>
-                                <p>Share insights, summaries, and conversations directly with your team or external tools like Slack and email.</p>
-                            </li>
-                            <li className="feature-item">
-                                <i className="fas fa-cog feature-icon"></i>
-                                <h3>Customizable Experience</h3>
-                                <p>Dark mode, adjustable font sizes, and more for a user-friendly interface.</p>
-                            </li>
-                            <li className="feature-item">
-                                <i className="fas fa-microphone feature-icon"></i>
-                                <h3>Voice Interaction</h3>
-                                <p>Enjoy hands-free interaction with text-to-speech and voice-to-text features.</p>
-                            </li>
-                        </ul>
-                    </div>
+                {/* Features Section */}
+                <section className="features-section">
+                    <h2 className="features-title">Why Professionals Choose SynText AI</h2>
+                    <ul className="features-list">
+                        <li className="feature-item">
+                            <h3>Rapid Knowledge Discovery</h3>
+                            <p>Analyze web pages, documents, and files in seconds.</p>
+                        </li>
+                        <li className="feature-item">
+                            <h3>Multilingual Capabilities</h3>
+                            <p>Engage seamlessly with content in multiple languages.</p>
+                        </li>
+                        <li className="feature-item">
+                            <h3>Comprehensive Formats</h3>
+                            <p>Interact with content in text and audio formats effortlessly.</p>
+                        </li>
+                        <li className="feature-item">
+                            <h3>Actionable Results</h3>
+                            <p>Summarize, extract, and share key insights instantly.</p>
+                        </li>
+                        <li className="feature-item">
+                            <h3>Customizable Experience</h3>
+                            <p>Adjust settings like dark mode to fit your workflow.</p>
+                        </li>
+                    </ul>
+                </section>
 
-                    <div className="video-column">
-                        <h2 className="video-title">See SynText AI in Action</h2>
-                        <div className="video-container">
-                            <iframe
-                                width="100%"
-                                height="250"
-                                src="https://www.youtube.com/embed/your-video-id"
-                                title="SynText AI Demo"
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                            ></iframe>
-                        </div>
+                {/* Demo Section */}
+                <section className="demo-section">
+                    <h2 className="demo-title">See SynText AI in Action</h2>
+                    <div className="video-container">
+                        <iframe
+                            width="100%"
+                            height="300"
+                            src="https://www.youtube.com/embed/your-video-id"
+                            title="SynText AI Demo"
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                        ></iframe>
                     </div>
                 </section>
             </main>
 
             {/* Footer */}
             <footer className="footer">
-                {/* Pricing Section */}
                 <section className="pricing-section">
-                    <h2 className="pricing-title">Start Your Knowledge Journey</h2>
+                    <h2 className="pricing-title">Start Your Journey with SynText AI</h2>
                     <p className="pricing-description">
-                        For just <strong>$15/month</strong>, unlock the full potential of SynText AI.
+                        Access the full power of SynText AI for <strong>just $15/month</strong>. Cancel anytime.
                     </p>
+                    {/* <Link to="/signup">
+                        <button className="pricing-button">Subscribe Now</button>
+                    </Link> */}
                 </section>
                 <p>&copy; 2024 OSAS INC. All rights reserved.</p>
             </footer>
