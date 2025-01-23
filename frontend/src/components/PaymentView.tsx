@@ -11,64 +11,63 @@ interface PaymentViewProps {
     onSubscriptionChange: (newStatus: string) => void;
     darkMode: boolean;
 }
+
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscriptionStatus, onSubscriptionChange, darkMode }) => {
     const stripe = useStripe();
     const elements = useElements();
     const [email, setEmail] = useState(user?.email || '');
     const [clientSecret, setClientSecret] = useState('');
-    const [loading, setLoading] = useState(true);
+    const [isRequestPending, setIsRequestPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [subscriptionData, setSubscriptionData] = useState<any>(null);
 
+    // Fetch Subscription Status
     useEffect(() => {
-        if (user) {
-            fetchSubscriptionStatus();
-        }
+        if (user) fetchSubscriptionStatus();
     }, [user]);
 
     const fetchSubscriptionStatus = async () => {
-        setLoading(true);
+        setIsRequestPending(true);
+        setError(null);
         try {
             const token = await user?.getIdToken();
             const res = await fetch('/api/v1/subscriptions/status', {
                 method: 'GET',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
+                headers: { Authorization: `Bearer ${token}` },
             });
+            if (!res.ok) throw new Error('Failed to fetch subscription status');
             const data = await res.json();
             setSubscriptionData(data);
             onSubscriptionChange(data.subscription_status);
         } catch (error) {
-            setError('Failed to fetch subscription status');
+            setError('Could not fetch subscription details. Please try again.');
         } finally {
-            setLoading(false);
+            setIsRequestPending(false);
         }
     };
 
-    const handleSubscribe = async (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!stripe || !elements) return;
-
-        const cardElement = elements.getElement(CardElement);
-        if (!cardElement) {
-            setError('CardElement is not available');
-            setLoading(false);
-            return;
+    // Validate Stripe and CardElement
+    const validateStripeAndCard = () => {
+        const cardElement = elements?.getElement(CardElement);
+        if (!stripe || !cardElement) {
+            setError('Payment system is unavailable. Please refresh the page.');
+            return null;
         }
+        return cardElement;
+    };
 
-        setLoading(true);
+    // Handle Subscribe
+    const handleSubscribe = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const cardElement = validateStripeAndCard();
+        if (!stripe || !cardElement) return;
+
+        setIsRequestPending(true);
         setError(null);
-
-        const { token, error: stripeError } = await stripe.createToken(cardElement);
-
-        if (stripeError) {
-            setError(stripeError.message || 'An unknown error occurred');
-            setLoading(false);
-            return;
-        }
-
         try {
+            const { token, error: stripeError } = await stripe.createToken(cardElement);
+            if (stripeError) throw new Error(stripeError.message || 'Payment processing failed.');
+
             const response = await fetch('/api/v1/subscriptions/subscribe', {
                 method: 'POST',
                 headers: {
@@ -77,51 +76,35 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
                 },
                 body: JSON.stringify({ payment_method: token?.id }),
             });
-
-            if (response.ok) {
-                setSubscriptionData({ ...subscriptionData, subscription_status: 'active' });
-                onSubscriptionChange('active');
-            } else {
-                const { error } = await response.json();
-                setError(error || 'An unknown error occurred');
-            }
+            if (!response.ok) throw new Error('Failed to complete subscription.');
+            const data = await response.json();
+            setSubscriptionData(data);
+            onSubscriptionChange(data.subscription_status);
         } catch (error) {
-            setError('Failed to subscribe');
+            setError((error as Error)?.message || 'An error occurred while subscribing.');
+
         } finally {
-            setLoading(false);
+            setIsRequestPending(false);
         }
     };
 
-    const handleUpdatePaymentMethod = async (event: React.FormEvent) => {
-        event.preventDefault();
-        if (!stripe || !elements) return;
+    // Handle Update Payment Method
+    const handleUpdatePaymentMethod = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const cardElement = validateStripeAndCard();
+        if (!cardElement || !clientSecret || !stripe) return;
 
-        const cardElement = elements.getElement(CardElement);
-        if (!cardElement) {
-            setError('CardElement is not available');
-            setLoading(false);
-            return;
-        }
-
-        setLoading(true);
+        setIsRequestPending(true);
         setError(null);
-
-        const { setupIntent, error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
-            payment_method: {
-                card: cardElement,
-                billing_details: {
-                    email,
-                },
-            },
-        });
-
-        if (stripeError) {
-            setError(stripeError.message || 'An unknown error occurred');
-            setLoading(false);
-            return;
-        }
-
         try {
+            const { setupIntent, error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
+                payment_method: {
+                    card: cardElement,
+                    billing_details: { email },
+                },
+            });
+            if (stripeError) throw new Error(stripeError.message || 'Failed to update payment method.');
+
             const response = await fetch('/api/v1/subscriptions/update-payment', {
                 method: 'POST',
                 headers: {
@@ -130,86 +113,73 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
                 },
                 body: JSON.stringify({ payment_method_id: setupIntent?.payment_method }),
             });
-
-            if (response.ok) {
-                setSubscriptionData({ ...subscriptionData, subscription_status: 'active' });
-                onSubscriptionChange('active');
-            } else {
-                const { error } = await response.json();
-                setError(error || 'An unknown error occurred');
-            }
+            if (!response.ok) throw new Error('Failed to update payment details.');
+            const data = await response.json();
+            setSubscriptionData(data);
+            onSubscriptionChange(data.subscription_status);
         } catch (error) {
-            setError('Failed to update payment method');
+            setError((error as Error)?.message || 'An error occurred while updating payment method.');
         } finally {
-            setLoading(false);
+            setIsRequestPending(false);
         }
     };
+
+    // Handle Cancel Subscription
     const handleCancelSubscription = async () => {
-        setLoading(true);
+        setIsRequestPending(true);
+        setError(null);
         try {
             const token = await user?.getIdToken();
             const res = await fetch('/api/v1/subscriptions/cancel', {
                 method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
+                headers: { Authorization: `Bearer ${token}` },
             });
-            if (res.ok) {
-                setSubscriptionData({ ...subscriptionData, subscription_status: 'canceled' });
-                onSubscriptionChange('canceled');
-            } else {
-                const { error } = await res.json();
-                setError(error);
-            }
+            if (!res.ok) throw new Error('Failed to cancel subscription.');
+            setSubscriptionData({ ...subscriptionData, subscription_status: 'canceled' });
+            onSubscriptionChange('canceled');
         } catch (error) {
-            setError('Failed to cancel subscription');
+            setError((error as Error)?.message || 'Failed to cancel subscription.');
         } finally {
-            setLoading(false);
+            setIsRequestPending(false);
         }
     };
-    const showUpdatePaymentForm = subscriptionData?.subscription_status === 'card_expired' || subscriptionData?.subscription_status === 'past_due';
 
-    if (loading) return <div>Loading...</div>;
+    const isCardUpdateRequired = ['card_expired', 'past_due'].includes(subscriptionData?.subscription_status);
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
             <h3>Payment</h3>
-
-            {showUpdatePaymentForm ? (
+            {isCardUpdateRequired ? (
                 <form onSubmit={handleUpdatePaymentMethod}>
                     <CardElement />
-                    <button type="submit" disabled={loading}>
-                        {loading ? 'Processing...' : 'Update Payment Method'}
+                    <button type="submit" disabled={isRequestPending}>
+                        {isRequestPending ? 'Processing...' : 'Update Payment Method'}
                     </button>
-                    {error && <p className="error">{error}</p>}
                 </form>
             ) : subscriptionData?.subscription_status === 'active' ? (
                 <>
                     <p>Your subscription is active.</p>
-                    <button onClick={handleCancelSubscription}>Cancel Subscription</button>
+                    <button onClick={handleCancelSubscription} disabled={isRequestPending}>
+                        {isRequestPending ? 'Processing...' : 'Cancel Subscription'}
+                    </button>
                 </>
             ) : (
                 <form onSubmit={handleSubscribe}>
                     <CardElement />
-                    <button type="submit" disabled={loading}>
-                        {loading ? 'Processing...' : 'Subscribe'}
+                    <button type="submit" disabled={isRequestPending}>
+                        {isRequestPending ? 'Processing...' : 'Subscribe'}
                     </button>
-                    {error && <p className="error">{error}</p>}
                 </form>
             )}
-
             {error && <p className="error">{error}</p>}
         </div>
     );
 };
 
-const WrappedPaymentView: React.FC<PaymentViewProps> = (props) => {
-    return (
-        <Elements stripe={props.stripePromise}>
-            <PaymentView {...props} />
-        </Elements>
-    );
-};
+const WrappedPaymentView: React.FC<PaymentViewProps> = (props) => (
+    <Elements stripe={props.stripePromise}>
+        <PaymentView {...props} />
+    </Elements>
+);
 
 export default WrappedPaymentView;
-

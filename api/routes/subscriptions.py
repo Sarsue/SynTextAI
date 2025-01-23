@@ -4,12 +4,18 @@ from dotenv import load_dotenv
 from utils import decode_firebase_token, get_user_id
 from datetime import datetime
 import os
-
+import logging
 load_dotenv()
+
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(levelname)s: %(message)s')
+
+
 
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
 price_id = os.getenv('STRIPE_PRICE_ID')
+logging.info(f"price id is {price_id}")
 subscriptions_bp = Blueprint("subscriptions", __name__, url_prefix="/api/v1/subscriptions")
 
 def get_id_helper(store, success, user_info):
@@ -85,10 +91,12 @@ def create_subscription():
 
         subscription = store.get_subscription(user_id)
         if subscription and subscription.get('status') == 'active':
+            logging.error(f"Request came from an already Active subscription {payment_method}")
             return jsonify({'error': 'Active subscription already exists'}), 400
 
         payment_method = request.json.get('payment_method')
         if not payment_method:
+            logging.error(f"Request came without a valid payment_method {payment_method}")
             return jsonify({'error': 'Payment method is missing'}), 400
 
         subscription = stripe.Subscription.create(

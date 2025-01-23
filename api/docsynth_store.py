@@ -12,8 +12,8 @@ import numpy as np
 from scipy.spatial.distance import cosine, euclidean
 
 
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.ERROR)
+# logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 class User(Base):
@@ -153,7 +153,7 @@ class DocSynthStore:
             return {'id': user.id, 'email': user.email, 'username': user.username}
         except IntegrityError:
             session.rollback()
-            logger.error(f"Error adding user: {e}")
+            #logger.error(f"Error adding user: {e}")
             raise
 
     def get_user_id_from_email(self, email):
@@ -191,7 +191,7 @@ class DocSynthStore:
             }
         except Exception as e:
             session.rollback()
-            logger.error(f"Error adding/updating subscription: {e}")
+            #logger.error(f"Error adding/updating subscription: {e}")
             raise
         finally:
             session.close()
@@ -209,7 +209,7 @@ class DocSynthStore:
                 raise ValueError("Subscription not found.")
         except Exception as e:
             session.rollback()
-            logger.error(f"Error updating subscription: {e}")
+            #logger.error(f"Error updating subscription: {e}")
             raise
         finally:
             session.close()
@@ -231,7 +231,7 @@ class DocSynthStore:
             else:
                 return None
         except Exception as e:
-            logger.error(f"Error getting subscription: {e}")
+            #logger.error(f"Error getting subscription: {e}")
             raise
         finally:
             session.close()
@@ -248,7 +248,7 @@ class DocSynthStore:
                 raise ValueError("Subscription not found.")
         except Exception as e:
             session.rollback()
-            logger.error(f"Error updating subscription status: {e}")
+            #logger.error(f"Error updating subscription status: {e}")
             raise
         finally:
             session.close()
@@ -262,7 +262,7 @@ class DocSynthStore:
             return {'id': chat_history.id, 'title': chat_history.title, 'user_id': chat_history.user_id}
         except Exception as e:
             session.rollback()
-            logger.error(f"Error adding chat history: {e}")
+            #logger.error(f"Error adding chat history: {e}")
             raise
         finally:
             session.close()
@@ -297,7 +297,7 @@ class DocSynthStore:
             }
         except Exception as e:
             session.rollback()
-            logger.error(f"Error adding message: {e}")
+            #logger.error(f"Error adding message: {e}")
             raise
         finally:
             session.close()
@@ -324,7 +324,7 @@ class DocSynthStore:
 
             return result
         except Exception as e:
-            logger.error(f"Error retrieving chat histories: {e}")
+            #logger.error(f"Error retrieving chat histories: {e}")
             raise
         finally:
             session.close()
@@ -349,7 +349,7 @@ class DocSynthStore:
                 for message in messages
             ]
         except Exception as e:
-            logger.error(f"Error retrieving messages for chat history: {e}")
+            #logger.error(f"Error retrieving messages for chat history: {e}")
             raise
         finally:
             session.close()
@@ -367,10 +367,10 @@ class DocSynthStore:
             # Commit the transaction
             session.commit()
 
-            logger.info(f'Deleted history {history_id} and associated messages for user {user_id}')
+            #logger.info(f'Deleted history {history_id} and associated messages for user {user_id}')
         except Exception as e:
             session.rollback()  # Rollback in case of error
-            logger.error(f"Error deleting chat history: {e}")
+            #logger.error(f"Error deleting chat history: {e}")
             raise
         finally:
             session.close()
@@ -388,10 +388,10 @@ class DocSynthStore:
             # Commit the transaction
             session.commit()
 
-            logger.info(f'Deleted all history and associated messages for user {user_id}')
+            #logger.info(f'Deleted all history and associated messages for user {user_id}')
         except Exception as e:
             session.rollback()  # Rollback in case of error
-            logger.error(f"Error deleting all user histories: {e}")
+            #logger.error(f"Error deleting all user histories: {e}")
             raise
         finally:
             session.close()
@@ -411,7 +411,7 @@ class DocSynthStore:
 
             return chat_history.strip()  # Remove trailing newline
         except Exception as e:
-            logger.error(f"Error formatting user chat history: {e}")
+            #logger.error(f"Error formatting user chat history: {e}")
             return ""
         finally:
             session.close()
@@ -425,12 +425,12 @@ class DocSynthStore:
                 
                 new_file = File(user_id=user_id, file_name=file_name, file_url=file_url)
                 session.add(new_file)
-                logger.info(f"Adding file: {file_name} for user {user_id}")
+                #logger.info(f"Adding file: {file_name} for user {user_id}")
                 session.commit()
-                logger.info(f"File added successfully: {new_file.id}")
+                #logger.info(f"File added successfully: {new_file.id}")
                 return {'id': new_file.id, 'user_id': user_id, 'file_url': file_url}
         except Exception as e:
-            logger.error(f"Error adding file: {e}", exc_info=True)
+            #logger.error(f"Error adding file: {e}", exc_info=True)
             raise
 
 
@@ -485,10 +485,10 @@ class DocSynthStore:
 
             # Commit all changes
             session.commit()
-            logging.info(f"File '{filename}' stored successfully with processed data.")
+            #logging.info(f"File '{filename}' stored successfully with processed data.")
         except Exception as e:
             session.rollback()
-            logging.error(f"Error storing file data: {e}")
+            #logging.error(f"Error storing file data: {e}")
             raise
         finally:
             session.close()
@@ -520,7 +520,7 @@ class DocSynthStore:
 
             return file_info_list
         except Exception as e:
-            logger.error(f"Error getting files for user: {e}")
+            #logger.error(f"Error getting files for user: {e}")
             raise
         finally:
             session.close()
@@ -552,14 +552,14 @@ class DocSynthStore:
                 session.delete(file)
                 session.commit()
 
-                logger.info(f"Deleted file '{file_name}', its chunks, and segments for user {user_id}.")
+                #logger.info(f"Deleted file '{file_name}', its chunks, and segments for user {user_id}.")
                 return {'file_name': file_name, 'file_id': file_id}
             else:
                 raise ValueError(f"File with ID {file_id} not found for user ID {user_id}.")
 
         except Exception as e:
             session.rollback()  # Rollback in case of error
-            logger.error(f"Error deleting file, its chunks, and segments: {e}")
+            #logger.error(f"Error deleting file, its chunks, and segments: {e}")
             raise  # Re-raise the exception for further handling
         finally:
             session.close()
@@ -629,7 +629,7 @@ class DocSynthStore:
 
 
         except Exception as e:
-            logger.error(f"Error retrieving similar segments: {e}")
+            #logger.error(f"Error retrieving similar segments: {e}")
             raise
         finally:
             session.close()

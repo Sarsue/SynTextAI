@@ -10,6 +10,7 @@ import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { UserProvider, useUserContext } from './UserContext';
 
+
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY);
 
 const App: React.FC = () => {
