@@ -14,8 +14,6 @@ logging.basicConfig(level=logging.DEBUG,
 
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
-price_id = os.getenv('STRIPE_PRICE_ID')
-logging.info(f"price id is {price_id}")
 subscriptions_bp = Blueprint("subscriptions", __name__, url_prefix="/api/v1/subscriptions")
 
 def get_id_helper(store, success, user_info):
@@ -78,44 +76,62 @@ def cancel_sub():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 403
-
 @subscriptions_bp.route('/subscribe', methods=['POST'])
 def create_subscription():
     try:
+        logging.info("Received subscription request.")
+
         store = current_app.store
         token = request.headers.get('Authorization')
         if not token:
+            logging.error("Authorization token is missing.")
             return jsonify({'error': 'Authorization token is missing'}), 401
+        logging.info(f"Authorization token: {token}")
+
         success, user_info = get_user_id(token)
+        logging.info(f"User info retrieved: {user_info}")
+
         user_id = get_id_helper(store, success, user_info)
+        logging.info(f"User ID: {user_id}")
 
         subscription = store.get_subscription(user_id)
+        logging.info(f"Existing subscription: {subscription}")
+
         if subscription and subscription.get('status') == 'active':
-            logging.error(f"Request came from an already Active subscription {payment_method}")
+            logging.error(f"Active subscription already exists for user: {user_id}")
             return jsonify({'error': 'Active subscription already exists'}), 400
 
         payment_method = request.json.get('payment_method')
+        logging.info(f"Payment method: {payment_method}")
         if not payment_method:
-            logging.error(f"Request came without a valid payment_method {payment_method}")
+            logging.error("Payment method is missing.")
             return jsonify({'error': 'Payment method is missing'}), 400
 
+        customer_id = store.get_stripe_customer_id(user_id)
+        logging.info(f"Stripe customer ID: {customer_id}")
+
+        price_id = os.getenv('STRIPE_PRICE_ID')
+        logging.info(f"price id is {price_id}")
         subscription = stripe.Subscription.create(
-            customer=store.get_stripe_customer_id(user_id),
-            items=[{'price': price_id}],  # Replace with your actual price ID
+            customer=customer_id,
+            items=[{'price': price_id}],
             default_payment_method=payment_method,
         )
+        logging.info(f"Stripe subscription created: {subscription}")
 
         store.add_or_update_subscription(
             user_id=user_id,
-            stripe_customer_id=store.get_stripe_customer_id(user_id),
+            stripe_customer_id=customer_id,
             stripe_subscription_id=subscription.id,
             status=subscription.status,
             current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
         )
+        logging.info(f"Subscription saved to database for user: {user_id}")
 
         return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully'}), 200
 
     except Exception as e:
+        logging.error(f"Error during subscription creation: {e}")
         return jsonify({'error': str(e)}), 403
 
 @subscriptions_bp.route('/update-payment', methods=['POST'])

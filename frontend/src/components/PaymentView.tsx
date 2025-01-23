@@ -56,18 +56,23 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         return cardElement;
     };
 
-    // Handle Subscribe
     const handleSubscribe = async (e: React.FormEvent) => {
         e.preventDefault();
         const cardElement = validateStripeAndCard();
-        if (!stripe || !cardElement) return;
+        if (!stripe || !cardElement) {
+            console.error("Stripe or Card Element is missing.");
+            return;
+        }
 
         setIsRequestPending(true);
         setError(null);
         try {
+            console.log("Generating Stripe token...");
             const { token, error: stripeError } = await stripe.createToken(cardElement);
             if (stripeError) throw new Error(stripeError.message || 'Payment processing failed.');
+            console.log("Stripe token generated:", token);
 
+            console.log("Sending subscription request...");
             const response = await fetch('/api/v1/subscriptions/subscribe', {
                 method: 'POST',
                 headers: {
@@ -76,13 +81,22 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
                 },
                 body: JSON.stringify({ payment_method: token?.id }),
             });
-            if (!response.ok) throw new Error('Failed to complete subscription.');
+            console.log("Response from server:", response);
+
+            if (!response.ok) {
+                const errorResponse = await response.json();
+                console.error("Server error response:", errorResponse);
+                throw new Error(errorResponse?.error || 'Failed to complete subscription.');
+            }
+
             const data = await response.json();
+            console.log("Subscription successful:", data);
+
             setSubscriptionData(data);
             onSubscriptionChange(data.subscription_status);
         } catch (error) {
+            console.error("Error during subscription:", error);
             setError((error as Error)?.message || 'An error occurred while subscribing.');
-
         } finally {
             setIsRequestPending(false);
         }
