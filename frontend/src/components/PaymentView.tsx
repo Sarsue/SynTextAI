@@ -66,11 +66,23 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
 
         setIsRequestPending(true);
         setError(null);
+
         try {
-            console.log("Generating Stripe token...");
-            const { token, error: stripeError } = await stripe.createToken(cardElement);
-            if (stripeError) throw new Error(stripeError.message || 'Payment processing failed.');
-            console.log("Stripe token generated:", token);
+            console.log("Creating Stripe payment method...");
+            const { paymentMethod, error: stripeError } = await stripe.createPaymentMethod({
+                type: 'card',
+                card: cardElement,
+                billing_details: {
+                    email,
+                    name: user?.displayName || 'Unknown User',
+                },
+            });
+
+            if (stripeError) {
+                throw new Error(stripeError.message || 'Payment method creation failed.');
+            }
+
+            console.log("Stripe payment method created:", paymentMethod);
 
             console.log("Sending subscription request...");
             const response = await fetch('/api/v1/subscriptions/subscribe', {
@@ -79,9 +91,8 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${await user?.getIdToken()}`,
                 },
-                body: JSON.stringify({ payment_method: token?.id }),
+                body: JSON.stringify({ payment_method: paymentMethod?.id }),
             });
-            console.log("Response from server:", response);
 
             if (!response.ok) {
                 const errorResponse = await response.json();

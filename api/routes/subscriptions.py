@@ -77,6 +77,7 @@ def cancel_sub():
     except Exception as e:
         return jsonify({'error': str(e)}), 403
 
+
 @subscriptions_bp.route('/subscribe', methods=['POST'])
 def create_subscription():
     try:
@@ -98,12 +99,12 @@ def create_subscription():
         else:
             # If no subscription exists, stripe_customer_id is None
             stripe_customer_id = None
-
-        # Retrieve the payment method from the request
-        payment_method = request.json.get('payment_method')
-        if not payment_method:
-            logging.error(f"Request came without a valid payment method: {user_id}")
-            return jsonify({'error': 'Payment method is missing'}), 400
+        
+        # Retrieve the payment method ID from the request
+        payment_method_id = request.json.get('payment_method')
+        if not payment_method_id:
+            logging.error(f"Request came without a valid payment method ID: {user_id}")
+            return jsonify({'error': 'Payment method ID is missing'}), 400
 
         # If stripe_customer_id is still None, create a new customer
         if not stripe_customer_id:
@@ -115,11 +116,24 @@ def create_subscription():
             stripe_customer_id = customer.id
             logging.info(f"Created new Stripe customer: {stripe_customer_id}")
 
+        # Attach the payment method to the customer
+        stripe.PaymentMethod.attach(
+            payment_method_id,
+            customer=stripe_customer_id
+        )
+
+        # Set the payment method as the default for the customer
+        stripe.Customer.modify(
+            stripe_customer_id,
+            invoice_settings={'default_payment_method': payment_method_id}
+        )
+
         # Create a new Stripe subscription
+       
         subscription = stripe.Subscription.create(
             customer=stripe_customer_id,
             items=[{'price': price_id}],  # Replace with your actual price ID
-            default_payment_method=payment_method,
+            default_payment_method=payment_method_id
         )
 
         # Store the subscription in the database
@@ -131,12 +145,11 @@ def create_subscription():
             current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
         )
 
-        return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully'}), 200
+        return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status}), 200
 
     except Exception as e:
         logging.error(f"Subscription error: {str(e)}")
         return jsonify({'error': str(e)}), 403
-
 
 @subscriptions_bp.route('/update-payment', methods=['POST'])
 def update_payment():
