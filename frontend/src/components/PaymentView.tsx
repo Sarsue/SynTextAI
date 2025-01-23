@@ -160,8 +160,10 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!res.ok) throw new Error('Failed to cancel subscription.');
-            setSubscriptionData({ ...subscriptionData, subscription_status: 'canceled' });
-            onSubscriptionChange('canceled');
+            const data = await res.json();
+
+            setSubscriptionData({ ...subscriptionData, subscription_status: data.subscription_status });
+            onSubscriptionChange(data.subscription_status);
         } catch (error) {
             setError((error as Error)?.message || 'Failed to cancel subscription.');
         } finally {
