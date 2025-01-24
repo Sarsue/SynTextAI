@@ -146,22 +146,18 @@ def create_subscription():
             )
 
             return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status}), 200
-        except stripe.error.CardError as e:
+        except Exception as e:
             # Card errors like insufficient funds or expired card
-            error_code = e.code 
-            error_msg = e.user_message or str(e)
+            error_msg =  str(e)
             store.add_or_update_subscription(
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=None,
-                status=error_code,
+                status=None,
                 current_period_end=None,
             )
             return jsonify({'error': error_msg, 'message': 'Card error occurred'}), 400
-        except Exception as e:
-             # Generic Stripe error
-            return jsonify({'error': str(e), 'message': 'An error occurred'}), 500
-
+        
        
 
 
@@ -183,11 +179,12 @@ def update_payment():
         if not payment_method:
             return jsonify({'error': 'Payment method is missing'}), 400
 
-        stripe_customer_id = store.get_stripe_customer_id(user_id)
+       
         subscription = store.get_subscription(user_id)
-
         if not subscription:
             return jsonify({'error': 'No subscription found'}), 404
+
+        stripe_customer_id = subscription.get('stripe_customer_id')
 
         subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
