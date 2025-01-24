@@ -34,7 +34,7 @@ class Subscription(Base):
 
     id = Column(Integer, primary_key=True)
     stripe_customer_id = Column(String, nullable=False)
-    stripe_subscription_id = Column(String, nullable=False, unique=True, index=True)
+    stripe_subscription_id = Column(String, nullable=True)
     status = Column(String, nullable=False)
     current_period_end = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
