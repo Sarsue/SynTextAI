@@ -116,40 +116,58 @@ def create_subscription():
             stripe_customer_id = customer.id
             logging.info(f"Created new Stripe customer: {stripe_customer_id}")
 
-        # Attach the payment method to the customer
-        stripe.PaymentMethod.attach(
-            payment_method_id,
-            customer=stripe_customer_id
-        )
+        try:
+            # Attach the payment method to the customer
+            stripe.PaymentMethod.attach(
+                payment_method_id,
+                customer=stripe_customer_id
+            )
 
-        # Set the payment method as the default for the customer
-        stripe.Customer.modify(
-            stripe_customer_id,
-            invoice_settings={'default_payment_method': payment_method_id}
-        )
+            # Set the payment method as the default for the customer
+            stripe.Customer.modify(
+                stripe_customer_id,
+                invoice_settings={'default_payment_method': payment_method_id}
+            )
 
-        # Create a new Stripe subscription
+            # Create a new Stripe subscription
+            subscription = stripe.Subscription.create(
+                customer=stripe_customer_id,
+                items=[{'price': price_id}],  # Replace with your actual price ID
+                default_payment_method=payment_method_id
+            )
+
+            # Store the subscription in the database
+            store.add_or_update_subscription(
+                user_id=user_id,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=subscription.id,
+                status=subscription.status,
+                current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
+            )
+
+            return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status}), 200
+        except stripe.error.CardError as e:
+            # Card errors like insufficient funds or expired card
+            error_code = e.code 
+            error_msg = e.user_message or str(e)
+            store.add_or_update_subscription(
+                user_id=user_id,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=None,
+                status=error_code,
+                current_period_end=None,
+            )
+            return jsonify({'error': error_msg, 'message': 'Card error occurred'}), 400
+        except Exception as e:
+             # Generic Stripe error
+            return jsonify({'error': str(e), 'message': 'An error occurred'}), 500
+
        
-        subscription = stripe.Subscription.create(
-            customer=stripe_customer_id,
-            items=[{'price': price_id}],  # Replace with your actual price ID
-            default_payment_method=payment_method_id
-        )
 
-        # Store the subscription in the database
-        store.add_or_update_subscription(
-            user_id=user_id,
-            stripe_customer_id=stripe_customer_id,
-            stripe_subscription_id=subscription.id,
-            status=subscription.status,
-            current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
-        )
-
-        return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status}), 200
 
     except Exception as e:
-        logging.error(f"Subscription error: {str(e)}")
-        return jsonify({'error': str(e)}), 403
+            logging.error(f"Subscription error: {str(e)}")
+            return jsonify({'error': str(e)}), 403
 
 @subscriptions_bp.route('/update-payment', methods=['POST'])
 def update_payment():
