@@ -226,7 +226,7 @@ def webhook():
             store.update_subscription(stripe_customer_id, status, current_period_end)
 
         elif event_type == 'customer.subscription.deleted':
-            store.update_subscription_status(stripe_customer_id, "canceled")
+            store.update_subscription_status(stripe_customer_id, "cancelled")
 
         else:
             return jsonify({"error": "Unhandled event"}), 400

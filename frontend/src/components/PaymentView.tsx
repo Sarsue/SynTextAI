@@ -30,21 +30,27 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         setIsRequestPending(true);
         setError(null);
         try {
+            console.log("Fetching subscription status...");
             const token = await user?.getIdToken();
+            console.log("User token:", token);
             const res = await fetch('/api/v1/subscriptions/status', {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${token}` },
             });
+            console.log("Subscription status response:", res);
             if (!res.ok) throw new Error('Failed to fetch subscription status');
             const data = await res.json();
+            console.log("Subscription status data:", data);
             setSubscriptionData(data);
             onSubscriptionChange(data.subscription_status);
         } catch (error) {
+            console.error("Error fetching subscription status:", error);
             setError('Could not fetch subscription details. Please try again.');
         } finally {
             setIsRequestPending(false);
         }
     };
+
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
@@ -171,8 +177,14 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
     };
 
+
+
+    console.log("Subscription status:", subscriptionData?.subscription_status);
     // const isCardUpdateRequired = ['card_expired', 'past_due'].includes(subscriptionData?.subscription_status);
-    const isCardUpdateRequired = !['canceled', 'active'].includes(subscriptionData?.subscription_status);
+    const isCardUpdateRequired = subscriptionData?.subscription_status
+        ? !['canceled', 'active'].includes(subscriptionData.subscription_status)
+        : true;
+    console.log("Is card update required:", isCardUpdateRequired);
 
 
     return (
