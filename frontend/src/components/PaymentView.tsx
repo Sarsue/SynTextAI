@@ -182,7 +182,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
     console.log("Subscription status:", subscriptionData?.subscription_status);
     // const isCardUpdateRequired = ['card_expired', 'past_due'].includes(subscriptionData?.subscription_status);
     const isCardUpdateRequired = subscriptionData?.subscription_status
-        ? !['canceled', 'active'].includes(subscriptionData.subscription_status)
+        ? !['canceled', 'active', 'none'].includes(subscriptionData.subscription_status)
         : true;
     console.log("Is card update required:", isCardUpdateRequired);
 
