@@ -167,7 +167,7 @@ class DocSynthStore:
     def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None):
         session = self.get_session()
         try:
-            subscription = session.query(Subscription).filter(Subscription.stripe_subscription_id == stripe_subscription_id).first()
+            subscription = session.query(Subscription).filter(Subscription.stripe_customer_id == stripe_customer_id).first()
             if subscription:
                 subscription.status = status
                 subscription.current_period_end = current_period_end
@@ -192,19 +192,6 @@ class DocSynthStore:
         except Exception as e:
             session.rollback()
             #logger.error(f"Error adding/updating subscription: {e}")
-            raise
-        finally:
-            session.close()
-    def get_stripe_customer_id(self, user_id):
-        session = self.get_session()
-        try:
-            subscription = session.query(Subscription).filter_by(user_id=user_id).first()
-            if subscription:
-                return subscription.stripe_customer_id
-            else:
-                raise ValueError("Stripe customer ID not found for the user.")
-        except Exception as e:
-            #logger.error(f"Error getting Stripe customer ID: {e}")
             raise
         finally:
             session.close()
