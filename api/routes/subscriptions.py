@@ -153,7 +153,7 @@ def create_subscription():
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=None,
-                status=None,
+                status="none",
                 current_period_end=None,
             )
             return jsonify({'error': error_msg, 'message': 'Card error occurred'}), 400
