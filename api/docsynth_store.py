@@ -166,19 +166,22 @@ class DocSynthStore:
 
     def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None):
         session = self.get_session()
+        update_time = datetime.utcnow() 
         try:
             subscription = session.query(Subscription).filter(Subscription.stripe_customer_id == stripe_customer_id).first()
             if subscription:
                 subscription.stripe_subscription_id = stripe_subscription_id,
                 subscription.status = status,
-                subscription.current_period_end = current_period_end
+                subscription.current_period_end = current_period_end,
+                subscription.updated_at = update_time
             else:
                 subscription = Subscription(
                     user_id=user_id, 
                     stripe_customer_id=stripe_customer_id, 
                     stripe_subscription_id=stripe_subscription_id,
                     status=status, 
-                    current_period_end=current_period_end
+                    current_period_end=current_period_end,
+                    updated_at = update_time
                 )
                 session.add(subscription)
             session.commit()
