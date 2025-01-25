@@ -169,7 +169,8 @@ class DocSynthStore:
         try:
             subscription = session.query(Subscription).filter(Subscription.stripe_customer_id == stripe_customer_id).first()
             if subscription:
-                subscription.status = status
+                subscription.stripe_subscription_id = stripe_subscription_id,
+                subscription.status = status,
                 subscription.current_period_end = current_period_end
             else:
                 subscription = Subscription(
