@@ -47,7 +47,7 @@ def subscription_status():
         
         if not subscription:
             return jsonify({
-                'status': 'none',
+                'subscription_status': 'none',
                 'card_last4': None,
                 'card_brand': None,
                 'card_exp_month': None,
@@ -56,7 +56,7 @@ def subscription_status():
         
         # Prepare subscription data to return
         response = {
-            'status': subscription['status'],
+            'subscription_status': subscription['status'],
             'card_last4': subscription.card_last4,
             'card_brand': subscription.card_brand,
             'card_exp_month': subscription.exp_month,
