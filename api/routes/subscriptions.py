@@ -29,18 +29,42 @@ def get_id_helper(store, success, user_info):
 @subscriptions_bp.route('/status', methods=['GET'])
 def subscription_status():
     try:
-
         store = current_app.store
         token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        user_id = get_id_helper(store, success, user_info)
+        
         if not token:
             return jsonify({'error': 'Authorization token is missing'}), 401
+        
+        success, user_info = get_user_id(token)
+        if not success:
+            return jsonify({'error': 'User authentication failed'}), 401
+        
+        user_id = get_id_helper(store, success, user_info)
+        if not user_id:
+            return jsonify({'error': 'User ID not found'}), 404
+
         subscription = store.get_subscription(user_id)
+        
+        if not subscription:
+            return jsonify({
+                'subscription_status': 'none',
+                'has_payment_method': False,
+                'card_last4': None,
+                'card_brand': None,
+                'card_exp_month': None,
+                'card_exp_year': None
+            }), 200
+        
+        # Prepare subscription data to return
         response = {
-            'subscription_status': subscription['status'] if subscription else 'none',
-            'has_payment_method': subscription.get('default_payment_method') is not None if subscription else False
+            'subscription_status': subscription['status'],
+            'has_payment_method': subscription.get('default_payment_method') is not None,
+            'card_last4': subscription.get('default_payment_method', {}).get('last4', None),
+            'card_brand': subscription.get('default_payment_method', {}).get('brand', None),
+            'card_exp_month': subscription.get('default_payment_method', {}).get('exp_month', None),
+            'card_exp_year': subscription.get('default_payment_method', {}).get('exp_year', None)
         }
+        
         return jsonify(response), 200
     except Exception as e:
         current_app.logger.error(f"Error in subscription_status: {str(e)}")
@@ -65,10 +89,9 @@ def cancel_sub():
             return jsonify({'error': 'Subscription ID is missing'}), 400
 
         cancellation_result = stripe.Subscription.delete(subscription_id)
-        store.add_or_update_subscription(
+        store.update_subscription_status(
             user_id,
             subscription_status['stripe_customer_id'],
-            subscription_id,
             cancellation_result['status']
         )
 
@@ -135,7 +158,7 @@ def create_subscription():
                 items=[{'price': price_id}],  # Replace with your actual price ID
                 default_payment_method=payment_method_id
             )
-
+           
             # Store the subscription in the database
             store.add_or_update_subscription(
                 user_id=user_id,
@@ -143,6 +166,10 @@ def create_subscription():
                 stripe_subscription_id=subscription.id,
                 status=subscription.status,
                 current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
+                card_last_4 = payment_method_id.card.last4,
+                card_brand = payment_method_id.card.brand,
+                exp_month = payment_method_id.card.exp_month,
+                exp_year = payment_method_id.card.exp_year
             )
 
             return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status}), 200
@@ -193,6 +220,17 @@ def update_payment():
         stripe.PaymentMethod.attach(payment_method, customer=stripe_customer_id)
         stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
 
+        store.update_subscription(
+            stripe_customer_id=stripe_customer_id,
+            status=subscription.status,  # Or retrieve status from Stripe if required
+            current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),  # Retrieve current period end from Stripe if needed
+            card_last_4 = payment_method.card.last4,
+            card_brand = payment_method.card.brand,
+            exp_month = payment_method.card.exp_month,
+            exp_year = payment_method.card.exp_year
+        )
+
+
         return jsonify({'success': True}), 200
 
     except Exception as e:
@@ -215,7 +253,7 @@ def webhook():
             store.update_subscription_status(stripe_customer_id, "active")
 
         elif event_type == 'invoice.payment_failed':
-            store.update_subscription_status(stripe_customer_id, "card_expired")
+            store.update_subscription_status(stripe_customer_id, "card_declined")
 
         elif event_type == 'customer.subscription.updated':
             status = data_object['status']

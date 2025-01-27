@@ -43,6 +43,21 @@ class Subscription(Base):
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
     user = relationship("User", back_populates="subscriptions")
 
+    # Link to CardDetails
+    card_details = relationship("CardDetails", back_populates="subscription", cascade="all, delete-orphan")
+
+class CardDetails(Base):
+    __tablename__ = 'card_details'
+
+    id = Column(Integer, primary_key=True)
+    subscription_id = Column(Integer, ForeignKey('subscriptions.id', ondelete='CASCADE'), nullable=False)  # Link to the Subscription table
+    card_last4 = Column(String(4), nullable=False)  # Last 4 digits of the card
+    card_type = Column(String(50), nullable=False)  # Card type (e.g., Visa, Mastercard)
+    exp_month = Column(Integer, nullable=False)  # Expiration month
+    exp_year = Column(Integer, nullable=False)  # Expiration year
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subscription = relationship('Subscription', back_populates='card_details')
 
 class ChatHistory(Base):
     __tablename__ = 'chat_histories'
@@ -164,26 +179,64 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None):
+    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
         session = self.get_session()
-        update_time = datetime.utcnow() 
+        update_time = datetime.utcnow()
         try:
+            # Check if the subscription already exists
             subscription = session.query(Subscription).filter(Subscription.stripe_customer_id == stripe_customer_id).first()
+            
             if subscription:
-                subscription.stripe_subscription_id = stripe_subscription_id,
-                subscription.status = status,
-                subscription.current_period_end = current_period_end,
+                # Update existing subscription
+                subscription.stripe_subscription_id = stripe_subscription_id
+                subscription.status = status
+                subscription.current_period_end = current_period_end
                 subscription.updated_at = update_time
+                
+                # Update card details if provided
+                if card_last4 and card_type and exp_month and exp_year:
+                    card_details = session.query(CardDetails).filter_by(subscription_id=subscription.id).first()
+                    if card_details:
+                        card_details.card_last4 = card_last4
+                        card_details.card_type = card_type
+                        card_details.exp_month = exp_month
+                        card_details.exp_year = exp_year
+                        card_details.created_at = update_time
+                    else:
+                        new_card_details = CardDetails(
+                            subscription_id=subscription.id,
+                            card_last4=card_last4,
+                            card_type=card_type,
+                            exp_month=exp_month,
+                            exp_year=exp_year,
+                            created_at=update_time
+                        )
+                        session.add(new_card_details)
             else:
+                # Create a new subscription
                 subscription = Subscription(
-                    user_id=user_id, 
-                    stripe_customer_id=stripe_customer_id, 
+                    user_id=user_id,
+                    stripe_customer_id=stripe_customer_id,
                     stripe_subscription_id=stripe_subscription_id,
-                    status=status, 
+                    status=status,
                     current_period_end=current_period_end,
-                    updated_at = update_time
+                    updated_at=update_time
                 )
                 session.add(subscription)
+                session.flush()  # Ensure subscription.id is generated before using it
+                
+                # Add card details if provided
+                if card_last4 and card_type and exp_month and exp_year:
+                    new_card_details = CardDetails(
+                        subscription_id=subscription.id,
+                        card_last4=card_last4,
+                        card_type=card_type,
+                        exp_month=exp_month,
+                        exp_year=exp_year,
+                        created_at=update_time
+                    )
+                    session.add(new_card_details)
+
             session.commit()
             return {
                 'id': subscription.id,
@@ -191,23 +244,54 @@ class DocSynthStore:
                 'stripe_customer_id': stripe_customer_id,
                 'stripe_subscription_id': stripe_subscription_id,
                 'status': status,
-                'current_period_end': current_period_end
+                'current_period_end': current_period_end,
+                'card_details': {
+                    'card_last4': card_last4,
+                    'card_type': card_type,
+                    'exp_month': exp_month,
+                    'exp_year': exp_year
+                } if card_last4 else None
             }
         except Exception as e:
             session.rollback()
-            #logger.error(f"Error adding/updating subscription: {e}")
+            # logger.error(f"Error adding/updating subscription: {e}")
             raise
         finally:
             session.close()
 
-    def update_subscription(self, stripe_customer_id, status, current_period_end):
+    def update_subscription(self, stripe_customer_id, status, current_period_end, card_last4=None, card_type=None, exp_month=None, exp_year=None):
         session = self.get_session()
         try:
+            # Find the subscription by Stripe customer ID
             subscription = session.query(Subscription).filter_by(stripe_customer_id=stripe_customer_id).first()
             if subscription:
+                # Update subscription details
                 subscription.status = status
                 subscription.current_period_end = current_period_end
                 subscription.updated_at = datetime.utcnow()  # Ensure `updated_at` is auto-updated
+
+                # Update payment card details if provided
+                if card_last4 and card_type and exp_month and exp_year:
+                    card_details = session.query(CardDetails).filter_by(subscription_id=subscription.id).first()
+                    if card_details:
+                        # Update existing card details
+                        card_details.card_last4 = card_last4
+                        card_details.card_type = card_type
+                        card_details.exp_month = exp_month
+                        card_details.exp_year = exp_year
+                        card_details.updated_at = datetime.utcnow()  # Ensure `updated_at` is updated
+                    else:
+                        # Add new card details if none exist
+                        new_card_details = CardDetails(
+                            subscription_id=subscription.id,
+                            card_last4=card_last4,
+                            card_type=card_type,
+                            exp_month=exp_month,
+                            exp_year=exp_year,
+                            created_at=datetime.utcnow()
+                        )
+                        session.add(new_card_details)
+
                 session.commit()
             else:
                 raise ValueError("Subscription not found.")
@@ -218,19 +302,32 @@ class DocSynthStore:
         finally:
             session.close()
 
+
     def get_subscription(self, user_id):
         session = self.get_session()
         try:
-            subscription = session.query(Subscription).filter_by(user_id=user_id).first()
+            # Use a join to retrieve the subscription and its related card details
+            subscription = (
+                session.query(Subscription, CardDetails)
+                .join(CardDetails, Subscription.id == CardDetails.subscription_id)
+                .filter(Subscription.user_id == user_id)
+                .first()
+            )
+            
             if subscription:
+                subscription_data, card_data = subscription
                 return {
-                    'id': subscription.id,
-                    'stripe_customer_id': subscription.stripe_customer_id,
-                    'stripe_subscription_id': subscription.stripe_subscription_id,
-                    'status': subscription.status,
-                    'current_period_end': subscription.current_period_end,
-                    'created_at': subscription.created_at,
-                    'updated_at': subscription.updated_at
+                    'id': subscription_data.id,
+                    'stripe_customer_id': subscription_data.stripe_customer_id,
+                    'stripe_subscription_id': subscription_data.stripe_subscription_id,
+                    'status': subscription_data.status,
+                    'current_period_end': subscription_data.current_period_end,
+                    'created_at': subscription_data.created_at,
+                    'updated_at': subscription_data.updated_at,
+                    'card_last4': card_data.card_last4,  # Get card details from the CardDetails table
+                    'card_brand': card_data.card_brand,
+                    'exp_month': card_data.exp_month,
+                    'exp_year': card_data.exp_year
                 }
             else:
                 return None
@@ -241,6 +338,9 @@ class DocSynthStore:
             session.close()
 
     def update_subscription_status(self, stripe_customer_id, new_status):
+        """
+            Called by Web Hook Uses Customer_id
+        """
         session = self.get_session()
         try:
             subscription = session.query(Subscription).filter_by(stripe_customer_id=stripe_customer_id).first()

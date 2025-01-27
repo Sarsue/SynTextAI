@@ -200,6 +200,17 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             ) : subscriptionData?.subscription_status === 'active' ? (
                 <>
                     <p>Your subscription is active.</p>
+                    {subscriptionData?.card_last4 && subscriptionData?.card_brand && (
+                        <div className="CardDetails">
+                            <p>
+                                Card: {subscriptionData.card_brand.toUpperCase()} ending in{' '}
+                                {subscriptionData.card_last4}
+                            </p>
+                            <p>
+                                Expiry: {subscriptionData.card_exp_month}/{subscriptionData.card_exp_year}
+                            </p>
+                        </div>
+                    )}
                     <button onClick={handleCancelSubscription} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Cancel Subscription'}
                     </button>
