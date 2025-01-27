@@ -48,7 +48,6 @@ def subscription_status():
         if not subscription:
             return jsonify({
                 'status': 'none',
-                'has_payment_method': False,
                 'card_last4': None,
                 'card_brand': None,
                 'card_exp_month': None,
@@ -58,7 +57,6 @@ def subscription_status():
         # Prepare subscription data to return
         response = {
             'status': subscription['status'],
-            'has_payment_method': True,
             'card_last4': subscription.card_last4,
             'card_brand': subscription.card_brand,
             'card_exp_month': subscription.exp_month,
@@ -97,8 +95,8 @@ def cancel_sub():
         card_details = {
                     'card_last4': subscription_status.card_last4,
                     'card_brand':  subscription_status.card.brand,
-                    'exp_month':  subscription_status.exp_month,
-                    'exp_year': subscription_status.exp_year
+                    'card_exp_month':  subscription_status.exp_month,
+                    'card_exp_year': subscription_status.exp_year
                 }
         return jsonify({'subscription_status': cancellation_result['status'], **card_details}), 200
 
@@ -179,8 +177,8 @@ def create_subscription():
             card_details = {
                     'card_last4': payment_method_id.card.last4,
                     'card_brand':  payment_method_id.card.brand,
-                    'exp_month':  payment_method_id.card.exp_month,
-                    'exp_year': payment_method_id.card.exp_year
+                    'card_exp_month':  payment_method_id.card.exp_month,
+                    'card_exp_year': payment_method_id.card.exp_year
                 }
             return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status, **card_details}), 200
         except Exception as e:
