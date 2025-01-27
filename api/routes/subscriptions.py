@@ -156,7 +156,7 @@ def create_subscription():
             )
 
             # Create a new Stripe subscription
-            subscription = stripe.Subscription.create(
+            created_subscription = stripe.Subscription.create(
                 customer=stripe_customer_id,
                 items=[{'price': price_id}],  # Replace with your actual price ID
                 default_payment_method=payment_method_id
@@ -166,9 +166,9 @@ def create_subscription():
             store.add_or_update_subscription(
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
-                stripe_subscription_id=subscription.id,
-                status=subscription.status,
-                current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),
+                stripe_subscription_id=created_subscription.id,
+                status=created_subscription.status,
+                current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
                 card_last_4 = payment_method_id.card.last4,
                 card_brand = payment_method_id.card.brand,
                 exp_month = payment_method_id.card.exp_month,
@@ -180,7 +180,7 @@ def create_subscription():
                     'card_exp_month':  payment_method_id.card.exp_month,
                     'card_exp_year': payment_method_id.card.exp_year
                 }
-            return jsonify({'subscription_id': subscription.id, 'message': 'Subscription created successfully', "subscription_status" : subscription.status, **card_details}), 200
+            return jsonify({'subscription_id': created_subscription.id, 'message': 'Subscription created successfully', "subscription_status" : created_subscription.status, **card_details}), 200
         except Exception as e:
             # Card errors like insufficient funds or expired card
             error_msg =  str(e)
