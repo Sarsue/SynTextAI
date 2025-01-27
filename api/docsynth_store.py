@@ -306,16 +306,23 @@ class DocSynthStore:
     def get_subscription(self, user_id):
         session = self.get_session()
         try:
-            # Use a join to retrieve the subscription and its related card details
+            # Use a LEFT JOIN to retrieve the subscription and its related card details (if any)
             subscription = (
                 session.query(Subscription, CardDetails)
-                .join(CardDetails, Subscription.id == CardDetails.subscription_id)
+                .outerjoin(CardDetails, Subscription.id == CardDetails.subscription_id)  # Changed to outerjoin
                 .filter(Subscription.user_id == user_id)
                 .first()
             )
             
             if subscription:
                 subscription_data, card_data = subscription
+                # Handle the case where card_data might be None (i.e., no card details associated with this subscription)
+                card_details = {
+                    'card_last4': card_data.card_last4 if card_data else None,
+                    'card_brand': card_data.card_brand if card_data else None,
+                    'exp_month': card_data.exp_month if card_data else None,
+                    'exp_year': card_data.exp_year if card_data else None
+                }
                 return {
                     'id': subscription_data.id,
                     'stripe_customer_id': subscription_data.stripe_customer_id,
@@ -324,10 +331,7 @@ class DocSynthStore:
                     'current_period_end': subscription_data.current_period_end,
                     'created_at': subscription_data.created_at,
                     'updated_at': subscription_data.updated_at,
-                    'card_last4': card_data.card_last4,  # Get card details from the CardDetails table
-                    'card_brand': card_data.card_brand,
-                    'exp_month': card_data.exp_month,
-                    'exp_year': card_data.exp_year
+                    **card_details  # Merge card details if available
                 }
             else:
                 return None
@@ -336,6 +340,7 @@ class DocSynthStore:
             raise
         finally:
             session.close()
+
 
     def update_subscription_status(self, stripe_customer_id, new_status):
         """
