@@ -88,7 +88,6 @@ def cancel_sub():
 
         cancellation_result = stripe.Subscription.delete(subscription_id)
         store.update_subscription_status(
-            user_id,
             subscription_status['stripe_customer_id'],
             cancellation_result['status']
         )
