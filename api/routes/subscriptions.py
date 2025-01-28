@@ -178,10 +178,10 @@ def create_subscription():
             return jsonify({
                             'message': 'Subscription created successfully',
                              "subscription_status" : created_subscription.status, 
-                            'card_last4': payment_method_id.card.last4,
-                            'card_brand': payment_method_id.card.brand,
-                            'card_exp_month': payment_method_id.card.exp_month,
-                            'card_exp_year': payment_method_id.card.exp_year}), 200
+                            'card_last4': payment_method.card.last4,
+                            'card_brand': payment_method.card.brand,
+                            'card_exp_month': payment_method.card.exp_month,
+                            'card_exp_year': payment_method.card.exp_year}), 200
                             
         except Exception as e:
             # Card errors like insufficient funds or expired card

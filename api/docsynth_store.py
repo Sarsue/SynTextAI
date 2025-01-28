@@ -239,19 +239,18 @@ class DocSynthStore:
 
             session.commit()
             return {
-                'id': subscription.id,
-                'user_id': user_id,
-                'stripe_customer_id': stripe_customer_id,
-                'stripe_subscription_id': stripe_subscription_id,
-                'status': status,
-                'current_period_end': current_period_end,
-                'card_details': {
-                    'card_last4': card_last4,
-                    'card_type': card_type,
-                    'exp_month': exp_month,
-                    'exp_year': exp_year
-                } if card_last4 else None
-            }
+                    'id': subscription.id,
+                    'user_id': user_id,
+                    'stripe_customer_id': stripe_customer_id,
+                    'stripe_subscription_id': stripe_subscription_id,
+                    'status': status,
+                    'current_period_end': current_period_end,
+                    'card_last4': card_last4 if card_last4 else None,
+                    'card_brand': card_type if card_type else None,
+                    'exp_month': exp_month if exp_month else None,
+                    'exp_year': exp_year if exp_year else None
+                } 
+
         except Exception as e:
             session.rollback()
             # logger.error(f"Error adding/updating subscription: {e}")
