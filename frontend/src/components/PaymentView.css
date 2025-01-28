@@ -1,35 +1,23 @@
-/* PaymentView general styling */
+/* PaymentView styling */
 .PaymentView {
     max-width: 600px;
-    /* Increased max-width for larger screens */
     width: 90%;
-    /* Responsive width to adjust based on screen size */
     margin: 20px auto;
-    /* Centered and with margin for spacing */
     padding: 20px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--header-footer-bg);
     border-radius: 8px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    background-color: var(--background-color);
+    color: var(--text-color);
     box-sizing: border-box;
-    /* Ensure padding doesn't affect width */
-}
-
-.PaymentView.dark-mode {
-    background-color: #333;
-    /* Dark mode background */
-    color: #fff;
-    /* Dark mode text color */
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Header styling */
 .PaymentView h3 {
-    color: #333;
     margin-bottom: 16px;
     font-size: 24px;
-}
-
-.PaymentView.dark-mode h3 {
-    color: #fff;
+    color: var(--text-color);
 }
 
 /* Label styling */
@@ -37,6 +25,7 @@
     display: block;
     margin-bottom: 8px;
     font-size: 14px;
+    color: var(--text-color);
 }
 
 /* Input and StripeElement styling */
@@ -45,61 +34,40 @@
     width: 100%;
     padding: 10px;
     margin-bottom: 16px;
-    box-sizing: border-box;
-    border: 1px solid #ccc;
+    border: 1px solid var(--header-footer-bg);
     border-radius: 4px;
-}
-
-.PaymentView.dark-mode input,
-.PaymentView.dark-mode .StripeElement {
-    border: 1px solid #555;
-    /* Dark mode input border */
-    background-color: #444;
-    /* Dark mode input background */
-    color: rgb(250, 245, 245);
-    /* Dark mode input text color */
+    background-color: var(--background-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    box-sizing: border-box;
 }
 
 /* Button styling */
 .PaymentView button {
     width: 100%;
-    /* Make the button full width */
-    background-color: #2196f3;
-    /* Change to blue color */
-    color: #fff;
+    background-color: var(--button-bg);
+    color: var(--button-text-color);
     padding: 12px;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-size: 16px;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .PaymentView button:hover {
-    background-color: #0b7dda;
-    /* Change to a darker shade of blue on hover */
-}
-
-.PaymentView.dark-mode button {
-    background-color: #007bff;
-    /* Dark mode button color */
-}
-
-.PaymentView.dark-mode button:hover {
-    background-color: #0056b3;
-    /* Dark mode button hover color */
+    opacity: 0.9;
 }
 
 /* Responsive styling */
 @media (max-width: 768px) {
     .PaymentView {
         width: 95%;
-        /* Adjust width on smaller screens */
         padding: 15px;
     }
 
     .PaymentView h3 {
         font-size: 20px;
-        /* Adjust heading size for smaller screens */
     }
 
     .PaymentView input,
@@ -109,16 +77,18 @@
 
     .PaymentView button {
         padding: 10px;
-        /* Adjust button padding for smaller screens */
     }
 }
 
+/* Card details styling */
 .CardDetails {
     margin-top: 10px;
     padding: 10px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--header-footer-bg);
     border-radius: 5px;
-    background-color: #f9f9f9;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .CardDetails p {
