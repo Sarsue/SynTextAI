@@ -56,11 +56,11 @@ def subscription_status():
         
         # Prepare subscription data to return
         response = {
-            'subscription_status': subscription['status'],
-            'card_last4': subscription.card_last4,
-            'card_brand': subscription.card_brand,
-            'card_exp_month': subscription.exp_month,
-            'card_exp_year': subscription.exp_year
+            'subscription_status': subscription["status"],
+            'card_last4': subscription["card_last4"],
+            'card_brand': subscription["card_brand"],
+            'card_exp_month': subscription["exp_month"],
+            'card_exp_year': subscription["exp_year"]
         }
         
         return jsonify(response), 200
@@ -92,13 +92,12 @@ def cancel_sub():
             subscription_status['stripe_customer_id'],
             cancellation_result['status']
         )
-        card_details = {
-                    'card_last4': subscription_status.card_last4,
-                    'card_brand':  subscription_status.card.brand,
-                    'card_exp_month':  subscription_status.exp_month,
-                    'card_exp_year': subscription_status.exp_year
-                }
-        return jsonify({'subscription_status': cancellation_result['status'], **card_details}), 200
+    
+        return jsonify({'subscription_status': cancellation_result['status'],
+                       'card_last4': subscription_status["card_last4"],
+                        'card_brand': subscription_status["card_brand"],
+                        'card_exp_month': subscription_status["exp_month"],
+                        'card_exp_year': subscription_status["exp_year"]}), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 403
@@ -170,17 +169,19 @@ def create_subscription():
                 status=created_subscription.status,
                 current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
                 card_last_4 = payment_method_id.card.last4,
-                card_brand = payment_method_id.card.brand,
+                card_type = payment_method_id.card.brand,
                 exp_month = payment_method_id.card.exp_month,
                 exp_year = payment_method_id.card.exp_year
             )
-            card_details = {
-                    'card_last4': payment_method_id.card.last4,
-                    'card_brand':  payment_method_id.card.brand,
-                    'card_exp_month':  payment_method_id.card.exp_month,
-                    'card_exp_year': payment_method_id.card.exp_year
-                }
-            return jsonify({'subscription_id': created_subscription.id, 'message': 'Subscription created successfully', "subscription_status" : created_subscription.status, **card_details}), 200
+           
+            return jsonify({
+                            'message': 'Subscription created successfully',
+                             "subscription_status" : created_subscription.status, 
+                            'card_last4': payment_method_id.card.last4,
+                            'card_brand': payment_method_id.card.brand,
+                            'card_exp_month': payment_method_id.card.exp_month,
+                            'card_exp_year': payment_method_id.card.exp_year}), 200
+                            
         except Exception as e:
             # Card errors like insufficient funds or expired card
             error_msg =  str(e)
@@ -230,8 +231,8 @@ def update_payment():
 
         store.update_subscription(
             stripe_customer_id=stripe_customer_id,
-            status=subscription.status,  # Or retrieve status from Stripe if required
-            current_period_end=datetime.utcfromtimestamp(subscription.current_period_end),  # Retrieve current period end from Stripe if needed
+            status=subscription["status"],  # Or retrieve status from Stripe if required
+            current_period_end=datetime.utcfromtimestamp(subscription["current_period_end"]),  # Retrieve current period end from Stripe if needed
             card_last_4 = payment_method.card.last4,
             card_brand = payment_method.card.brand,
             exp_month = payment_method.card.exp_month,
