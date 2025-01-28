@@ -169,7 +169,7 @@ def create_subscription():
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription.status,
                 current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
-                card_last_4 = payment_method.card.last4,
+                card_last4 = payment_method.card.last4,
                 card_type = payment_method.card.brand,
                 exp_month = payment_method.card.exp_month,
                 exp_year = payment_method.card.exp_year
@@ -235,8 +235,8 @@ def update_payment():
             stripe_customer_id=stripe_customer_id,
             status=subscription["status"],  # Or retrieve status from Stripe if required
             current_period_end=datetime.utcfromtimestamp(subscription["current_period_end"]),  # Retrieve current period end from Stripe if needed
-            card_last_4 = payment_method.card.last4,
-            card_brand = payment_method.card.brand,
+            card_last4 = payment_method.card.last4,
+            card_type = payment_method.card.brand,
             exp_month = payment_method.card.exp_month,
             exp_year = payment_method.card.exp_year
         )
