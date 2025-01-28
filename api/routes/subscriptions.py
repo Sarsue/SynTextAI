@@ -143,6 +143,7 @@ def create_subscription():
 
         try:
             # Attach the payment method to the customer
+            payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
             stripe.PaymentMethod.attach(
                 payment_method_id,
                 customer=stripe_customer_id
@@ -168,10 +169,10 @@ def create_subscription():
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription.status,
                 current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
-                card_last_4 = payment_method_id.card.last4,
-                card_type = payment_method_id.card.brand,
-                exp_month = payment_method_id.card.exp_month,
-                exp_year = payment_method_id.card.exp_year
+                card_last_4 = payment_method.card.last4,
+                card_type = payment_method.card.brand,
+                exp_month = payment_method.card.exp_month,
+                exp_year = payment_method.card.exp_year
             )
            
             return jsonify({
@@ -211,7 +212,7 @@ def update_payment():
         success, user_info = get_user_id(token)
         user_id = get_id_helper(store, success, user_info)
 
-        payment_method = request.json.get('payment_method')
+        payment_method_id = request.json.get('payment_method')
         if not payment_method:
             return jsonify({'error': 'Payment method is missing'}), 400
 
@@ -225,8 +226,8 @@ def update_payment():
         subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
             return jsonify({'error': 'Subscription ID is missing'}), 400
-
-        stripe.PaymentMethod.attach(payment_method, customer=stripe_customer_id)
+        payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
+        stripe.PaymentMethod.attach(payment_method_id, customer=stripe_customer_id)
         stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
 
         store.update_subscription(
