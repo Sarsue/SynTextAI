@@ -226,9 +226,10 @@ def update_payment():
         subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
             return jsonify({'error': 'Subscription ID is missing'}), 400
+
         payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
         stripe.PaymentMethod.attach(payment_method_id, customer=stripe_customer_id)
-        stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
+        stripe.Subscription.modify(subscription_id, default_payment_method=payment_method_id)
 
         store.update_subscription(
             stripe_customer_id=stripe_customer_id,
