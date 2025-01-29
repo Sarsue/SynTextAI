@@ -19,9 +19,13 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
     const [subscriptionStatusLocal, setSubscriptionStatusLocal] = useState<string | null>(subscriptionStatus);
 
     // Language and comprehension level states
-    const [selectedLanguage, setSelectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
-    const [comprehensionLevel, setComprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
-
+    // Language and comprehension level states
+    const [selectedLanguage, setSelectedLanguage] = useState<string>(
+        userSettings.selectedLanguage || 'English' // Default to 'English' if empty
+    );
+    const [comprehensionLevel, setComprehensionLevel] = useState<string>(
+        userSettings.comprehensionLevel || 'Beginner' // Default to 'Beginner' if empty
+    );
     // Update userSettings in context whenever any relevant state changes
     useEffect(() => {
         setUserSettings({
@@ -50,14 +54,22 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
             alert("No user found.");
             return;
         }
+        const idToken = await user?.getIdToken();
+
+        if (!idToken) {
+            console.error('User token not available');
+            return null;
+        }
 
         try {
-            const response = await fetch('/api/delete-account', {
+            const response = await fetch('/api/v1/users', {
                 method: 'DELETE',
                 headers: {
+                    'Authorization': `Bearer ${idToken}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ uid: user.uid }),
+                mode: 'cors',
+                credentials: 'include',
             });
 
             if (response.ok) {

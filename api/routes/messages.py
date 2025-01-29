@@ -27,7 +27,7 @@ def create_message():
     message_list = []
     message = request.args.get('message')
     language = request.args.get('language', 'English')  # Default to 'English' if not provided
-    comprehension_level = request.args.get('comprehensionLevel', 'dropout')  # Set a default value if desired
+    comprehension_level = request.args.get('comprehensionLevel', 'beginner')  # Set a default value if desired
     token = request.headers.get('Authorization')
     
     success, user_info = get_user_id(token)

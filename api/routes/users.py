@@ -39,30 +39,57 @@ def create_user():
     return jsonify(User)
 
 
-@users_bp.route("/personas", methods=["GET"])
-def get_user_personas():
+@users_bp.route("", methods=["DELETE"])
+def delete_user():
     store = current_app.store
     token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    user_id = get_id_helper(store, success, user_info)
 
-    user_personas = store.get_user_personas(user_id)
-    return jsonify(user_personas)
+    if not token:
+        return jsonify({'error': 'Authorization token is missing'}), 401
+
+    # Extract the actual token from the "Authorization" header
+    token = token.split("Bearer ")[1]
+    success, user_info = decode_firebase_token(token)
+
+    if not success:
+        return jsonify(user_info), 401
+
+    # Now you can use the user_info dictionary to allow or restrict actions
+    name = user_info['name']
+    email = user_info['email']
+
+    print(f"{email} and {name}")
+    return jsonify({"name" : name, "email" : email}), 200
 
 
-@users_bp.route("/personas", methods=["PUT"])
-def update_user_personas():
-    store = current_app.store
-    token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    user_id = get_id_helper(store, success, user_info)
 
-    data = request.json
-    # Default to an empty list if None
-    selected_personas = data.get("selected_personas", [])
+    # delete file, messages, history, subscription, card details etc 
 
-    if not isinstance(selected_personas, list):
-        return jsonify({"error": "Invalid data format for selected_personas"}), 400
 
-    store.update_user_personas(user_id, selected_personas)
-    return jsonify({"success": True})
+# @users_bp.route("/personas", methods=["GET"])
+# def get_user_personas():
+#     store = current_app.store
+#     token = request.headers.get('Authorization')
+#     success, user_info = get_user_id(token)
+#     user_id = get_id_helper(store, success, user_info)
+
+#     user_personas = store.get_user_personas(user_id)
+#     return jsonify(user_personas)
+
+
+# @users_bp.route("/personas", methods=["PUT"])
+# def update_user_personas():
+#     store = current_app.store
+#     token = request.headers.get('Authorization')
+#     success, user_info = get_user_id(token)
+#     user_id = get_id_helper(store, success, user_info)
+
+#     data = request.json
+#     # Default to an empty list if None
+#     selected_personas = data.get("selected_personas", [])
+
+#     if not isinstance(selected_personas, list):
+#         return jsonify({"error": "Invalid data format for selected_personas"}), 400
+
+#     store.update_user_personas(user_id, selected_personas)
+#     return jsonify({"success": True})

@@ -39,8 +39,8 @@ const UserContext = createContext<UserContextType>({
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [darkMode, setDarkMode] = useState<boolean>(false);
     const [userSettings, setUserSettings] = useState<UserSettings>({
-        comprehensionLevel: '',
-        selectedLanguage: '',
+        comprehensionLevel: 'Beginner',  // Default value set to 'Beginner'
+        selectedLanguage: 'English',     // Default value set to 'English'
     });
     const [isPollingFiles, setIsPollingFiles] = useState<boolean>(false);
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
@@ -67,6 +67,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         </UserContext.Provider>
     );
 };
+
 
 // Define useUserContext hook
 export const useUserContext = (): UserContextType => {
