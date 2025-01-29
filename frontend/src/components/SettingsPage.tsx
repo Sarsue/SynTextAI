@@ -10,15 +10,12 @@ import { loadStripe, Stripe } from '@stripe/stripe-js';
 interface SettingsPageProps {
     stripePromise: Promise<Stripe | null>;
     user: User | null; // Adjust the user prop type
-    subscriptionStatus: string | null;
 }
 
-const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscriptionStatus }) => {
+const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, userSettings, setUserSettings } = useUserContext();
-    const [subscriptionStatusLocal, setSubscriptionStatusLocal] = useState<string | null>(subscriptionStatus);
+    const { darkMode, setDarkMode, userSettings, setUserSettings, subscriptionStatus, setSubscriptionStatus } = useUserContext();
 
-    // Language and comprehension level states
     // Language and comprehension level states
     const [selectedLanguage, setSelectedLanguage] = useState<string>(
         userSettings.selectedLanguage || 'English' // Default to 'English' if empty
@@ -26,6 +23,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
     const [comprehensionLevel, setComprehensionLevel] = useState<string>(
         userSettings.comprehensionLevel || 'Beginner' // Default to 'Beginner' if empty
     );
+
     // Update userSettings in context whenever any relevant state changes
     useEffect(() => {
         setUserSettings({
@@ -35,9 +33,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
         });
     }, [selectedLanguage, comprehensionLevel, setUserSettings]);
 
-    const handleSubscriptionChange = (newStatus: string) => {
-        setSubscriptionStatusLocal(newStatus);
-    };
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(
@@ -88,7 +83,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
         }
     };
 
-
     const validLanguages = ['English', 'French', 'German', 'Spanish', 'Chinese', 'Japanese'];
     const validEducationLevels = ['Beginner', 'Intermediate', 'Advanced'];
 
@@ -108,8 +102,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                         <PaymentView
                             stripePromise={stripePromise}
                             user={user}
-                            subscriptionStatus={subscriptionStatusLocal}
-                            onSubscriptionChange={handleSubscriptionChange}
                             darkMode={darkMode}
                         />
                     </div>
@@ -154,6 +146,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                         <DarkModeToggle darkMode={darkMode} setDarkMode={setDarkMode} />
                     </div>
                 </div>
+
                 {/* Account Management Section */}
                 <h2 className="section-title text-red-500">Delete Account</h2>
                 <p className="text-sm text-gray-600">
@@ -174,7 +167,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
             </div>
         </div>
     );
-
 };
 
 export default SettingsPage;

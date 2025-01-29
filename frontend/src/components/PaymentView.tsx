@@ -2,17 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useStripe, useElements, Elements, CardElement } from '@stripe/react-stripe-js';
 import type { Stripe } from '@stripe/stripe-js';
 import './PaymentView.css';
+import { useUserContext } from '../UserContext'; // Importing the context hook
 import { User } from 'firebase/auth';
-
 interface PaymentViewProps {
     stripePromise: Promise<Stripe | null>;
     user: User | null;
-    subscriptionStatus: string | null;
-    onSubscriptionChange: (newStatus: string) => void;
     darkMode: boolean;
 }
 
-const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscriptionStatus, onSubscriptionChange, darkMode }) => {
+const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode }) => {
+    const { subscriptionStatus, setSubscriptionStatus } = useUserContext(); // Getting subscriptionStatus from context
     const stripe = useStripe();
     const elements = useElements();
     const [email, setEmail] = useState(user?.email || '');
@@ -42,7 +41,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             const data = await res.json();
             console.log("Subscription status data:", data);
             setSubscriptionData(data);
-            onSubscriptionChange(data.subscription_status);
+            setSubscriptionStatus(data.subscription_status); // Update context with fetched subscription status
         } catch (error) {
             console.error("Error fetching subscription status:", error);
             setError('Could not fetch subscription details. Please try again.');
@@ -50,7 +49,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             setIsRequestPending(false);
         }
     };
-
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
@@ -110,7 +108,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             console.log("Subscription successful:", data);
 
             setSubscriptionData(data);
-            onSubscriptionChange(data.subscription_status);
+            setSubscriptionStatus(data.subscription_status); // Update context with the new subscription status
         } catch (error) {
             console.error("Error during subscription:", error);
             setError((error as Error)?.message || 'An error occurred while subscribing.');
@@ -147,7 +145,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             if (!response.ok) throw new Error('Failed to update payment details.');
             const data = await response.json();
             setSubscriptionData(data);
-            onSubscriptionChange(data.subscription_status);
+            setSubscriptionStatus(data.subscription_status); // Update context with new subscription status
         } catch (error) {
             setError((error as Error)?.message || 'An error occurred while updating payment method.');
         } finally {
@@ -169,7 +167,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
             const data = await res.json();
 
             setSubscriptionData({ ...subscriptionData, subscription_status: data.subscription_status });
-            onSubscriptionChange(data.subscription_status);
+            setSubscriptionStatus(data.subscription_status); // Update context with new subscription status
         } catch (error) {
             setError((error as Error)?.message || 'Failed to cancel subscription.');
         } finally {
@@ -177,15 +175,10 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, subscrip
         }
     };
 
-
-
     console.log("Subscription status:", subscriptionData?.subscription_status);
-    // const isCardUpdateRequired = ['card_expired', 'past_due'].includes(subscriptionData?.subscription_status);
     const isCardUpdateRequired = subscriptionData?.subscription_status
         ? !['canceled', 'active', 'none'].includes(subscriptionData.subscription_status)
         : true;
-    console.log("Is card update required:", isCardUpdateRequired);
-
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>

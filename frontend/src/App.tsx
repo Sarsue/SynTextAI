@@ -4,40 +4,16 @@ import Home from './Home';
 import Auth from './Auth';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
-import { Link } from 'react-router-dom';
 import { User as FirebaseUser } from 'firebase/auth';
 import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { UserProvider, useUserContext } from './UserContext';
 
-
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY);
 
 const App: React.FC = () => {
     const [user, setUser] = useState<FirebaseUser | null>(null);
-    const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null); // Ensure subscriptionStatus is a string or null
-    const { darkMode } = useUserContext();
-
-    useEffect(() => {
-        if (user) {
-            fetchSubscriptionStatus();
-        }
-
-    }, [user]);
-
-
-    const fetchSubscriptionStatus = async () => {
-        const idToken = await user?.getIdToken();
-        const response = await fetch(`api/v1/subscriptions/status`, {
-            method: 'GET',
-            headers: {
-                Authorization: `Bearer ${idToken}`,
-            },
-
-        });
-        const data = await response.json();
-        setSubscriptionStatus(data.subscription_status ?? null);
-    };
+    const { darkMode, subscriptionStatus, setSubscriptionStatus } = useUserContext(); // Get subscriptionStatus from context
 
     return (
         <UserProvider>
@@ -59,7 +35,6 @@ const App: React.FC = () => {
                                         <ChatApp
                                             user={user}
                                             onLogout={() => setUser(null)}
-                                            subscriptionStatus={subscriptionStatus}
                                         />
                                     ) : (
                                         <Navigate to="/settings" replace />
@@ -72,7 +47,6 @@ const App: React.FC = () => {
                                     <SettingsPage
                                         stripePromise={stripePromise}
                                         user={user}
-                                        subscriptionStatus={subscriptionStatus}
                                     />
                                 }
                             />
@@ -83,5 +57,6 @@ const App: React.FC = () => {
         </UserProvider>
     );
 };
+
 
 export default App;

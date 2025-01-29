@@ -16,10 +16,9 @@ import { Persona, UploadedFile } from './types';
 interface ChatAppProps {
     user: User | null;
     onLogout: () => void;
-    subscriptionStatus: string | null;
 }
 
-const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus }) => {
+const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     // const { loading, setLoading } = useUserContext();
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
@@ -83,7 +82,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
         try {
             //setLoading(true); // Set loading to true at the start of the operation
             console.log('Files to append:', files);
-            console.log(subscriptionStatus);
 
             if (files.length > 0) {
                 const formData = new FormData();
