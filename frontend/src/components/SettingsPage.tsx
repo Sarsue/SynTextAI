@@ -34,6 +34,44 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
     const handleSubscriptionChange = (newStatus: string) => {
         setSubscriptionStatusLocal(newStatus);
     };
+    const handleDeleteAccount = async () => {
+        const confirmed = window.confirm(
+            "⚠️ WARNING: Deleting your account will permanently remove:\n\n" +
+            "- Your payment information 💳\n" +
+            "- Your chat history 💬\n" +
+            "- Your uploaded files 📂\n" +
+            "- Your account credentials 👤\n\n" +
+            "This action is irreversible! Are you sure you want to proceed?"
+        );
+
+        if (!confirmed) return;
+
+        if (!user) {
+            alert("No user found.");
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/delete-account', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ uid: user.uid }),
+            });
+
+            if (response.ok) {
+                alert("✅ Your account has been successfully deleted.");
+                window.location.href = '/'; // Redirect to home after deletion
+            } else {
+                alert("❌ Failed to delete account. Please try again.");
+            }
+        } catch (error) {
+            console.error("Error deleting account:", error);
+            alert("⚠️ An error occurred. Please try again later.");
+        }
+    };
+
 
     const validLanguages = ['English', 'French', 'German', 'Spanish', 'Chinese', 'Japanese'];
     const validEducationLevels = ['Beginner', 'Intermediate', 'Advanced'];
@@ -100,6 +138,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
                         <DarkModeToggle darkMode={darkMode} setDarkMode={setDarkMode} />
                     </div>
                 </div>
+                {/* Account Management Section */}
+                <h2 className="section-title text-red-500">Delete Account</h2>
+                <p className="text-sm text-gray-600">
+                    Deleting your account will permanently erase all of your data, including:
+                </p>
+                <ul className="list-disc text-gray-700 ml-5 my-2 text-sm">
+                    <li>Payment details 💳</li>
+                    <li>Chat history 💬</li>
+                    <li>Uploaded files 📂</li>
+                    <li>Account credentials 👤</li>
+                </ul>
+                <button
+                    className="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-700 transition duration-200"
+                    onClick={handleDeleteAccount}
+                >
+                    Delete My Account
+                </button>
             </div>
         </div>
     );
