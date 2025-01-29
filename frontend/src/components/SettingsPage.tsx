@@ -38,6 +38,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
     const handleSubscriptionChange = (newStatus: string) => {
         setSubscriptionStatusLocal(newStatus);
     };
+
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(
             "⚠️ WARNING: Deleting your account will permanently remove:\n\n" +
@@ -54,14 +55,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
             alert("No user found.");
             return;
         }
-        const idToken = await user?.getIdToken();
-
-        if (!idToken) {
-            console.error('User token not available');
-            return null;
-        }
 
         try {
+            const idToken = await user.getIdToken();
+            if (!idToken) {
+                console.error('User token not available');
+                alert("Authentication failed. Please try logging in again.");
+                return;
+            }
+
             const response = await fetch('/api/v1/users', {
                 method: 'DELETE',
                 headers: {
@@ -74,13 +76,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user, subscr
 
             if (response.ok) {
                 alert("✅ Your account has been successfully deleted.");
-                window.location.href = '/'; // Redirect to home after deletion
+                window.location.href = '/'; // Redirect to home
             } else {
-                alert("❌ Failed to delete account. Please try again.");
+                const errorData = await response.json();
+                console.error("Delete error:", errorData);
+                alert(`❌ Failed to delete account: ${errorData.error || "Unknown error"}`);
             }
         } catch (error) {
             console.error("Error deleting account:", error);
-            alert("⚠️ An error occurred. Please try again later.");
+            alert("⚠️ A network error occurred. Please try again later.");
         }
     };
 

@@ -180,25 +180,32 @@ class DocSynthStore:
             session.close()
             
     def delete_user_account(self, user_id):
+        session = self.get_session()
         try:
-            session = self.get_session()
-
-            # Fetch the user by ID
+            # Fetch user and related records
             user = session.query(User).filter(User.id == user_id).first()
             if not user:
                 raise ValueError(f"User with ID {user_id} not found.")
 
-            # Delete the user and all related data
+            # Explicitly delete related objects (redundant but ensures cleanup)
+            session.query(CardDetails).filter(CardDetails.subscription_id.in_(
+                session.query(Subscription.id).filter(Subscription.user_id == user_id)
+            )).delete(synchronize_session=False)
+
+            session.query(Subscription).filter(Subscription.user_id == user_id).delete(synchronize_session=False)
+            session.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
+            session.query(ChatHistory).filter(ChatHistory.user_id == user_id).delete(synchronize_session=False)
+            session.query(File).filter(File.user_id == user_id).delete(synchronize_session=False)
+
+            # Finally, delete the user
             session.delete(user)
             session.commit()
-
-            #logger.info(f'Deleted user account {user_id} and all related data.')
         except Exception as e:
-            session.rollback()  # Rollback in case of error
-            #logger.error(f"Error deleting user account: {e}")
+            session.rollback()
             raise
         finally:
             session.close()
+
 
     def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
         session = self.get_session()

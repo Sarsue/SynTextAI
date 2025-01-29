@@ -121,3 +121,9 @@ def process_query_data(self, id, history_id, message, language):
         content=response, sender='bot', user_id=id, chat_history_id=history_id)
   
 
+@shared_task(bind=True)
+def delete_user_task(self, user_id):
+    try:
+        store.delete_user_account(user_id)
+    except Exception as e:
+        self.retry(exc=e)
