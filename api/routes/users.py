@@ -39,6 +39,7 @@ def create_user():
     User = store.add_user(email, name)
     print(User)
     return jsonify(User)
+    
 @users_bp.route("", methods=["DELETE"])
 def delete_user():
     store = current_app.store

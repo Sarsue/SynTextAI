@@ -70,7 +70,7 @@ class SyntextAgent:
         best_score = best_context["relevance_score"]
         return best_context, best_score
 
-    def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str) -> str:
+    def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str, comprehension_level: str) -> str:
         """
         Main pipeline to process a user query using document chunks and relevance scores.
         """
@@ -80,59 +80,28 @@ class SyntextAgent:
 
             # Step 2: Get the best context based on the highest relevance score
             best_context, best_score = self.determine_best_context(relevance_scores)
-            print( best_context, best_score )
+            print(best_context, best_score)
+            
             # Step 3: Decide the context based on the relevance score threshold
             if best_score >= self.relevance_thresholds["high"]:
-                # Use the full context for high scores
+                # Use the full context for high relevance scores
                 context = best_context["content"]
-          
 
                 # Step 4: Create the LLM prompt with the selected context
                 resp_prompt = (
-                    f"Answer the following question based on the provided text (Respond in {language}): {context}\n\n"
+                    f"Answer the following question based on the provided text (Respond in {language}): {context} the user would like the answer to be {comprehension_level}\n\n"
                     f"Question: {query}\n\n"
                 )
                 print(resp_prompt)
 
                 # Step 5: Get the answer from the LLM
                 ans = prompt_llm(resp_prompt)
-           
+
                 # Step 6: Construct the file reference for the selected chunk
-                # Assuming best_context['meta_data'] contains either a 'start_time', 'end_time', or 'page_number'
                 meta_data = best_context['meta_data']
                 file_name = best_context['file_url'].split('/')[-1]
-                # Determine the file type based on metadata
-                if meta_data.get("type") == "video":
-                        # If it's a video, use start_time and end_time for file_name and file_url
-                    vid = ""
-                    if meta_data.get("start_time"):
-                        vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
-                        file_name += vid
-                    file_url = f"{best_context['file_url']}?{vid}"
-                else:
-                    # If it's a PDF, use page_number for file_name and file_url
-                    pg_num = 0
-                    if meta_data.get("page_number") > 0:
-                        pg_num =  meta_data.get("page_number")
-                        file_name += ' page ' + str(pg_num)
-                    file_url = f"{best_context['file_url']}?page={pg_num}"
-
-         
-                
-                # Construct the JSON response with the formatted file link
-                references = [
-                    f"[{file_name}]({file_url})"
-                ]
-                reference_links = "\n".join(references)
-                logger.info(reference_links)
-                return ans + "\n\n" + reference_links
-
-            else:
-                ans = "Syntext couldnt generate the right response from the retrieved files"             
-                meta_data = best_context['meta_data']
 
                 # Determine the file type based on metadata
-                file_name = best_context['file_url'].split('/')[-1]
                 if meta_data.get("type") == "video":
                     # If it's a video, use start_time and end_time for file_name and file_url
                     vid = ""
@@ -144,18 +113,44 @@ class SyntextAgent:
                     # If it's a PDF, use page_number for file_name and file_url
                     pg_num = 0
                     if meta_data.get("page_number") > 0:
-                        pg_num =  meta_data.get("page_number")
+                        pg_num = meta_data.get("page_number")
                         file_name += ' page ' + str(pg_num)
                     file_url = f"{best_context['file_url']}?page={pg_num}"
 
                 # Construct the JSON response with the formatted file link
-                references = [
-                    f"[{file_name}]({file_url})"
-                ]
+                references = [f"[{file_name}]({file_url})"]
                 reference_links = "\n".join(references)
                 logger.info(reference_links)
                 return ans + "\n\n" + reference_links
-                     
+
+            else:
+                # If the relevance score is low, return a more informative message
+                ans = "The retrieved context may not be highly relevant to your query, and Syntext couldn't generate a satisfactory answer."
+
+                # Provide the context with metadata
+                meta_data = best_context['meta_data']
+                file_name = best_context['file_url'].split('/')[-1]
+
+                if meta_data.get("type") == "video":
+                    # If it's a video, use start_time and end_time for file_name and file_url
+                    vid = ""
+                    if meta_data.get("start_time"):
+                        vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
+                        file_name += vid
+                    file_url = f"{best_context['file_url']}?{vid}"
+                else:
+                    # If it's a PDF, use page_number for file_name and file_url
+                    pg_num = 0
+                    if meta_data.get("page_number") > 0:
+                        pg_num = meta_data.get("page_number")
+                        file_name += ' page ' + str(pg_num)
+                    file_url = f"{best_context['file_url']}?page={pg_num}"
+
+                # Construct the JSON response with the formatted file link
+                references = [f"[{file_name}]({file_url})"]
+                reference_links = "\n".join(references)
+                logger.info(reference_links)
+                return ans + "\n\n" + reference_links
 
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)

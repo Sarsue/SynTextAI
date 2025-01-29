@@ -38,7 +38,7 @@ def create_message():
     user_request = store.add_message(
         content=message, sender='user', user_id=id, chat_history_id=history_id)
     message_list.append(user_request)
-    task = process_query_data.delay(id, history_id, message, language)
+    task = process_query_data.delay(id, history_id, message, language,comprehension_level)
     logging.info(f"Enqueued Task {task.id}  for processing {message}")
     return message_list
    

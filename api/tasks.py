@@ -112,11 +112,11 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
 
 
 @shared_task(bind=True)
-def process_query_data(self, id, history_id, message, language):
+def process_query_data(self, id, history_id, message, language,comprehension_level):
     # Gather context for agent message history , top similar doocuments and current query
     formatted_history = store.format_user_chat_history(history_id, id)
     topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
-    response = syntext.query_pipeline(message,formatted_history,topK_chunks,language)
+    response = syntext.query_pipeline(message,formatted_history,topK_chunks,language,comprehension_level)
     store.add_message(
         content=response, sender='bot', user_id=id, chat_history_id=history_id)
   
