@@ -50,7 +50,7 @@ const App: React.FC = () => {
                                 path="/login"
                                 element={<Auth setUser={setUser} />}
                             />
-                            {/* <Route
+                            <Route
                                 path="/chat"
                                 element={
                                     subscriptionStatus === null ? (
@@ -64,16 +64,6 @@ const App: React.FC = () => {
                                     ) : (
                                         <Navigate to="/settings" replace />
                                     )
-                                }
-                            /> */}
-                            <Route
-                                path="/chat"
-                                element={
-                                    <ChatApp
-                                        user={user}
-                                        onLogout={() => setUser(null)}
-                                        subscriptionStatus={subscriptionStatus}
-                                    />
                                 }
                             />
                             <Route
