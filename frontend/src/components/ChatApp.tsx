@@ -136,38 +136,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            //  setLoading(false); // Set loading to false if there's an error
+            // setLoading(false); // Set loading to false if there's an error
         }
     };
-
     const sendMessage = async (message: string) => {
         if (currentHistory !== null && !isNaN(currentHistory)) {
             const history = histories[currentHistory];
 
             if (history) {
-                const temporaryMessage: Message = {
-                    id: -1,
-                    content: message,
-                    sender: 'user',
-                    timestamp: new Date().toLocaleString('en-US', { hour12: false }),
-                    liked: false,
-                    disliked: false,
-                };
-
-                const updatedMessages = [...history.messages, temporaryMessage];
-
-                setHistories((prevHistories) => {
-                    const updatedHistory = {
-                        ...prevHistories[currentHistory],
-                        messages: updatedMessages,
-                    };
-
-                    return {
-                        ...prevHistories,
-                        [currentHistory]: updatedHistory,
-                    };
-                });
-
                 const linkDataResponse = await callApiWithToken(
                     `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                     'POST'
@@ -181,30 +157,29 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             id: messageData.id,
                             content: messageData.content,
                             sender: messageData.sender,
-                            timestamp: messageData.timestamp,
+                            timestamp: new Date(messageData.timestamp).toISOString(), // Convert to ISO string
                             liked: messageData.is_liked === 1,
                             disliked: messageData.is_disliked === 1,
                         }))
                         : [];
 
+                    // Combine new messages with the existing messages
                     const updatedMessages = [
-                        ...history.messages.filter((msg) => msg.id !== -1),
+                        ...history.messages,
                         ...newMessages,
                     ];
 
-                    setHistories((prevHistories) => {
-                        const updatedHistory = {
-                            ...prevHistories[currentHistory],
-                            messages: updatedMessages,
-                        };
+                    const updatedHistory: History = {
+                        ...history,
+                        messages: updatedMessages,
+                    };
 
-                        return {
-                            ...prevHistories,
-                            [currentHistory]: updatedHistory,
-                        };
-                    });
+                    setHistories((prevHistories) => ({
+                        ...prevHistories,
+                        [currentHistory]: updatedHistory,
+                    }));
 
-                    setIsPollingMessages(true); // Start polling for messages
+                    setIsPollingMessages(true);
                 }
             }
         } else {
@@ -223,23 +198,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                         messages: [],
                     };
 
-                    const temporaryMessage: Message = {
-                        id: -1,
-                        content: message,
-                        sender: 'user',
-                        timestamp: new Date().toLocaleString('en-US', { hour12: false }),
-                        liked: false,
-                        disliked: false,
-                    };
-
-                    const updatedMessages = [...newHistory.messages, temporaryMessage];
-
                     setHistories((prevHistories) => ({
                         ...prevHistories,
-                        [newHistory.id]: {
-                            ...newHistory,
-                            messages: updatedMessages,
-                        },
+                        [newHistory.id]: newHistory,
                     }));
 
                     setCurrentHistory(newHistory.id);
@@ -257,16 +218,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                                 id: messageData.id,
                                 content: messageData.content,
                                 sender: messageData.sender,
-                                timestamp: messageData.timestamp,
+                                timestamp: new Date(messageData.timestamp).toISOString(), // Convert to ISO string
                                 liked: messageData.is_liked === 1,
                                 disliked: messageData.is_disliked === 1,
                             }))
                             : [];
 
                         const updatedMessages = [
-                            ...newHistory.messages.filter((msg) => msg.id !== -1),
+                            ...newHistory.messages,
                             ...newMessages,
                         ];
+
 
                         setHistories((prevHistories) => ({
                             ...prevHistories,
@@ -276,12 +238,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                             },
                         }));
 
-                        setIsPollingMessages(true); // Start polling for messages
+                        setIsPollingMessages(true);
                     }
                 }
             }
         }
     };
+
 
     const handleClearHistory = async () => {
         try {
@@ -371,18 +334,24 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout, subscriptionStatus })
                 return;
             }
 
-            const histories: History[] = jsonResponse.map((historyData: any) => ({
-                id: historyData.id,
-                title: historyData.title,
-                messages: (historyData.messages || []).map((messageData: any) => ({
-                    id: messageData.id,
-                    content: messageData.content,
-                    sender: messageData.sender,
-                    timestamp: messageData.timestamp,
-                    liked: messageData.is_liked === 1,
-                    disliked: messageData.is_disliked === 1,
-                })),
-            }));
+            // Map and sort messages for each history
+            const histories: History[] = jsonResponse.map((historyData: any) => {
+                // Sort messages by 'id'
+                const sortedMessages = (historyData.messages || []).sort((a: any, b: any) => a.id - b.id);
+
+                return {
+                    id: historyData.id,
+                    title: historyData.title,
+                    messages: sortedMessages.map((messageData: any) => ({
+                        id: messageData.id,
+                        content: messageData.content,
+                        sender: messageData.sender,
+                        timestamp: messageData.timestamp,
+                        liked: messageData.is_liked === 1,
+                        disliked: messageData.is_disliked === 1,
+                    })),
+                };
+            });
 
             const historiesObject: { [key: number]: History } = {};
             histories.forEach((history) => {
