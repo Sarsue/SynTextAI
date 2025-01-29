@@ -51,14 +51,17 @@ def delete_user():
     token = token.split("Bearer ")[1]
     success, user_info = decode_firebase_token(token)
 
+
     if not success:
         return jsonify(user_info), 401
+    
+    id = get_id_helper(store, success, user_info)
 
     # Now you can use the user_info dictionary to allow or restrict actions
     name = user_info['name']
     email = user_info['email']
 
-    print(f"{email} and {name}")
+    store.delete_user_account(id)
     return jsonify({"name" : name, "email" : email}), 200
 
 

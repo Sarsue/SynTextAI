@@ -178,6 +178,27 @@ class DocSynthStore:
             return user.id
         finally:
             session.close()
+            
+    def delete_user_account(self, user_id):
+        try:
+            session = self.get_session()
+
+            # Fetch the user by ID
+            user = session.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise ValueError(f"User with ID {user_id} not found.")
+
+            # Delete the user and all related data
+            session.delete(user)
+            session.commit()
+
+            #logger.info(f'Deleted user account {user_id} and all related data.')
+        except Exception as e:
+            session.rollback()  # Rollback in case of error
+            #logger.error(f"Error deleting user account: {e}")
+            raise
+        finally:
+            session.close()
 
     def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
         session = self.get_session()
