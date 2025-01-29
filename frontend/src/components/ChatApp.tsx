@@ -22,11 +22,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     // const { loading, setLoading } = useUserContext();
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
-    const { darkMode, userSettings } = useUserContext();
+    const { darkMode, userSettings, subscriptionStatus } = useUserContext();
 
     // Language and comprehension level states
-    const [selectedLanguage, setSelectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
-    const [comprehensionLevel, setComprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
+    const [selectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
+    const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
     const { isPollingFiles, setIsPollingFiles } = useUserContext(); // State to track if we are polling for files
@@ -448,6 +448,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const handleCloseFileViewer = () => {
         setSelectedFile(null); // Clear selected file when closing viewer
     };
+
+    useEffect(() => {
+        if (user && subscriptionStatus !== 'active') {
+            // Navigate to the settings page if the subscription is not active
+            navigate('/settings'); // Make sure the /settings route exists in your routing setup
+        }
+    }, [user, navigate, subscriptionStatus]);
 
     useEffect(() => {
         let pollingInterval: NodeJS.Timeout | null = null;

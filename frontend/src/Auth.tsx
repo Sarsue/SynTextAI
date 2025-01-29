@@ -16,7 +16,7 @@ interface AuthProps {
 
 const Auth: FC<AuthProps> = ({ setUser }) => {
     const navigate = useNavigate();
-    const { darkMode } = useUserContext();  // Get darkMode from context
+    const { darkMode } = useUserContext();
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {

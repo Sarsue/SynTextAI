@@ -14,7 +14,7 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, userSettings, setUserSettings, subscriptionStatus, setSubscriptionStatus } = useUserContext();
+    const { darkMode, setDarkMode, userSettings, setUserSettings, subscriptionStatus } = useUserContext();
 
     // Language and comprehension level states
     const [selectedLanguage, setSelectedLanguage] = useState<string>(
@@ -33,6 +33,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
         });
     }, [selectedLanguage, comprehensionLevel, setUserSettings]);
 
+    // Log the subscription status every time it changes
+    useEffect(() => {
+        console.log("Current subscription status:", subscriptionStatus);
+    }, [subscriptionStatus]);
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(

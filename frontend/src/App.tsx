@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom'; // Import Navigate for redirects
+import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
 import Home from './Home';
 import Auth from './Auth';
 import ChatApp from './components/ChatApp';
@@ -13,7 +13,8 @@ const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY);
 
 const App: React.FC = () => {
     const [user, setUser] = useState<FirebaseUser | null>(null);
-    const { darkMode, subscriptionStatus, setSubscriptionStatus } = useUserContext(); // Get subscriptionStatus from context
+    const { darkMode } = useUserContext(); // Get subscriptionStatus from context
+
 
     return (
         <UserProvider>
@@ -22,33 +23,14 @@ const App: React.FC = () => {
                     <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
                         <Routes>
                             <Route path="/" element={<Home />} />
-                            <Route
-                                path="/login"
-                                element={<Auth setUser={setUser} />}
-                            />
+                            <Route path="/login" element={<Auth setUser={setUser} />} />
                             <Route
                                 path="/chat"
-                                element={
-                                    subscriptionStatus === null ? (
-                                        <Navigate to="/settings" replace />
-                                    ) : subscriptionStatus === 'active' ? (
-                                        <ChatApp
-                                            user={user}
-                                            onLogout={() => setUser(null)}
-                                        />
-                                    ) : (
-                                        <Navigate to="/settings" replace />
-                                    )
-                                }
+                                element={<ChatApp user={user} onLogout={() => setUser(null)} />}
                             />
                             <Route
                                 path="/settings"
-                                element={
-                                    <SettingsPage
-                                        stripePromise={stripePromise}
-                                        user={user}
-                                    />
-                                }
+                                element={<SettingsPage stripePromise={stripePromise} user={user} />}
                             />
                         </Routes>
                     </div>
@@ -57,6 +39,5 @@ const App: React.FC = () => {
         </UserProvider>
     );
 };
-
 
 export default App;
