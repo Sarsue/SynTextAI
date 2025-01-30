@@ -1,3 +1,15 @@
+/* Define input text color variables for light and dark modes */
+:root {
+    --input-background-color: #ffffff;
+    /* Light input background */
+    --input-text-color: #000000;
+    /* Dark text for inputs */
+    --input-background-dark: #333;
+    /* Dark input background */
+    --input-text-dark: #ffffff;
+    /* White text for inputs in dark mode */
+}
+
 /* PaymentView styling */
 .PaymentView {
     max-width: 600px;
@@ -13,21 +25,6 @@
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Header styling */
-.PaymentView h3 {
-    margin-bottom: 16px;
-    font-size: 24px;
-    color: var(--text-color);
-}
-
-/* Label styling */
-.PaymentView label {
-    display: block;
-    margin-bottom: 8px;
-    font-size: 14px;
-    color: var(--text-color);
-}
-
 /* Input and StripeElement styling */
 .PaymentView input,
 .PaymentView .StripeElement {
@@ -36,10 +33,18 @@
     margin-bottom: 16px;
     border: 1px solid var(--header-footer-bg);
     border-radius: 4px;
-    background-color: var(--background-color);
-    color: var(--text-color);
+    background-color: var(--input-background-color);
+    color: var(--input-text-color);
     transition: background-color 0.3s ease, color 0.3s ease;
     box-sizing: border-box;
+}
+
+/* For dark mode, define input-specific colors */
+.dark-mode .PaymentView input,
+.dark-mode .PaymentView .StripeElement {
+    background-color: var(--input-background-dark);
+    color: var(--input-text-dark);
+    /* Ensure card number text is white */
 }
 
 /* Button styling */
@@ -57,27 +62,6 @@
 
 .PaymentView button:hover {
     opacity: 0.9;
-}
-
-/* Responsive styling */
-@media (max-width: 768px) {
-    .PaymentView {
-        width: 95%;
-        padding: 15px;
-    }
-
-    .PaymentView h3 {
-        font-size: 20px;
-    }
-
-    .PaymentView input,
-    .PaymentView .StripeElement {
-        padding: 8px;
-    }
-
-    .PaymentView button {
-        padding: 10px;
-    }
 }
 
 /* Card details styling */
