@@ -30,7 +30,7 @@ Delete the line: Ctrl + K
 
 
 
-scp deploy.sh .env root@138.197.131.87:/home/root/
+scp deploy.sh .env root@178.128.236.126:/home/root/
 
 
 <!-- # mount volume

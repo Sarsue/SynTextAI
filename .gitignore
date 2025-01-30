@@ -39,7 +39,9 @@ deploy.sh
 .env.production.local
 
 .env.development
+.env.dev
 .env.production
+.env.prod
 
 npm-debug.log*
 yarn-debug.log*
