@@ -10,7 +10,7 @@ import json
 from docsynth_store import DocSynthStore
 from llm_service import get_text_embeddings_in_batches, get_text_embedding
 from syntext_agent import SyntextAgent
-from utils import chunk_text
+from utils import chunk_text, delete_from_gcs
 import stripe
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -123,7 +123,7 @@ def process_query_data(self, id, history_id, message, language,comprehension_lev
   
 
 @shared_task(bind=True)
-def delete_user_task(self, user_id):
+def delete_user_task(self, user_id, user_gc_id):
     try:
         # Get the user's subscription details
         user_sub = store.get_subscription(user_id)
@@ -153,7 +153,11 @@ def delete_user_task(self, user_id):
             # Optionally delete the customer if needed (be careful with this step)
             stripe.Customer.delete(stripe_customer_id)
             logging.info(f"Stripe customer {stripe_customer_id} deleted successfully.")
-            
+        
+        
+        files = store.get_files_for_user(user_id)   
+        for f in files:
+            delete_from_gcs(user_gc_id, f["name"])
         # Delete the user's account from the database
         store.delete_user_account(user_id)
         logging.info(f"User account {user_id} deleted successfully.")

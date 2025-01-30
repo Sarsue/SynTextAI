@@ -26,6 +26,7 @@ def create_user():
     # Extract the actual token from the "Authorization" header
     token = token.split("Bearer ")[1]
     success, user_info = decode_firebase_token(token)
+    
 
     if not success:
         return jsonify(user_info), 401
@@ -33,9 +34,6 @@ def create_user():
     # Now you can use the user_info dictionary to allow or restrict actions
     name = user_info['name']
     email = user_info['email']
-
-    print(f"{email} and {name}")
-
     User = store.add_user(email, name)
     print(User)
     return jsonify(User)
@@ -55,11 +53,14 @@ def delete_user():
             return jsonify({'error': 'Invalid token'}), 401
 
         user_id = get_id_helper(store, success, user_info)
+        user_gc_id = user_info['user_id']
+
         if not user_id:
             return jsonify({'error': 'User not found'}), 404
 
         # Trigger Celery task
-        delete_user_task.apply_async(args=[user_id])
+        # delete google cloud files too
+        delete_user_task.apply_async(args=[user_id,user_gc_id])
 
         return jsonify({"message": "User deletion in progress", "email": user_info['email']}), 200
 
