@@ -8,7 +8,7 @@ import Auth from './Auth';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
 
-console.log("Stripe API Key:", process.env.REACT_APP_STRIPE_API_KEY);
+
 const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY || "");
 
 const App: React.FC = () => {
