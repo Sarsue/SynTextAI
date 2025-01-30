@@ -165,6 +165,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 </ul>
                 <button
                     className="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-700 transition duration-200"
+                    style={{ backgroundColor: "#ef4444" }} // Explicit inline style to override dark mode
                     onClick={handleDeleteAccount}
                 >
                     Delete My Account

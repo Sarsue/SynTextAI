@@ -153,7 +153,20 @@ select:focus {
     font-size: 18px;
     color: var(--text-color);
 }
+.delete-account-section h2 {
+    color: #ef4444 !important;
+    /* Ensure red color is enforced */
+}
 
+.delete-account-section button {
+    background-color: #ef4444 !important;
+    color: white !important;
+}
+
+.delete-account-section button:hover {
+    background-color: #dc2626 !important;
+    /* Slightly darker red on hover */
+}
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     .settings-container {
@@ -186,4 +199,5 @@ select:focus {
         font-size: 16px;
         margin-bottom: 8px;
     }
+    
 }
