@@ -25,7 +25,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         if (user) fetchSubscriptionStatus();
     }, [user]);
 
- 
+
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
@@ -162,7 +162,20 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             <h3>Payment</h3>
             {isCardUpdateRequired ? (
                 <form onSubmit={handleUpdatePaymentMethod}>
-                    <CardElement />
+                    <CardElement
+                        options={{
+                            style: {
+                                base: {
+                                    color: darkMode ? "#ffffff" : "#000000", // White in dark mode
+                                    backgroundColor: darkMode ? "#333" : "#ffffff",
+                                    "::placeholder": {
+                                        color: darkMode ? "#bbbbbb" : "#888888", // Adjust placeholder color
+                                    },
+                                },
+                            },
+                        }}
+                    />
+
                     <button type="submit" disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Update Payment Method'}
                     </button>
@@ -187,7 +200,20 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 </>
             ) : (
                 <form onSubmit={handleSubscribe}>
-                    <CardElement />
+                    <CardElement
+                        options={{
+                            style: {
+                                base: {
+                                    color: darkMode ? "#ffffff" : "#000000", // White in dark mode
+                                    backgroundColor: darkMode ? "#333" : "#ffffff",
+                                    "::placeholder": {
+                                        color: darkMode ? "#bbbbbb" : "#888888", // Adjust placeholder color
+                                    },
+                                },
+                            },
+                        }}
+                    />
+
                     <button type="submit" disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe'}
                     </button>
