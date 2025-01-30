@@ -125,20 +125,35 @@ def process_query_data(self, id, history_id, message, language,comprehension_lev
 @shared_task(bind=True)
 def delete_user_task(self, user_id):
     try:
-        # Get the user's subscription
+        # Get the user's subscription details
         user_sub = store.get_subscription(user_id)
-        
-        # Check if the user has an active subscription
+
         if user_sub and user_sub["status"] == "active":
             user_stripe_sub = user_sub["stripe_subscription_id"]
-            cancellation_result = stripe.Subscription.delete(user_stripe_sub)  # Cancel the subscription on Stripe
-     
-            store.update_subscription_status(
-                user_sub['stripe_customer_id'],
-                cancellation_result['status']
-            )
+            stripe_customer_id = user_sub.get("stripe_customer_id")
+
+            # Cancel the subscription on Stripe
+            stripe.Subscription.delete(user_stripe_sub)
             logging.info(f"Subscription {user_stripe_sub} canceled successfully.")
-        
+
+            # Now, remove the payment method from Stripe
+            if stripe_customer_id:
+                # Retrieve the payment method associated with the customer
+                payment_methods = stripe.PaymentMethod.list(
+                    customer=stripe_customer_id,
+                    type="card"  # Assuming it's a card
+                )
+
+                # Detach and remove all payment methods associated with this customer
+                for payment_method in payment_methods.auto_paging_iter():
+                    # Detach the payment method (this removes it from the customer's account)
+                    stripe.PaymentMethod.detach(payment_method.id)
+                    logging.info(f"Payment method {payment_method.id} detached successfully.")
+            
+            # Optionally delete the customer if needed (be careful with this step)
+            stripe.Customer.delete(stripe_customer_id)
+            logging.info(f"Stripe customer {stripe_customer_id} deleted successfully.")
+            
         # Delete the user's account from the database
         store.delete_user_account(user_id)
         logging.info(f"User account {user_id} deleted successfully.")
