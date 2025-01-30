@@ -11,9 +11,10 @@ from docsynth_store import DocSynthStore
 from llm_service import get_text_embeddings_in_batches, get_text_embedding
 from syntext_agent import SyntextAgent
 from utils import chunk_text
+import stripe
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
+stripe.api_key = os.getenv('STRIPE_SECRET')
 # Construct paths relative to the base directory
 database_config = {
     'dbname': os.getenv("DATABASE_NAME"),
@@ -124,6 +125,24 @@ def process_query_data(self, id, history_id, message, language,comprehension_lev
 @shared_task(bind=True)
 def delete_user_task(self, user_id):
     try:
+        # Get the user's subscription
+        user_sub = store.get_subscription(user_id)
+        
+        # Check if the user has an active subscription
+        if user_sub and user_sub["status"] == "active":
+            user_stripe_sub = user_sub["stripe_subscription_id"]
+            cancellation_result = stripe.Subscription.delete(user_stripe_sub)  # Cancel the subscription on Stripe
+     
+            store.update_subscription_status(
+                user_sub['stripe_customer_id'],
+                cancellation_result['status']
+            )
+            logging.info(f"Subscription {user_stripe_sub} canceled successfully.")
+        
+        # Delete the user's account from the database
         store.delete_user_account(user_id)
+        logging.info(f"User account {user_id} deleted successfully.")
+
     except Exception as e:
+        logging.error(f"Error occurred during user deletion: {str(e)}")
         self.retry(exc=e)
