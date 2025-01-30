@@ -19,6 +19,8 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
         const validFiles = attachedFiles.filter(isFileSupported);
         if (validFiles.length !== attachedFiles.length) {
             alert('Only PDF, image (JPG, PNG, GIF), and text files are supported.');
+        } else if (validFiles.length > 10) {
+            alert('There is a maximum limit of 10 files per Upload');
         } else {
             onSend(message, validFiles).then(() => {
                 setMessage('');
@@ -44,6 +46,8 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
 
         if (validFiles.length === 0) {
             alert('Only PDF, image (JPG, PNG, GIF), and text files are supported.');
+        } else if (validFiles.length > 10) {
+            alert('There is a maximum limit of 10 files per Upload');
         } else {
             setAttachedFiles((prevFiles) => [...prevFiles, ...validFiles]);
         }

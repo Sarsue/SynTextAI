@@ -157,7 +157,7 @@ class DocSynthStore:
 
     def add_user(self, email, username):
         session = self.get_session()
-        existing_user = session.query(User).filter_by(username=username).first()
+        existing_user = session.query(User).filter_by(email=email).first()
         if existing_user:
             return {'id': existing_user.id, 'email': existing_user.email, 'username': existing_user.username}
         

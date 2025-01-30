@@ -14,7 +14,7 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, userSettings, setUserSettings, subscriptionStatus } = useUserContext();
+    const { darkMode, setDarkMode, userSettings, setUserSettings, subscriptionStatus, setUser } = useUserContext();
 
     // Language and comprehension level states
     const [selectedLanguage, setSelectedLanguage] = useState<string>(
@@ -75,7 +75,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
 
             if (response.ok) {
                 alert("✅ Your account has been successfully deleted.");
-                window.location.href = '/'; // Redirect to home
+                setUser(null);  // Assuming setUser is available from your UserContext
+                navigate('/');
             } else {
                 const errorData = await response.json();
                 console.error("Delete error:", errorData);

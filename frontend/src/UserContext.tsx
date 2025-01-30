@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User } from 'firebase/auth'; // Import Firebase User type
+// UserContext.tsx
+
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { User as FirebaseUser } from 'firebase/auth';
 
 // Define the type for UserSettings
 interface UserSettings {
@@ -7,13 +9,22 @@ interface UserSettings {
     selectedLanguage: string;
 }
 
+// Define the type for SubscriptionData
+interface SubscriptionData {
+    subscription_status: string;
+    card_last4?: string;
+    card_brand?: string;
+    card_exp_month?: string;
+    card_exp_year?: string;
+}
+
 // Define the type for UserContext
 interface UserContextType {
+    user: FirebaseUser | null; // Add user state
+    setUser: (user: FirebaseUser | null) => void; // Method to set user
     darkMode: boolean;
     toggleDarkMode: () => void;
     setDarkMode: (darkMode: boolean) => void;
-    user: User | null; // Add Firebase User here
-    setUser: (user: User | null) => void; // Add method to set user
     userSettings: UserSettings;
     setUserSettings: (settings: UserSettings) => void;
     isPollingFiles: boolean;
@@ -23,18 +34,21 @@ interface UserContextType {
     subscriptionStatus: string | null;
     setSubscriptionStatus: (status: string | null) => void;
     fetchSubscriptionStatus: () => void;
+    subscriptionData: SubscriptionData | null;
+    setSubscriptionData: (data: SubscriptionData | null) => void;
+    registerUserInBackend: (user: FirebaseUser) => Promise<void>;
 }
 
 // Create the UserContext with initial values
 const UserContext = createContext<UserContextType>({
+    user: null,
+    setUser: () => { },
     darkMode: false,
     toggleDarkMode: () => { },
     setDarkMode: () => { },
-    user: null, // Initially, user is null
-    setUser: () => { },
     userSettings: {
-        comprehensionLevel: '',
-        selectedLanguage: '',
+        comprehensionLevel: 'Beginner',
+        selectedLanguage: 'English',
     },
     setUserSettings: () => { },
     isPollingFiles: false,
@@ -44,63 +58,103 @@ const UserContext = createContext<UserContextType>({
     subscriptionStatus: null,
     setSubscriptionStatus: () => { },
     fetchSubscriptionStatus: () => { },
+    subscriptionData: null,
+    setSubscriptionData: () => { },
+    registerUserInBackend: async () => { },
 });
 
 // Define UserProvider component
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+    const [user, setUser] = useState<FirebaseUser | null>(null); // Manage user state here
     const [darkMode, setDarkMode] = useState<boolean>(false);
-    const [user, setUser] = useState<User | null>(null); // Manage Firebase user state
     const [userSettings, setUserSettings] = useState<UserSettings>({
-        comprehensionLevel: 'Beginner',  // Default value set to 'Beginner'
-        selectedLanguage: 'English',     // Default value set to 'English'
+        comprehensionLevel: 'Beginner',
+        selectedLanguage: 'English',
     });
     const [isPollingFiles, setIsPollingFiles] = useState<boolean>(false);
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
+    const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
 
     const toggleDarkMode = () => {
         setDarkMode((prevMode) => !prevMode);
     };
 
-    // Fetch subscription status when the user is available
-    useEffect(() => {
-        if (user) { // Only fetch subscription if user is available
-            fetchSubscriptionStatus();
-        }
-    }, [user]);
-
     const fetchSubscriptionStatus = async () => {
         try {
-            const idToken = await user?.getIdToken(); // Get ID Token from Firebase User object
-            if (!idToken) throw new Error('No token found');
+            if (user) {
+                const idToken = await user.getIdToken();
+                const response = await fetch('api/v1/subscriptions/status', {
+                    method: 'GET',
+                    headers: {
+                        Authorization: `Bearer ${idToken}`,
+                    },
+                });
 
-            const response = await fetch('api/v1/subscriptions/status', {
-                method: 'GET',
+                if (!response.ok) {
+                    throw new Error('Failed to fetch subscription status');
+                }
+
+                const data = await response.json();
+                console.log(data)
+                setSubscriptionStatus(data.subscription_status ?? null);
+                setSubscriptionData(data); // Set the subscription data here
+
+            }
+        } catch (error) {
+            console.error('Error fetching subscription status:', error);
+            setSubscriptionStatus(null);
+            setSubscriptionData(null); // Reset subscription data in case of error
+        }
+    };
+
+    const registerUserInBackend = async (user: FirebaseUser) => {
+        try {
+            const idToken = await user.getIdToken();
+            const response = await fetch(`/api/v1/users`, {
+                method: 'POST',
                 headers: {
-                    Authorization: `Bearer ${idToken}`,
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`,
                 },
             });
 
             if (!response.ok) {
-                throw new Error('Failed to fetch subscription status');
+                throw new Error(`Failed to register user: ${response.statusText}`);
             }
 
-            const data = await response.json();
-            setSubscriptionStatus(data.subscription_status ?? null);
+            console.log('User successfully registered in backend');
         } catch (error) {
-            console.error('Error fetching subscription status:', error);
-            setSubscriptionStatus(null);
+            console.error('Error registering user in backend:', error);
         }
     };
+
+    // UseEffect to call fetchSubscriptionStatus when the user is set
+    useEffect(() => {
+        if (!user) return;  
+        const registerAndFetchSubscription = async () => {
+            if (user) {
+                try {
+                    await registerUserInBackend(user);  // Wait for the user registration to complete
+                    await fetchSubscriptionStatus();    // Only fetch subscription status after registration
+                } catch (error) {
+                    console.error("Error in user registration or subscription status fetch:", error);
+                }
+            }
+        };
+
+        registerAndFetchSubscription(); // Call the async function
+
+    }, [user]); // This effect runs when 'user' state changes
 
     return (
         <UserContext.Provider
             value={{
+                user,
+                setUser, // Provide setter for user state
                 darkMode,
                 toggleDarkMode,
                 setDarkMode,
-                user,
-                setUser,
                 userSettings,
                 setUserSettings,
                 isPollingFiles,
@@ -110,6 +164,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 subscriptionStatus,
                 setSubscriptionStatus,
                 fetchSubscriptionStatus,
+                subscriptionData,
+                setSubscriptionData, // Provide setter for subscriptionData
+                registerUserInBackend, // Provide registerUserInBackend method
             }}
         >
             {children}

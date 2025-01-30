@@ -22,8 +22,6 @@ mistral_client = MistralClient(api_key=mistral_key)
 MODEL_NAME = "mistral-small-latest"
 MAX_TOKENS = 4096  # Example token limit for the model (adjust as needed)
 
-sentence_transformer_model = SentenceTransformer('all-MiniLM-L6-v2')  # Example model
-
 logging.basicConfig(level=logging.INFO)
 
 def get_text_embeddings_in_batches(inputs, batch_size=10):

@@ -11,44 +11,21 @@ interface PaymentViewProps {
 }
 
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode }) => {
-    const { subscriptionStatus, setSubscriptionStatus } = useUserContext(); // Getting subscriptionStatus from context
+    const { fetchSubscriptionStatus, setSubscriptionStatus, subscriptionData, setSubscriptionData } = useUserContext(); // Getting subscriptionStatus from context
     const stripe = useStripe();
     const elements = useElements();
     const [email, setEmail] = useState(user?.email || '');
     const [clientSecret, setClientSecret] = useState('');
     const [isRequestPending, setIsRequestPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [subscriptionData, setSubscriptionData] = useState<any>(null);
+
 
     // Fetch Subscription Status
     useEffect(() => {
         if (user) fetchSubscriptionStatus();
     }, [user]);
 
-    const fetchSubscriptionStatus = async () => {
-        setIsRequestPending(true);
-        setError(null);
-        try {
-            console.log("Fetching subscription status...");
-            const token = await user?.getIdToken();
-            console.log("User token:", token);
-            const res = await fetch('/api/v1/subscriptions/status', {
-                method: 'GET',
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            console.log("Subscription status response:", res);
-            if (!res.ok) throw new Error('Failed to fetch subscription status');
-            const data = await res.json();
-            console.log("Subscription status data:", data);
-            setSubscriptionData(data);
-            setSubscriptionStatus(data.subscription_status); // Update context with fetched subscription status
-        } catch (error) {
-            console.error("Error fetching subscription status:", error);
-            setError('Could not fetch subscription details. Please try again.');
-        } finally {
-            setIsRequestPending(false);
-        }
-    };
+ 
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {

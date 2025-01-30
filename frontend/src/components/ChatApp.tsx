@@ -22,7 +22,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     // const { loading, setLoading } = useUserContext();
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
-    const { darkMode, userSettings, subscriptionStatus } = useUserContext();
+    const { darkMode, userSettings, fetchSubscriptionStatus, subscriptionStatus } = useUserContext();
 
     // Language and comprehension level states
     const [selectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
@@ -449,12 +449,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         setSelectedFile(null); // Clear selected file when closing viewer
     };
 
-    useEffect(() => {
-        if (user && subscriptionStatus !== 'active') {
-            // Navigate to the settings page if the subscription is not active
-            navigate('/settings'); // Make sure the /settings route exists in your routing setup
-        }
-    }, [user, navigate, subscriptionStatus]);
 
     useEffect(() => {
         let pollingInterval: NodeJS.Timeout | null = null;
