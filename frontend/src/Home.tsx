@@ -31,6 +31,19 @@ const Home: React.FC = () => {
                     <p className="hero-description">
                         Search across PDFs, research papers, and web sources effortlessly, with multilingual support and expanding compatibility.
                     </p>
+
+                    {/* Embed YouTube Video */}
+                    <div className="video-container">
+                        <iframe
+                            width="560"
+                            height="315"
+                            src="https://www.youtube.com/embed/4oy5PdsxI4E"
+                            title="SynText AI Demo"
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                        ></iframe>
+                    </div>
                 </section>
             </main>
 
