@@ -90,6 +90,8 @@ scp deploy.sh docker-compose-prod.yml root@147.182.150.68:/root/
 scp /Users/osas/Documents/dev/docsynth/deploy.sh root@146.190.246.13:/root/
 scp  /Users/osas/Documents/dev/app/deploy.sh  /Users/osas/Documents/dev/app/.env root@178.128.236.126:/home/root/
 
+ssh root@178.128.236.126
+
 4 Deploy script
 on server chmod +x deploy.sh
  ./deploy.sh
