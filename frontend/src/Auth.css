@@ -1,3 +1,6 @@
+/* Global Theme Variables */
+
+
 /* Apply theme variables to auth page elements */
 .auth-container {
     background-color: var(--background-color);
@@ -8,6 +11,8 @@
     justify-content: center;
     height: 100vh;
     transition: background-color 0.3s ease, color 0.3s ease;
+    padding: 20px;
+    /* Add some padding for spacing */
 }
 
 /* Button Styles */
@@ -21,10 +26,31 @@
     font-size: 1rem;
     border-radius: 4px;
     margin: 10px;
-    transition: background-color 0.3s ease;
+    transition: background-color 0.3s ease, opacity 0.3s ease;
+    width: 100%;
+    max-width: 300px;
+    /* Limit button width for larger screens */
 }
 
+/* Button Hover Effect */
 .google-sign-in-button:hover,
 .logout-button:hover {
     opacity: 0.9;
+}
+
+/* Responsive Design for Mobile */
+@media (max-width: 600px) {
+
+    .google-sign-in-button,
+    .logout-button {
+        font-size: 0.9rem;
+        /* Slightly smaller text on mobile */
+        padding: 10px 20px;
+        /* Adjust padding for mobile */
+    }
+
+    .auth-container {
+        padding: 15px;
+        /* Adjust padding for smaller screens */
+    }
 }
