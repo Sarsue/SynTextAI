@@ -20,7 +20,7 @@
 .history-column {
     display: flex;
     flex-direction: column;
-    padding: 16px;
+    padding: clamp(10px, 2vw, 16px);
     height: 100%;
     transition: background-color 0.3s ease;
 }
@@ -44,13 +44,12 @@
 /* Buttons */
 .settings-button,
 .logout-button-container button {
-    padding: 10px 20px;
-    font-size: 1rem;
+    padding: clamp(8px, 2vw, 10px) clamp(16px, 4vw, 20px);
+    font-size: clamp(0.9rem, 2vw, 1rem);
     border: none;
     border-radius: 4px;
     cursor: pointer;
     margin-top: auto;
-    /* Align at the bottom */
     transition: background-color 0.3s ease;
 }
 
@@ -58,4 +57,42 @@
 .settings-button:hover,
 .logout-button-container button:hover {
     opacity: 0.9;
+}
+
+/* Mobile Adjustments */
+@media (max-width: 768px) {
+    .layout-container {
+        flex-direction: column;
+    }
+
+    .files-column,
+    .conversation-column,
+    .history-column {
+        flex: 1;
+        padding: clamp(10px, 3vw, 16px);
+    }
+
+    .settings-button,
+    .logout-button-container button {
+        font-size: clamp(1rem, 3vw, 1.2rem);
+        padding: clamp(10px, 3vw, 14px);
+    }
+}
+
+@media (max-width: 480px) {
+    .layout-container {
+        flex-direction: column;
+    }
+
+    .files-column,
+    .conversation-column,
+    .history-column {
+        padding: clamp(8px, 4vw, 12px);
+    }
+
+    .settings-button,
+    .logout-button-container button {
+        font-size: clamp(1.1rem, 4vw, 1.3rem);
+        padding: clamp(12px, 4vw, 16px);
+    }
 }

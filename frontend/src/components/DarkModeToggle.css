@@ -3,9 +3,9 @@
     align-items: center;
     justify-content: center;
     position: relative;
-    width: 60px;
-    height: 30px;
-    margin: 10px;
+    width: clamp(50px, 5vw, 60px);
+    height: clamp(25px, 2.5vw, 30px);
+    margin: clamp(8px, 1vw, 10px);
 }
 
 .dark-mode-checkbox {
@@ -20,7 +20,7 @@
     width: 100%;
     height: 100%;
     background-color: #ddd;
-    border-radius: 15px;
+    border-radius: clamp(10px, 2vw, 15px);
     position: relative;
     cursor: pointer;
     transition: background-color 0.3s;
@@ -32,22 +32,22 @@
 
 .sun-icon,
 .moon-icon {
-    font-size: 14px;
+    font-size: clamp(12px, 2vw, 14px);
     color: #fff;
-    padding: 0 5px;
+    padding: 0 clamp(4px, 1vw, 5px);
 }
 
 .toggle-ball {
     position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 24px;
-    height: 24px;
+    top: clamp(2px, 1vw, 3px);
+    left: clamp(2px, 1vw, 3px);
+    width: clamp(20px, 3vw, 24px);
+    height: clamp(20px, 3vw, 24px);
     background-color: #fff;
     border-radius: 50%;
     transition: transform 0.3s;
 }
 
 .dark-mode-checkbox:checked+.dark-mode-label .toggle-ball {
-    transform: translateX(30px);
+    transform: translateX(clamp(26px, 4vw, 30px));
 }

@@ -1,8 +1,6 @@
-/* SettingsPage.css */
-
 /* Container for the entire settings page */
 .settings-container {
-    padding: 24px;
+    padding: clamp(16px, 2vw, 24px);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -16,12 +14,12 @@
 .close-button {
     background: none;
     border: none;
-    font-size: 28px;
+    font-size: clamp(24px, 2vw, 28px);
     color: var(--text-color);
     cursor: pointer;
     position: absolute;
-    top: 16px;
-    right: 16px;
+    top: clamp(12px, 1vw, 16px);
+    right: clamp(12px, 1vw, 16px);
     transition: color 0.3s ease;
 }
 
@@ -32,29 +30,29 @@
 /* Settings content area */
 .settings-content {
     width: 100%;
-    max-width: 900px;
-    margin-top: 60px;
+    max-width: clamp(600px, 70vw, 900px);
+    margin-top: clamp(40px, 4vw, 60px);
     background-color: var(--background-color);
     color: var(--text-color);
-    border-radius: 12px;
+    border-radius: clamp(8px, 1vw, 12px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    padding: 32px;
+    padding: clamp(24px, 2vw, 32px);
 }
 
 /* General settings section */
 .settings-section {
-    margin-bottom: 24px;
-    padding: 20px;
+    margin-bottom: clamp(16px, 2vw, 24px);
+    padding: clamp(16px, 2vw, 20px);
     background-color: var(--header-footer-bg);
-    border-radius: 12px;
+    border-radius: clamp(8px, 1vw, 12px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 /* Section title */
 .section-title {
-    font-size: 24px;
+    font-size: clamp(20px, 2vw, 24px);
     font-weight: 600;
-    margin-bottom: 20px;
+    margin-bottom: clamp(16px, 2vw, 20px);
     color: var(--text-color);
 }
 
@@ -62,16 +60,16 @@
 .section-content {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: clamp(8px, 1vw, 12px);
 }
 
 /* Select elements for Language and Comprehension Level */
 select {
-    padding: 10px;
-    font-size: 16px;
-    border-radius: 8px;
+    padding: clamp(8px, 1vw, 10px);
+    font-size: clamp(14px, 1.5vw, 16px);
+    border-radius: clamp(6px, 0.5vw, 8px);
     border: 1px solid #ddd;
-    margin-top: 12px;
+    margin-top: clamp(8px, 1vw, 12px);
     background-color: var(--input-background);
     color: var(--text-color);
     transition: border-color 0.3s ease, background-color 0.3s ease;
@@ -84,51 +82,50 @@ select:focus {
 
 /* Payment section styling */
 .payment-section {
-    margin-top: 36px;
-    padding: 20px;
+    margin-top: clamp(24px, 2vw, 36px);
+    padding: clamp(16px, 2vw, 20px);
     background-color: var(--header-footer-bg);
-    border-radius: 12px;
+    border-radius: clamp(8px, 1vw, 12px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 /* Delete account section styling */
 .delete-account-section {
-    margin-top: 40px;
-    padding: 20px;
+    margin-top: clamp(24px, 2vw, 40px);
+    padding: clamp(16px, 2vw, 20px);
     background-color: var(--header-footer-bg);
-    border-radius: 12px;
+    border-radius: clamp(8px, 1vw, 12px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 .delete-account-section h2 {
     color: #ef4444;
-    /* Red color for delete section */
-    font-size: 22px;
+    font-size: clamp(18px, 2vw, 22px);
     font-weight: bold;
 }
 
 .delete-account-section ul {
     list-style-type: disc;
-    margin-left: 24px;
+    margin-left: clamp(16px, 2vw, 24px);
     color: var(--text-color);
-    font-size: 16px;
+    font-size: clamp(14px, 1.5vw, 16px);
 }
 
 .delete-account-section button {
     background-color: #ef4444;
     color: white;
-    padding: 14px 28px;
+    padding: clamp(12px, 1vw, 14px) clamp(24px, 2vw, 28px);
     border: none;
-    border-radius: 8px;
+    border-radius: clamp(6px, 0.5vw, 8px);
     cursor: pointer;
     font-weight: 600;
     transition: background-color 0.3s ease, transform 0.2s ease;
-    margin-top: 24px;
-    max-width: 350px;
+    margin-top: clamp(16px, 2vw, 24px);
+    max-width: clamp(250px, 30vw, 350px);
     display: block;
     margin-left: auto;
     margin-right: auto;
-    font-size: 16px;
+    font-size: clamp(14px, 1.5vw, 16px);
 }
 
 .delete-account-section button:hover {
@@ -138,24 +135,24 @@ select:focus {
 
 /* Theme switch toggle styling */
 .theme-toggle-section {
-    margin-top: 36px;
+    margin-top: clamp(24px, 2vw, 36px);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 20px;
+    padding: clamp(8px, 1vw, 10px) clamp(16px, 2vw, 20px);
     background-color: var(--header-footer-bg);
-    border-radius: 8px;
+    border-radius: clamp(6px, 0.5vw, 8px);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 /* For DarkModeToggle component */
 .theme-toggle-section label {
-    font-size: 18px;
+    font-size: clamp(16px, 1.5vw, 18px);
     color: var(--text-color);
 }
+
 .delete-account-section h2 {
     color: #ef4444 !important;
-    /* Ensure red color is enforced */
 }
 
 .delete-account-section button {
@@ -165,8 +162,8 @@ select:focus {
 
 .delete-account-section button:hover {
     background-color: #dc2626 !important;
-    /* Slightly darker red on hover */
 }
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
     .settings-container {
@@ -199,5 +196,4 @@ select:focus {
         font-size: 16px;
         margin-bottom: 8px;
     }
-    
 }

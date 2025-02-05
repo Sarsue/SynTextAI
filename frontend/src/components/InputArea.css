@@ -2,34 +2,29 @@
     display: flex;
     flex-direction: column;
     background-color: var(--background-color);
-    /* Uses the background-color from theme */
     color: var(--text-color);
-    /* Uses the text color from theme */
-    padding: 16px;
-    border-radius: 8px;
+    padding: clamp(12px, 2vw, 16px);
+    border-radius: clamp(6px, 1vw, 8px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     justify-content: space-between;
     position: relative;
     transition: background-color 0.3s ease, color 0.3s ease;
-    /* Smooth transition for light/dark mode */
 }
 
 /* Dark mode specific styling */
 .dark-mode .input-area {
     background-color: var(--background-color);
-    /* Background color for dark mode */
     color: var(--text-color);
-    /* Text color for dark mode */
 }
 
 /* Text input styling */
 .text-input {
-    padding: 12px;
+    padding: clamp(10px, 2vw, 12px);
     border: 1px solid #ccc;
-    border-radius: 6px;
-    margin-bottom: 8px;
+    border-radius: clamp(4px, 1vw, 6px);
+    margin-bottom: clamp(6px, 1vw, 8px);
     width: 100%;
-    font-size: 14px;
+    font-size: clamp(12px, 2vw, 14px);
     transition: border-color 0.3s ease;
 }
 
@@ -42,23 +37,18 @@
 .custom-file-upload {
     display: inline-block;
     background-color: var(--button-bg);
-    /* Uses button background from theme */
     color: var(--button-text-color);
-    /* Uses button text color from theme */
-    padding: 8px 16px;
-    border-radius: 6px;
+    padding: clamp(6px, 1vw, 8px) clamp(12px, 2vw, 16px);
+    border-radius: clamp(4px, 1vw, 6px);
     cursor: pointer;
     transition: background-color 0.3s ease;
-    font-size: 16px;
-    /* Adjusted font size for consistency */
+    font-size: clamp(14px, 2vw, 16px);
 }
 
 /* Ensure the file upload button is more visible in dark mode */
 .dark-mode .custom-file-upload {
     background-color: var(--button-bg);
-    /* Keeps button visible in dark mode */
     color: var(--button-text-color);
-    /* Ensures text is visible */
 }
 
 .custom-file-upload:hover {
@@ -72,18 +62,16 @@
 
 .send-button {
     background-color: var(--button-bg);
-    /* Uses button background from theme */
     color: var(--button-text-color);
-    /* Uses button text color from theme */
-    padding: 10px 18px;
+    padding: clamp(8px, 1vw, 10px) clamp(14px, 2vw, 18px);
     border: none;
-    border-radius: 6px;
+    border-radius: clamp(4px, 1vw, 6px);
     cursor: pointer;
     position: absolute;
-    bottom: 16px;
-    right: 16px;
+    bottom: clamp(12px, 2vw, 16px);
+    right: clamp(12px, 2vw, 16px);
     transition: background-color 0.3s ease;
-    font-size: 16px;
+    font-size: clamp(14px, 2vw, 16px);
 }
 
 .send-button:hover {
@@ -100,8 +88,8 @@
     border: 3px solid #f3f3f3;
     border-top: 3px solid #0078d4;
     border-radius: 50%;
-    width: 20px;
-    height: 20px;
+    width: clamp(16px, 2vw, 20px);
+    height: clamp(16px, 2vw, 20px);
     animation: spin 0.8s linear infinite;
 }
 
@@ -119,26 +107,26 @@
 .attached-files {
     display: flex;
     flex-wrap: wrap;
-    margin-top: 8px;
+    margin-top: clamp(6px, 1vw, 8px);
 }
 
 .attached-file {
     display: flex;
     align-items: center;
     background-color: var(--background-color);
-    padding: 6px;
-    border-radius: 6px;
-    margin-right: 8px;
-    margin-bottom: 8px;
-    font-size: 14px;
+    padding: clamp(4px, 1vw, 6px);
+    border-radius: clamp(4px, 1vw, 6px);
+    margin-right: clamp(6px, 1vw, 8px);
+    margin-bottom: clamp(6px, 1vw, 8px);
+    font-size: clamp(12px, 2vw, 14px);
 }
 
 .attached-file button {
     background: none;
     border: none;
     color: #d9534f;
-    font-size: 16px;
-    margin-left: 8px;
+    font-size: clamp(14px, 2vw, 16px);
+    margin-left: clamp(6px, 1vw, 8px);
     cursor: pointer;
 }
 
@@ -149,15 +137,15 @@
 /* Responsive adjustments */
 @media (max-width: 600px) {
     .send-button {
-        padding: 8px 14px;
-        font-size: 14px;
+        padding: clamp(6px, 2vw, 8px) clamp(10px, 2vw, 14px);
+        font-size: clamp(12px, 2vw, 14px);
     }
 
     .text-input {
-        font-size: 12px;
+        font-size: clamp(10px, 2vw, 12px);
     }
 
     .attached-file {
-        font-size: 12px;
+        font-size: clamp(10px, 2vw, 12px);
     }
 }

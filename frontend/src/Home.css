@@ -36,32 +36,33 @@ body {
 header {
     background-color: var(--header-footer-bg);
     color: var(--text-color);
-    padding: 20px;
+    padding: clamp(10px, 2vw, 20px);
     text-align: center;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 /* Logo */
 .logo-container .app-title {
-    font-size: 2rem;
+    font-size: clamp(1.5rem, 3vw, 2rem);
     font-weight: 600;
     margin: 0;
 }
 
 /* Authentication Button */
 .auth-buttons {
-    margin-top: 10px;
+    margin-top: clamp(5px, 1vw, 10px);
 }
 
 .google-sign-in-button {
     background-color: var(--button-bg);
     color: var(--button-text-color);
     border: none;
-    padding: 12px 24px;
-    font-size: 1rem;
+    padding: clamp(8px, 2vw, 12px) clamp(16px, 4vw, 24px);
+    font-size: clamp(0.8rem, 2vw, 1rem);
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.3s ease;
+    width: 10%;
 }
 
 .google-sign-in-button:hover {
@@ -76,7 +77,7 @@ header {
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 80px 20px;
+    padding: clamp(40px, 10vw, 80px) clamp(10px, 5vw, 20px);
 }
 
 /* Hero Section */
@@ -85,17 +86,17 @@ header {
 }
 
 .hero-title {
-    font-size: 3.2rem;
+    font-size: clamp(1.8rem, 4vw, 3.2rem);
     font-weight: 700;
-    margin-bottom: 16px;
+    margin-bottom: clamp(10px, 2vw, 16px);
     line-height: 1.2;
 }
 
 .hero-description {
-    font-size: 1.25rem;
+    font-size: clamp(0.9rem, 2vw, 1.25rem);
     line-height: 1.6;
     color: rgba(0, 0, 0, 0.7);
-    margin-bottom: 24px;
+    margin-bottom: clamp(16px, 2vw, 24px);
 }
 
 .dark-mode .hero-description {
@@ -105,13 +106,19 @@ header {
 /* Footer */
 footer {
     background-color: var(--header-footer-bg);
-    padding: 20px;
+    padding: clamp(10px, 2vw, 20px);
     text-align: center;
-    font-size: 0.9rem;
+    font-size: clamp(0.8rem, 2vw, 0.9rem);
     border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 footer p {
     margin: 0;
     opacity: 0.8;
+}
+
+/* Video Container */
+.video-container iframe {
+    width: 100%;
+    height: clamp(150px, 30vw, 315px);
 }

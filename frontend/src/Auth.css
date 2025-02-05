@@ -1,56 +1,47 @@
-/* Global Theme Variables */
-
-
-/* Apply theme variables to auth page elements */
+/* Base Styles */
 .auth-container {
-    background-color: var(--background-color);
-    color: var(--text-color);
+    background-color: var(--background-color, #f0f0f0);
+    color: var(--text-color, #333);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100vh;
+    padding: clamp(20px, 5vw, 40px);
     transition: background-color 0.3s ease, color 0.3s ease;
-    padding: 20px;
-    /* Add some padding for spacing */
 }
 
 /* Button Styles */
 .google-sign-in-button,
 .logout-button {
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
+    background-color: var(--button-bg, #4285f4);
+    color: var(--button-text-color, #fff);
     border: none;
-    padding: 12px 24px;
+    padding: clamp(12px, 2vw, 16px) clamp(24px, 5vw, 32px);
     cursor: pointer;
-    font-size: 1rem;
-    border-radius: 4px;
-    margin: 10px;
-    transition: background-color 0.3s ease, opacity 0.3s ease;
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    border-radius: 8px;
+    margin: clamp(10px, 2vw, 15px);
+    transition: background-color 0.3s ease;
     width: 100%;
-    max-width: 300px;
-    /* Limit button width for larger screens */
 }
 
-/* Button Hover Effect */
+/* Hover Effects */
 .google-sign-in-button:hover,
 .logout-button:hover {
-    opacity: 0.9;
+    background-color: #357ae8;
 }
 
-/* Responsive Design for Mobile */
+/* Mobile Adjustments */
 @media (max-width: 600px) {
 
     .google-sign-in-button,
     .logout-button {
-        font-size: 0.9rem;
-        /* Slightly smaller text on mobile */
-        padding: 10px 20px;
-        /* Adjust padding for mobile */
+        font-size: clamp(1.2rem, 3vw, 1.4rem);
+        padding: clamp(14px, 3vw, 18px);
     }
 
     .auth-container {
-        padding: 15px;
-        /* Adjust padding for smaller screens */
+        padding: clamp(40px, 10vw, 60px) clamp(20px, 5vw, 30px);
     }
 }
