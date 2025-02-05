@@ -49,7 +49,7 @@
 
 /* Button styling */
 .PaymentView button {
-    width: 100%;
+    width: clamp(150px, 50%, 300px);
     background-color: var(--button-bg);
     color: var(--button-text-color);
     padding: clamp(10px, 1vw, 12px);
