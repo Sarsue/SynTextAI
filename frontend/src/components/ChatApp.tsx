@@ -607,11 +607,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     return (
         <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>
             <div className="layout-container">
-                {/* Mobile Tab Navigation */}
-                {isMobile && <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />}
+                {/* Mobile Tab Navigation - Only on mobile screens */}
+                {isMobile && (
+                    <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
+                )}
 
-                {/* Layout for Larger Screens */}
+                {/* Layout for Larger Screens - Desktop */}
                 <div className="columns-container">
+                    {/* Show columns only on desktop (not mobile) */}
                     <div className={`files-column ${isMobile ? "hidden" : ""}`}>
                         <KnowledgeBaseComponent
                             files={knowledgeBaseFiles}
@@ -655,8 +658,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                     </div>
                 </div>
 
-                {/* Tab Content for Mobile */}
-                {!isMobile && renderTabContent()}
+                {/* Render Tab Content for Mobile */}
+                {isMobile && renderTabContent()}
             </div>
         </div>
     );
