@@ -8,6 +8,10 @@
     flex-direction: column;
     position: relative;
     transition: background-color 0.3s ease;
+    justify-content: flex-start;
+    /* Ensures messages align well */
+    align-items: center;
+    /* Centers the content */
 }
 
 /* Dark mode styles */
@@ -128,6 +132,7 @@
 @media (max-width: 768px) {
     .conversation-view {
         padding: clamp(8px, 3vw, 12px);
+        justify-content: flex-start;
     }
 
     .chat-message {

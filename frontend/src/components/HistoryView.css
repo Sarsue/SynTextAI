@@ -27,6 +27,9 @@
     cursor: pointer;
     transition: background-color 0.3s;
     border-radius: clamp(4px, 0.5vw, 5px);
+    flex-grow: 1;
+    /* Ensures buttons take equal width on smaller screens */
+    text-align: center;
 }
 
 .history-action:hover {
@@ -114,11 +117,14 @@
 
     .history-actions {
         padding-bottom: clamp(6px, 2vw, 8px);
+        flex-direction: column;
+        gap: 6px;
     }
 
     .history-action {
         padding: clamp(6px, 2vw, 8px) clamp(10px, 3vw, 12px);
         font-size: clamp(0.9rem, 2vw, 1rem);
+        width: 100%;
     }
 
     .history-list {
@@ -143,11 +149,14 @@
 
     .history-actions {
         padding-bottom: clamp(4px, 3vw, 6px);
+        flex-direction: column;
+        gap: 4px;
     }
 
     .history-action {
         padding: clamp(4px, 3vw, 6px) clamp(8px, 4vw, 10px);
         font-size: clamp(0.8rem, 3vw, 0.9rem);
+        width: 100%;
     }
 
     .history-list {

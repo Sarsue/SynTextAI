@@ -8,12 +8,14 @@
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Layout Container */
 .layout-container {
     display: flex;
     flex: 1;
     height: 100%;
     justify-content: space-between;
-    /* Ensures the columns are spaced out properly */
+    gap: 16px;
+    /* Adds spacing between columns */
 }
 
 /* Column Styles */
@@ -74,6 +76,8 @@
     .layout-container {
         flex-direction: column;
         /* Stack columns vertically */
+        gap: 8px;
+        /* Reduces gap between stacked columns */
     }
 
     .files-column,
@@ -96,6 +100,8 @@
     .layout-container {
         flex-direction: column;
         /* Stack columns vertically */
+        gap: 4px;
+        /* Further reduces gap for mobile screens */
     }
 
     .files-column,
