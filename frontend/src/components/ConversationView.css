@@ -7,6 +7,7 @@
     display: flex;
     flex-direction: column;
     position: relative;
+    transition: background-color 0.3s ease;
 }
 
 /* Dark mode styles */
@@ -82,7 +83,6 @@
     margin-top: clamp(4px, 1vw, 6px);
 }
 
-/* Action buttons */
 .icon-button {
     background: none;
     border: none;
@@ -112,10 +112,7 @@
     color: red;
 }
 
-.like-button {
-    color: gray;
-}
-
+.like-button,
 .dislike-button {
     color: gray;
 }
@@ -135,10 +132,12 @@
 
     .chat-message {
         max-width: clamp(85%, 90vw, 90%);
+        padding: clamp(8px, 3vw, 12px);
     }
 
     .actions button {
         padding: clamp(2px, 2vw, 4px);
+        font-size: clamp(0.9rem, 2vw, 1rem);
     }
 
     .message-timestamp {
@@ -152,13 +151,17 @@
     }
 
     .chat-message {
-        padding: clamp(8px, 3vw, 10px);
+        padding: clamp(6px, 4vw, 10px);
         max-width: clamp(90%, 95vw, 95%);
     }
 
     .actions button {
         padding: clamp(2px, 3vw, 4px);
         font-size: clamp(0.8rem, 3vw, 0.9rem);
+    }
+
+    .message-timestamp {
+        font-size: clamp(0.55rem, 3vw, 0.6rem);
     }
 }
 

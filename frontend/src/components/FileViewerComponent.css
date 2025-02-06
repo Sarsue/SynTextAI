@@ -22,15 +22,19 @@
     height: clamp(80%, 90vh, 90%);
     overflow-y: auto;
     position: relative;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .file-viewer-content h4 {
     margin-bottom: clamp(10px, 1vw, 15px);
+    font-size: clamp(1.2rem, 2vw, 1.5rem);
 }
 
 .file-viewer-content pre {
     white-space: pre-wrap;
     font-family: monospace;
+    font-size: clamp(0.9rem, 2vw, 1.1rem);
+    overflow-x: auto;
 }
 
 .file-viewer-content button {
@@ -43,6 +47,7 @@
     position: absolute;
     top: clamp(8px, 1vw, 10px);
     right: clamp(8px, 1vw, 10px);
+    transition: background-color 0.3s ease;
 }
 
 .file-viewer-content button:hover {
@@ -61,4 +66,49 @@
 
 .file-viewer-dark-mode .file-viewer-content button:hover {
     background-color: #333;
+}
+
+/* Mobile view optimizations */
+@media (max-width: 768px) {
+    .file-viewer-content {
+        padding: clamp(12px, 3vw, 16px);
+        width: clamp(90%, 95vw, 95%);
+        height: clamp(90%, 95vh, 95%);
+    }
+
+    .file-viewer-content h4 {
+        margin-bottom: clamp(8px, 2vw, 12px);
+        font-size: clamp(1.1rem, 3vw, 1.4rem);
+    }
+
+    .file-viewer-content pre {
+        font-size: clamp(0.8rem, 3vw, 1rem);
+    }
+
+    .file-viewer-content button {
+        padding: clamp(4px, 2vw, 6px) clamp(8px, 3vw, 10px);
+        font-size: clamp(0.9rem, 3vw, 1.1rem);
+    }
+}
+
+@media (max-width: 480px) {
+    .file-viewer-content {
+        padding: clamp(10px, 4vw, 14px);
+        width: clamp(95%, 98vw, 98%);
+        height: clamp(95%, 98vh, 98%);
+    }
+
+    .file-viewer-content h4 {
+        margin-bottom: clamp(6px, 3vw, 10px);
+        font-size: clamp(1rem, 4vw, 1.3rem);
+    }
+
+    .file-viewer-content pre {
+        font-size: clamp(0.7rem, 4vw, 0.9rem);
+    }
+
+    .file-viewer-content button {
+        padding: clamp(4px, 3vw, 6px) clamp(6px, 4vw, 8px);
+        font-size: clamp(0.8rem, 4vw, 1rem);
+    }
 }

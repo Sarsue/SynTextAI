@@ -6,6 +6,7 @@
     border-radius: clamp(6px, 1vw, 8px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     overflow-y: auto;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 /* Dark Mode for Knowledge Base */
@@ -45,12 +46,14 @@
     align-items: center;
     padding: clamp(6px, 1vw, 8px);
     border-radius: clamp(3px, 0.5vw, 4px);
+    transition: background-color 0.3s ease;
 }
 
 /* Common styles for the file link */
 .file-list .file-link {
     cursor: pointer;
     text-decoration: underline;
+    font-size: clamp(12px, 2vw, 14px);
 }
 
 /* Styles for processed and not processed file links */
@@ -122,4 +125,65 @@
 
 .green-indicator {
     background-color: green;
+}
+
+/* Mobile view optimizations */
+@media (max-width: 768px) {
+    .files-column {
+        width: clamp(200px, 30vw, 250px);
+        padding: clamp(10px, 2vw, 14px);
+    }
+
+    .knowledgebase-toggle button {
+        padding: clamp(4px, 1vw, 6px) clamp(10px, 2vw, 14px);
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .file-list li {
+        padding: clamp(4px, 1vw, 6px);
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .file-list .file-link {
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .file-list .delete-button {
+        padding: clamp(2px, 0.5vw, 3px) clamp(4px, 1vw, 6px);
+        font-size: clamp(10px, 1vw, 12px);
+    }
+
+    .file-status-legend {
+        font-size: clamp(11px, 1.5vw, 13px);
+    }
+}
+
+@media (max-width: 480px) {
+    .files-column {
+        width: clamp(180px, 40vw, 220px);
+        padding: clamp(8px, 3vw, 12px);
+    }
+
+    .knowledgebase-toggle button {
+        padding: clamp(4px, 2vw, 6px) clamp(8px, 3vw, 12px);
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .file-list li {
+        padding: clamp(4px, 2vw, 6px);
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .file-list .file-link {
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .file-list .delete-button {
+        padding: clamp(2px, 1vw, 4px) clamp(4px, 2vw, 6px);
+        font-size: clamp(9px, 2vw, 11px);
+    }
+
+    .file-status-legend {
+        font-size: clamp(10px, 1.5vw, 12px);
+    }
 }

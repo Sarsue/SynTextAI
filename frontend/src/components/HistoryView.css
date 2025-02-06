@@ -56,6 +56,7 @@
 .history-item {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     padding: clamp(8px, 1vw, 10px);
     margin-bottom: clamp(4px, 0.5vw, 5px);
     cursor: pointer;
@@ -98,8 +99,68 @@
     cursor: pointer;
     font-size: clamp(14px, 1.5vw, 16px);
     margin-left: clamp(8px, 1vw, 10px);
+    transition: color 0.3s;
 }
 
 .delete-button:hover {
     color: darkred;
+}
+
+/* Mobile view optimizations */
+@media (max-width: 768px) {
+    .history-container {
+        padding: clamp(6px, 2vw, 8px);
+    }
+
+    .history-actions {
+        padding-bottom: clamp(6px, 2vw, 8px);
+    }
+
+    .history-action {
+        padding: clamp(6px, 2vw, 8px) clamp(10px, 3vw, 12px);
+        font-size: clamp(0.9rem, 2vw, 1rem);
+    }
+
+    .history-list {
+        margin-top: clamp(6px, 2vw, 8px);
+    }
+
+    .history-item {
+        padding: clamp(6px, 2vw, 8px);
+        margin-bottom: clamp(4px, 1vw, 6px);
+        font-size: clamp(0.9rem, 2vw, 1rem);
+    }
+
+    .delete-button {
+        font-size: clamp(12px, 2vw, 14px);
+    }
+}
+
+@media (max-width: 480px) {
+    .history-container {
+        padding: clamp(4px, 3vw, 6px);
+    }
+
+    .history-actions {
+        padding-bottom: clamp(4px, 3vw, 6px);
+    }
+
+    .history-action {
+        padding: clamp(4px, 3vw, 6px) clamp(8px, 4vw, 10px);
+        font-size: clamp(0.8rem, 3vw, 0.9rem);
+    }
+
+    .history-list {
+        margin-top: clamp(4px, 3vw, 6px);
+    }
+
+    .history-item {
+        padding: clamp(4px, 3vw, 6px);
+        margin-bottom: clamp(4px, 2vw, 6px);
+        font-size: clamp(0.8rem, 3vw, 0.9rem);
+    }
+
+    .delete-button {
+        font-size: clamp(10px, 3vw, 12px);
+    }
 }

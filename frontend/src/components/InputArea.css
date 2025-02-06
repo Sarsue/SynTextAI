@@ -1,3 +1,4 @@
+/* Input Area */
 .input-area {
     display: flex;
     flex-direction: column;
@@ -135,17 +136,48 @@
 }
 
 /* Responsive adjustments */
-@media (max-width: 600px) {
-    .send-button {
-        padding: clamp(6px, 2vw, 8px) clamp(10px, 2vw, 14px);
-        font-size: clamp(12px, 2vw, 14px);
+@media (max-width: 768px) {
+    .input-area {
+        padding: clamp(10px, 2vw, 14px);
     }
 
     .text-input {
-        font-size: clamp(10px, 2vw, 12px);
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .custom-file-upload {
+        font-size: clamp(13px, 2vw, 15px);
+    }
+
+    .send-button {
+        padding: clamp(6px, 2vw, 8px) clamp(12px, 3vw, 14px);
+        font-size: clamp(13px, 2vw, 15px);
     }
 
     .attached-file {
-        font-size: clamp(10px, 2vw, 12px);
+        font-size: clamp(11px, 2vw, 13px);
+    }
+}
+
+@media (max-width: 480px) {
+    .input-area {
+        padding: clamp(8px, 3vw, 12px);
+    }
+
+    .text-input {
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .custom-file-upload {
+        font-size: clamp(12px, 3vw, 14px);
+    }
+
+    .send-button {
+        padding: clamp(4px, 3vw, 6px) clamp(10px, 4vw, 12px);
+        font-size: clamp(12px, 3vw, 14px);
+    }
+
+    .attached-file {
+        font-size: clamp(10px, 3vw, 12px);
     }
 }
