@@ -181,7 +181,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
 
     // Determine if the card update is required (expired cards, etc.)
     const isCardUpdateRequired = subscriptionData?.subscription_status &&
-        !['none', 'active', 'deleted', 'canceled'].includes(subscriptionData.subscription_status);
+        !['none', 'active', 'deleted', 'canceled', 'trialing'].includes(subscriptionData.subscription_status);
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
