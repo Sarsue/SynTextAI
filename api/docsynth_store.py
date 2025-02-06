@@ -39,6 +39,8 @@ class Subscription(Base):
     current_period_end = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+    trial_end = Column(TIMESTAMP, nullable=True)
+
 
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
     user = relationship("User", back_populates="subscriptions")
@@ -187,27 +189,30 @@ class DocSynthStore:
             if not user:
                 raise ValueError(f"User with ID {user_id} not found.")
 
-            # Explicitly delete related objects (redundant but ensures cleanup)
-            session.query(CardDetails).filter(CardDetails.subscription_id.in_(
-                session.query(Subscription.id).filter(Subscription.user_id == user_id)
-            )).delete(synchronize_session=False)
+            # Fetch the user's subscription
+            subscription = session.query(Subscription).filter(Subscription.user_id == user_id).first()
+            if subscription:
+                # Update subscription status to 'deleted' and clear stripe_subscription_id
+                subscription.status = 'deleted'
+                subscription.stripe_subscription_id = None
+                session.add(subscription)
 
-            session.query(Subscription).filter(Subscription.user_id == user_id).delete(synchronize_session=False)
+            # Delete related records, but don't delete user or subscription
+            session.query(CardDetails).filter(CardDetails.subscription_id == subscription.id).delete(synchronize_session=False)
             session.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
             session.query(ChatHistory).filter(ChatHistory.user_id == user_id).delete(synchronize_session=False)
             session.query(File).filter(File.user_id == user_id).delete(synchronize_session=False)
 
-            # Finally, delete the user
-            session.delete(user)
+            # Commit changes
             session.commit()
+
         except Exception as e:
             session.rollback()
             raise
         finally:
             session.close()
 
-
-    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
+    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, trial_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
         session = self.get_session()
         update_time = datetime.utcnow()
         try:
@@ -219,6 +224,7 @@ class DocSynthStore:
                 subscription.stripe_subscription_id = stripe_subscription_id
                 subscription.status = status
                 subscription.current_period_end = current_period_end
+                subscription.trial_end = trial_end  # Update trial_end if provided
                 subscription.updated_at = update_time
                 
                 # Update card details if provided
@@ -248,6 +254,7 @@ class DocSynthStore:
                     stripe_subscription_id=stripe_subscription_id,
                     status=status,
                     current_period_end=current_period_end,
+                    trial_end=trial_end,  # Set trial_end if available
                     updated_at=update_time
                 )
                 session.add(subscription)
@@ -273,15 +280,14 @@ class DocSynthStore:
                     'stripe_subscription_id': stripe_subscription_id,
                     'status': status,
                     'current_period_end': current_period_end,
+                    'trial_end': trial_end,  # Include trial_end in the response
                     'card_last4': card_last4 if card_last4 else None,
                     'card_brand': card_type if card_type else None,
                     'exp_month': exp_month if exp_month else None,
                     'exp_year': exp_year if exp_year else None
                 } 
-
         except Exception as e:
             session.rollback()
-            # logger.error(f"Error adding/updating subscription: {e}")
             raise
         finally:
             session.close()
@@ -351,6 +357,7 @@ class DocSynthStore:
                     'stripe_subscription_id': subscription_data.stripe_subscription_id,
                     'status': subscription_data.status,
                     'current_period_end': subscription_data.current_period_end,
+                      'trial_end': subscription_data.trial_end,  
                     'created_at': subscription_data.created_at,
                     'updated_at': subscription_data.updated_at,
                     'card_last4': card_data.card_last4 if card_data else None,

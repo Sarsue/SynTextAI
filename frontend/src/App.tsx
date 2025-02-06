@@ -25,7 +25,7 @@ const App: React.FC = () => {
                             path="/chat"
                             element={
                                 user ? (
-                                    subscriptionStatus === 'active' ? (
+                                    subscriptionStatus === 'active' || subscriptionStatus === 'trialing' ? (
                                         <ChatApp user={user} onLogout={() => { }} />
                                     ) : (
                                         <Navigate to="/settings" replace />

@@ -16,6 +16,7 @@ interface SubscriptionData {
     card_brand?: string;
     card_exp_month?: string;
     card_exp_year?: string;
+    trial_end?: number;
 }
 
 // Define the type for UserContext
@@ -131,7 +132,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // UseEffect to call fetchSubscriptionStatus when the user is set
     useEffect(() => {
-        if (!user) return;  
+        if (!user) return;
         const registerAndFetchSubscription = async () => {
             if (user) {
                 try {

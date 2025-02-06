@@ -4,6 +4,7 @@ import type { Stripe } from '@stripe/stripe-js';
 import './PaymentView.css';
 import { useUserContext } from '../UserContext'; // Importing the context hook
 import { User } from 'firebase/auth';
+
 interface PaymentViewProps {
     stripePromise: Promise<Stripe | null>;
     user: User | null;
@@ -19,13 +20,10 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     const [isRequestPending, setIsRequestPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-
     // Fetch Subscription Status
     useEffect(() => {
         if (user) fetchSubscriptionStatus();
     }, [user]);
-
-
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
@@ -94,6 +92,34 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         }
     };
 
+    const handleStartTrial = async () => {
+        setIsRequestPending(true);
+        setError(null);
+        try {
+            console.log("Starting free trial...");
+            const response = await fetch('/api/v1/subscriptions/start-trial', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${await user?.getIdToken()}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorResponse = await response.json();
+                throw new Error(errorResponse?.error || 'Failed to start free trial.');
+            }
+
+            const data = await response.json();
+            setSubscriptionData(data);
+            setSubscriptionStatus(data.subscription_status); // Update context with the new subscription status
+        } catch (error) {
+            setError((error as Error)?.message || 'An error occurred while starting the trial.');
+        } finally {
+            setIsRequestPending(false);
+        }
+    };
+
     // Handle Update Payment Method
     const handleUpdatePaymentMethod = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -151,36 +177,60 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             setIsRequestPending(false);
         }
     };
-
     console.log("Subscription status:", subscriptionData?.subscription_status);
-    const isCardUpdateRequired = subscriptionData?.subscription_status
-        ? !['canceled', 'active', 'none'].includes(subscriptionData.subscription_status)
-        : true;
+
+    // Determine if the card update is required (expired cards, etc.)
+    const isCardUpdateRequired = subscriptionData?.subscription_status &&
+        !['none', 'active', 'deleted', 'canceled'].includes(subscriptionData.subscription_status);
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
             <h3>Payment</h3>
+
+            {/* Handle the case where the user needs to update their card */}
             {isCardUpdateRequired ? (
-                <form onSubmit={handleUpdatePaymentMethod}>
-                    <CardElement
-                        options={{
-                            style: {
-                                base: {
-                                    color: darkMode ? "#ffffff" : "#000000", // White in dark mode
-                                    backgroundColor: darkMode ? "#333" : "#ffffff",
-                                    "::placeholder": {
-                                        color: darkMode ? "#bbbbbb" : "#888888", // Adjust placeholder color
+                <>
+                    <p>Your payment method needs to be updated due to an expired card or other issue.</p>
+                    <form onSubmit={handleUpdatePaymentMethod}>
+                        <CardElement
+                            options={{
+                                style: {
+                                    base: {
+                                        color: darkMode ? "#ffffff" : "#000000", // White in dark mode
+                                        backgroundColor: darkMode ? "#333" : "#ffffff",
+                                        "::placeholder": {
+                                            color: darkMode ? "#bbbbbb" : "#888888", // Adjust placeholder color
+                                        },
                                     },
                                 },
-                            },
-                        }}
-                    />
-
-                    <button type="submit" disabled={isRequestPending}>
-                        {isRequestPending ? 'Processing...' : 'Update Payment Method'}
+                            }}
+                        />
+                        <button type="submit" disabled={isRequestPending}>
+                            {isRequestPending ? 'Processing...' : 'Update Payment Method'}
+                        </button>
+                    </form>
+                </>
+            ) : subscriptionData?.subscription_status === 'none' ? (
+                // New user eligible for free trial
+                <>
+                    <p>You have access to a free trial.</p>
+                    <button onClick={handleStartTrial} disabled={isRequestPending}>
+                        {isRequestPending ? 'Starting Trial...' : 'Start Free Trial'}
                     </button>
-                </form>
+                </>
+            ) : subscriptionData?.subscription_status === 'trialing' ? (
+                // Trial period active, prompt for subscription
+                <>
+                    <p>Your free trial is active.</p>
+                    {subscriptionData?.trial_end && (
+                        <p>Trial ends on: {new Date(subscriptionData.trial_end * 1000).toLocaleDateString()}</p>
+                    )}
+                    <button onClick={handleSubscribe} disabled={isRequestPending}>
+                        {isRequestPending ? 'Processing...' : 'Subscribe Now'}
+                    </button>
+                </>
             ) : subscriptionData?.subscription_status === 'active' ? (
+                // Subscription is active, show card details and cancel button
                 <>
                     <p>Your subscription is active.</p>
                     {subscriptionData?.card_last4 && subscriptionData?.card_brand && (
@@ -198,7 +248,16 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                         {isRequestPending ? 'Processing...' : 'Cancel Subscription'}
                     </button>
                 </>
+            ) : subscriptionData?.subscription_status === 'deleted' || subscriptionData?.subscription_status === 'canceled' ? (
+                // User has canceled or deleted subscription, prompt to subscribe again
+                <>
+                    <p>Your subscription has been deleted or canceled.</p>
+                    <button onClick={handleSubscribe} disabled={isRequestPending}>
+                        {isRequestPending ? 'Processing...' : 'Subscribe Again'}
+                    </button>
+                </>
             ) : (
+                // Default case: Prompt to subscribe if no status matches
                 <form onSubmit={handleSubscribe}>
                     <CardElement
                         options={{
@@ -213,15 +272,16 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                             },
                         }}
                     />
-
                     <button type="submit" disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe'}
                     </button>
                 </form>
             )}
+
             {error && <p className="error">{error}</p>}
         </div>
     );
+
 };
 
 const WrappedPaymentView: React.FC<PaymentViewProps> = (props) => (

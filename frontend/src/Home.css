@@ -6,6 +6,8 @@
     --button-bg: #007bff;
     --button-text-color: #ffffff;
     --button-hover-bg: #0056b3;
+    --pricing-bg: #eef2ff;
+    --pricing-text: #1a237e;
 }
 
 /* Dark Mode */
@@ -13,6 +15,8 @@
     --background-color: #121212;
     --text-color: #e0e0e0;
     --header-footer-bg: #1f1f1f;
+    --pricing-bg: #1a1a2e;
+    --pricing-text: #bb86fc;
 }
 
 /* Base Styles */
@@ -62,7 +66,7 @@ header {
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.3s ease;
-    width: 10%;
+    width: clamp(150px, 50%, 300px);
 }
 
 .google-sign-in-button:hover {
@@ -101,6 +105,30 @@ header {
 
 .dark-mode .hero-description {
     color: rgba(255, 255, 255, 0.75);
+}
+
+/* Pricing Section */
+.pricing-section {
+    background-color: var(--pricing-bg);
+    color: var(--pricing-text);
+    padding: clamp(20px, 5vw, 40px);
+    border-radius: 10px;
+    margin: clamp(20px, 4vw, 40px) auto;
+    text-align: center;
+    max-width: 600px;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.pricing-title {
+    font-size: clamp(1.5rem, 3vw, 2.5rem);
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.pricing-details {
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    font-weight: 500;
+    opacity: 0.9;
 }
 
 /* Footer */

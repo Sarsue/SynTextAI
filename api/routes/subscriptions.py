@@ -51,7 +51,8 @@ def subscription_status():
                 'card_last4': None,
                 'card_brand': None,
                 'card_exp_month': None,
-                'card_exp_year': None
+                'card_exp_year': None,
+                'trial_end': None
             }), 200
         
         # Prepare subscription data to return
@@ -60,13 +61,86 @@ def subscription_status():
             'card_last4': subscription["card_last4"],
             'card_brand': subscription["card_brand"],
             'card_exp_month': subscription["exp_month"],
-            'card_exp_year': subscription["exp_year"]
+            'card_exp_year': subscription["exp_year"],
+            'trial_end': subscription["trial_end"]  
         }
         
         return jsonify(response), 200
     except Exception as e:
         current_app.logger.error(f"Error in subscription_status: {str(e)}")
         return jsonify({'error': 'An internal error occurred'}), 500
+
+@subscriptions_bp.route('/start-trial', methods=['POST'])
+def start_trial():
+    try:
+        store = current_app.store
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'error': 'Authorization token is missing'}), 401
+        
+        success, user_info = get_user_id(token)
+        user_id = get_id_helper(store, success, user_info)
+
+        # Check if the user already has a subscription
+        subscription = store.get_subscription(user_id)
+        if subscription:
+            # If subscription exists, check its status
+            if subscription.get('status') == 'active':
+                logging.error(f"Request came from an already active subscription: {user_id}")
+                return jsonify({'error': 'Active subscription already exists'}), 400
+            else:
+                # If subscription exists but is not active, we assume they are in a trial or canceled state.
+                # Handle the logic for reactivating or restarting the trial as needed.
+                pass
+        else:
+            # No subscription found, start a trial
+            stripe_customer_id = None
+
+            # Create a new Stripe customer if needed
+            existing_customers = stripe.Customer.list(email=user_info.get('email'))
+            if existing_customers.data:
+                stripe_customer_id = existing_customers.data[0].id
+                logging.info(f"Found existing Stripe customer: {stripe_customer_id}")
+            else:
+                # Create a new Stripe customer if no existing customer is found
+                customer = stripe.Customer.create(
+                    description=f"Customer for user_id {user_id}",
+                    email=user_info.get('email'),
+                    name=user_info.get('name')
+                )
+                stripe_customer_id = customer.id
+                logging.info(f"Created new Stripe customer: {stripe_customer_id}")
+
+            # Create a trial subscription for the user
+            created_subscription = stripe.Subscription.create(
+                customer=stripe_customer_id,
+                items=[{'price': price_id}],
+                trial_period_days=30,  # Adjust to your trial period duration
+            )
+
+            # Store the subscription in the database with the 'trial' status
+            store.add_or_update_subscription(
+                user_id=user_id,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=created_subscription.id,
+                status=created_subscription["status"],
+                current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
+                trial_end=datetime.utcfromtimestamp(created_subscription.trial_end),  # Pass trial_end
+                card_last4=None,  # No card details at the start of the trial
+                card_type=None,
+                exp_month=None,
+                exp_year=None
+            )
+
+            return jsonify({
+                'message': 'Trial started successfully',
+                'subscription_status': created_subscription["status"],
+                'trial_end': datetime.utcfromtimestamp(created_subscription.trial_end)  # Correct trial_end value
+            }), 200
+
+    except Exception as e:
+        logging.error(f"Error starting trial: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 @subscriptions_bp.route('/cancel', methods=['POST'])

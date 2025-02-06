@@ -45,7 +45,7 @@ class WebSearch:
             total=self.retry_limit,
             backoff_factor=1,
             status_forcelist=[500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "OPTIONS"]
+            allowed_methods=["HEAD", "GET", "OPTIONS"]
         )
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
@@ -54,7 +54,13 @@ class WebSearch:
 
     async def fetch_async(self, url: str) -> Optional[str]:
         """Fetch a URL asynchronously with retry logic and exponential backoff."""
-        proxy = random.choice(self.proxies) if self.proxies else None
+        p = random.choice(proxies)
+
+        # Use the chosen proxy for both http and https
+        proxy = {
+            'http': p,
+            'https': p
+        }
         headers = {'User-Agent': 'Mozilla/5.0'}
         for attempt in range(self.retry_limit):
             try:
@@ -195,7 +201,13 @@ class WebSearch:
 
 # Example usage
 if __name__ == "__main__":
-    proxies = ["http://proxy1.example.com", "http://proxy2.example.com"]  # Add your proxy list here
+    proxies = [
+    'https://3.97.167.115:3128',
+    'https://3.97.176.251:3128' ,
+    'https://15.156.24.206:3128' 
+    ]
+
+
     searcher = WebSearch(proxies=proxies)
     ans = searcher.search_topic(topic="How does Tariff work?")
     print(ans)

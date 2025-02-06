@@ -43,6 +43,8 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: clamp(6px, 1vw, 8px);
+    border-radius: clamp(3px, 0.5vw, 4px);
 }
 
 /* Common styles for the file link */
@@ -79,11 +81,45 @@
 
 /* Processed and Not Processed File Status Styles */
 .processed-file {
+    background-color: #e8f5e9;
+    /* Light green background for processed */
     color: #4caf50;
     /* Green color for processed */
 }
 
 .not-processed-file {
-    color: #ff9800;
-    /* Orange color for not processed */
+    background-color: #ffebee;
+    /* Light red background for not processed */
+    color: #ff0000;
+    /* Red color for not processed */
+}
+
+/* Legend Styling */
+.file-status-legend {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 10px;
+    font-size: clamp(12px, 1.5vw, 14px);
+}
+
+.file-status-legend p {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.red-indicator,
+.green-indicator {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    border-radius: 50%;
+}
+
+.red-indicator {
+    background-color: red;
+}
+
+.green-indicator {
+    background-color: green;
 }

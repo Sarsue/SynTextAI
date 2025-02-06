@@ -16,7 +16,9 @@ const Home: React.FC = () => {
                 </div>
                 <div className="auth-buttons">
                     <Link to="/login" className="signin-link">
-                        <button className="google-sign-in-button">Sign in with Google</button>
+                        <button className="google-sign-in-button">
+                            Start Free Trial
+                        </button>
                     </Link>
                 </div>
             </header>
@@ -44,6 +46,17 @@ const Home: React.FC = () => {
                             allowFullScreen
                         ></iframe>
                     </div>
+                </section>
+
+                {/* Pricing Section */}
+                <section className="pricing-section">
+                    <h2 className="pricing-title">Try SynText AI Free for 30 Days</h2>
+                    <p className="pricing-description">
+                        Get full access to all features during your 30-day free trial. No credit card required. After that, continue for just <strong>$15/month</strong>.
+                    </p>
+                    <Link to="/login" className="signin-link">
+                        <button className="pricing-button">Start Your Free Trial</button>
+                    </Link>
                 </section>
             </main>
 
