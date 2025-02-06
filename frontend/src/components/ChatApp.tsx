@@ -12,7 +12,7 @@ import { useUserContext } from '../UserContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
-
+import Tabs from "./Tabs";
 interface ChatAppProps {
     user: User | null;
     onLogout: () => void;
@@ -33,7 +33,16 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const { isPollingMessages, setIsPollingMessages } = useUserContext(); // State to track if we are polling for messages
     const navigate = useNavigate();
     const parentIsPollingMessages = isPollingMessages;
+    const [activeTab, setActiveTab] = useState("chat");
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
+    useEffect(() => {
+        const handleResize = () => {
+            setIsMobile(window.innerWidth <= 768);
+        };
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
     const handleSettingsClick = () => {
         navigate('/settings');
     };
@@ -546,70 +555,111 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-    return (
-        <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''}`}>
-            <div className="layout-container">
-                {/* Files Column on the left */}
-                <div className="files-column">
-                    <KnowledgeBaseComponent
-                        files={knowledgeBaseFiles}
-                        onDeleteFile={handleDeleteFile}
-                        onFileClick={handleFileClick}
-                        darkMode={darkMode}
-                    />
-                    {selectedFile && (
-                        <FileViewerComponent
-                            fileUrl={selectedFile.publicUrl}
-                            onClose={handleCloseFileViewer}
-                            onError={handleFileError}
+    const renderTabContent = () => {
+        switch (activeTab) {
+            case "files":
+                return (
+                    <div className="files-column">
+                        <KnowledgeBaseComponent
+                            files={knowledgeBaseFiles}
+                            onDeleteFile={handleDeleteFile}
+                            onFileClick={handleFileClick}
                             darkMode={darkMode}
                         />
-                    )}
-                    {/* Settings Button at the bottom left */}
-                    {user !== null && (
-                        <button
-                            className="settings-button"
-                            onClick={handleSettingsClick}
-                            style={{
-                                backgroundColor: darkMode ? 'var(--button-bg)' : 'var(--light-bg)',
-                                color: darkMode ? 'var(--button-text-color)' : 'var(--light-text-color)',
-                            }}
-                        >
-                            ⚙️
-                        </button>
-                    )}
+                        {selectedFile && (
+                            <FileViewerComponent
+                                fileUrl={selectedFile.publicUrl}
+                                onClose={handleCloseFileViewer}
+                                onError={handleFileError}
+                                darkMode={darkMode}
+                            />
+                        )}
+                    </div>
+                );
+            case "chat":
+                return (
+                    <div className="conversation-column">
+                        <ConversationView
+                            history={currentHistory !== null ? histories[currentHistory] : null}
+                            onCopy={handleCopy}
+                        />
+                        <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
+                    </div>
+                );
+            case "history":
+                return (
+                    <div className="history-column">
+                        <HistoryView
+                            histories={Object.values(histories)}
+                            setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
+                            onClearHistory={handleClearHistory}
+                            onNewChat={handleNewChat}
+                            onDeleteHistory={handleDeleteHistory}
+                            onDownloadHistory={handleDownloadHistory}
+                        />
+                    </div>
+                );
+            default:
+                return null;
+        }
+    };
+
+    return (
+        <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>
+            <div className="layout-container">
+                {/* Mobile Tab Navigation */}
+                {isMobile && <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />}
+
+                {/* Layout for Larger Screens */}
+                <div className="columns-container">
+                    <div className={`files-column ${isMobile ? "hidden" : ""}`}>
+                        <KnowledgeBaseComponent
+                            files={knowledgeBaseFiles}
+                            onDeleteFile={handleDeleteFile}
+                            onFileClick={handleFileClick}
+                            darkMode={darkMode}
+                        />
+                        {selectedFile && (
+                            <FileViewerComponent
+                                fileUrl={selectedFile.publicUrl}
+                                onClose={handleCloseFileViewer}
+                                onError={handleFileError}
+                                darkMode={darkMode}
+                            />
+                        )}
+                    </div>
+
+                    <div className={`conversation-column ${isMobile ? "hidden" : ""}`}>
+                        <ConversationView
+                            history={currentHistory !== null ? histories[currentHistory] : null}
+                            onCopy={handleCopy}
+                        />
+                        <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
+                        <ToastContainer />
+                    </div>
+
+                    <div className={`history-column ${isMobile ? "hidden" : ""}`}>
+                        {user !== null && (
+                            <div className="logout-button-container">
+                                <button onClick={handleLogout}>Logout</button>
+                            </div>
+                        )}
+                        <HistoryView
+                            histories={Object.values(histories)}
+                            setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
+                            onClearHistory={handleClearHistory}
+                            onNewChat={handleNewChat}
+                            onDeleteHistory={handleDeleteHistory}
+                            onDownloadHistory={handleDownloadHistory}
+                        />
+                    </div>
                 </div>
 
-                {/* Conversation View in the middle */}
-                <div className="conversation-column">
-                    <ConversationView
-                        history={currentHistory !== null ? histories[currentHistory] : null}
-                        onCopy={handleCopy}
-                    />
-                    <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
-                    <ToastContainer />
-                </div>
-
-                {/* History Column on the right */}
-                <div className="history-column">
-                    {user !== null && (
-                        <div className="logout-button-container">
-                            <button onClick={handleLogout}>Logout</button>
-                        </div>
-                    )}
-                    <HistoryView
-                        histories={Object.values(histories)}
-                        setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
-                        onClearHistory={handleClearHistory}
-                        onNewChat={handleNewChat}
-                        onDeleteHistory={handleDeleteHistory}
-                        onDownloadHistory={handleDownloadHistory}
-                    />
-                </div>
+                {/* Tab Content for Mobile */}
+                {!isMobile && renderTabContent()}
             </div>
         </div>
     );
-
 };
 
 export default ChatApp;
