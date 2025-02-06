@@ -19,7 +19,7 @@ const Auth: FC = () => {
 
     useEffect(() => {
         if (user && subscriptionStatus !== null) {
-            navigate(subscriptionStatus === 'active' ? '/chat' : '/settings');
+            navigate(subscriptionStatus === 'active' || subscriptionStatus === 'trialing' ? '/chat' : '/settings');
         }
     }, [user, subscriptionStatus, navigate]);
 
