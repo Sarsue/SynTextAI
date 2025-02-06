@@ -16,7 +16,7 @@ interface SubscriptionData {
     card_brand?: string;
     card_exp_month?: string;
     card_exp_year?: string;
-    trial_end?: number;
+    trial_end?: string;
 }
 
 // Define the type for UserContext

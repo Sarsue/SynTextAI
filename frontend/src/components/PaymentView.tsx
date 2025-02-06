@@ -223,7 +223,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 <>
                     <p>Your free trial is active.</p>
                     {subscriptionData?.trial_end && (
-                        <p>Trial ends on: {new Date(subscriptionData.trial_end * 1000).toLocaleDateString()}</p>
+                        <p>Trial ends on: {new Date(subscriptionData.trial_end).toLocaleDateString()}</p>
                     )}
                     <button onClick={handleSubscribe} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe Now'}

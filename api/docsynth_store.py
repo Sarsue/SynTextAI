@@ -280,7 +280,7 @@ class DocSynthStore:
                     'stripe_subscription_id': stripe_subscription_id,
                     'status': status,
                     'current_period_end': current_period_end,
-                    'trial_end': trial_end,  # Include trial_end in the response
+                    'trial_end': trial_end.strftime("%Y-%m-%d %H:%M:%S") if trial_end else None,  # Include trial_end in the response
                     'card_last4': card_last4 if card_last4 else None,
                     'card_brand': card_type if card_type else None,
                     'exp_month': exp_month if exp_month else None,
