@@ -399,6 +399,21 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                                 darkMode={darkMode}
                             />
                         )}
+                    </div>
+                );
+            case "chat":
+                return (
+                    <div className={`conversation-column ${activeTab === "chat" ? "active" : ""}`}>
+                        {user !== null && (
+                            <div className="logout-button-container">
+                                <button onClick={handleLogout}>Logout</button>
+                            </div>
+                        )}
+                        <ConversationView
+                            history={currentHistory !== null ? histories[currentHistory] : null}
+                            onCopy={handleCopy}
+                        />
+                        <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
                         {/* Settings Button at the bottom left */}
                         {user !== null && (
                             <button
@@ -414,24 +429,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                         )}
                     </div>
                 );
-            case "chat":
-                return (
-                    <div className={`conversation-column ${activeTab === "chat" ? "active" : ""}`}>
-                        <ConversationView
-                            history={currentHistory !== null ? histories[currentHistory] : null}
-                            onCopy={handleCopy}
-                        />
-                        <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
-                    </div>
-                );
             case "history":
                 return (
                     <div className={`history-column ${activeTab === "history" ? "active" : ""}`}>
-                        {user !== null && (
-                            <div className="logout-button-container">
-                                <button onClick={handleLogout}>Logout</button>
-                            </div>
-                        )}
                         <HistoryView
                             histories={Object.values(histories)}
                             setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
