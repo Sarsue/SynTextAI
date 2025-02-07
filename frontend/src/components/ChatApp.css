@@ -126,7 +126,7 @@
 }
 
 /* Tab Navigation - Mobile-only */
-.tabs-container {
+.tabs {
     display: none;
     flex-direction: row;
     gap: 16px;
@@ -134,7 +134,7 @@
     margin-bottom: 16px;
 }
 
-.tabs-container button {
+.tabs button {
     background-color: var(--tab-bg);
     color: var(--text-color);
     border: none;
@@ -145,22 +145,22 @@
     transition: background-color 0.3s ease;
 }
 
-.tabs-container button:hover {
+.tabs button:hover {
     background-color: var(--hover-bg);
 }
 
-.tabs-container button.active {
+.tabs button.active {
     background-color: var(--active-tab-bg);
 }
 
 /* Show tabs only on mobile screens */
 @media (max-width: 768px) {
-    .tabs-container {
+    .tabs {
         display: flex;
     }
 
     /* Style adjustments for the tabs */
-    .tabs-container button {
+    .tabs button {
         font-size: clamp(1rem, 3vw, 1.2rem);
     }
 }

@@ -30,9 +30,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
         setSelectedFile(url);
         setFileError(null);
 
-        // Log file link click
-        const logUrl = 'api/v1/logs';
-        await LogUIActions(logUrl, 'POST', `User clicked file link: ${url}`, 'info');
         console.log(`User clicked file link: ${url}`);
     };
 
