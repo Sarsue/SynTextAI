@@ -13,24 +13,22 @@ import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
 import Tabs from "./Tabs";
+
 interface ChatAppProps {
     user: User | null;
     onLogout: () => void;
 }
 
 const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
-    // const { loading, setLoading } = useUserContext();
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
     const { darkMode, userSettings, fetchSubscriptionStatus, subscriptionStatus } = useUserContext();
-
-    // Language and comprehension level states
     const [selectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
     const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
-    const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null); // State for selected file
-    const { isPollingFiles, setIsPollingFiles } = useUserContext(); // State to track if we are polling for files
-    const { isPollingMessages, setIsPollingMessages } = useUserContext(); // State to track if we are polling for messages
+    const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
+    const { isPollingFiles, setIsPollingFiles } = useUserContext();
+    const { isPollingMessages, setIsPollingMessages } = useUserContext();
     const navigate = useNavigate();
     const parentIsPollingMessages = isPollingMessages;
     const [activeTab, setActiveTab] = useState("chat");
@@ -43,6 +41,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         window.addEventListener("resize", handleResize);
         return () => window.removeEventListener("resize", handleResize);
     }, []);
+
     const handleSettingsClick = () => {
         navigate('/settings');
     };
@@ -50,24 +49,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const callApiWithToken = async (url: string, method: string, body?: any) => {
         try {
             const idToken = await user?.getIdToken();
-
             if (!idToken) {
                 console.error('User token not available');
                 return null;
             }
-
-            const headers: HeadersInit = {
-                'Authorization': `Bearer ${idToken}`,
-            };
-
-            const response = await fetch(url, {
-                method,
-                headers,
-                mode: 'cors',
-                credentials: 'include',
-                body: body ? body : undefined,  // Do not stringify the body for FormData
-            });
-
+            const headers: HeadersInit = { 'Authorization': `Bearer ${idToken}` };
+            const response = await fetch(url, { method, headers, mode: 'cors', credentials: 'include', body: body ? body : undefined });
             return response;
         } catch (error) {
             console.error('Unexpected error calling API:', error);
@@ -77,65 +64,34 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     const handleCopy = (message: Message) => {
         const textToCopy = message.content;
-
         navigator.clipboard.writeText(textToCopy)
-            .then(() => {
-                console.log('Text successfully copied to clipboard:', textToCopy);
-            })
-            .catch((err) => {
-                console.error('Unable to copy text to clipboard:', err);
-            });
+            .then(() => { console.log('Text successfully copied to clipboard:', textToCopy); })
+            .catch((err) => { console.error('Unable to copy text to clipboard:', err); });
     };
 
     const handleSend = async (message: string, files: File[]) => {
         try {
-            //setLoading(true); // Set loading to true at the start of the operation
             console.log('Files to append:', files);
-
             if (files.length > 0) {
                 const formData = new FormData();
-
                 for (let i = 0; i < files.length; i++) {
                     formData.append(files[i].name, files[i]);
                 }
-
                 const fileDataResponse = await callApiWithToken(
                     `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                     'POST',
                     formData
                 );
-
                 if (fileDataResponse && fileDataResponse.ok) {
                     const fileData = await fileDataResponse.json();
-                    toast.success(fileData.message, {
-                        position: 'top-right',
-                        autoClose: 3000,
-                        hideProgressBar: false,
-                        closeOnClick: true,
-                        pauseOnHover: true,
-                        draggable: true,
-                        progress: undefined,
-                    });
-                    setIsPollingFiles(true); // Start polling for files
-                    fetchUserFiles();  // Ensure this fetch triggers the update
+                    toast.success(fileData.message, { position: 'top-right', autoClose: 3000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
+                    setIsPollingFiles(true);
+                    fetchUserFiles();
                 } else {
-                    toast.error('File upload failed. Please try again.', {
-                        position: 'top-right',
-                        autoClose: 5000,
-                        hideProgressBar: false,
-                        closeOnClick: true,
-                        pauseOnHover: true,
-                        draggable: true,
-                        progress: undefined,
-                    });
+                    toast.error('File upload failed. Please try again.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
                 }
-
-                if (!message.trim()) {
-                    // setLoading(false);
-                    return; // Early return if the message is empty
-                }
+                if (!message.trim()) { return; }
             }
-
             if (currentHistory !== null && !isNaN(currentHistory)) {
                 await sendMessage(message);
             } else {
@@ -143,49 +99,30 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            // setLoading(false); // Set loading to false if there's an error
         }
     };
+
     const sendMessage = async (message: string) => {
         if (currentHistory !== null && !isNaN(currentHistory)) {
             const history = histories[currentHistory];
-
             if (history) {
                 const linkDataResponse = await callApiWithToken(
                     `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                     'POST'
                 );
-
                 if (linkDataResponse) {
                     const linkData = await linkDataResponse.json();
-
-                    const newMessages = Array.isArray(linkData)
-                        ? linkData.map((messageData: any) => ({
-                            id: messageData.id,
-                            content: messageData.content,
-                            sender: messageData.sender,
-                            timestamp: new Date(messageData.timestamp).toISOString(), // Convert to ISO string
-                            liked: messageData.is_liked === 1,
-                            disliked: messageData.is_disliked === 1,
-                        }))
-                        : [];
-
-                    // Combine new messages with the existing messages
-                    const updatedMessages = [
-                        ...history.messages,
-                        ...newMessages,
-                    ];
-
-                    const updatedHistory: History = {
-                        ...history,
-                        messages: updatedMessages,
-                    };
-
-                    setHistories((prevHistories) => ({
-                        ...prevHistories,
-                        [currentHistory]: updatedHistory,
-                    }));
-
+                    const newMessages = Array.isArray(linkData) ? linkData.map((messageData: any) => ({
+                        id: messageData.id,
+                        content: messageData.content,
+                        sender: messageData.sender,
+                        timestamp: new Date(messageData.timestamp).toISOString(),
+                        liked: messageData.is_liked === 1,
+                        disliked: messageData.is_disliked === 1,
+                    })) : [];
+                    const updatedMessages = [...history.messages, ...newMessages];
+                    const updatedHistory: History = { ...history, messages: updatedMessages };
+                    setHistories((prevHistories) => ({ ...prevHistories, [currentHistory]: updatedHistory }));
                     setIsPollingMessages(true);
                 }
             }
@@ -194,57 +131,28 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
                 'POST'
             );
-
             if (createHistoryResponse) {
                 const createHistoryData = await createHistoryResponse.json();
-
                 if (createHistoryData?.id) {
-                    const newHistory: History = {
-                        id: createHistoryData.id,
-                        title: createHistoryData.title,
-                        messages: [],
-                    };
-
-                    setHistories((prevHistories) => ({
-                        ...prevHistories,
-                        [newHistory.id]: newHistory,
-                    }));
-
+                    const newHistory: History = { id: createHistoryData.id, title: createHistoryData.title, messages: [] };
+                    setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: newHistory }));
                     setCurrentHistory(newHistory.id);
-
                     const linkDataResponse = await callApiWithToken(
                         `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
                         'POST'
                     );
-
                     if (linkDataResponse) {
                         const linkData = await linkDataResponse.json();
-
-                        const newMessages = Array.isArray(linkData)
-                            ? linkData.map((messageData: any) => ({
-                                id: messageData.id,
-                                content: messageData.content,
-                                sender: messageData.sender,
-                                timestamp: new Date(messageData.timestamp).toISOString(), // Convert to ISO string
-                                liked: messageData.is_liked === 1,
-                                disliked: messageData.is_disliked === 1,
-                            }))
-                            : [];
-
-                        const updatedMessages = [
-                            ...newHistory.messages,
-                            ...newMessages,
-                        ];
-
-
-                        setHistories((prevHistories) => ({
-                            ...prevHistories,
-                            [newHistory.id]: {
-                                ...newHistory,
-                                messages: updatedMessages,
-                            },
-                        }));
-
+                        const newMessages = Array.isArray(linkData) ? linkData.map((messageData: any) => ({
+                            id: messageData.id,
+                            content: messageData.content,
+                            sender: messageData.sender,
+                            timestamp: new Date(messageData.timestamp).toISOString(),
+                            liked: messageData.is_liked === 1,
+                            disliked: messageData.is_disliked === 1,
+                        })) : [];
+                        const updatedMessages = [...newHistory.messages, ...newMessages];
+                        setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: { ...newHistory, messages: updatedMessages } }));
                         setIsPollingMessages(true);
                     }
                 }
@@ -252,18 +160,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-
     const handleClearHistory = async () => {
         try {
             const clearHistoryResponse = await callApiWithToken(`api/v1/histories/all`, 'DELETE');
-
             if (!clearHistoryResponse?.ok) {
                 console.error('Failed to clear history:', clearHistoryResponse?.statusText);
                 return;
             }
-
             await fetchHistories();
-
             setCurrentHistory(null);
         } catch (error) {
             console.error('Error clearing history:', error);
@@ -273,17 +177,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const handleNewChat = async () => {
         try {
             const createHistoryResponse = await callApiWithToken(`api/v1/histories?title=New%20Chat`, 'POST');
-
             if (createHistoryResponse) {
                 const createHistoryData = createHistoryResponse.ok ? await createHistoryResponse.json() : null;
-
                 if (createHistoryData?.id) {
-                    const newHistory: History = {
-                        id: createHistoryData.id,
-                        title: createHistoryData.title,
-                        messages: [],
-                    };
-
+                    const newHistory: History = { id: createHistoryData.id, title: createHistoryData.title, messages: [] };
                     setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: newHistory }));
                     setCurrentHistory(newHistory.id);
                 }
@@ -296,17 +193,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const handleDeleteHistory = async (historyId: number | History) => {
         try {
             const idToDelete = typeof historyId === 'number' ? historyId : historyId.id;
-
             const deleteHistoryResponse = await callApiWithToken(`api/v1/histories?history-id=${encodeURIComponent(idToDelete)}`, 'DELETE');
-
             if (deleteHistoryResponse) {
                 const deleteHistoryData = await deleteHistoryResponse.json();
-
                 if (deleteHistoryData?.message === 'History deleted successfully') {
                     console.log('History deleted successfully');
-
                     await fetchHistories();
-
                     if (currentHistory === idToDelete) {
                         setCurrentHistory(null);
                     }
@@ -322,12 +214,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const fetchHistories = async () => {
         try {
             const historiesResponse = await callApiWithToken(`api/v1/histories`, 'GET');
-
             if (!historiesResponse?.ok) {
                 console.error('Failed to fetch chat histories:', historiesResponse?.status, historiesResponse?.statusText);
                 return;
             }
-
             let jsonResponse;
             try {
                 jsonResponse = await historiesResponse.json();
@@ -335,17 +225,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 console.error('Error parsing JSON response:', error);
                 return;
             }
-
             if (!Array.isArray(jsonResponse)) {
                 console.error('Invalid response format:', jsonResponse);
                 return;
             }
-
-            // Map and sort messages for each history
             const histories: History[] = jsonResponse.map((historyData: any) => {
-                // Sort messages by 'id'
                 const sortedMessages = (historyData.messages || []).sort((a: any, b: any) => a.id - b.id);
-
                 return {
                     id: historyData.id,
                     title: historyData.title,
@@ -359,20 +244,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                     })),
                 };
             });
-
             const historiesObject: { [key: number]: History } = {};
             histories.forEach((history) => {
                 historiesObject[history.id] = history;
             });
-
             setHistories(historiesObject);
-
             const latestHistoryId = histories.length > 0 ? histories[histories.length - 1].id : null;
             setCurrentHistory(latestHistoryId);
-
             console.log('Loaded Histories:', histories);
-
-            // Stop polling messages if the latest message is from the bot
             if (isPollingMessages && latestHistoryId !== null) {
                 const lastMessage = histories[histories.length - 1]?.messages?.slice(-1)[0];
                 if (lastMessage?.sender === 'bot') {
@@ -384,7 +263,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-
     const handleLogout = () => {
         onLogout();
         navigate('/');
@@ -393,29 +271,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const handleDownloadHistory = async () => {
         if (!Object.keys(histories).length) {
             console.error('No chat histories available to download.');
-            toast.error('No chat histories available to download.', {
-                position: 'top-right',
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: true,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-            });
+            toast.error('No chat histories available to download.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
             return;
         }
-
         try {
             const historiesArray = Object.values(histories);
-
-            // Convert the histories object to a JSON string
             const dataStr = JSON.stringify(historiesArray, null, 2);
             const blob = new Blob([dataStr], { type: 'application/json' });
             const username = user?.displayName;
-            // Create a download link
             const url = URL.createObjectURL(blob);
             const now = new Date();
-            const datetimeString = now.toISOString().replace(/[:.]/g, '-'); // Format as YYYY-MM-DDTHH-MM-SS
+            const datetimeString = now.toISOString().replace(/[:.]/g, '-');
             const filename = `${username}_${datetimeString}_history.json`;
             const a = document.createElement('a');
             a.href = url;
@@ -423,27 +289,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            URL.revokeObjectURL(url); // Clean up the URL object
-            toast.success('Chat histories downloaded successfully!', {
-                position: 'top-right',
-                autoClose: 3000,
-                hideProgressBar: false,
-                closeOnClick: true,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-            });
+            URL.revokeObjectURL(url);
+            toast.success('Chat histories downloaded successfully!', { position: 'top-right', autoClose: 3000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
         } catch (error) {
             console.error('Error downloading chat histories:', error);
-            toast.error('Error downloading chat histories. Please try again.', {
-                position: 'top-right',
-                autoClose: 5000,
-                hideProgressBar: false,
-                closeOnClick: true,
-                pauseOnHover: true,
-                draggable: true,
-                progress: undefined,
-            });
+            toast.error('Error downloading chat histories. Please try again.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
         }
     };
 
@@ -452,26 +302,23 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     };
 
     const handleFileClick = (file: UploadedFile) => {
-        setSelectedFile(file); // Set the selected file when clicked
-    };
-    const handleCloseFileViewer = () => {
-        setSelectedFile(null); // Clear selected file when closing viewer
+        setSelectedFile(file);
     };
 
+    const handleCloseFileViewer = () => {
+        setSelectedFile(null);
+    };
 
     useEffect(() => {
         let pollingInterval: NodeJS.Timeout | null = null;
-
         const fetchInitialData = async () => {
             try {
-                // Fetch histories and files unconditionally on initial load
                 await fetchHistories();
                 await fetchUserFiles();
             } catch (error) {
                 console.error('Error fetching initial data:', error);
             }
         };
-
         const pollData = async () => {
             try {
                 if (isPollingMessages) {
@@ -484,35 +331,23 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 console.error('Error during polling:', error);
             }
         };
-
         if (user) {
-            fetchInitialData(); // Initial fetch
-            pollingInterval = setInterval(pollData, 30000); // Poll every 30 seconds
+            fetchInitialData();
+            pollingInterval = setInterval(pollData, 30000);
         }
-
         return () => {
             if (pollingInterval) clearInterval(pollingInterval);
         };
     }, [user, isPollingMessages, isPollingFiles]);
 
-
     const fetchUserFiles = async () => {
         if (!user) return;
-
         try {
             const token = await user.getIdToken();
-
-            const response = await fetch(`api/v1/files`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
-            });
-
+            const response = await fetch(`api/v1/files`, { headers: { 'Authorization': `Bearer ${token}` } });
             if (response.ok) {
                 const files: UploadedFile[] = await response.json();
                 setKnowledgeBaseFiles(files);
-
-                // Stop polling files if all are processed
                 if (isPollingFiles) {
                     const unprocessedFiles = files.some((file) => !file.processed);
                     if (!unprocessedFiles) {
@@ -527,24 +362,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-
     const handleDeleteFile = async (fileId: number) => {
         if (!user) {
             console.error('User is not available.');
             return;
         }
-
-        // Add logic to delete the file on the server
         try {
             const token = await user.getIdToken();
-
-            const deleteResponse = await fetch(`api/v1/files/${fileId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
-            });
-
+            const deleteResponse = await fetch(`api/v1/files/${fileId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
             if (deleteResponse.ok) {
                 setKnowledgeBaseFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
             } else {
@@ -607,59 +432,55 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     return (
         <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>
             <div className="layout-container">
-                {/* Mobile Tab Navigation - Only on mobile screens */}
                 {isMobile && (
                     <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
                 )}
-
-                {/* Layout for Larger Screens - Desktop */}
                 <div className="columns-container">
-                    {/* Show columns only on desktop (not mobile) */}
-                    <div className={`files-column ${isMobile ? "hidden" : ""}`}>
-                        <KnowledgeBaseComponent
-                            files={knowledgeBaseFiles}
-                            onDeleteFile={handleDeleteFile}
-                            onFileClick={handleFileClick}
-                            darkMode={darkMode}
-                        />
-                        {selectedFile && (
-                            <FileViewerComponent
-                                fileUrl={selectedFile.publicUrl}
-                                onClose={handleCloseFileViewer}
-                                onError={handleFileError}
-                                darkMode={darkMode}
-                            />
-                        )}
-                    </div>
-
-                    <div className={`conversation-column ${isMobile ? "hidden" : ""}`}>
-                        <ConversationView
-                            history={currentHistory !== null ? histories[currentHistory] : null}
-                            onCopy={handleCopy}
-                        />
-                        <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
-                        <ToastContainer />
-                    </div>
-
-                    <div className={`history-column ${isMobile ? "hidden" : ""}`}>
-                        {user !== null && (
-                            <div className="logout-button-container">
-                                <button onClick={handleLogout}>Logout</button>
+                    {!isMobile && (
+                        <>
+                            <div className="files-column">
+                                <KnowledgeBaseComponent
+                                    files={knowledgeBaseFiles}
+                                    onDeleteFile={handleDeleteFile}
+                                    onFileClick={handleFileClick}
+                                    darkMode={darkMode}
+                                />
+                                {selectedFile && (
+                                    <FileViewerComponent
+                                        fileUrl={selectedFile.publicUrl}
+                                        onClose={handleCloseFileViewer}
+                                        onError={handleFileError}
+                                        darkMode={darkMode}
+                                    />
+                                )}
                             </div>
-                        )}
-                        <HistoryView
-                            histories={Object.values(histories)}
-                            setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
-                            onClearHistory={handleClearHistory}
-                            onNewChat={handleNewChat}
-                            onDeleteHistory={handleDeleteHistory}
-                            onDownloadHistory={handleDownloadHistory}
-                        />
-                    </div>
+                            <div className="conversation-column">
+                                <ConversationView
+                                    history={currentHistory !== null ? histories[currentHistory] : null}
+                                    onCopy={handleCopy}
+                                />
+                                <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
+                                <ToastContainer />
+                            </div>
+                            <div className="history-column">
+                                {user !== null && (
+                                    <div className="logout-button-container">
+                                        <button onClick={handleLogout}>Logout</button>
+                                    </div>
+                                )}
+                                <HistoryView
+                                    histories={Object.values(histories)}
+                                    setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
+                                    onClearHistory={handleClearHistory}
+                                    onNewChat={handleNewChat}
+                                    onDeleteHistory={handleDeleteHistory}
+                                    onDownloadHistory={handleDownloadHistory}
+                                />
+                            </div>
+                        </>
+                    )}
+                    {isMobile && renderTabContent()}
                 </div>
-
-                {/* Render Tab Content for Mobile */}
-                {isMobile && renderTabContent()}
             </div>
         </div>
     );

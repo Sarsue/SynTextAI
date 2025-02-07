@@ -83,10 +83,18 @@
     .files-column,
     .conversation-column,
     .history-column {
-        flex: 1;
+        display: none;
+        /* Hide columns by default on mobile */
         padding: clamp(10px, 3vw, 16px);
         order: unset;
         /* Removes any previous order restrictions */
+    }
+
+    .files-column.active,
+    .conversation-column.active,
+    .history-column.active {
+        display: flex;
+        /* Show only the active tab content */
     }
 
     .settings-button,
@@ -151,20 +159,8 @@
         display: flex;
     }
 
-    /* Hide columns on mobile */
-    .files-column,
-    .conversation-column,
-    .history-column {
-        display: none;
-    }
-
     /* Style adjustments for the tabs */
     .tabs-container button {
         font-size: clamp(1rem, 3vw, 1.2rem);
     }
-}
-
-/* Ensure only active tab content is visible on mobile */
-.tabs-container button.active {
-    background-color: var(--active-tab-bg);
 }
