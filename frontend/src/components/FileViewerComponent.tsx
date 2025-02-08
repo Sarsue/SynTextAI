@@ -27,7 +27,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         }
 
         setFileType(detectedFileType);
-        fetchFileContent(fileUrl, detectedFileType);
+
+        // If it's a webpage, no need to fetch it, just use the URL directly
+        if (detectedFileType === 'webpage') {
+            setFileContent(fileUrl);
+            setLoading(false);
+        } else {
+            fetchFileContent(fileUrl, detectedFileType);
+        }
     }, [fileUrl, onError]);
 
     const fetchFileContent = async (url: string, type: string) => {
@@ -65,10 +72,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
 
     const getFileType = (fileUrl: string): string | null => {
         const url = new URL(fileUrl);
-        // Extract the pathname without query params or fragments
         const pathname = url.pathname;
-        // Get the file extension
         const extension = pathname.split('.').pop()?.toLowerCase();
+
         if (fileUrl.startsWith('http') && !extension) {
             return 'webpage'; // Detect web page links
         }
@@ -124,7 +130,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                 );
             case 'webpage':
                 return (
-                    <iframe src={fileUrl} width="100%" height="750px" style={{ border: 'none' }} title="Web Page Viewer"></iframe>
+                    <iframe src={fileContent!} width="100%" height="750px" style={{ border: 'none' }} title="Web Page Viewer"></iframe>
                 );
             default:
                 return <div>Unsupported file type</div>;
