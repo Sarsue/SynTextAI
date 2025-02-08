@@ -52,7 +52,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
             children={markdown}
             components={{
                 a: ({ href, children }) => {
-                    if (href && href.startsWith('https://')) {
+                    if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
                         return (
                             <a href="#" onClick={(e) => { e.preventDefault(); handleFileLinkClick(href); }}>
                                 {children}
