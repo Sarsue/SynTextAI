@@ -69,6 +69,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         const pathname = url.pathname;
         // Get the file extension
         const extension = pathname.split('.').pop()?.toLowerCase();
+        if (fileUrl.startsWith('http') && !extension) {
+            return 'webpage'; // Detect web page links
+        }
 
         switch (extension) {
             case 'pdf':
@@ -82,6 +85,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
             case 'mkv':
             case 'avi':
                 return 'video';
+            case 'html':
+                return 'webpage';
             default:
                 return null;
         }
@@ -116,6 +121,10 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                         <source src={fileContent!} type="video/mp4" />
                         Your browser does not support the video tag or the video format.
                     </video>
+                );
+            case 'webpage':
+                return (
+                    <iframe src={fileUrl} width="100%" height="750px" style={{ border: 'none' }} title="Web Page Viewer"></iframe>
                 );
             default:
                 return <div>Unsupported file type</div>;
