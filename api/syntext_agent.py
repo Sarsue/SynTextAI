@@ -1,7 +1,7 @@
 import re
 import logging
 from llm_service import prompt_llm, summarize
-from web_searcher import WebSearch
+# from web_searcher import WebSearch
 from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +15,7 @@ class SyntextAgent:
             "high": 0.8,
             "low": 0.3
         }
-        self.searcher = WebSearch() 
+       # self.searcher = WebSearch() 
    
 
     def assess_relevance(self, query: str, context: str) -> float:
@@ -181,5 +181,4 @@ if __name__ == "__main__":
     # query_embedding = get_text_embedding(message)
     # topK_chunks = store.query_chunks_by_embedding(id,query_embedding)
     # response = syntext.query_pipeline(message, None, topK_chunks, language)
-    ans = syntext.searcher.search_topic(message)
-    print(ans)
+
