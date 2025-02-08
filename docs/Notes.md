@@ -106,3 +106,7 @@ Delete the line: Ctrl + K
 Save and exit: Ctrl + X, Y, Enter
 
 
+how to override searxng settings
+docker run -d -p 8888:8080 --name searxng \
+  -v $(pwd)/settings.yml:/etc/searxng/settings.yml \
+  searxng/searxng:latest

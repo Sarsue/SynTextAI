@@ -16,6 +16,8 @@ services:
     container_name: searxng
     ports:
       - "8080:8080"  # Expose the port for searxng
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml  # Mount settings.yml into container
     networks:
       - syntext-net
 
