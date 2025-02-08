@@ -6,7 +6,7 @@ import re
 import time  # Import time module to add delays
 
 # URL for searxng and Tavily APIs
-searxng_url = "http://localhost:8888/search"
+searxng_url = "http://178.128.236.126/:8080/search"
 tavily_url = "https://api.tavily.com/search"
 
 def get_best_answer(api_response):
@@ -36,32 +36,40 @@ def tavily_search(query):
     else:
         return None, None
 
-# Function for SearxNG search
-def searxng_search(query):
+
+# Function for SearxNG search with timeout
+def searxng_search(query, timeout=30):  # Default timeout set to 10 seconds
     params = {"q": query, "format": "json"}
     try:
-        response = requests.get(searxng_url, params=params)
+        response = requests.get(searxng_url, params=params, timeout=timeout)  # Adding timeout
         if response.status_code == 200:
             return response.json()  
         else:
             print(f"Error: {response.status_code}")
             return None
+    except requests.exceptions.Timeout:
+        print("The request timed out.")
+        return None
     except requests.exceptions.RequestException as e:
         print(f"An error occurred: {e}")
         return None
 
-# Function to fetch page content from URL
-def fetch_page_content(url):
+# Function to fetch page content from URL with timeout
+def fetch_page_content(url, timeout=15):  # Default timeout set to 10 seconds
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=timeout)  # Adding timeout
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             paragraphs = soup.find_all('p')
             text = ' '.join([para.get_text() for para in paragraphs])
             return text
         else:
+            print(f"Error: Unable to fetch {url}, status code: {response.status_code}")
             return None
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        print(f"Timeout occurred while fetching {url}")
+        return None
+    except requests.exceptions.RequestException as e:
         print(f"Error fetching {url}: {e}")
         return None
 
@@ -92,57 +100,68 @@ def query_llm_with_text(text, query):
 
     return cleaned_answer, score
 
+
+
 # Main function to get answers from the web
 def get_answers_from_web(query):
-    # Step 1: Search using searxng (or another search method)
-    search_results = searxng_search(query)
-    if not search_results:
-        return "No search results found."
+    try:
+        # Step 1: Search using searxng (or another search method)
+        search_results = searxng_search(query)
+        if not search_results:
+            return None, None
 
-    # Step 2: Extract top results and fetch page content
-    top_results = []
-    for result in search_results.get('results', [])[:5]:  # Limit to first 5 results
-        url = result.get('url')
-        title = result.get('title')
-        score = result.get('score', 0)
-        
-        # Fetch page content
-        page_content = fetch_page_content(url)
-        if page_content:
-            top_results.append({
-                'title': title,
-                'url': url,
-                'content': page_content,
+        # Step 2: Extract top results and fetch page content
+        top_results = []
+        for result in search_results.get('results', [])[:5]:  # Limit to first 5 results
+            url = result.get('url')
+            title = result.get('title')
+            score = result.get('score', 0)
+            
+            # Fetch page content
+            page_content = fetch_page_content(url)
+            if page_content:
+                top_results.append({
+                    'title': title,
+                    'url': url,
+                    'content': page_content,
+                    'score': score
+                })
+
+        # Step 3: Query LLM with each result's content
+        answers = []
+        for result in top_results:
+            answer, score = query_llm_with_text(result['content'], query)
+            answers.append({
+                'title': result['title'],
+                'url': result['url'],
+                'answer': answer,
                 'score': score
             })
 
-    # Step 3: Query LLM with each result's content
-    answers = []
-    for result in top_results:
-        answer, score = query_llm_with_text(result['content'], query)
-        answers.append({
-            'title': result['title'],
-            'url': result['url'],
-            'answer': answer,
-            'score': score
-        })
+            # Introduce a delay between requests to avoid being blacklisted
+            time.sleep(2)  # Sleep for 2 seconds between queries
 
-        # Introduce a delay between requests to avoid being blacklisted
-        time.sleep(2)  # Sleep for 2 seconds between queries
+        # Step 4: Rank answers based on LLM's score and return the best match
+        if answers:
+            best_answer = max(answers, key=lambda x: x['score'])
+            
+            # Clean the response by removing any confidence score reference
+            clean_prompt = f"""
+            Clean the following answer by removing any reference to the confidence score. The response should be clear and concise, with no internal information such as a confidence score.
 
-    # Step 4: Rank answers based on LLM's score and return the best match
-    if answers:
-        best_answer = max(answers, key=lambda x: x['score'])
-        clean_prompt = f"""
-        Clean the following answer by removing any reference to the confidence score. The response should be clear and concise, with no internal information, such as a confidence score.
+            {best_answer["answer"]}
+            """
 
-        {best_answer["answer"]}
-        """
-
-        # Get the cleaned response
-        cleaned_response = prompt_llm(clean_prompt)
-        return cleaned_response, best_answer["url"]
-    else:
+            # Get the cleaned response from the LLM
+            cleaned_response = prompt_llm(clean_prompt)
+            
+            # Return the cleaned response and the corresponding URL
+            return cleaned_response, best_answer["url"]
+        else:
+            return None, None
+    
+    except Exception as e:
+        print(f"Error occurred: {e}")  # Log the error for debugging
         return None, None
 
 # Function to initiate search and get the best answer
@@ -153,7 +172,7 @@ def search(query):
     return result, url
 
 if __name__ == "__main__":
-    query = "how do i change my car engine block?"
+    query = "what occupations pay the best in 2025?"
     response , url = search(query)
     answer = response + "\n\n" + url
     print(answer)
