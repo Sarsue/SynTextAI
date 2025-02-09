@@ -27,14 +27,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         }
 
         setFileType(detectedFileType);
-
-        // If it's a webpage, no need to fetch it, just use the URL directly
-        if (detectedFileType === 'webpage') {
-            setFileContent(fileUrl);
-            setLoading(false);
-        } else {
-            fetchFileContent(fileUrl, detectedFileType);
-        }
+        fetchFileContent(fileUrl, detectedFileType);
     }, [fileUrl, onError]);
 
     const fetchFileContent = async (url: string, type: string) => {
@@ -75,18 +68,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         const pathname = url.pathname;
         const extension = pathname.split('.').pop()?.toLowerCase();
 
-        // Detect webpage links, considering the case where there is no extension
-        if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-            // Treat URLs with no file extension as webpage
-            if (!extension || extension === '') {
-                return 'webpage';
-            }
-
-            // Handle potential HTML files explicitly
-            if (extension === 'html') {
-                return 'webpage';
-            }
-        }
 
         switch (extension) {
             case 'pdf':
