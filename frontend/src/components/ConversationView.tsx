@@ -27,11 +27,34 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
     };
 
     const handleFileLinkClick = async (url: string) => {
+        // Create a new URL object to parse the link
+        const parsedUrl = new URL(url);
+        const pathname = parsedUrl.pathname;
+        const extension = pathname.split('.').pop()?.toLowerCase();
+        console.log(`Extension: ${extension}`);
+        // Detect webpage links
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+            // Treat URLs with no file extension as a webpage
+            if (!extension || extension === '') {
+                console.log(`User clicked webpage link (no file extension): ${url}`);
+                window.open(url, '_blank'); // Open in a new tab
+                return;
+            }
+
+            // Handle potential HTML files explicitly
+            if (extension === 'html') {
+                console.log(`User clicked webpage link (HTML): ${url}`);
+                window.open(url, '_blank'); // Open in a new tab
+                return;
+            }
+        }
+
+        // If it's a file link (not a webpage)
         setSelectedFile(url);
         setFileError(null);
-
         console.log(`User clicked file link: ${url}`);
     };
+
 
     const handleCopy = async (message: Message) => {
         onCopy(message);

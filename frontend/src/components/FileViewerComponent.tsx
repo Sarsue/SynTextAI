@@ -75,9 +75,17 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         const pathname = url.pathname;
         const extension = pathname.split('.').pop()?.toLowerCase();
 
-        if ((fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) && !extension) {
+        // Detect webpage links, considering the case where there is no extension
+        if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+            // Treat URLs with no file extension as webpage
+            if (!extension || extension === '') {
+                return 'webpage';
+            }
 
-            return 'webpage'; // Detect web page links
+            // Handle potential HTML files explicitly
+            if (extension === 'html') {
+                return 'webpage';
+            }
         }
 
         switch (extension) {
