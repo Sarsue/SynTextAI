@@ -6,7 +6,7 @@ import re
 import time  # Import time module to add delays
 
 # URL for searxng and Tavily APIs
-searxng_url = "http://178.128.236.126/:8080/search"
+searxng_url = "http://178.128.236.126:8080/search"
 tavily_url = "https://api.tavily.com/search"
 
 def get_best_answer(api_response):
@@ -60,9 +60,16 @@ def fetch_page_content(url, timeout=15):  # Default timeout set to 10 seconds
         response = requests.get(url, timeout=timeout)  # Adding timeout
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            paragraphs = soup.find_all('p')
-            text = ' '.join([para.get_text() for para in paragraphs])
-            return text
+            # Remove href attributes from <a> tags but keep the text
+            for a in soup.find_all("a"):
+                a.replace_with(a.get_text())
+
+            # Extract text
+            text = soup.get_text(separator=" ")
+
+            # Remove excessive whitespace and newlines
+            cleaned_text = re.sub(r'\s+', ' ', text).strip()
+            return cleaned_text
         else:
             print(f"Error: Unable to fetch {url}, status code: {response.status_code}")
             return None
@@ -126,6 +133,7 @@ def get_answers_from_web(query):
                     'content': page_content,
                     'score': score
                 })
+            time.sleep(1)  # Sleep for 1 seconds between queries
 
         # Step 3: Query LLM with each result's content
         answers = []
@@ -139,7 +147,7 @@ def get_answers_from_web(query):
             })
 
             # Introduce a delay between requests to avoid being blacklisted
-            time.sleep(2)  # Sleep for 2 seconds between queries
+            time.sleep(1)  # Sleep for 1 seconds between queries
 
         # Step 4: Rank answers based on LLM's score and return the best match
         if answers:
@@ -171,8 +179,44 @@ def search(query):
         result, url =  tavily_search(query)
     return result, url
 
+##### EXPERIMENT#######
+def save_page_content(url, content, save_dir="saved_pages"):
+    """Saves the page content to a file named after the URL."""
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)  # Create directory if it doesn't exist
+
+    # Create a safe filename by replacing special characters
+    safe_filename = url.replace("http://", "").replace("https://", "").replace("/", "_").replace("?", "_").replace(":", "_")
+    file_path = os.path.join(save_dir, f"{safe_filename}.txt")
+
+    with open(file_path, "w", encoding="utf-8") as file:
+        file.write(content)
+
+    return file_path 
+def experimental_pipeline(query):
+    search_results = searxng_search(query)
+    if not search_results:
+        return None, None
+
+    # Step 2: Extract top results and fetch page content
+    top_results = []
+    url_content_map = {}  # Dictionary to store URL and page content
+
+    for result in search_results.get('results', [])[:5]:  # Limit to first 5 results
+
+        url = result.get('url')
+        title = result.get('title')
+        score = result.get('score', 0)
+        print(url, title)
+        # Fetch page content
+        page_content = fetch_page_content(url)
+        if page_content:
+            save_page_content(url, page_content)
+            # top_results.append({"url": url, "title": title, "score": score, "content": page_content})
+            # url_content_map[url] = page_content  # Save URL and content for comparison
+
+
 if __name__ == "__main__":
-    query = "what occupations pay the best in 2025?"
-    response , url = search(query)
-    answer = response + "\n\n" + url
-    print(answer)
+    query = "How do i install air filter in my frigidaire ?"
+    print(search(query))
+
