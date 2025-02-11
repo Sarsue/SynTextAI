@@ -179,42 +179,6 @@ def search(query):
         result, url =  tavily_search(query)
     return result, url
 
-##### EXPERIMENT#######
-def save_page_content(url, content, save_dir="saved_pages"):
-    """Saves the page content to a file named after the URL."""
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)  # Create directory if it doesn't exist
-
-    # Create a safe filename by replacing special characters
-    safe_filename = url.replace("http://", "").replace("https://", "").replace("/", "_").replace("?", "_").replace(":", "_")
-    file_path = os.path.join(save_dir, f"{safe_filename}.txt")
-
-    with open(file_path, "w", encoding="utf-8") as file:
-        file.write(content)
-
-    return file_path 
-def experimental_pipeline(query):
-    search_results = searxng_search(query)
-    if not search_results:
-        return None, None
-
-    # Step 2: Extract top results and fetch page content
-    top_results = []
-    url_content_map = {}  # Dictionary to store URL and page content
-
-    for result in search_results.get('results', [])[:5]:  # Limit to first 5 results
-
-        url = result.get('url')
-        title = result.get('title')
-        score = result.get('score', 0)
-        print(url, title)
-        # Fetch page content
-        page_content = fetch_page_content(url)
-        if page_content:
-            save_page_content(url, page_content)
-            # top_results.append({"url": url, "title": title, "score": score, "content": page_content})
-            # url_content_map[url] = page_content  # Save URL and content for comparison
-
 
 if __name__ == "__main__":
     query = "How do i install air filter in my frigidaire ?"
