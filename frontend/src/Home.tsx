@@ -17,7 +17,7 @@ const Home: React.FC = () => {
                 <div className="auth-buttons">
                     <Link to="/login" className="signin-link">
                         <button className="primary-button">
-                            Start Free Trial
+                            Google Sign In
                         </button>
                     </Link>
                 </div>

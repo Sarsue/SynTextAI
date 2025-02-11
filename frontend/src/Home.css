@@ -9,9 +9,7 @@
     --pricing-bg: #eef2ff;
     --pricing-text: #1a237e;
     --feature-bg: #007bff;
-    /* Match feature background with button color */
     --feature-text-color: #ffffff;
-    /* Ensure text is readable */
 }
 
 /* Dark Mode */
@@ -22,7 +20,6 @@
     --pricing-bg: #1a1a2e;
     --pricing-text: #bb86fc;
     --feature-bg: #0056b3;
-    /* Dark mode feature background */
 }
 
 /* Base Styles */
@@ -46,7 +43,7 @@ body {
 header {
     background-color: var(--header-footer-bg);
     color: var(--text-color);
-    padding: clamp(10px, 2vw, 20px);
+    padding: clamp(12px, 2vw, 20px);
     text-align: center;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
@@ -67,12 +64,13 @@ header {
     background-color: var(--button-bg);
     color: var(--button-text-color);
     border: none;
-    padding: clamp(8px, 2vw, 12px) clamp(16px, 4vw, 24px);
-    font-size: clamp(0.8rem, 2vw, 1rem);
+    padding: clamp(10px, 2vw, 14px) clamp(20px, 4vw, 28px);
+    font-size: clamp(0.9rem, 2vw, 1.1rem);
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.3s ease;
-    width: clamp(150px, 50%, 300px);
+    width: min(90%, 300px);
+    /* More responsive */
 }
 
 .primary-button:hover {
@@ -87,45 +85,49 @@ header {
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: clamp(40px, 10vw, 80px) clamp(10px, 5vw, 20px);
+    padding: clamp(40px, 10vw, 80px) clamp(16px, 5vw, 24px);
 }
 
 /* Hero Section */
 .hero-section {
-    max-width: 800px;
+    max-width: min(90%, 600px);
+    /* More responsive */
+    text-align: center;
 }
 
 .hero-title {
-    font-size: clamp(1.8rem, 4vw, 3.2rem);
+    font-size: clamp(1.8rem, 4vw, 3rem);
     font-weight: 700;
     margin-bottom: clamp(10px, 2vw, 16px);
     line-height: 1.2;
 }
 
 .hero-description {
-    font-size: clamp(0.9rem, 2vw, 1.25rem);
+    font-size: clamp(1rem, 2vw, 1.2rem);
     line-height: 1.6;
-    color: rgba(0, 0, 0, 0.7);
+    color: rgba(0, 0, 0, 0.75);
     margin-bottom: clamp(16px, 2vw, 24px);
 }
 
 .dark-mode .hero-description {
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.85);
 }
 
 /* Features Section */
 .features-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 20px;
     margin-top: 30px;
+    width: 100%;
+    max-width: 1200px;
 }
 
 .feature-item {
     background-color: var(--feature-bg);
     color: var(--feature-text-color);
-    padding: 20px;
-    border-radius: 10px;
+    padding: 24px;
+    border-radius: 12px;
     text-align: center;
     transition: transform 0.3s ease;
 }
@@ -140,20 +142,28 @@ header {
 }
 
 /* Video Container */
+.video-container {
+    width: 100%;
+    max-width: 800px;
+    margin: auto;
+}
+
 .video-container iframe {
     width: 100%;
-    height: clamp(150px, 30vw, 315px);
+    height: clamp(180px, 35vw, 360px);
 }
 
 /* Testimonials Section */
 .testimonials-section {
     margin-top: 40px;
+    width: 100%;
 }
 
 .testimonial-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 20px;
+    width: 100%;
 }
 
 .testimonial-item {
@@ -184,13 +194,49 @@ header {
 /* Footer */
 footer {
     background-color: var(--header-footer-bg);
-    padding: clamp(10px, 2vw, 20px);
+    padding: clamp(12px, 2vw, 20px);
     text-align: center;
-    font-size: clamp(0.8rem, 2vw, 0.9rem);
+    font-size: clamp(0.85rem, 2vw, 1rem);
     border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 footer p {
     margin: 0;
     opacity: 0.8;
+}
+
+/* Responsive Tweaks */
+@media (max-width: 768px) {
+    .features-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .testimonial-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pricing-section {
+        max-width: 90%;
+    }
+}
+
+@media (max-width: 480px) {
+    .hero-title {
+        font-size: 1.8rem;
+    }
+
+    .primary-button {
+        font-size: 1rem;
+        padding: 12px 20px;
+    }
+
+    .testimonial-grid,
+    .features-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pricing-section {
+        padding: 20px;
+    }
 }
