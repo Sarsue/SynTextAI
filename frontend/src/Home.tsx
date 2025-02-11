@@ -12,12 +12,12 @@ const Home: React.FC = () => {
             <header className="header">
                 <div className="logo-container">
                     <h1 className="app-title">SynText AI</h1>
-                    <p className="tagline">Smarter Answers, Faster Insights</p>
+                    <p className="tagline">Empowering Insights, Instantly</p>
                 </div>
                 <div className="auth-buttons">
                     <Link to="/login" className="signin-link">
                         <button className="primary-button">
-                            Get Started for Free
+                            Start Free Trial
                         </button>
                     </Link>
                 </div>
@@ -26,12 +26,12 @@ const Home: React.FC = () => {
             {/* Hero Section */}
             <main className="content-container">
                 <section className="hero-section">
-                    <h2 className="hero-title">Your AI-Powered Knowledge Assistant</h2>
+                    <h2 className="hero-title">Your Ultimate AI Knowledge Assistant</h2>
                     <p className="hero-description">
-                        Search, summarize, and extract insights instantly from PDFs, research papers, and web sources—all with citations.
+                        Instantly search, summarize, and extract insights from PDFs, research papers, and web sources with verified citations.
                     </p>
                     <p className="hero-description">
-                        Supports multiple languages and evolving document compatibility.
+                        Experience multilingual support and evolving document compatibility.
                     </p>
                     <Link to="/login" className="signin-link">
                         <button className="cta-button">Try It Free for 30 Days</button>
@@ -45,7 +45,7 @@ const Home: React.FC = () => {
                         <div className="feature-item">
                             <div className="feature-icon">🔍</div>
                             <h3>AI-Powered Search</h3>
-                            <p>Find exact answers from PDFs, books, and research instantly.</p>
+                            <p>Find precise answers from PDFs, books, and research instantly.</p>
                         </div>
                         <div className="feature-item">
                             <div className="feature-icon">📖</div>
@@ -55,11 +55,15 @@ const Home: React.FC = () => {
                         <div className="feature-item">
                             <div className="feature-icon">🌍</div>
                             <h3>Multilingual Support</h3>
-                            <p>Seamless understanding in English, Spanish, French, and more.</p>
+                            <p>Seamless understanding in multiple languages.</p>
+                        </div>
+                        <div className="feature-item">
+                            <div className="feature-icon">🕒</div>
+                            <h3>Time-Saving</h3>
+                            <p>Reduce research time and enhance productivity.</p>
                         </div>
                     </div>
                 </section>
-
 
                 {/* Embedded Video */}
                 <section className="video-section">
@@ -76,12 +80,25 @@ const Home: React.FC = () => {
                     </div>
                 </section>
 
+                {/* Testimonials Section
+                <section className="testimonials-section">
+                    <h2 className="section-title">What Our Users Say</h2>
+                    <div className="testimonial-grid">
+                        <div className="testimonial-item">
+                            <p>"SynText AI has revolutionized my research process!" - Helen </p>
+                        </div>
+                        <div className="testimonial-item">
+                            <p>"I like the export chat history feature" - Andre Blaise </p>
+                        </div>
+                    </div>
+                </section> */}
+
                 {/* Pricing Section */}
                 <section className="pricing-section">
                     <h2 className="pricing-title">Start Your Free Trial Today</h2>
                     <p className="pricing-description">
-                        Get full access to all features for 30 days—no credit card required.
-                        After that, enjoy unlimited AI searches for just <strong>$15/month</strong>.
+                        Enjoy full access to all features for 30 days—no credit card required.
+                        After that, unlimited AI searches for just <strong>$15/month</strong>.
                     </p>
                     <Link to="/login" className="signin-link">
                         <button className="cta-button">Start Free Trial</button>
@@ -92,7 +109,7 @@ const Home: React.FC = () => {
             {/* Footer */}
             <footer className="footer">
                 <p>&copy; 2025 OSAS INC. All rights reserved.</p>
-                <p className="footer-info">Designed for professionals, researchers, and businesses looking for AI-driven insights.</p>
+                <p className="footer-info">Designed for professionals, researchers, and businesses seeking AI-driven insights.</p>
             </footer>
         </div>
     );
