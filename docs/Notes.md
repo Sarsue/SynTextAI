@@ -35,36 +35,21 @@ https://github.com/NirDiamant/RAG_Techniques/blob/main/all_rag_techniques/crag.i
 
 
 
-Document
 
-1. Document Extraction high accuracy here is half the battle
-PDF extract to text
-Video using fastwhisper to convert audio to text.
-save chunks and Page / Segment summary 
-
-
-
-
-
-2. CHUNK TEXT AND STORE IN DB
+CHUNK TEXT AND STORE IN DB
 Same DB store for vectors and app state aka  no specialty vectorDB. sqlite supports vectors if we could figure out the litestream docker replication and backup to google cloud storage I'd use it.
 
+multilingual embedding*
 
-We need to retrieve documents  chunk alongside the page / segment summary they belong to  
-evaluate document chunk retrieved with query for relevance
-if scores are high > 0.7 generate response from document
-if scores less than 0.3 generate response from web search
-else concatenate document and web search
 
-IMPROVEMENTS
-- Use SqlAlchemy as ORM so there isnt sql specific code for Postgres or Sqllite in code.  Use Alembic for handing migrations. I abandoned using litestream and sqllite for replication and back up for using a managed instance on Digital Ocean.
 
-OUTSTANDING
+
+IDEAS
 - PDF to Markdown FOR BETTER CAPTURING OF  FIGURES AND TABLES EXTRACTS*
 Later using a Multi Modal Model (Pixtral / Qwen / GPT Vision), we ingest information from these type of documents visually let the LLM extract information for us visually
 https://github.com/kkaarrss/pdf-to-markup/blob/main/pdf_reader.py
 
-- Web Search Improvements for better answers 
+- resolve intent, gather context (chat history, web, documents), generate response
 
 
 Deploying
@@ -87,7 +72,7 @@ APP PLATFORM CONNECTS TO DOCKER HUB AND DEPLOYS PUSHED IMAGE
 copy .env.prod, docker-compose-prod.yml and deploy.sh files
 
 
-scp  /Users/osas/Documents/dev/app/deploy.sh  /Users/osas/Documents/dev/app/.env root@178.128.236.126:/home/root/
+scp  /Users/osas/Documents/dev/app/deploy.sh  /Users/osas/Documents/dev/app/.env.prod root@178.128.236.126:/home/root/
 
 ssh root@178.128.236.126
 

@@ -6,7 +6,7 @@ import re
 import time  # Import time module to add delays
 
 # URL for searxng and Tavily APIs
-searxng_url = "http://178.128.236.126:8080/search"
+searxng_url =  os.getenv("SEARXNG_URL") 
 tavily_url = "https://api.tavily.com/search"
 
 def get_best_answer(api_response):
@@ -107,19 +107,15 @@ def query_llm_with_text(text, query):
 
     return cleaned_answer, score
 
-
-
-# Main function to get answers from the web
-def get_answers_from_web(query):
+def get_search_results(query, k=5):
     try:
-        # Step 1: Search using searxng (or another search method)
         search_results = searxng_search(query)
         if not search_results:
             return None, None
 
         # Step 2: Extract top results and fetch page content
         top_results = []
-        for result in search_results.get('results', [])[:5]:  # Limit to first 5 results
+        for result in search_results.get('results', [])[:k]:  # Limit to first 5 results
             url = result.get('url')
             title = result.get('title')
             score = result.get('score', 0)
@@ -134,7 +130,16 @@ def get_answers_from_web(query):
                     'score': score
                 })
             time.sleep(1)  # Sleep for 1 seconds between queries
+        return top_results
+    except:
+        return top_results
 
+# Main function to get answers from the web
+def get_answers_from_web(query):
+    try:
+        # Step 1: Search using searxng (or another search method)
+        
+        top_results = get_search_results(query)
         # Step 3: Query LLM with each result's content
         answers = []
         for result in top_results:
@@ -182,5 +187,5 @@ def search(query):
 
 if __name__ == "__main__":
     query = "How do i install air filter in my frigidaire ?"
-    print(search(query))
+    print(get_search_results(query))
 

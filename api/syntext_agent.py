@@ -1,11 +1,12 @@
 import re
 import logging
-from llm_service import prompt_llm, summarize
-from web_searcher import search
+from llm_service import prompt_llm, 
+from web_searcher import get_search_results
 from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class SyntextAgent:
     """Interface for conversing with document and web content."""
@@ -126,7 +127,7 @@ class SyntextAgent:
                     return ans + "\n\n" + reference_links
 
             # Web search the document search didnt give good result 
-            response , url = search(query)
+            results  = get_search_results(query)
             return response + "\n\n" + url
 
         except Exception as e:
