@@ -130,9 +130,37 @@ def get_search_results(query, k=5):
                     'score': score
                 })
             time.sleep(1)  # Sleep for 1 seconds between queries
-        return top_results
-    except:
-        return top_results
+
+        if top_results:
+            # Combine all content with source information
+            sources_content = []
+            for i, r in enumerate(top_results, 1):
+                source_text = f"Source {i}:\nTitle: {r['title']}\nURL: {r['url']}\nContent:\n{r['content']}"
+                sources_content.append(source_text)
+            
+            combined_content = "\n\n".join(sources_content)
+            
+            prompt = f"""Based on the following sources, provide a comprehensive answer to: {query}
+
+            {combined_content}
+
+            Provide a clear and concise answer that synthesizes information from the sources. 
+            After your answer, include a "References" section with numbered references.
+            Format each reference as: [n] Title - URL
+
+            Example format:
+            Your detailed answer here...
+
+            References:
+            [1] Example Title - https://example.com
+            [2] Another Source - https://another.com"""
+            
+            return prompt_llm(prompt), None  # No need for separate references as LLM includes them
+
+        return None, None
+    except Exception as e:
+        print(f"Error in get_search_results: {e}")
+        return None, None
 
 # Main function to get answers from the web
 def get_answers_from_web(query):
@@ -186,6 +214,6 @@ def search(query):
 
 
 if __name__ == "__main__":
-    query = "How do i install air filter in my frigidaire ?"
+    query = "How different is winter in BC fron Ontario?"
     print(get_search_results(query))
 

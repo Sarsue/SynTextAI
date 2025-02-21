@@ -126,9 +126,11 @@ class SyntextAgent:
                     logger.info(reference_links)
                     return ans + "\n\n" + reference_links
 
-            # Web search the document search didnt give good result 
-            results  = get_search_results(query)
-            return response + "\n\n" + url
+            # Web search if the document search didn't give good result 
+            answer, _ = get_search_results(query)
+            if answer:
+                return answer  # The answer already includes formatted references
+            return "Sorry, I couldn't find a good answer to your question."
 
         except Exception as e:
             logger.error(f"Exception occurred: {e}", exc_info=True)
