@@ -20,7 +20,7 @@ services:
       - ./settings.yml:/etc/searxng/settings.yml  # Mount settings.yml into container
     networks:
       - syntext-net
-
+      
 networks:
   syntext-net:
     driver: bridge

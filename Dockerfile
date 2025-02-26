@@ -20,11 +20,12 @@ RUN apt-get update && \
     ffmpeg \
     libsndfile1 \
     curl \
-    supervisor && \
+    supervisor \
+    build-essential \
+    python3-dev && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-\
 
 # Copy only the build artifacts from the first stage (frontend build step), not node_modules
 COPY --from=build-step /app/build ./build
@@ -34,7 +35,6 @@ COPY api/ ./api/
 
 # Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt
-
 
 FROM base
 

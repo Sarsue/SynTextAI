@@ -1,5 +1,5 @@
-from gevent import monkey
-monkey.patch_all()  # This needs to be at the very top, before other imports
+import eventlet
+eventlet.monkey_patch()  # This needs to be at the very top, before other imports
 
 from flask import Flask, send_from_directory
 from flask_cors import CORS
@@ -16,14 +16,11 @@ from flask_socketio import SocketIO
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# Move socketio initialization here
+# Initialize socketio with simpler config
 socketio = SocketIO(
     cors_allowed_origins="*",
-    ping_timeout=60,
-    ping_interval=25,
-    async_mode='gevent',
-    logger=True,
-    engineio_logger=True
+    async_mode='eventlet',
+    logger=True
 )
 
 # Construct paths relative to the base directory
@@ -144,6 +141,5 @@ flask_app = create_app()
 # Initialize Celery
 celery = make_celery(flask_app)
 
-# Only run the app if this file is run directly
 if __name__ == '__main__':
-    socketio.run(flask_app, debug=True, host='0.0.0.0', port=5000)
+    socketio.run(flask_app, debug=True, host='0.0.0.0', port=3000)
