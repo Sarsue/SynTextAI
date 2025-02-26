@@ -1,6 +1,6 @@
 import re
 import logging
-from llm_service import prompt_llm, 
+from llm_service import prompt_llm
 from web_searcher import get_answers_from_web
 from docsynth_store import DocSynthStore
 
