@@ -44,7 +44,6 @@ flask
 firebase-admin
 flask-cors
 flask-sse==1.0.0
-flask-socketio
 pdfminer.six
 Pillow
 pytesseract
@@ -162,5 +161,9 @@ markdownify==0.14.1
 pgvector==0.3.6
 psycopg2-binary
 supervisor
+flask-socketio==5.3.6
+python-socketio==5.9.0
+python-engineio==4.8.0
 gevent==22.10.2
 gevent-websocket==0.10.1
+eventlet==0.33.3

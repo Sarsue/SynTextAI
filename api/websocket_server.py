@@ -1,25 +1,19 @@
-from flask_socketio import SocketIO, emit, disconnect
+from gevent import monkey
+monkey.patch_all()
+
+from flask_socketio import emit, disconnect
 from functools import wraps
 import firebase_admin.auth as auth
 from flask import request, current_app
 import logging
 from threading import Lock
 import time
-from gevent import monkey
-monkey.patch_all()
+
+# Import socketio instance from app.py
+from app import socketio
 
 # Add thread synchronization
 thread_lock = Lock()
-
-# Initialize SocketIO with better configuration
-socketio = SocketIO(
-    cors_allowed_origins="*",
-    ping_timeout=60,
-    ping_interval=25,
-    async_mode='gevent',
-    logger=True,
-    engineio_logger=True
-)
 
 # Improve connection tracking
 user_connections = {}  # Maps user IDs to {sid: timestamp} dict
