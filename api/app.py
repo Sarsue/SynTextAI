@@ -7,6 +7,8 @@ from redis import StrictRedis, ConnectionPool  # Added connection pooling
 import os
 from celery import Celery
 from kombu.utils.url import safequote
+from websocket_server import socketio
+
 # Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -66,6 +68,9 @@ def create_app():
     redis_client = StrictRedis(connection_pool=pool)
     app.redis_client = redis_client  # Make Redis available in your app
 
+    # Initialize SocketIO with the app
+    socketio.init_app(app)
+
     # Register Blueprints
     from routes.users import users_bp
     from routes.histories import histories_bp
@@ -121,3 +126,6 @@ def make_celery(app):
 # Initialize the Flask app and Celery
 app = create_app()
 celery = make_celery(app)
+
+if __name__ == '__main__':
+    socketio.run(app, debug=True)

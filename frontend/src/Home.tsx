@@ -12,12 +12,12 @@ const Home: React.FC = () => {
             <header className="header">
                 <div className="logo-container">
                     <h1 className="app-title">SynText AI</h1>
-                    <p className="tagline">Empowering Insights, Instantly</p>
+                    <p className="tagline">Your Intelligent Research Partner</p>
                 </div>
                 <div className="auth-buttons">
                     <Link to="/login" className="signin-link">
                         <button className="primary-button">
-                            Google Sign In
+                            Start Researching
                         </button>
                     </Link>
                 </div>
@@ -26,82 +26,75 @@ const Home: React.FC = () => {
             {/* Hero Section */}
             <main className="content-container">
                 <section className="hero-section">
-                    <h2 className="hero-title">Your Ultimate AI Knowledge Assistant</h2>
+                    <h2 className="hero-title">AI-Powered Research Assistant</h2>
                     <p className="hero-description">
-                        Instantly search, summarize, and extract insights from PDFs, research papers, and web sources with verified citations.
-                    </p>
-                    <p className="hero-description">
-                        Experience multilingual support and evolving document compatibility.
+                        Transform complex research into actionable insights. Perfect for consulting firms, 
+                        analysts, and knowledge workers who need quick, reliable intelligence.
                     </p>
                     <Link to="/login" className="signin-link">
-                        <button className="cta-button">Try It Free for 30 Days</button>
+                        <button className="cta-button">Start Free Trial</button>
                     </Link>
                 </section>
 
                 {/* Features Section */}
                 <section className="features-section">
-                    <h2 className="section-title">Why Choose SynText AI?</h2>
+                    <h2 className="section-title">Powerful Research Tools</h2>
                     <div className="features-grid">
                         <div className="feature-item">
+                            <div className="feature-icon">📊</div>
+                            <h3>Intelligent Summarization</h3>
+                            <p>Automatically digest long reports and research papers into key insights and actionable points.</p>
+                        </div>
+                        <div className="feature-item">
                             <div className="feature-icon">🔍</div>
-                            <h3>AI-Powered Search</h3>
-                            <p>Find precise answers from PDFs, books, and research instantly.</p>
+                            <h3>Research Synthesis</h3>
+                            <p>Gather and analyze information from multiple sources for comprehensive research reports.</p>
                         </div>
                         <div className="feature-item">
-                            <div className="feature-icon">📖</div>
-                            <h3>Verified Citations</h3>
-                            <p>Every answer includes source references for credibility.</p>
+                            <div className="feature-icon">🎯</div>
+                            <h3>Competitive Intelligence</h3>
+                            <p>Stay ahead with AI-powered market research and competitor analysis.</p>
                         </div>
                         <div className="feature-item">
-                            <div className="feature-icon">🌍</div>
-                            <h3>Multilingual Support</h3>
-                            <p>Seamless understanding in multiple languages.</p>
-                        </div>
-                        <div className="feature-item">
-                            <div className="feature-icon">🕒</div>
-                            <h3>Time-Saving</h3>
-                            <p>Reduce research time and enhance productivity.</p>
+                            <div className="feature-icon">📚</div>
+                            <h3>Smart Explanations</h3>
+                            <p>Get clear, context-aware explanations of complex topics and industry terminology.</p>
                         </div>
                     </div>
                 </section>
 
-                {/* Embedded Video */}
-                <section className="video-section">
-                    <div className="video-container">
-                        <iframe
-                            width="560"
-                            height="315"
-                            src="https://www.youtube.com/embed/4oy5PdsxI4E"
-                            title="SynText AI Demo"
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                        ></iframe>
+                {/* Use Cases Section */}
+                <section className="use-cases-section">
+                    <h2 className="section-title">Perfect For</h2>
+                    <div className="use-cases-grid">
+                        <div className="use-case-item">
+                            <h3>Consulting Firms</h3>
+                            <p>Accelerate research and analysis for client projects</p>
+                        </div>
+                        <div className="use-case-item">
+                            <h3>Business Analysts</h3>
+                            <p>Quick market insights and competitor research</p>
+                        </div>
+                        <div className="use-case-item">
+                            <h3>Knowledge Workers</h3>
+                            <p>Efficient information gathering and synthesis</p>
+                        </div>
+                        <div className="use-case-item">
+                            <h3>Students & Academics</h3>
+                            <p>Research assistance with proper citations</p>
+                        </div>
                     </div>
                 </section>
-
-                {/* Testimonials Section
-                <section className="testimonials-section">
-                    <h2 className="section-title">What Our Users Say</h2>
-                    <div className="testimonial-grid">
-                        <div className="testimonial-item">
-                            <p>"SynText AI has revolutionized my research process!" - Helen </p>
-                        </div>
-                        <div className="testimonial-item">
-                            <p>"I like the export chat history feature" - Andre Blaise </p>
-                        </div>
-                    </div>
-                </section> */}
 
                 {/* Pricing Section */}
                 <section className="pricing-section">
-                    <h2 className="pricing-title">Start Your Free Trial Today</h2>
+                    <h2 className="pricing-title">Professional Research Tools</h2>
                     <p className="pricing-description">
-                        Enjoy full access to all features for 30 days—no credit card required.
-                        After that, unlimited AI searches for just <strong>$15/month</strong>.
+                        Start with a 30-day free trial. Then just <strong>$15/month</strong> for unlimited research assistance.
+                        Perfect for professionals and teams.
                     </p>
                     <Link to="/login" className="signin-link">
-                        <button className="cta-button">Start Free Trial</button>
+                        <button className="cta-button">Begin Free Trial</button>
                     </Link>
                 </section>
             </main>
@@ -109,7 +102,7 @@ const Home: React.FC = () => {
             {/* Footer */}
             <footer className="footer">
                 <p>&copy; 2025 OSAS INC. All rights reserved.</p>
-                <p className="footer-info">Designed for professionals, researchers, and businesses seeking AI-driven insights.</p>
+                <p className="footer-info">Empowering professionals with AI-driven research tools.</p>
             </footer>
         </div>
     );

@@ -107,15 +107,24 @@ def query_llm_with_text(text, query):
 
     return cleaned_answer, score
 
-def get_search_results(query, k=5):
+def get_search_results(query, k=5, max_tokens_per_source=800):
+    """
+    Searches the web and returns a list of search results.
+    Each result contains title, url, content, and score.
+    
+    Args:
+        query: Search query string
+        k: Maximum number of results to return
+        max_tokens_per_source: Maximum tokens to keep per source to avoid context length issues
+    """
     try:
         search_results = searxng_search(query)
         if not search_results:
-            return None, None
+            return []
 
         # Step 2: Extract top results and fetch page content
         top_results = []
-        for result in search_results.get('results', [])[:k]:  # Limit to first 5 results
+        for result in search_results.get('results', [])[:k]:
             url = result.get('url')
             title = result.get('title')
             score = result.get('score', 0)
@@ -123,54 +132,50 @@ def get_search_results(query, k=5):
             # Fetch page content
             page_content = fetch_page_content(url)
             if page_content:
+                # Truncate content to avoid token limit issues
+                # Rough approximation: 1 token ≈ 4 chars
+                max_chars = max_tokens_per_source * 4
+                if len(page_content) > max_chars:
+                    page_content = page_content[:max_chars] + "..."
+
                 top_results.append({
                     'title': title,
                     'url': url,
                     'content': page_content,
                     'score': score
                 })
-            time.sleep(1)  # Sleep for 1 seconds between queries
+            time.sleep(1)  # Sleep between queries
 
-        if top_results:
-            # Combine all content with source information
-            sources_content = []
-            for i, r in enumerate(top_results, 1):
-                source_text = f"Source {i}:\nTitle: {r['title']}\nURL: {r['url']}\nContent:\n{r['content']}"
-                sources_content.append(source_text)
-            
-            combined_content = "\n\n".join(sources_content)
-            
-            prompt = f"""Based on the following sources, provide a comprehensive answer to: {query}
+        return top_results
 
-            {combined_content}
-
-            Provide a clear and concise answer that synthesizes information from the sources. 
-            After your answer, include a "References" section with numbered references.
-            Format each reference as: [n] Title - URL
-
-            Example format:
-            Your detailed answer here...
-
-            References:
-            [1] Example Title - https://example.com
-            [2] Another Source - https://another.com"""
-            
-            return prompt_llm(prompt), None  # No need for separate references as LLM includes them
-
-        return None, None
     except Exception as e:
         print(f"Error in get_search_results: {e}")
-        return None, None
+        return []
 
-# Main function to get answers from the web
 def get_answers_from_web(query):
     try:
-        # Step 1: Search using searxng (or another search method)
-        
+        # Step 1: Get search results
         top_results = get_search_results(query)
-        # Step 3: Query LLM with each result's content
+        if not top_results:
+            return None, None
+            
+        # Step 2: Query LLM with each result's content
         answers = []
         for result in top_results:
+            # Create a prompt for this specific source
+            prompt = f"""Based on the following source, answer this question: {query}
+
+Source:
+Title: {result['title']}
+URL: {result['url']}
+Content:
+{result['content']}
+
+Important instructions:
+1. Only include information that is explicitly stated in the source
+2. If you're not confident about answering based on this source, indicate low confidence
+3. Keep the answer focused and relevant to the query
+"""
             answer, score = query_llm_with_text(result['content'], query)
             answers.append({
                 'title': result['title'],
@@ -179,10 +184,9 @@ def get_answers_from_web(query):
                 'score': score
             })
 
-            # Introduce a delay between requests to avoid being blacklisted
-            time.sleep(1)  # Sleep for 1 seconds between queries
+            time.sleep(1)  # Sleep between queries
 
-        # Step 4: Rank answers based on LLM's score and return the best match
+        # Step 3: Rank answers based on LLM's score and return the best match
         if answers:
             best_answer = max(answers, key=lambda x: x['score'])
             
@@ -214,6 +218,6 @@ def search(query):
 
 
 if __name__ == "__main__":
-    query = "How different is winter in BC fron Ontario?"
+    query = "how do I make jollof rice?"
     print(get_search_results(query))
 

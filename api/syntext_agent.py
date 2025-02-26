@@ -127,9 +127,11 @@ class SyntextAgent:
                     return ans + "\n\n" + reference_links
 
             # Web search if the document search didn't give good result 
-            answer, _ = get_search_results(query)
-            if answer:
-                return answer  # The answer already includes formatted references
+            results = get_search_results(query)
+            if results:
+                # The first element is the LLM response with citations, second is None (unused URL)
+                answer, _ = results
+                return answer
             return "Sorry, I couldn't find a good answer to your question."
 
         except Exception as e:

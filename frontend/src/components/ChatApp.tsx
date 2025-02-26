@@ -13,6 +13,7 @@ import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
 import Tabs from "./Tabs";
+import { io, Socket } from 'socket.io-client';
 
 interface ChatAppProps {
     user: User | null;
@@ -27,12 +28,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
-    const { isPollingFiles, setIsPollingFiles } = useUserContext();
-    const { isPollingMessages, setIsPollingMessages } = useUserContext();
     const navigate = useNavigate();
-    const parentIsPollingMessages = isPollingMessages;
     const [activeTab, setActiveTab] = useState("chat"); // Default to "chat"
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+    const [socket, setSocket] = useState<Socket | null>(null);
+    const [isSending, setIsSending] = useState(false);
 
     useEffect(() => {
         const handleResize = () => {
@@ -71,6 +71,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     const handleSend = async (message: string, files: File[]) => {
         try {
+            setIsSending(true); // Disable input while processing
             console.log('Files to append:', files);
             if (files.length > 0) {
                 const formData = new FormData();
@@ -85,12 +86,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 if (fileDataResponse && fileDataResponse.ok) {
                     const fileData = await fileDataResponse.json();
                     toast.success(fileData.message, { position: 'top-right', autoClose: 3000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
-                    setIsPollingFiles(true);
                     fetchUserFiles();
                 } else {
                     toast.error('File upload failed. Please try again.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
                 }
-                if (!message.trim()) { return; }
+                if (!message.trim()) {
+                    setIsSending(false); // Re-enable input if only uploading files
+                    return;
+                }
             }
             if (currentHistory !== null && !isNaN(currentHistory)) {
                 await sendMessage(message);
@@ -99,6 +102,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             }
         } catch (error) {
             console.error('Error sending message:', error);
+            setIsSending(false); // Re-enable input on error
         }
     };
 
@@ -123,7 +127,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                     const updatedMessages = [...history.messages, ...newMessages];
                     const updatedHistory: History = { ...history, messages: updatedMessages };
                     setHistories((prevHistories) => ({ ...prevHistories, [currentHistory]: updatedHistory }));
-                    setIsPollingMessages(true);
                 }
             }
         } else {
@@ -153,7 +156,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                         })) : [];
                         const updatedMessages = [...newHistory.messages, ...newMessages];
                         setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: { ...newHistory, messages: updatedMessages } }));
-                        setIsPollingMessages(true);
                     }
                 }
             }
@@ -252,12 +254,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             const latestHistoryId = histories.length > 0 ? histories[histories.length - 1].id : null;
             setCurrentHistory(latestHistoryId);
             console.log('Loaded Histories:', histories);
-            if (isPollingMessages && latestHistoryId !== null) {
-                const lastMessage = histories[histories.length - 1]?.messages?.slice(-1)[0];
-                if (lastMessage?.sender === 'bot') {
-                    setIsPollingMessages(false);
-                }
-            }
         } catch (error) {
             console.error('Error fetching chat histories:', error);
         }
@@ -310,7 +306,57 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     };
 
     useEffect(() => {
-        let pollingInterval: NodeJS.Timeout | null = null;
+        const initializeWebSocket = async () => {
+            if (!user) return;
+
+            const token = await user.getIdToken();
+            const newSocket = io('/', {
+                extraHeaders: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+
+            newSocket.on('connect', () => {
+                console.log('WebSocket connected');
+            });
+
+            newSocket.on('file_processed', (data) => {
+                if (data.status === 'success') {
+                    fetchUserFiles();
+                    toast.success(`File ${data.filename} processed successfully`);
+                } else {
+                    toast.error(`Error processing file ${data.filename}: ${data.error}`);
+                }
+            });
+
+            newSocket.on('message_received', (data) => {
+                if (data.status === 'error') {
+                    toast.error(`Error: ${data.error}`);
+                    setIsSending(false); // Re-enable input on error
+                    return;
+                }
+                if (data.historyId && data.messages) {
+                    setHistories(prevHistories => ({
+                        ...prevHistories,
+                        [data.historyId]: {
+                            ...prevHistories[data.historyId],
+                            messages: data.messages
+                        }
+                    }));
+                }
+                setIsSending(false); // Re-enable input after receiving response
+            });
+
+            setSocket(newSocket);
+            return () => {
+                newSocket.close();
+            };
+        };
+
+        initializeWebSocket();
+    }, [user]);
+
+    useEffect(() => {
         const fetchInitialData = async () => {
             try {
                 await fetchHistories();
@@ -319,26 +365,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 console.error('Error fetching initial data:', error);
             }
         };
-        const pollData = async () => {
-            try {
-                if (isPollingMessages) {
-                    await fetchHistories();
-                }
-                if (isPollingFiles) {
-                    await fetchUserFiles();
-                }
-            } catch (error) {
-                console.error('Error during polling:', error);
-            }
-        };
+
         if (user) {
             fetchInitialData();
-            pollingInterval = setInterval(pollData, 30000);
         }
-        return () => {
-            if (pollingInterval) clearInterval(pollingInterval);
-        };
-    }, [user, isPollingMessages, isPollingFiles]);
+    }, [user]);
 
     const fetchUserFiles = async () => {
         if (!user) return;
@@ -348,12 +379,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             if (response.ok) {
                 const files: UploadedFile[] = await response.json();
                 setKnowledgeBaseFiles(files);
-                if (isPollingFiles) {
-                    const unprocessedFiles = files.some((file) => !file.processed);
-                    if (!unprocessedFiles) {
-                        setIsPollingFiles(false);
-                    }
-                }
             } else {
                 console.error('Failed to fetch user files:', response.statusText);
             }
@@ -413,7 +438,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                             history={currentHistory !== null ? histories[currentHistory] : null}
                             onCopy={handleCopy}
                         />
-                        <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
+                        <InputArea onSend={handleSend} isSending={isSending} />
                         {/* Settings Button at the bottom left */}
                         {user !== null && (
                             <button
@@ -494,7 +519,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                                 history={currentHistory !== null ? histories[currentHistory] : null}
                                 onCopy={handleCopy}
                             />
-                            <InputArea onSend={handleSend} isSending={parentIsPollingMessages} />
+                            <InputArea onSend={handleSend} isSending={isSending} />
                             <ToastContainer />
                         </div>
 

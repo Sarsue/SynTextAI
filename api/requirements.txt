@@ -44,6 +44,7 @@ flask
 firebase-admin
 flask-cors
 flask-sse==1.0.0
+flask-socketio
 pdfminer.six
 Pillow
 pytesseract

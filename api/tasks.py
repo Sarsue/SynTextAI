@@ -12,6 +12,7 @@ from llm_service import get_text_embeddings_in_batches, get_text_embedding
 from syntext_agent import SyntextAgent
 from utils import chunk_text, delete_from_gcs
 import stripe
+from websocket_server import notify_user
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 stripe.api_key = os.getenv('STRIPE_SECRET')
@@ -99,7 +100,13 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
 
 
         store.update_file_with_chunks(user_id, filename, ext, extracted_data)
-  
+        
+        # Notify user that file is processed
+        notify_user(user_id, 'file_processed', {
+            'filename': filename,
+            'status': 'success'
+        })
+        
         result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
         return {"status": "success", "result": result}
     
@@ -108,19 +115,31 @@ def process_file_data(self, user_id, user_gc_id, filename, language):
         logging.error(f"Error Validating {filename}: {str(result_data)}")
     
     except Exception as e:
-        result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
-        logging.error(f"Error processing {filename}: {str(result_data)}")
+        # Notify user of failure
+        notify_user(user_id, 'file_processed', {
+            'filename': filename,
+            'status': 'error',
+            'error': str(e)
+        })
+        raise
 
 
 @shared_task(bind=True)
-def process_query_data(self, id, history_id, message, language,comprehension_level):
+def process_query_data(self, id, history_id, message, language, comprehension_level):
     # Gather context for agent message history , top similar doocuments and current query
     formatted_history = store.format_user_chat_history(history_id, id)
     topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
     response = syntext.query_pipeline(message,formatted_history,topK_chunks,language,comprehension_level)
     store.add_message(
         content=response, sender='bot', user_id=id, chat_history_id=history_id)
-  
+        
+        # Notify user of new message
+        notify_user(id, 'message_received', {
+            'history_id': history_id,
+            'message': response,
+            'sender': 'bot'
+        })
+
 
 @shared_task(bind=True)
 def delete_user_task(self, user_id, user_gc_id):
