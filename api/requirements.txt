@@ -162,4 +162,5 @@ markdownify==0.14.1
 pgvector==0.3.6
 psycopg2-binary
 supervisor
-
+gevent==22.10.2
+gevent-websocket==0.10.1

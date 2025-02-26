@@ -8,6 +8,8 @@ import os
 from celery import Celery
 from kombu.utils.url import safequote
 from websocket_server import socketio
+from gevent import monkey
+monkey.patch_all()
 
 # Load environment variables
 load_dotenv()
@@ -68,8 +70,17 @@ def create_app():
     redis_client = StrictRedis(connection_pool=pool)
     app.redis_client = redis_client  # Make Redis available in your app
 
-    # Initialize SocketIO with the app
-    socketio.init_app(app)
+    # Update SocketIO configuration
+    socketio.init_app(app,
+        cors_allowed_origins="*",
+        ping_timeout=60,
+        ping_interval=25,
+        async_mode='gevent',  # Make sure gevent is properly installed
+        message_queue=redis_url,
+        engineio_logger=True,
+        logger=True,
+        async_handlers=True
+    )
 
     # Register Blueprints
     from routes.users import users_bp
@@ -128,4 +139,5 @@ app = create_app()
 celery = make_celery(app)
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    app = create_app()
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)

@@ -13,7 +13,6 @@ import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
 import Tabs from "./Tabs";
-import { io, Socket } from 'socket.io-client';
 
 interface ChatAppProps {
     user: User | null;
@@ -31,11 +30,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState("chat"); // Default to "chat"
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-    const [socket, setSocket] = useState<Socket | null>(null);
+    const { socket } = useUserContext();
     const [isSending, setIsSending] = useState(false);
 
-    const SOCKET_RECONNECTION_ATTEMPTS = 3;
-    const SOCKET_RECONNECTION_DELAY = 5000;
+    const SOCKET_RECONNECTION_ATTEMPTS = 5;
+    const SOCKET_RECONNECTION_DELAY = 3000;
+    const SOCKET_RECONNECTION_DELAY_MAX = 15000;
 
     useEffect(() => {
         const handleResize = () => {
@@ -308,116 +308,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         setSelectedFile(null);
     };
 
-    const initializeWebSocket = async () => {
-        if (!user) return;
-
-        try {
-            const token = await user.getIdToken();
-            const newSocket = io('/', {
-                extraHeaders: {
-                    Authorization: `Bearer ${token}`
-                },
-                reconnection: true,
-                reconnectionAttempts: SOCKET_RECONNECTION_ATTEMPTS,
-                reconnectionDelay: SOCKET_RECONNECTION_DELAY,
-                timeout: 60000 // 60 seconds timeout
-            });
-
-            newSocket.on('connect', () => {
-                console.log('WebSocket connected');
-            });
-
-            newSocket.on('connect_error', (error) => {
-                console.error('WebSocket connection error:', error);
-                toast.error('Connection error. Retrying...');
-            });
-
-            newSocket.on('disconnect', (reason) => {
-                console.log('WebSocket disconnected:', reason);
-                if (reason === 'io server disconnect') {
-                    // Server initiated disconnect, try reconnecting
-                    newSocket.connect();
-                }
-            });
-
-            newSocket.on('reconnect', (attemptNumber) => {
-                console.log('WebSocket reconnected after', attemptNumber, 'attempts');
-            });
-
-            newSocket.on('reconnect_failed', () => {
-                console.error('WebSocket reconnection failed');
-                toast.error('Connection lost. Please refresh the page.');
-            });
-
-            newSocket.on('file_processed', (data) => {
-                if (data.status === 'success') {
-                    fetchUserFiles();
-                    toast.success(`File ${data.filename} processed successfully`);
-                } else {
-                    toast.error(`Error processing file ${data.filename}: ${data.error}`);
-                }
-            });
-
-            newSocket.on('message_received', (data) => {
-                if (data.status === 'error') {
-                    toast.error(`Error: ${data.error}`);
-                    setIsSending(false); // Re-enable input on error
-                    return;
-                }
-                if (data.history_id && data.message) {
-                    setHistories(prevHistories => ({
-                        ...prevHistories,
-                        [data.history_id]: {
-                            ...prevHistories[data.history_id],
-                            messages: [...prevHistories[data.history_id].messages, data.message] // Append only new message
-                        }
-                    }));
-                }
-                setIsSending(false); // Re-enable input after receiving response
-            });
-
-            setSocket(newSocket);
-            return () => {
-                newSocket.close();
-            };
-        } catch (error) {
-            console.error('Error initializing WebSocket:', error);
-            toast.error('Failed to establish connection');
-        }
-    };
-
-    useEffect(() => {
-        let cleanup: (() => void) | undefined;
-
-        if (user) {
-            const initialize = async () => {
-                cleanup = await initializeWebSocket();
-            };
-            initialize();
-        }
-
-        return () => {
-            if (cleanup) {
-                cleanup();
-            }
-        };
-    }, [user]);
-
-    useEffect(() => {
-        const fetchInitialData = async () => {
-            try {
-                await fetchHistories();
-                await fetchUserFiles();
-            } catch (error) {
-                console.error('Error fetching initial data:', error);
-            }
-        };
-
-        if (user) {
-            fetchInitialData();
-        }
-    }, [user]);
-
     const fetchUserFiles = async () => {
         if (!user) return;
         try {
@@ -518,6 +408,42 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 return null;
         }
     };
+
+    useEffect(() => {
+        if (socket) {
+            socket.on('file_processed', (data) => {
+                if (data.status === 'success') {
+                    fetchUserFiles();
+                    toast.success(`File ${data.filename} processed successfully`);
+                } else {
+                    toast.error(`Error processing file ${data.filename}: ${data.error}`);
+                }
+            });
+
+            socket.on('message_received', (data) => {
+                if (data.status === 'error') {
+                    toast.error(`Error: ${data.error}`);
+                    setIsSending(false);
+                    return;
+                }
+                if (data.history_id && data.message) {
+                    setHistories(prevHistories => ({
+                        ...prevHistories,
+                        [data.history_id]: {
+                            ...prevHistories[data.history_id],
+                            messages: [...prevHistories[data.history_id].messages, data.message]
+                        }
+                    }));
+                }
+                setIsSending(false);
+            });
+
+            return () => {
+                socket.off('file_processed');
+                socket.off('message_received');
+            };
+        }
+    }, [socket]);
 
     return (
         <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>

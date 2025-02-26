@@ -234,5 +234,5 @@ def search(query):
 
 if __name__ == "__main__":
     query = "how do I make jollof rice?"
-    print(get_search_results(query))
+    print(get_answers_from_web(query))
 
