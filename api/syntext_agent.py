@@ -1,7 +1,7 @@
 import re
 import logging
 from llm_service import prompt_llm, 
-from web_searcher import get_search_results
+from web_searcher import get_answers_from_web
 from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
@@ -127,11 +127,9 @@ class SyntextAgent:
                     return ans + "\n\n" + reference_links
 
             # Web search if the document search didn't give good result 
-            results = get_search_results(query)
+            results, _ = get_answers_from_web(query)
             if results:
-                # The first element is the LLM response with citations, second is None (unused URL)
-                answer, _ = results
-                return answer
+                return results
             return "Sorry, I couldn't find a good answer to your question."
 
         except Exception as e:

@@ -335,12 +335,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                     setIsSending(false); // Re-enable input on error
                     return;
                 }
-                if (data.historyId && data.messages) {
+                if (data.history_id && data.message) {
                     setHistories(prevHistories => ({
                         ...prevHistories,
-                        [data.historyId]: {
-                            ...prevHistories[data.historyId],
-                            messages: data.messages
+                        [data.history_id]: {
+                            ...prevHistories[data.history_id],
+                            messages: [...prevHistories[data.history_id].messages, data.message] // Append only new message
                         }
                     }));
                 }
