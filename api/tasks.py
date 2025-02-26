@@ -130,11 +130,9 @@ def process_query_data(self, id, history_id, message, language, comprehension_le
     formatted_history = store.format_user_chat_history(history_id, id)
     topK_chunks = store.query_chunks_by_embedding(id,get_text_embedding(message))
     response = syntext.query_pipeline(message,formatted_history,topK_chunks,language,comprehension_level)
-    store.add_message(
-        content=response, sender='bot', user_id=id, chat_history_id=history_id)
-        
-        # Notify user of new message
-        notify_user(id, 'message_received', {
+    store.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id) 
+    # Notify user of new message
+    notify_user(id, 'message_received', {
             'history_id': history_id,
             'message': response,
             'sender': 'bot'
