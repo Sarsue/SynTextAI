@@ -129,6 +129,7 @@ class SyntextAgent:
             # Web search if the document search didn't give good result 
             results, _ = get_answers_from_web(query)
             if results:
+                # The results now include both the answer and reference links
                 return results
             return "Sorry, I couldn't find a good answer to your question."
 

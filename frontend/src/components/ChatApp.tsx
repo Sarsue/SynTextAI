@@ -34,6 +34,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isSending, setIsSending] = useState(false);
 
+    const SOCKET_RECONNECTION_ATTEMPTS = 3;
+    const SOCKET_RECONNECTION_DELAY = 5000;
+
     useEffect(() => {
         const handleResize = () => {
             setIsMobile(window.innerWidth <= 768);
@@ -305,19 +308,45 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         setSelectedFile(null);
     };
 
-    useEffect(() => {
-        const initializeWebSocket = async () => {
-            if (!user) return;
+    const initializeWebSocket = async () => {
+        if (!user) return;
 
+        try {
             const token = await user.getIdToken();
             const newSocket = io('/', {
                 extraHeaders: {
                     Authorization: `Bearer ${token}`
-                }
+                },
+                reconnection: true,
+                reconnectionAttempts: SOCKET_RECONNECTION_ATTEMPTS,
+                reconnectionDelay: SOCKET_RECONNECTION_DELAY,
+                timeout: 60000 // 60 seconds timeout
             });
 
             newSocket.on('connect', () => {
                 console.log('WebSocket connected');
+            });
+
+            newSocket.on('connect_error', (error) => {
+                console.error('WebSocket connection error:', error);
+                toast.error('Connection error. Retrying...');
+            });
+
+            newSocket.on('disconnect', (reason) => {
+                console.log('WebSocket disconnected:', reason);
+                if (reason === 'io server disconnect') {
+                    // Server initiated disconnect, try reconnecting
+                    newSocket.connect();
+                }
+            });
+
+            newSocket.on('reconnect', (attemptNumber) => {
+                console.log('WebSocket reconnected after', attemptNumber, 'attempts');
+            });
+
+            newSocket.on('reconnect_failed', () => {
+                console.error('WebSocket reconnection failed');
+                toast.error('Connection lost. Please refresh the page.');
             });
 
             newSocket.on('file_processed', (data) => {
@@ -351,9 +380,27 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             return () => {
                 newSocket.close();
             };
-        };
+        } catch (error) {
+            console.error('Error initializing WebSocket:', error);
+            toast.error('Failed to establish connection');
+        }
+    };
 
-        initializeWebSocket();
+    useEffect(() => {
+        let cleanup: (() => void) | undefined;
+
+        if (user) {
+            const initialize = async () => {
+                cleanup = await initializeWebSocket();
+            };
+            initialize();
+        }
+
+        return () => {
+            if (cleanup) {
+                cleanup();
+            }
+        };
     }, [user]);
 
     useEffect(() => {

@@ -133,10 +133,10 @@ def process_query_data(self, id, history_id, message, language, comprehension_le
     store.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id) 
     # Notify user of new message
     notify_user(id, 'message_received', {
-            'history_id': history_id,
-            'message': response,
-            'sender': 'bot'
-        })
+    'history_id': history_id,
+    'message': response,
+    'sender': 'bot'
+    })
 
 
 @shared_task(bind=True)

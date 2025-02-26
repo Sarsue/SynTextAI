@@ -186,22 +186,37 @@ Important instructions:
 
             time.sleep(1)  # Sleep between queries
 
-        # Step 3: Rank answers based on LLM's score and return the best match
-        if answers:
-            best_answer = max(answers, key=lambda x: x['score'])
+        # Step 3: Filter answers with good confidence scores and synthesize them
+        good_answers = [a for a in answers if a['score'] > 0.6]  # Adjust threshold as needed
+        
+        if good_answers:
+            # Create a prompt to synthesize information from multiple sources
+            sources_text = "\n\n".join([
+                f"Source {i+1} ({answer['url']}):\n{answer['answer']}"
+                for i, answer in enumerate(good_answers)
+            ])
             
-            # Clean the response by removing any confidence score reference
-            clean_prompt = f"""
-            Clean the following answer by removing any reference to the confidence score. The response should be clear and concise, with no internal information such as a confidence score.
-
-            {best_answer["answer"]}
-            """
-
-            # Get the cleaned response from the LLM
-            cleaned_response = prompt_llm(clean_prompt)
+            synthesis_prompt = f"""Synthesize a comprehensive answer to the question: "{query}"
             
-            # Return the cleaned response and the corresponding URL
-            return cleaned_response, best_answer["url"]
+Using information from these sources:
+
+{sources_text}
+
+Instructions:
+1. Combine relevant information from all sources
+2. Resolve any contradictions between sources
+3. Present a clear, coherent answer
+4. Keep the response focused and relevant
+"""
+            
+            final_answer = prompt_llm(synthesis_prompt)
+            
+            # Add reference links at the end
+            reference_links = "\n\nReferences:\n" + "\n".join([
+                f"- {answer['url']}" for answer in good_answers
+            ])
+            
+            return final_answer + reference_links, None  # Return None for single URL since we're using multiple
         else:
             return None, None
     
