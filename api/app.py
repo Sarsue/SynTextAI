@@ -39,7 +39,7 @@ ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 redis_url = (
     f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
     "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
-)
+) 
 
 redis_connection_pool_options = {
     'ssl_cert_reqs': 'CERT_REQUIRED',
@@ -122,10 +122,12 @@ def make_celery(app):
     return celery
 
 # Initialize the Flask app and Celery
-flask_app = create_app()
-celery = make_celery(flask_app)
+app = create_app()
+celery = make_celery(app)
 
 if __name__ == '__main__':
     from websocket_server import socketio  # Import only in __main__
-    socketio.init_app(flask_app, message_queue=redis_url)
+    socketio.init_app(app, message_queue=redis_url)
     socketio.run(flask_app, debug=True, host='0.0.0.0', port=3000)
+
+
