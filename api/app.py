@@ -10,18 +10,10 @@ from redis import StrictRedis, ConnectionPool
 import os
 from celery import Celery
 from kombu.utils.url import safequote
-from flask_socketio import SocketIO
 
 # Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# Initialize socketio with simpler config
-socketio = SocketIO(
-    cors_allowed_origins="*",
-    async_mode='eventlet',
-    logger=True
-)
 
 # Construct paths relative to the base directory
 database_config = {
@@ -41,10 +33,8 @@ redis_pwd = os.getenv('REDIS_PASSWORD')
 redis_host = os.getenv('REDIS_HOST')
 redis_port = os.getenv('REDIS_PORT')
 
-# Path to the certificate
 ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 
-# Redis connection pool for Celery with SSL configuration
 redis_url = (
     f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
     "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
@@ -78,13 +68,7 @@ def create_app():
     redis_client = StrictRedis(connection_pool=pool)
     app.redis_client = redis_client
 
-    # Initialize SocketIO with the app
-    socketio.init_app(app, 
-        message_queue=redis_url,
-        async_handlers=True
-    )
-
-    # Register Blueprints
+    # Register Blueprints (No WebSocket import here)
     from routes.users import users_bp
     from routes.histories import histories_bp
     from routes.messages import messages_bp
@@ -98,7 +82,7 @@ def create_app():
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
     app.register_blueprint(logs_bp,  url_prefix="/api/v1/logs")
-  
+
     @app.route('/')
     def serve_react_app():
         return send_from_directory(app.static_folder, 'index.html')
@@ -115,16 +99,10 @@ def make_celery(flask_app):
         backend=redis_url,
         broker=redis_url
     )
-    
+
     celery_app.conf.update({
         'broker_url': redis_url,
         'result_backend': redis_url,
-        'broker_transport_options': redis_connection_pool_options,
-        'task_time_limit': 900,
-        'task_soft_time_limit': 600,
-        'worker_prefetch_multiplier': 1,
-        'broker_connection_retry_on_startup': True,
-        'broker_connection_max_retries': None,
     })
 
     class ContextTask(celery_app.Task):
@@ -135,11 +113,10 @@ def make_celery(flask_app):
     celery_app.Task = ContextTask
     return celery_app
 
-# Create the Flask app
 flask_app = create_app()
-
-# Initialize Celery
 celery = make_celery(flask_app)
 
 if __name__ == '__main__':
+    from websocket_server import socketio  # Import only in __main__
+    socketio.init_app(flask_app, message_queue=redis_url)
     socketio.run(flask_app, debug=True, host='0.0.0.0', port=3000)
