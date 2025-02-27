@@ -2,18 +2,11 @@ import eventlet
 eventlet.monkey_patch()
 
 from flask_socketio import emit, disconnect
-import firebase_admin
-from firebase_admin import auth, credentials
 from flask import request
 import logging
 import time
-
 from app import socketio  # Import SocketIO instance
-
-# Initialize Firebase if not already initialized
-if not firebase_admin._apps:
-    cred = credentials.Certificate("path/to/firebase-key.json")
-    firebase_admin.initialize_app(cred)
+from utils import get_user_id
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -58,8 +51,8 @@ def handle_connect():
             return
         
         token = token.split(' ')[1]
-        decoded_token = auth.verify_id_token(token)
-        user_id = decoded_token['uid']
+        status, decoded_token = get_user_id(token)
+        user_id = decoded_token['user_id']
         
         if user_id not in user_connections:
             user_connections[user_id] = {}
