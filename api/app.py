@@ -6,11 +6,10 @@ from flask_cors import CORS
 from docsynth_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
-from redis import StrictRedis, ConnectionPool
+from redis import StrictRedis, ConnectionPool  # Added connection pooling
 import os
 from celery import Celery
 from kombu.utils.url import safequote
-
 # Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -33,8 +32,10 @@ redis_pwd = os.getenv('REDIS_PASSWORD')
 redis_host = os.getenv('REDIS_HOST')
 redis_port = os.getenv('REDIS_PORT')
 
+# Path to the certificate
 ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 
+# Redis connection pool for Celery with SSL configuration
 redis_url = (
     f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
     "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
@@ -66,9 +67,9 @@ def create_app():
         **redis_connection_pool_options
     )
     redis_client = StrictRedis(connection_pool=pool)
-    app.redis_client = redis_client
+    app.redis_client = redis_client  # Make Redis available in your app
 
-    # Register Blueprints (No WebSocket import here)
+    # Register Blueprints
     from routes.users import users_bp
     from routes.histories import histories_bp
     from routes.messages import messages_bp
@@ -82,7 +83,7 @@ def create_app():
     app.register_blueprint(files_bp, url_prefix="/api/v1/files")
     app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
     app.register_blueprint(logs_bp,  url_prefix="/api/v1/logs")
-
+  
     @app.route('/')
     def serve_react_app():
         return send_from_directory(app.static_folder, 'index.html')
@@ -93,26 +94,34 @@ def create_app():
 
     return app
 
-def make_celery(flask_app):
-    celery_app = Celery(
-        flask_app.import_name,
+def make_celery(app):
+    # Initialize Celery with the application's import name, broker, and backend
+    celery = Celery(
+        app.import_name,
         backend=redis_url,
-        broker=redis_url
+        broker=redis_url,
     )
-
-    celery_app.conf.update({
+    celery.conf.update({
         'broker_url': redis_url,
         'result_backend': redis_url,
+        'broker_transport_options': redis_connection_pool_options,
+        'task_time_limit': 900,
+        'task_soft_time_limit': 600,
+        'worker_prefetch_multiplier': 1,
+        'broker_connection_retry_on_startup': True,
+        'broker_connection_max_retries': None,
     })
 
-    class ContextTask(celery_app.Task):
+    # Ensure that Celery tasks run within the Flask application context
+    class ContextTask(celery.Task):
         def __call__(self, *args, **kwargs):
-            with flask_app.app_context():
+            with app.app_context():
                 return self.run(*args, **kwargs)
 
-    celery_app.Task = ContextTask
-    return celery_app
+    celery.Task = ContextTask
+    return celery
 
+# Initialize the Flask app and Celery
 flask_app = create_app()
 celery = make_celery(flask_app)
 
