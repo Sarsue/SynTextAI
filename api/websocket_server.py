@@ -1,103 +1,102 @@
-from gevent import monkey
-monkey.patch_all()
+import eventlet
+eventlet.monkey_patch()
 
 from flask_socketio import emit, disconnect
-from functools import wraps
-import firebase_admin.auth as auth
-from flask import request, current_app
+import firebase_admin
+from firebase_admin import auth, credentials
+from flask import request
 import logging
-from threading import Lock
 import time
 
-# Import socketio instance from app.py
-from app import socketio
+from app import socketio  # Import SocketIO instance
 
-# Add thread synchronization
-thread_lock = Lock()
+# Initialize Firebase if not already initialized
+if not firebase_admin._apps:
+    cred = credentials.Certificate("path/to/firebase-key.json")
+    firebase_admin.initialize_app(cred)
 
-# Improve connection tracking
-user_connections = {}  # Maps user IDs to {sid: timestamp} dict
-guest_sids = set()
+# Logging setup
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# Track connections
+user_connections = {}  # Maps user_id -> {sid: timestamp}
+guest_sids = set()
+
 def cleanup_stale_connections():
-    """Clean up stale connections periodically"""
-    with thread_lock:
-        current_time = time.time()
-        for user_id in list(user_connections.keys()):
-            for sid, timestamp in list(user_connections[user_id].items()):
-                if current_time - timestamp > 70:  # Connection considered stale after 70 seconds
-                    del user_connections[user_id][sid]
-                    if not user_connections[user_id]:
-                        del user_connections[user_id]
-                    logger.info(f"Cleaned up stale connection for user {user_id} sid {sid}")
+    """Periodically remove stale connections"""
+    current_time = time.time()
+    stale_sids = []
+    
+    for user_id, connections in list(user_connections.items()):
+        for sid, timestamp in list(connections.items()):
+            if current_time - timestamp > 70:  # 70-second timeout
+                stale_sids.append((user_id, sid))
+
+    for user_id, sid in stale_sids:
+        del user_connections[user_id][sid]
+        if not user_connections[user_id]:
+            del user_connections[user_id]
+        logger.info(f"Cleaned up stale connection: user={user_id}, sid={sid}")
+
+def background_cleanup():
+    """Runs periodic cleanup in the background"""
+    while True:
+        eventlet.sleep(30)  # Run cleanup every 30 seconds
+        cleanup_stale_connections()
+
+# Start background task
+eventlet.spawn(background_cleanup)
 
 @socketio.on('connect')
 def handle_connect():
     try:
-        if 'Authorization' not in request.headers:
+        token = request.headers.get('Authorization')
+        if not token:
             guest_sids.add(request.sid)
             emit('connected', {'status': 'connected', 'authenticated': False})
             return
-
-        token = request.headers['Authorization'].split(' ')[1]
-        try:
-            decoded_token = auth.verify_id_token(token)
-            user_id = decoded_token['uid']
-            
-            with thread_lock:
-                if user_id not in user_connections:
-                    user_connections[user_id] = {}
-                user_connections[user_id][request.sid] = time.time()
-            
-            logger.info(f"Authenticated user {user_id} connected with sid {request.sid}")
-            emit('connected', {'status': 'connected', 'authenticated': True})
-            
-        except Exception as e:
-            logger.error(f"Auth token verification failed: {str(e)}")
-            guest_sids.add(request.sid)
-            emit('connected', {'status': 'connected', 'authenticated': False})
-            
+        
+        token = token.split(' ')[1]
+        decoded_token = auth.verify_id_token(token)
+        user_id = decoded_token['uid']
+        
+        if user_id not in user_connections:
+            user_connections[user_id] = {}
+        user_connections[user_id][request.sid] = time.time()
+        
+        logger.info(f"User {user_id} connected (sid={request.sid})")
+        emit('connected', {'status': 'connected', 'authenticated': True})
+    
     except Exception as e:
-        logger.error(f"Connection error: {str(e)}")
-        disconnect()
+        logger.error(f"Connection error: {e}")
+        guest_sids.add(request.sid)
+        emit('connected', {'status': 'connected', 'authenticated': False})
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    try:
-        with thread_lock:
-            # Clean up user connections
-            for user_id, connections in list(user_connections.items()):
-                if request.sid in connections:
-                    del connections[request.sid]
-                    if not connections:
-                        del user_connections[user_id]
-                    logger.info(f"User {user_id} disconnected from sid {request.sid}")
-                    break
-            
-            # Clean up guest connections
-            guest_sids.discard(request.sid)
-            
-        logger.info(f"Client {request.sid} disconnected")
-        
-    except Exception as e:
-        logger.error(f"Disconnect error: {str(e)}")
+    """Handles client disconnection"""
+    for user_id, connections in list(user_connections.items()):
+        if request.sid in connections:
+            del connections[request.sid]
+            if not connections:
+                del user_connections[user_id]
+            logger.info(f"User {user_id} disconnected (sid={request.sid})")
+            break
+    
+    guest_sids.discard(request.sid)
+    logger.info(f"Client {request.sid} disconnected")
 
 def notify_user(user_id, event_type, data):
-    """Send notification to specific user"""
-    try:
-        with thread_lock:
-            if user_id in user_connections:
-                for sid in user_connections[user_id].keys():
-                    try:
-                        emit(event_type, data, room=sid)
-                        logger.debug(f"Notification sent to user {user_id} sid {sid}")
-                    except Exception as e:
-                        logger.error(f"Error sending notification to {sid}: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error in notify_user: {str(e)}")
+    """Send real-time notification to a specific user"""
+    if user_id in user_connections:
+        for sid in user_connections[user_id].keys():
+            try:
+                emit(event_type, data, room=sid)
+                logger.debug(f"Sent {event_type} to user {user_id} (sid={sid})")
+            except Exception as e:
+                logger.error(f"Notification error: {e}")
 
-# Add periodic cleanup
 @socketio.on('ping')
 def handle_ping():
     cleanup_stale_connections()
@@ -105,4 +104,4 @@ def handle_ping():
 
 @socketio.on_error()
 def error_handler(e):
-    logger.error(f"SocketIO error: {str(e)}") 
+    logger.error(f"SocketIO error: {e}")
