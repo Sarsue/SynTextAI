@@ -1,12 +1,15 @@
+# This file will be for Gunicorn only
 import eventlet
-eventlet.monkey_patch()  # Ensure eventlet patches everything before imports
+eventlet.monkey_patch()
 
-from app import app , redis_url # Import the Flask app directly from app.py
+from app import app
 from websocket_server import socketio
 
-# Initialize SocketIO with Redis message queue
-socketio.init_app(app, message_queue=redis_url)  # Make sure the Redis URL is correct
+# Initialize SocketIO with the Flask app
+socketio.init_app(app, async_mode='eventlet')
 
-# Expose the Flask app for Gunicorn
+# For Gunicorn, we expose the app directly
+application = app
+
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=3000)

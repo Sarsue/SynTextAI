@@ -1,16 +1,22 @@
 import eventlet
 eventlet.monkey_patch()
 
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
 import logging
+from flask import request
 import time
 from utils import get_user_id
 
-# Initialize SocketIO (independent of Flask app)
-socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet', logger=True)
+# Initialize SocketIO
+socketio = SocketIO(
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    logger=True,
+    engineio_logger=True  # Add this for debugging
+)
 
-# Logging setup
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Track connections
@@ -43,12 +49,12 @@ eventlet.spawn(background_cleanup)  # Start cleanup task
 
 @socketio.on('connect')
 def handle_connect():
+    logger.info("Client connecting...")
     try:
         token = request.headers.get('Authorization')
         if not token:
-            guest_sids.add(request.sid)
-            emit('connected', {'status': 'connected', 'authenticated': False})
-            return
+            logger.info("No token provided")
+            return False  # Reject connection
         
         token = token.split(' ')[1]
         status, decoded_token = get_user_id(token)
@@ -59,12 +65,12 @@ def handle_connect():
         user_connections[user_id][request.sid] = time.time()
 
         logger.info(f"User {user_id} connected (sid={request.sid})")
-        emit('connected', {'status': 'connected', 'authenticated': True})
+        socketio.emit('connected', {'status': 'connected', 'authenticated': True})
     
     except Exception as e:
         logger.error(f"Connection error: {e}")
         guest_sids.add(request.sid)
-        emit('connected', {'status': 'connected', 'authenticated': False})
+        socketio.emit('connected', {'status': 'connected', 'authenticated': False})
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -85,16 +91,15 @@ def notify_user(user_id, event_type, data):
     if user_id in user_connections:
         for sid in user_connections[user_id].keys():
             try:
-                emit(event_type, data, room=sid)
+                socketio.emit(event_type, data, room=sid)
                 logger.debug(f"Sent {event_type} to user {user_id} (sid={sid})")
             except Exception as e:
                 logger.error(f"Notification error: {e}")
 
-
 @socketio.on('ping')
 def handle_ping():
-    cleanup_stale_connections()
-    emit('pong')
+    logger.debug(f"Ping from {request.sid}")
+    socketio.emit('pong', room=request.sid)
 
 @socketio.on_error()
 def error_handler(e):

@@ -154,7 +154,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         try {
             const token = await user.getIdToken();
-            const newSocket = io('/', {
+            const newSocket = io({
+                path: '/socket.io',
                 extraHeaders: {
                     Authorization: `Bearer ${token}`
                 },

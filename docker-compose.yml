@@ -10,6 +10,14 @@ services:
       - .env  # Load environment variables from .env file
     networks:
       - syntext-net
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   searxng:
     image: searxng/searxng:latest  # Official image for searxng

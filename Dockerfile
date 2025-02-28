@@ -36,6 +36,13 @@ COPY api/ ./api/
 # Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt
 
+# Add DNS configuration
+RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
+    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+
+# Install CA certificates
+RUN apt-get update && apt-get install -y ca-certificates
+
 FROM base
 
 # Set permissions for log files and directories (ensure directories are writable)
@@ -44,7 +51,7 @@ RUN mkdir -p /var/log/syntextai && \
     chmod -R 775 /var/log/syntextai
 
 # Expose thc v=e application port
-EXPOSE 3000
+EXPOSE 3000 3001
 
 # Supervisor Configuration
 COPY supervisord.conf /etc/supervisor/supervisord.conf

@@ -411,6 +411,16 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     useEffect(() => {
         if (socket) {
+            // Basic connection status
+            socket.on('connect', () => {
+                console.log('Connected to WebSocket');
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from WebSocket');
+            });
+
+            // Your existing socket event handlers
             socket.on('file_processed', (data) => {
                 if (data.status === 'success') {
                     fetchUserFiles();
@@ -439,6 +449,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             });
 
             return () => {
+                socket.off('connect');
+                socket.off('disconnect');
                 socket.off('file_processed');
                 socket.off('message_received');
             };
