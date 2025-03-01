@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from utils import decode_firebase_token, get_user_id
 from sqlalchemy.exc import IntegrityError
-from tasks import delete_user_task
+
 
 users_bp = Blueprint("users", __name__, url_prefix="api/v1/users")
 
@@ -40,6 +40,7 @@ def create_user():
     
 @users_bp.route("", methods=["DELETE"])
 def delete_user():
+    from tasks import delete_user_task
     store = current_app.store
     token = request.headers.get('Authorization')
 
