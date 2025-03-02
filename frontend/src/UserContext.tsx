@@ -36,7 +36,7 @@ interface UserContextType {
     subscriptionData: SubscriptionData | null;
     setSubscriptionData: (data: SubscriptionData | null) => void;
     registerUserInBackend: (user: FirebaseUser) => Promise<void>;
-    websocket: WebSocket | null;
+    socket: WebSocket | null;
     initializeWebSocket: () => Promise<void>;
     disconnectWebSocket: () => void;
 }
@@ -63,7 +63,7 @@ const UserContext = createContext<UserContextType>({
     subscriptionData: null,
     setSubscriptionData: () => { },
     registerUserInBackend: async () => { },
-    websocket: null,
+    socket: null,
     initializeWebSocket: async () => { },
     disconnectWebSocket: () => { },
 });
@@ -80,7 +80,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
     const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
-    const [websocket, setWebsocket] = useState<WebSocket | null>(null);
+    const [socket, setWebsocket] = useState<WebSocket | null>(null);
 
     const toggleDarkMode = () => {
         setDarkMode((prevMode) => !prevMode);
@@ -135,14 +135,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const disconnectWebSocket = () => {
-        if (websocket) {
-            websocket.close();
+        if (socket) {
+            socket.close();
             setWebsocket(null);
         }
     };
 
     const initializeWebSocket = async () => {
-        if (!user || websocket) return;
+        if (!user || socket) return;
 
         try {
             const token = await user.getIdToken();
@@ -240,7 +240,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 subscriptionData,
                 setSubscriptionData,
                 registerUserInBackend,
-                websocket,
+                socket,
                 initializeWebSocket,
                 disconnectWebSocket,
             }}

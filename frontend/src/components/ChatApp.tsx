@@ -411,51 +411,54 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     useEffect(() => {
         if (socket) {
-            // Basic connection status
-            socket.on('connect', () => {
-                console.log('Connected to WebSocket');
-            });
+            // Handler for incoming messages
+            const handleMessage = (event: MessageEvent) => {
+                const data = JSON.parse(event.data);
 
-            socket.on('disconnect', () => {
-                console.log('Disconnected from WebSocket');
-            });
-
-            // Your existing socket event handlers
-            socket.on('file_processed', (data) => {
-                if (data.status === 'success') {
-                    fetchUserFiles();
-                    toast.success(`File ${data.filename} processed successfully`);
-                } else {
-                    toast.error(`Error processing file ${data.filename}: ${data.error}`);
-                }
-            });
-
-            socket.on('message_received', (data) => {
-                if (data.status === 'error') {
-                    toast.error(`Error: ${data.error}`);
-                    setIsSending(false);
-                    return;
-                }
-                if (data.history_id && data.message) {
-                    setHistories(prevHistories => ({
-                        ...prevHistories,
-                        [data.history_id]: {
-                            ...prevHistories[data.history_id],
-                            messages: [...prevHistories[data.history_id].messages, data.message]
+                // Check the event type
+                switch (data.event) {
+                    case 'files_processed':
+                        if (data.status === 'success') {
+                            fetchUserFiles(); // Fetch updated files
+                            toast.success(`File ${data.filename} processed successfully`);
+                        } else {
+                            toast.error(`Error processing file ${data.filename}: ${data.error}`);
                         }
-                    }));
-                }
-                setIsSending(false);
-            });
+                        break;
 
+                    case 'message_received':
+                        if (data.status === 'error') {
+                            toast.error(`Error: ${data.error}`);
+                            setIsSending(false);
+                            return;
+                        }
+                        if (data.history_id && data.message) {
+                            setHistories((prevHistories) => ({
+                                ...prevHistories,
+                                [data.history_id]: {
+                                    ...prevHistories[data.history_id],
+                                    messages: [...prevHistories[data.history_id].messages, data.message],
+                                },
+                            }));
+                        }
+                        setIsSending(false);
+                        break;
+
+                    default:
+                        console.warn('Unknown WebSocket event:', data.event);
+                        break;
+                }
+            };
+
+            // Add event listener for messages
+            socket.addEventListener('message', handleMessage);
+
+            // Cleanup function
             return () => {
-                socket.off('connect');
-                socket.off('disconnect');
-                socket.off('file_processed');
-                socket.off('message_received');
+                socket.removeEventListener('message', handleMessage);
             };
         }
-    }, [socket]);
+    }, [socket, fetchUserFiles]); // Add fetchUserFiles as a dependency
 
     return (
         <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>
