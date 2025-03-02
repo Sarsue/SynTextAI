@@ -16,7 +16,7 @@ import logging
 import time
 from utils import get_user_id, decode_firebase_token  # Ensure decode_firebase_token is imported
 from dotenv import load_dotenv
-from config import redis_celery_broker_url, redis_celery_broker_url# Load environment variables
+from config import redis_celery_broker_url, redis_celery_backend_url# Load environment variables
 
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
