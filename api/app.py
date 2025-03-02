@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 from fastapi import FastAPI, WebSocket, Depends, HTTPException
 from fastapi.responses import FileResponse 
 from fastapi.middleware.cors import CORSMiddleware
@@ -94,11 +96,20 @@ celery = Celery(
 
 # Celery configuration
 celery.conf.update({
-    'task_serializer': 'json',
-    'result_serializer': 'json',
-    'accept_content': ['json'],
-    'timezone': 'UTC',
+        'broker_url': redis_url,
+        'result_backend': redis_url,
+        'broker_transport_options': redis_connection_pool_options,
+        'task_time_limit': 900,
+        'task_soft_time_limit': 600,
+        'worker_prefetch_multiplier': 1,
+        'broker_connection_retry_on_startup': True,
+        'broker_connection_max_retries': None,
+        'task_serializer': 'json',
+        'result_serializer': 'json',
+        'accept_content': ['json'],
+        'timezone': 'UTC',
 })
+
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
 app.mount("/", StaticFiles(directory=build_path, html = True), name="static")
 
