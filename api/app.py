@@ -19,12 +19,12 @@ import logging
 import time
 from utils import get_user_id, decode_firebase_token
 from dotenv import load_dotenv
-from config import redis_celery_broker_url, redis_celery_backend_url
-
+from kombu.utils.url import safequote
+import ssl
 # Load environment variables
 load_dotenv()
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Initialize FastAPI
 app = FastAPI()
 app.add_middleware(
@@ -66,53 +66,38 @@ redis_pwd = os.getenv('REDIS_PASSWORD')
 redis_host = os.getenv('REDIS_HOST')
 redis_port = os.getenv('REDIS_PORT')
 
-# Path to the certificate
+
 ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 
 # Redis connection pool for Celery with SSL configuration
 redis_url = (
-    f"rediss://:{quote(redis_pwd)}@{redis_host}:{redis_port}/0"
-    f"?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs={ssl_cert_path}"
+    f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
 )
 
-redis_connection_pool_options = {
-    'ssl_cert_reqs': 'CERT_REQUIRED',
-    'ssl_ca_certs': ssl_cert_path,
-}
-
-pool = ConnectionPool.from_url(
-    redis_url, 
-    max_connections=10, 
-    connection_class=StrictRedis,
-    **redis_connection_pool_options
-)
-redis_client = StrictRedis(connection_pool=pool)
-app.state.redis_client = redis_client
 
 # Initialize Celery
 celery = Celery(
-    __name__,
-    broker=redis_celery_broker_url,
-    backend=redis_celery_backend_url,
+    "__name__",
+    broker=redis_url,
+    backend=redis_url,
+    redbeat_redis_url=redis_url,
+    broker_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
+    redis_backend_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
 )
 
 # Celery configuration
 celery.conf.update({
-    'broker_url': redis_celery_broker_url,
-    'result_backend': redis_celery_backend_url,
-    'broker_transport_options': redis_connection_pool_options,
-    'task_time_limit': 900,
-    'task_soft_time_limit': 600,
-    'worker_prefetch_multiplier': 1,
-    'broker_connection_retry_on_startup': True,
-    'broker_connection_max_retries': None,
-    'task_serializer': 'json',
-    'result_serializer': 'json',
-    'accept_content': ['json'],
-    'timezone': 'UTC',
+        'broker_url': redis_url,
+        'result_backend': redis_url,
+        'task_time_limit': 900,
+        'task_soft_time_limit': 600,
+        'worker_prefetch_multiplier': 1,
+        'broker_connection_retry_on_startup': True,
+        'broker_connection_max_retries': None,
 })
 
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
+
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
 # Import routers after app is set up
