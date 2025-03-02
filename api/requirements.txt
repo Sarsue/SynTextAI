@@ -40,15 +40,11 @@ grpcio
 grpcio-status
 grpcio-tools
 faster-whisper==1.1.0
-flask
 firebase-admin
-flask-cors
-flask-sse==1.0.0
 pdfminer.six
 Pillow
 pytesseract
 psycopg2-binary==2.9.9
-gunicorn
 gpt4all
 mistralai
 h11==0.14.0
@@ -161,7 +157,5 @@ markdownify==0.14.1
 pgvector==0.3.6
 psycopg2-binary
 supervisor
-flask-socketio==5.3.6
-python-socketio==5.9.0
-python-engineio==4.8.0
-eventlet==0.33.3
+fastapi
+uvicorn

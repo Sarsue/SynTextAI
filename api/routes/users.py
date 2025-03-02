@@ -1,104 +1,115 @@
-from flask import Blueprint, request, jsonify, current_app
-from utils import decode_firebase_token, get_user_id
+from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from utils import decode_firebase_token, get_user_id
+from docsynth_store import DocSynthStore
+from tasks import delete_user_task
+import logging
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
-users_bp = Blueprint("users", __name__, url_prefix="api/v1/users")
+# Initialize FastAPI router
+users_router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
+# Helper function to authenticate user and retrieve user ID
+async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(lambda: app.state.store)):
+    if not authorization or not authorization.startswith("Bearer "):
+        logger.error("Invalid or missing Authorization token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-def get_id_helper(store, success, user_info):
-    if not success:
-        return jsonify(user_info), 401
-
-    email = user_info['email']
-    id = store.get_user_id_from_email(email)
-    return id
-
-
-@users_bp.route("", methods=["POST"])
-def create_user():
-    store = current_app.store
-    token = request.headers.get('Authorization')
-
-    if not token:
-        return jsonify({'error': 'Authorization token is missing'}), 401
-
-    # Extract the actual token from the "Authorization" header
-    token = token.split("Bearer ")[1]
+    token = authorization.split("Bearer ")[1]
     success, user_info = decode_firebase_token(token)
-    
-
     if not success:
-        return jsonify(user_info), 401
+        logger.error("Failed to authenticate user with token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Now you can use the user_info dictionary to allow or restrict actions
-    name = user_info['name']
-    email = user_info['email']
-    User = store.add_user(email, name)
-    print(User)
-    return jsonify(User)
-    
-@users_bp.route("", methods=["DELETE"])
-def delete_user():
-    from tasks import delete_user_task
-    store = current_app.store
-    token = request.headers.get('Authorization')
+    user_id = store.get_user_id_from_email(user_info['email'])
+    if not user_id:
+        logger.error(f"No user ID found for email: {user_info['email']}")
+        raise HTTPException(status_code=404, detail="User not found")
 
-    if not token or not token.startswith("Bearer "):
-        return jsonify({'error': 'Invalid or missing Authorization token'}), 401
+    logger.info(f"Authenticated user_id: {user_id}")
+    return user_id, user_info
 
+# Route to create a new user
+@users_router.post("", status_code=201)
+async def create_user(
+    authorization: str = Header(None),
+    store: DocSynthStore = Depends(lambda: app.state.store)
+):
     try:
-        token = token.split("Bearer ")[1]
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Authorization token is missing")
+
+        token = authorization.split("Bearer ")[1]
         success, user_info = decode_firebase_token(token)
         if not success:
-            return jsonify({'error': 'Invalid token'}), 401
+            raise HTTPException(status_code=401, detail="Invalid token")
 
-        user_id = get_id_helper(store, success, user_info)
-        user_gc_id = user_info['user_id']
-
-        if not user_id:
-            return jsonify({'error': 'User not found'}), 404
-
-        # Trigger Celery task
-        # delete google cloud files too
-        delete_user_task.apply_async(args=[user_id,user_gc_id])
-
-        return jsonify({"message": "User deletion in progress", "email": user_info['email']}), 200
+        # Now you can use the user_info dictionary to allow or restrict actions
+        name = user_info['name']
+        email = user_info['email']
+        user = store.add_user(email, name)
+        logger.info(f"Created user: {user}")
+        return user
 
     except IntegrityError:
-        current_app.logger.error(f"Database error while deleting user {user_info['email']}")
-        return jsonify({'error': 'Failed to delete user due to database constraints'}), 500
-
+        logger.error(f"Database error while creating user {user_info['email']}")
+        raise HTTPException(status_code=400, detail="User already exists")
     except Exception as e:
-        current_app.logger.error(f"Unexpected error: {str(e)}")
-        return jsonify({'error': 'An unexpected error occurred'}), 500
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
+# Route to delete a user
+@users_router.delete("", status_code=200)
+async def delete_user(
+    user_id: int = Depends(authenticate_user),
+    store: DocSynthStore = Depends(lambda: app.state.store)
+):
+    try:
+        user_id, user_info = user_id  # Unpack the tuple returned by authenticate_user
+        user_gc_id = user_info['user_id']
 
+        # Trigger Celery task to delete user and associated files
+        delete_user_task.apply_async(args=[user_id, user_gc_id])
 
-# @users_bp.route("/personas", methods=["GET"])
-# def get_user_personas():
-#     store = current_app.store
-#     token = request.headers.get('Authorization')
-#     success, user_info = get_user_id(token)
-#     user_id = get_id_helper(store, success, user_info)
+        return {"message": "User deletion in progress", "email": user_info['email']}
 
-#     user_personas = store.get_user_personas(user_id)
-#     return jsonify(user_personas)
+    except IntegrityError:
+        logger.error(f"Database error while deleting user {user_info['email']}")
+        raise HTTPException(status_code=500, detail="Failed to delete user due to database constraints")
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
+# Route to get user personas (commented out for now)
+# @users_router.get("/personas")
+# async def get_user_personas(
+#     user_id: int = Depends(authenticate_user),
+#     store: DocSynthStore = Depends(lambda: app.state.store)
+# ):
+#     try:
+#         user_personas = store.get_user_personas(user_id)
+#         return user_personas
+#     except Exception as e:
+#         logger.error(f"Error retrieving user personas: {str(e)}")
+#         raise HTTPException(status_code=500, detail="An unexpected error occurred")
 
-# @users_bp.route("/personas", methods=["PUT"])
-# def update_user_personas():
-#     store = current_app.store
-#     token = request.headers.get('Authorization')
-#     success, user_info = get_user_id(token)
-#     user_id = get_id_helper(store, success, user_info)
+# Route to update user personas (commented out for now)
+# @users_router.put("/personas")
+# async def update_user_personas(
+#     selected_personas: list = Body(..., embed=True),
+#     user_id: int = Depends(authenticate_user),
+#     store: DocSynthStore = Depends(lambda: app.state.store)
+# ):
+#     try:
+#         if not isinstance(selected_personas, list):
+#             raise HTTPException(status_code=400, detail="Invalid data format for selected_personas")
 
-#     data = request.json
-#     # Default to an empty list if None
-#     selected_personas = data.get("selected_personas", [])
-
-#     if not isinstance(selected_personas, list):
-#         return jsonify({"error": "Invalid data format for selected_personas"}), 400
-
-#     store.update_user_personas(user_id, selected_personas)
-#     return jsonify({"success": True})
+#         store.update_user_personas(user_id, selected_personas)
+#         return {"success": True}
+#     except Exception as e:
+#         logger.error(f"Error updating user personas: {str(e)}")
+#         raise HTTPException(status_code=500, detail="An unexpected error occurred")

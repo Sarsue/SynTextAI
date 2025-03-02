@@ -1,45 +1,59 @@
-from flask import Blueprint, request, jsonify, current_app
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from typing import List
 from utils import get_user_id
-
+from docsynth_store import DocSynthStore
 from llm_service import get_text_embedding
 from tasks import process_query_data
 import logging
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s: %(message)s')
 
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
-messages_bp = Blueprint("messages", __name__, url_prefix="api/v1/messages")
+# Initialize FastAPI router
+messages_router = APIRouter(prefix="/api/v1/messages", tags=["messages"])
 
+# Helper function to authenticate user and retrieve user ID
+async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(lambda: app.state.store)):
+    if not authorization:
+        logger.error("Missing Authorization token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-def get_id_helper(store, success, user_info):
+    success, user_info = get_user_id(authorization)
     if not success:
-        return jsonify(user_info), 401
+        logger.error("Failed to authenticate user with token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Now you can use the user_info dictionary to allow or restrict actions
-    name = user_info['name']
-    email = user_info['email']
-    id = store.get_user_id_from_email(email)
-    return id
+    user_id = store.get_user_id_from_email(user_info['email'])
+    if not user_id:
+        logger.error(f"No user ID found for email: {user_info['email']}")
+        raise HTTPException(status_code=404, detail="User not found")
 
-@messages_bp.route('', methods=['POST'])
-def create_message():
-    store = current_app.store
-    message_list = []
-    message = request.args.get('message')
-    language = request.args.get('language', 'English')  # Default to 'English' if not provided
-    comprehension_level = request.args.get('comprehensionLevel', 'beginner')  # Set a default value if desired
-    token = request.headers.get('Authorization')
-    
-    success, user_info = get_user_id(token)
-    id = get_id_helper(store, success, user_info)
-    history_id = int(request.args.get('history-id'))
+    logger.info(f"Authenticated user_id: {user_id}")
+    return user_id
 
-    # Save the user message to the history
-    user_request = store.add_message(
-        content=message, sender='user', user_id=id, chat_history_id=history_id)
-    message_list.append(user_request)
-    task = process_query_data.delay(id, history_id, message, language,comprehension_level)
-    logging.info(f"Enqueued Task {task.id}  for processing {message}")
-    return message_list
-   
-  
+# Route to create a new message
+@messages_router.post("", status_code=201)
+async def create_message(
+    message: str = Query(..., description="The message content"),
+    language: str = Query("English", description="Language of the message"),
+    comprehension_level: str = Query("beginner", description="Comprehension level of the message"),
+    history_id: int = Query(..., description="ID of the chat history"),
+    user_id: int = Depends(authenticate_user),
+    store: DocSynthStore = Depends(lambda: app.state.store)
+):
+    try:
+        # Save the user message to the history
+        user_request = store.add_message(
+            content=message, sender='user', user_id=user_id, chat_history_id=history_id
+        )
+        message_list = [user_request]
+
+        # Enqueue the task for processing the query
+        task = process_query_data.delay(user_id, history_id, message, language, comprehension_level)
+        logger.info(f"Enqueued Task {task.id} for processing {message}")
+
+        return message_list
+    except Exception as e:
+        logger.error(f"Error creating message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

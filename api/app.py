@@ -1,41 +1,33 @@
-import eventlet
-eventlet.monkey_patch()
-
-from flask import Flask, send_from_directory, jsonify, request
-from flask_cors import CORS
-from flask_socketio import SocketIO, emit
+from fastapi import FastAPI, WebSocket, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+from fastapi import Request
+from websocket_manager import websocket_manager
 from docsynth_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
-from redis import StrictRedis, ConnectionPool, Redis
-import os
+from redis import Redis, ConnectionPool, StrictRedis
 from celery import Celery
-from config import redis_celery_broker_url, redis_celery_backend_url, redis_socketio_url, redis_app_url, ssl_cert_path
-from datetime import datetime
-import ssl
+from urllib.parse import quote
+import os
 import logging
 import time
-from utils import get_user_id  # Existing import
+from utils import get_user_id, decode_firebase_token  # Ensure decode_firebase_token is imported
 
 # Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT"),
-}
-DATABASE_URL = (
-    f"postgresql://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+# Initialize FastAPI
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
-# Initialize SocketIO
-socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet', message_queue=redis_socketio_url)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -44,114 +36,140 @@ logger = logging.getLogger(__name__)
 # Track connections
 user_connections = {}  # Maps user_id -> {sid: timestamp}
 
-def create_app():
-    app = Flask(__name__, static_folder='../build', static_url_path='/')
-    initialize_firebase()
-    CORS(app, supports_credentials=True)
-    
-    app.config['DATABASE_URL'] = DATABASE_URL
-    app.socketio = socketio  # Make socketio accessible via app
+# Initialize Firebase and Redis
+initialize_firebase()
 
-    store = DocSynthStore(database_url=DATABASE_URL)
-    app.store = store
+database_config = {
+    'dbname': os.getenv("DATABASE_NAME"),
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': os.getenv("DATABASE_PORT"),
+}
 
-    pool = ConnectionPool.from_url(redis_celery_broker_url, max_connections=10, connection_class=StrictRedis)
-    redis_client = StrictRedis(connection_pool=pool)
-    app.redis_client = redis_client
+DATABASE_URL = (
+    f"postgresql://{database_config['user']}:{database_config['password']}"
+    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+)
 
-    from routes.users import users_bp
-    from routes.histories import histories_bp
-    from routes.messages import messages_bp
-    from routes.files import files_bp
-    from routes.subscriptions import subscriptions_bp
+store = DocSynthStore(database_url=DATABASE_URL)
+app.state.store = store
 
-    app.register_blueprint(users_bp, url_prefix="/api/v1/users")
-    app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
-    app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
-    app.register_blueprint(files_bp, url_prefix="/api/v1/files")
-    app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
+redis_username = os.getenv('REDIS_USERNAME')
+redis_pwd = os.getenv('REDIS_PASSWORD')
+redis_host = os.getenv('REDIS_HOST')
+redis_port = os.getenv('REDIS_PORT')
 
-    @app.route('/')
-    def serve_react_app():
-        return send_from_directory(app.static_folder, 'index.html')
+# Path to the certificate
+ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 
-    @app.route('/<path:path>')
-    def serve_static_file(path):
-        return send_from_directory(app.static_folder, path)
+# Redis connection pool for Celery with SSL configuration
+redis_url = (
+    f"rediss://:{quote(redis_pwd)}@{redis_host}:{redis_port}/0"
+    "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
+)
 
-    # SocketIO Event Handlers
-    @socketio.on('connect')
-    def handle_connect():
-        token = request.headers.get('Authorization')
-        if not token:
-            emit('connected', {'status': 'connected', 'authenticated': False})
-            return
-        token = token.split(' ')[1]
-        status, decoded_token = get_user_id(token)
-        if status and 'user_id' in decoded_token:
-            user_id = decoded_token['user_id']
-            if user_id not in user_connections:
-                user_connections[user_id] = {}
-            user_connections[user_id][request.sid] = time.time()
-            logger.info(f"User {user_id} connected (sid={request.sid})")
-            emit('connected', {'status': 'connected', 'authenticated': True})
+redis_connection_pool_options = {
+    'ssl_cert_reqs': 'CERT_REQUIRED',
+    'ssl_ca_certs': ssl_cert_path,
+}
+
+pool = ConnectionPool.from_url(
+    redis_url, 
+    max_connections=10, 
+    connection_class=StrictRedis,
+    **redis_connection_pool_options
+)
+redis_client = StrictRedis(connection_pool=pool)
+app.state.redis_client = redis_client
+
+# Initialize Celery
+celery = Celery(
+    __name__,
+    broker=os.getenv("REDIS_CELERY_BROKER_URL"),
+    backend=os.getenv("REDIS_CELERY_BACKEND_URL"),
+)
+
+# Celery configuration
+celery.conf.update({
+    'task_serializer': 'json',
+    'result_serializer': 'json',
+    'accept_content': ['json'],
+    'timezone': 'UTC',
+})
+
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
+
+app.mount("/static", StaticFiles(directory=build_path), name="static")
+# Import routers after app is set up
+from routes.files import files_router
+from routes.histories import histories_router
+from routes.messages import messages_router
+from routes.subscriptions import subscriptions_router
+from routes.users import users_router
+
+# Include routers
+app.include_router(files_router)
+app.include_router(histories_router)
+app.include_router(messages_router)
+app.include_router(subscriptions_router)
+app.include_router(users_router)
+
+@app.get("/")
+async def serve_react_app():
+    index_path = os.path.join(build_path, "index.html")
+    if not os.path.exists(index_path):
+        raise HTTPException(status_code=404, detail="React app not found. Build the frontend first.")
+    return FileResponse(index_path)
+
+# Serve other static files (CSS, JS, images, etc.)
+@app.get("/{path:path}")
+async def serve_static_file(path: str):
+    file_path = os.path.join(build_path, path)
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    else:
+        # If the file doesn't exist, serve the index.html (for React Router)
+        index_path = os.path.join(build_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
         else:
-            emit('connected', {'status': 'connected', 'authenticated': False})
+            raise HTTPException(status_code=404, detail="File not found.")
 
-    @socketio.on('disconnect')
-    def handle_disconnect():
-        for user_id, connections in list(user_connections.items()):
-            if request.sid in connections:
-                del connections[request.sid]
-                if not connections:
-                    del user_connections[user_id]
-                logger.info(f"User {user_id} disconnected (sid={request.sid})")
-                break
-        logger.info(f"Client {request.sid} disconnected")
-
-    @socketio.on('ping')
-    def handle_ping():
-        emit('pong')
-
-    return app
-
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        broker=redis_celery_broker_url,
-        backend=redis_celery_backend_url,
-    )
-    logger.info(f"Celery broker URL: {celery.conf.broker_url}")
-    logger.info(f"Celery backend URL: {celery.conf.result_backend}")
-    celery.conf.update({
-        'broker_url': redis_celery_broker_url,
-        'result_backend': redis_celery_backend_url,
-        'broker_use_ssl': {'ssl_cert_reqs': ssl.CERT_REQUIRED, 'ssl_ca_certs': ssl_cert_path},
-        'redis_backend_use_ssl': {'ssl_cert_reqs': ssl.CERT_REQUIRED, 'ssl_ca_certs': ssl_cert_path},
-    })
-       # Add logging to see the broker URL
- 
-
-    class ContextTask(celery.Task):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return self.run(*args, **kwargs)
-    celery.Task = ContextTask
-    return celery
-
-app = create_app()
-celery = make_celery(app)
-socketio.init_app(app)
-
-@app.route('/health')
-def health_check():
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    await websocket.accept()
     try:
-        redis_client = Redis.from_url(redis_app_url, ssl_cert_reqs=ssl.CERT_REQUIRED, ssl_ca_certs=ssl_cert_path)
-        redis_client.ping()
-        celery.control.ping(timeout=1.0)
-        return jsonify({'status': 'healthy', 'redis': 'connected', 'celery': 'connected', 'timestamp': datetime.utcnow().isoformat()}), 200
-    except Exception as e:
-        return jsonify({'status': 'unhealthy', 'error': str(e), 'timestamp': datetime.utcnow().isoformat()}), 500
+        # Authenticate the user
+        data = await websocket.receive_json()
+        if data.get("type") != "auth":
+            await websocket.close(code=1008)
+            return
 
-if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0', port=3000)
+        token = data.get("token")
+        success, user_info = decode_firebase_token(token)
+        if not success:
+            await websocket.close(code=1008)
+            return
+
+        # Add the WebSocket connection to the manager
+        await websocket_manager.connect(user_id, websocket)
+
+        # Keep the connection alive
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(user_id)
+        logger.info(f"User {user_id} disconnected")
+
+@app.get("/health")
+async def health_check():
+    try:
+        redis_client.ping()
+        return {"status": "healthy"}
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=3000)

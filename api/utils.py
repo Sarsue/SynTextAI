@@ -4,7 +4,7 @@ import re
 import hashlib
 from google.cloud import storage
 import logging
-from flask_socketio import emit
+
 
 bucket_name = 'docsynth-fbb02.appspot.com'
 
@@ -91,12 +91,3 @@ def chunk_text(text):
             }
         chunks.append(chunk)
     return chunks
-
-   
-def notify_user(socketio, user_id, event_type, data):
-    """Send real-time notification to a specific user"""
-    try:
-        socketio.emit(event_type, data, room=str(user_id))
-        logger.info(f"Notified user {user_id} with event {event_type}")
-    except Exception as e:
-        logger.error(f"Error notifying user {user_id}: {e}")

@@ -1,134 +1,129 @@
 import os
-from flask import Blueprint, request, jsonify, current_app
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status
+from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
-from utils import get_user_id, upload_to_gcs,delete_from_gcs
+from utils import get_user_id, upload_to_gcs, delete_from_gcs
 from tasks import process_file_data
 import logging
 from celery.result import AsyncResult
+from typing import Dict, Optional
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s: %(message)s')
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
-
-files_bp = Blueprint("files", __name__, url_prefix="/api/v1/files")
-
+# Initialize FastAPI router
+files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 # Helper function to authenticate user and retrieve user ID
-def authenticate_user(store):
+async def authenticate_user(request: Request):
     try:
         token = request.headers.get('Authorization')
         if not token:
-            logging.error("Missing Authorization token")
-            return None, None
+            logger.error("Missing Authorization token")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
         success, user_info = get_user_id(token)
         if not success:
-            logging.error("Failed to authenticate user with token")
-            return None, None
+            logger.error("Failed to authenticate user with token")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
-        user_id = store.get_user_id_from_email(user_info['email'])
+        user_id = request.app.state.store.get_user_id_from_email(user_info['email'])
         if not user_id:
-            logging.error(f"No user ID found for email: {user_info['email']}")
-            return None, user_info['user_id']
+            logger.error(f"No user ID found for email: {user_info['email']}")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        logging.info(
-            f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
+        logger.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
         return user_id, user_info['user_id']
 
     except Exception as e:
-        logging.exception("Error during user authentication")
-        return None, None
+        logger.exception("Error during user authentication")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Route to save file
-@files_bp.route('', methods=['POST'])
-def save_file():
+@files_router.post("", status_code=status.HTTP_202_ACCEPTED)
+async def save_file(
+    request: Request,
+    language: str = "English",
+    comprehension_level: str = "dropout",
+    files: list[UploadFile] = File(...),
+    user_info: tuple = Depends(authenticate_user)
+):
     try:
-        language = request.args.get('language', 'English')
-        comprehension_level = request.args.get('comprehensionLevel', 'dropout')
-        store = current_app.store
-        user_id, user_gc_id = authenticate_user(store)
-        if user_id is None:
-            return jsonify({'error': 'Unauthorized'}), 401
+        user_id, user_gc_id = user_info
+        store = request.app.state.store
 
-        if not request.files:
-            logging.warning('No files provided')
-            return jsonify({'error': 'No files provided'}), 400
+        if not files:
+            logger.warning('No files provided')
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
 
-        for _, file in request.files.items():
-            file_url = upload_to_gcs(file, user_gc_id, file.filename)
-            store.add_file(user_id,file.filename,file_url)
+        for file in files:
+            file_url = upload_to_gcs(file.file, user_gc_id, file.filename)
+            store.add_file(user_id, file.filename, file_url)
             if not file_url:
-                logging.error(f"Failed to upload {file.filename} to GCS")
-                return jsonify({'error': 'File upload failed'}), 500
+                logger.error(f"Failed to upload {file.filename} to GCS")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
             task = process_file_data.delay(user_id, user_gc_id, file.filename, language)
+            logger.info(f"Enqueued Task {task.id} for processing {file.filename}")
 
-            logging.info(f"Enqueued Task {task.id}  for processing {file.filename}")
+        return {"message": "File processing queued."}
 
-
-        return jsonify({'message': 'File processing queued.'}), 202
     except RedisError as e:
-        logging.error("Redis error")
-        return jsonify({'error': 'Failed to enqueue job'}), 500
+        logger.error("Redis error")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to enqueue job")
     except Exception as e:
-        logging.error(f"Exception occurred: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Exception occurred: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Route to retrieve files
-@files_bp.route('', methods=['GET'])
-def retrieve_files():
+@files_router.get("", response_model=list)
+async def retrieve_files(request: Request, user_info: tuple = Depends(authenticate_user)):
     try:
-        store = current_app.store
-        user_id, _ = authenticate_user(store)
-        if user_id is None:
-            return jsonify({'error': 'Unauthorized'}), 401
-
+        user_id, _ = user_info
+        store = request.app.state.store
         files = store.get_files_for_user(user_id)
-        return jsonify(files)
+        return files
     except Exception as e:
-        logging.error(f"Error retrieving files: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error retrieving files: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Route to delete a file
-@files_bp.route('/<int:fileId>', methods=['DELETE'])
-def delete_file(fileId):
+@files_router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_file(file_id: int, request: Request, user_info: tuple = Depends(authenticate_user)):
     try:
-        store = current_app.store
-        user_id, user_gc_id = authenticate_user(store)
-        if user_id is None:
-            return jsonify({'error': 'Unauthorized'}), 401
-
-        file_info = store.delete_file_entry(user_id, fileId)
+        user_id, user_gc_id = user_info
+        store = request.app.state.store
+        file_info = store.delete_file_entry(user_id, file_id)
         delete_from_gcs(user_gc_id, file_info['file_name'])
-        return '', 204
+        return None
     except Exception as e:
-        logging.error(f"Error deleting file: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error deleting file: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-@files_bp.route('/<int:fileId>/reextract', methods=['PATCH'])
-def reextract_file(fileId):
+# Route to re-extract a file
+@files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
+async def reextract_file(file_id: int, request: Request, user_info: tuple = Depends(authenticate_user)):
     try:
-        store = current_app.store
-        user_id, _ = authenticate_user(store)
-        if user_id is None:
-            return jsonify({'error': 'Unauthorized'}), 401
+        user_id, _ = user_info
+        store = request.app.state.store
 
-        # # Check if the file exists
-        # file_info = store.get_file_entry(user_id, fileId)
+        # Placeholder for re-extraction logic
+        # file_info = store.get_file_entry(user_id, file_id)
         # if not file_info:
-        #     return jsonify({'error': 'File not found'}), 404
+        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-        # # Trigger re-extraction logic
         # process_file(file_info['file_path'])  # Replace with your re-processing logic
 
-        return jsonify({'message': 'File re-extraction initiated'}), 202
+        return {"message": "File re-extraction initiated"}
     except Exception as e:
-        logging.error(f"Error reextracting file: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error reextracting file: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-@files_bp.route('/result/<id>', methods=['GET'])
-def task_result(id: str) -> dict[str, object]:
-    result = AsyncResult(id)
+# Route to check task result
+@files_router.get("/result/{task_id}")
+async def task_result(task_id: str) -> Dict[str, object]:
+    result = AsyncResult(task_id)
     return {
         "ready": result.ready(),
         "successful": result.successful(),
