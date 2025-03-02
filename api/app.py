@@ -1,7 +1,8 @@
 import eventlet
 eventlet.monkey_patch()
+
 from fastapi import FastAPI, WebSocket, Depends, HTTPException
-from fastapi.responses import FileResponse 
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -16,10 +17,11 @@ from urllib.parse import quote
 import os
 import logging
 import time
-from utils import get_user_id, decode_firebase_token  # Ensure decode_firebase_token is imported
+from utils import get_user_id, decode_firebase_token
 from dotenv import load_dotenv
-from config import redis_celery_broker_url, redis_celery_backend_url# Load environment variables
+from config import redis_celery_broker_url, redis_celery_backend_url
 
+# Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -70,7 +72,7 @@ ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
 # Redis connection pool for Celery with SSL configuration
 redis_url = (
     f"rediss://:{quote(redis_pwd)}@{redis_host}:{redis_port}/0"
-    "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
+    f"?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs={ssl_cert_path}"
 )
 
 redis_connection_pool_options = {
@@ -96,22 +98,22 @@ celery = Celery(
 
 # Celery configuration
 celery.conf.update({
-        'broker_url': redis_url,
-        'result_backend': redis_url,
-        'broker_transport_options': redis_connection_pool_options,
-        'task_time_limit': 900,
-        'task_soft_time_limit': 600,
-        'worker_prefetch_multiplier': 1,
-        'broker_connection_retry_on_startup': True,
-        'broker_connection_max_retries': None,
-        'task_serializer': 'json',
-        'result_serializer': 'json',
-        'accept_content': ['json'],
-        'timezone': 'UTC',
+    'broker_url': redis_celery_broker_url,
+    'result_backend': redis_celery_backend_url,
+    'broker_transport_options': redis_connection_pool_options,
+    'task_time_limit': 900,
+    'task_soft_time_limit': 600,
+    'worker_prefetch_multiplier': 1,
+    'broker_connection_retry_on_startup': True,
+    'broker_connection_max_retries': None,
+    'task_serializer': 'json',
+    'result_serializer': 'json',
+    'accept_content': ['json'],
+    'timezone': 'UTC',
 })
 
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
-app.mount("/", StaticFiles(directory=build_path, html = True), name="static")
+app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
 # Import routers after app is set up
 from routes.files import files_router

@@ -24,7 +24,6 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-\
 
 # Copy only the build artifacts from the first stage (frontend build step), not node_modules
 COPY --from=build-step /app/build ./build

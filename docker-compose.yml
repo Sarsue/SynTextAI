@@ -2,25 +2,19 @@ version: '3.8'
 
 services:
   syntextaiapp:
-    image: osasdeeon/syntextai:latest  # Use the pre-built image for Syntext AI app
+    image: osasdeeon/syntextai:latest
     container_name: syntextaiapp
     ports:
-      - "3000:3000"  # Expose the port for your app
+      - "3000:3000"  # Expose port 3000 for your app
     env_file:
       - .env  # Load environment variables from .env file
-    networks:
-      - syntext-net
+    network_mode: host  # Use the host's network stack
 
   searxng:
-    image: searxng/searxng:latest  # Official image for searxng
+    image: searxng/searxng:latest
     container_name: searxng
     ports:
-      - "8080:8080"  # Expose the port for searxng
+      - "8080:8080"  # Expose port 8080 for SearXNG
     volumes:
       - ./settings.yml:/etc/searxng/settings.yml  # Mount settings.yml into container
-    networks:
-      - syntext-net
-
-networks:
-  syntext-net:
-    driver: bridge
+    network_mode: host  # Use the host's network stack

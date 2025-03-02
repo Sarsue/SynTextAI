@@ -2,9 +2,10 @@ import os
 import ssl
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
+
+# Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-
 
 # Redis configuration
 redis_host = os.getenv('REDIS_HOST')
@@ -21,8 +22,8 @@ ssl_conf = {
 # Redis URLs - handle password properly
 def get_redis_url(db_number):
     if redis_pwd:
-        return f"rediss://:{quote_plus(redis_pwd)}@{redis_host}:{redis_port}/{db_number}"
-    return f"rediss://{redis_host}:{redis_port}/{db_number}"
+        return f"rediss://:{quote_plus(redis_pwd)}@{redis_host}:{redis_port}/{db_number}?ssl_cert_reqs={ssl.CERT_REQUIRED}&ssl_ca_certs={ssl_cert_path}"
+    return f"rediss://{redis_host}:{redis_port}/{db_number}?ssl_cert_reqs={ssl.CERT_REQUIRED}&ssl_ca_certs={ssl_cert_path}"
 
 # Define Redis URLs for different purposes
 redis_celery_broker_url = get_redis_url(0)
