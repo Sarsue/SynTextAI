@@ -97,9 +97,7 @@ celery.conf.update({
     'accept_content': ['json'],
     'timezone': 'UTC',
 })
-
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
-
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "build"))
 app.mount("/static", StaticFiles(directory=build_path), name="static")
 # Import routers after app is set up
 from routes.files import files_router
@@ -119,7 +117,7 @@ app.include_router(users_router)
 async def serve_react_app():
     index_path = os.path.join(build_path, "index.html")
     if not os.path.exists(index_path):
-        raise HTTPException(status_code=404, detail="React app not found. Build the frontend first.")
+        raise HTTPException(status_code=404, detail="App not found. Build the App first.")
     return FileResponse(index_path)
 
 # Serve other static files (CSS, JS, images, etc.)
