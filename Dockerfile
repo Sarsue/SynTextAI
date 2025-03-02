@@ -1,7 +1,7 @@
 # Stage 1: Frontend build
 FROM node:18-alpine AS build-step
 WORKDIR /app
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --only=production && npm prune --production
 COPY frontend/ ./
