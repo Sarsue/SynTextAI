@@ -100,7 +100,7 @@ celery.conf.update({
     'timezone': 'UTC',
 })
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
-app.mount("/static", StaticFiles(directory=build_path, html = True), name="static")
+app.mount("/", StaticFiles(directory=build_path, html = True), name="static")
 
 # Import routers after app is set up
 from routes.files import files_router
