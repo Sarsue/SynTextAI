@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket, Depends, HTTPException
+from fastapi.responses import FileResponse 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -14,8 +15,9 @@ import os
 import logging
 import time
 from utils import get_user_id, decode_firebase_token  # Ensure decode_firebase_token is imported
+from dotenv import load_dotenv
+from config import redis_celery_broker_url, redis_celery_broker_url# Load environment variables
 
-# Load environment variables
 load_dotenv()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -86,8 +88,8 @@ app.state.redis_client = redis_client
 # Initialize Celery
 celery = Celery(
     __name__,
-    broker=os.getenv("REDIS_CELERY_BROKER_URL"),
-    backend=os.getenv("REDIS_CELERY_BACKEND_URL"),
+    broker=redis_celery_broker_url,
+    backend=redis_celery_backend_url,
 )
 
 # Celery configuration
@@ -97,8 +99,9 @@ celery.conf.update({
     'accept_content': ['json'],
     'timezone': 'UTC',
 })
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "build"))
-app.mount("/static", StaticFiles(directory=build_path), name="static")
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
+app.mount("/static", StaticFiles(directory=build_path, html = True), name="static")
+
 # Import routers after app is set up
 from routes.files import files_router
 from routes.histories import histories_router

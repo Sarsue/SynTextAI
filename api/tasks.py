@@ -1,6 +1,7 @@
 from celery import shared_task
 import logging
 import os
+
 from tempfile import NamedTemporaryFile
 from text_extractor import extract_data
 from faster_whisper import WhisperModel
@@ -10,6 +11,9 @@ from llm_service import get_text_embeddings_in_batches, get_text_embedding
 from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
+from dotenv import load_dotenv
+# Load environment variables
+load_dotenv()
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -18,7 +22,19 @@ logger = logging.getLogger(__name__)
 stripe.api_key = os.getenv('STRIPE_SECRET')
 
 # Initialize DocSynthStore and SyntextAgent
-store = DocSynthStore(database_url=os.getenv("DATABASE_URL"))
+database_config = {
+    'dbname': os.getenv("DATABASE_NAME"),
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': os.getenv("DATABASE_PORT"),
+}
+
+DATABASE_URL = (
+    f"postgresql://{database_config['user']}:{database_config['password']}"
+    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+)
+store = DocSynthStore(DATABASE_URL)
 syntext = SyntextAgent()
 
 @shared_task(bind=True, max_retries=5)

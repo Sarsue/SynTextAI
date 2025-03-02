@@ -159,3 +159,5 @@ psycopg2-binary
 supervisor
 fastapi
 uvicorn
+eventlet
+python-multipart
