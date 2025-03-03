@@ -44,8 +44,6 @@ RUN mkdir -p /var/log/syntextai && \
 # Expose thc v=e application port
 EXPOSE 3000
 
-# Supervisor Configuration
-COPY supervisord.conf /etc/supervisor/supervisord.conf
 
 # Command to start Supervisor (or your application)
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]
