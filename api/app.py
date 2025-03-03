@@ -1,5 +1,3 @@
-import eventlet
-eventlet.monkey_patch()
 
 from fastapi import FastAPI, WebSocket, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -11,14 +9,11 @@ from websocket_manager import websocket_manager
 from docsynth_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
-from redis import Redis, ConnectionPool, StrictRedis
-from urllib.parse import quote
 import os
 import logging
 import time
 from utils import get_user_id, decode_firebase_token
-from dotenv import load_dotenv
-import ssl
+
 # Load environment variables
 load_dotenv()
 
