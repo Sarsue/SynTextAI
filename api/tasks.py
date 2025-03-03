@@ -1,7 +1,5 @@
-from celery import shared_task
 import logging
 import os
-
 from tempfile import NamedTemporaryFile
 from text_extractor import extract_data
 from faster_whisper import WhisperModel
@@ -12,8 +10,11 @@ from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
 from dotenv import load_dotenv
+from fastapi import BackgroundTasks, HTTPException
+
 # Load environment variables
 load_dotenv()
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -37,8 +38,7 @@ DATABASE_URL = (
 store = DocSynthStore(DATABASE_URL)
 syntext = SyntextAgent()
 
-@shared_task(bind=True, max_retries=5)
-def transcribe_audio_chunked(self, file_path: str, lang: str) -> list:
+def transcribe_audio_chunked(file_path: str, lang: str) -> list:
     """
     Transcribe audio using WhisperModel.
     """
@@ -65,10 +65,9 @@ def transcribe_audio_chunked(self, file_path: str, lang: str) -> list:
 
     except Exception as e:
         logger.exception("Error in transcription")
-        raise self.retry(exc=e, countdown=min(2 ** self.request.retries, 300))
+        raise HTTPException(status_code=500, detail="Transcription failed")
 
-@shared_task(bind=True)
-def process_file_data(self, user_id: str, user_gc_id: str, filename: str, language: str):
+def process_file_data(user_id: str, user_gc_id: str, filename: str, language: str):
     """
     Process a file (audio, video, or document) and store its data.
     """
@@ -127,8 +126,7 @@ def process_file_data(self, user_id: str, user_gc_id: str, filename: str, langua
         logger.error(f"Error processing {filename}: {str(result_data)}")
         websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(e)})
 
-@shared_task(bind=True)
-def process_query_data(self, id: str, history_id: str, message: str, language: str, comprehension_level: str):
+def process_query_data(id: str, history_id: str, message: str, language: str, comprehension_level: str):
     """
     Process a user query and generate a response using SyntextAgent.
     """
@@ -147,8 +145,7 @@ def process_query_data(self, id: str, history_id: str, message: str, language: s
         
         websocket_manager.send_message(id, "message_received", {"status": "error", "error": str(e)})
 
-@shared_task(bind=True)
-def delete_user_task(self, user_id: str, user_gc_id: str):
+def delete_user_task(user_id: str, user_gc_id: str):
     """
     Delete a user's account, subscription, and associated files.
     """
@@ -193,4 +190,6 @@ def delete_user_task(self, user_id: str, user_gc_id: str):
 
     except Exception as e:
         logger.error(f"Error occurred during user deletion: {str(e)}")
-        self.retry(exc=e)
+        raise HTTPException(status_code=500, detail="User deletion failed")
+
+# Example FastAPI route handlers

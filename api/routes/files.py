@@ -1,9 +1,8 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, background_tasks
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
-from tasks import process_file_data
 import logging
 from celery.result import AsyncResult
 from typing import Dict, Optional
@@ -64,8 +63,8 @@ async def save_file(
                 logger.error(f"Failed to upload {file.filename} to GCS")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
-            task = process_file_data.delay(user_id, user_gc_id, file.filename, language)
-            logger.info(f"Enqueued Task {task.id} for processing {file.filename}")
+            background_tasks.add_task(process_file_data, user_id, user_gc_id, filename, language)
+            logger.info(f"Enqueued Task for processing {file.filename}")
 
         return {"message": "File processing queued."}
 

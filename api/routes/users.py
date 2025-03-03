@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from utils import decode_firebase_token, get_user_id
 from docsynth_store import DocSynthStore
-from tasks import delete_user_task
 import logging
 
 # Set up logging
@@ -71,10 +70,8 @@ async def delete_user(
     try:
         user_id, user_info = user_id  # Unpack the tuple returned by authenticate_user
         user_gc_id = user_info['user_id']
-
         # Trigger Celery task to delete user and associated files
-        delete_user_task.apply_async(args=[user_id, user_gc_id])
-
+        background_tasks.add_task(delete_user_task, user_id, user_gc_id)
         return {"message": "User deletion in progress", "email": user_info['email']}
 
     except IntegrityError:

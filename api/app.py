@@ -61,40 +61,6 @@ DATABASE_URL = (
 store = DocSynthStore(database_url=DATABASE_URL)
 app.state.store = store
 
-redis_username = os.getenv('REDIS_USERNAME')
-redis_pwd = os.getenv('REDIS_PASSWORD')
-redis_host = os.getenv('REDIS_HOST')
-redis_port = os.getenv('REDIS_PORT')
-
-
-ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
-
-# Redis connection pool for Celery with SSL configuration
-redis_url = (
-    f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
-)
-
-
-# Initialize Celery
-celery = Celery(
-    "__name__",
-    broker=redis_url,
-    backend=redis_url,
-    redbeat_redis_url=redis_url,
-    broker_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
-    redis_backend_use_ssl={"ssl_cert_reqs": ssl.CERT_NONE},
-)
-
-# Celery configuration
-celery.conf.update({
-        'broker_url': redis_url,
-        'result_backend': redis_url,
-        'task_time_limit': 900,
-        'task_soft_time_limit': 600,
-        'worker_prefetch_multiplier': 1,
-        'broker_connection_retry_on_startup': True,
-        'broker_connection_max_retries': None,
-})
 
 
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))

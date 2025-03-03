@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, background_tasks
 from typing import List
 from utils import get_user_id
 from docsynth_store import DocSynthStore
@@ -50,8 +50,8 @@ async def create_message(
         message_list = [user_request]
 
         # Enqueue the task for processing the query
-        task = process_query_data.delay(user_id, history_id, message, language, comprehension_level)
-        logger.info(f"Enqueued Task {task.id} for processing {message}")
+        background_tasks.add_task(process_query_data, id, history_id, message, language, comprehension_level)
+        logger.info(f"Enqueued Task for processing {message}")
 
         return message_list
     except Exception as e:
