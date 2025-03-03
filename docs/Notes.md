@@ -29,7 +29,7 @@ APP PLATFORM CONNECTS TO DOCKER HUB AND DEPLOYS PUSHED IMAGE
 copy .env, docker-compose-prod.yml, settings.yml and deploy.sh files
 
 
-scp  /Users/osas/Documents/dev/app/deploy.sh  /Users/osas/Documents/dev/app/.env root@178.128.236.126:/home/root/
+scp  /Users/osas/Documents/dev/app/deploy.sh  /Users/osas/Documents/dev/app/docker-compose.yml root@178.128.236.126:/home/root/
 
 ssh root@178.128.236.126
 

@@ -8,7 +8,8 @@ services:
       - "3000:3000"  # Expose port 3000 for your app
     env_file:
       - .env  # Load environment variables from .env file
-    network_mode: host  # Use the host's network stack
+    networks:
+      - syntextai_network  # Use a custom bridge network
 
   searxng:
     image: searxng/searxng:latest
@@ -17,4 +18,9 @@ services:
       - "8080:8080"  # Expose port 8080 for SearXNG
     volumes:
       - ./settings.yml:/etc/searxng/settings.yml  # Mount settings.yml into container
-    network_mode: host  # Use the host's network stack
+    networks:
+      - syntextai_network  # Use a custom bridge network
+
+networks:
+  syntextai_network:
+    driver: bridge  # Custom bridge network
