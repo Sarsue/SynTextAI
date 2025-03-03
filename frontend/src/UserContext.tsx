@@ -146,8 +146,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         try {
             const token = await user.getIdToken();
-            const wsUrl = `ws://${window.location.host}/ws/${user.uid}`;
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'; // Use 'wss' for HTTPS, 'ws' for HTTP
+            const wsUrl = `${protocol}://${window.location.host}/ws/${user.uid}`;
             const ws = new WebSocket(wsUrl);
+
 
             ws.onopen = () => {
                 console.log('WebSocket connected');
