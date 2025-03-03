@@ -3,7 +3,6 @@ from typing import List
 from utils import get_user_id
 from docsynth_store import DocSynthStore
 from llm_service import get_text_embedding
-from tasks import process_query_data
 import logging
 
 # Set up logging

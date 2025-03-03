@@ -12,14 +12,12 @@ from docsynth_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
 from redis import Redis, ConnectionPool, StrictRedis
-from celery import Celery
 from urllib.parse import quote
 import os
 import logging
 import time
 from utils import get_user_id, decode_firebase_token
 from dotenv import load_dotenv
-from kombu.utils.url import safequote
 import ssl
 # Load environment variables
 load_dotenv()
@@ -63,7 +61,7 @@ app.state.store = store
 
 
 
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
 # Import routers after app is set up
@@ -130,7 +128,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 @app.get("/health")
 async def health_check():
     try:
-        redis_client.ping()
         return {"status": "healthy"}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}

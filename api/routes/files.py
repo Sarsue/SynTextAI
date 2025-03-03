@@ -4,7 +4,6 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
-from celery.result import AsyncResult
 from typing import Dict, Optional
 
 # Set up logging
@@ -120,12 +119,3 @@ async def reextract_file(file_id: int, request: Request, user_info: tuple = Depe
         logger.error(f"Error reextracting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-# Route to check task result
-@files_router.get("/result/{task_id}")
-async def task_result(task_id: str) -> Dict[str, object]:
-    result = AsyncResult(task_id)
-    return {
-        "ready": result.ready(),
-        "successful": result.successful(),
-        "value": result.result if result.ready() else None,
-    }
