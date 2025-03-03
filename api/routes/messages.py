@@ -4,7 +4,7 @@ from utils import get_user_id
 from docsynth_store import DocSynthStore
 from llm_service import get_text_embedding
 import logging
-from tasks import process_query_data
+
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -43,6 +43,7 @@ async def create_message(
     store: DocSynthStore = Depends(lambda: app.state.store)
 ):
     try:
+        from tasks import process_query_data
         # Save the user message to the history
         user_request = store.add_message(
             content=message, sender='user', user_id=user_id, chat_history_id=history_id

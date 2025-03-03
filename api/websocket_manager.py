@@ -18,5 +18,4 @@ class WebSocketManager:
             websocket = self.active_connections[user_id]
             await websocket.send_json({"event": event_type, "data": data})
 
-# Initialize the WebSocket manager
 websocket_manager = WebSocketManager()

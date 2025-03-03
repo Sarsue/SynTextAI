@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from utils import decode_firebase_token, get_user_id
 from docsynth_store import DocSynthStore
 import logging
-from tasks import delete_user_task
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ async def delete_user(
     store: DocSynthStore = Depends(lambda: app.state.store)
 ):
     try:
+        from tasks import delete_user_task
         user_id, user_info = user_id  # Unpack the tuple returned by authenticate_user
         user_gc_id = user_info['user_id']
         # Trigger Celery task to delete user and associated files

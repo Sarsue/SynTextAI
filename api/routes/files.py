@@ -5,7 +5,7 @@ from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from typing import Dict, Optional
-from tasks import process_file_data
+
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -49,6 +49,8 @@ async def save_file(
     user_info: tuple = Depends(authenticate_user)
 ):
     try:
+        from tasks import process_file_data
+        
         user_id, user_gc_id = user_info
         store = request.app.state.store
 
