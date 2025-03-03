@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, background_tasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
@@ -42,6 +42,7 @@ async def authenticate_user(request: Request):
 # Route to save file
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def save_file(
+     background_tasks: BackgroundTasks,
     request: Request,
     language: str = "English",
     comprehension_level: str = "dropout",

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, background_tasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks
 from typing import List
 from utils import get_user_id
 from docsynth_store import DocSynthStore
@@ -35,6 +35,7 @@ async def authenticate_user(authorization: str = Header(None), store: DocSynthSt
 # Route to create a new message
 @messages_router.post("", status_code=201)
 async def create_message(
+    background_tasks: BackgroundTasks,
     message: str = Query(..., description="The message content"),
     language: str = Query("English", description="Language of the message"),
     comprehension_level: str = Query("beginner", description="Comprehension level of the message"),

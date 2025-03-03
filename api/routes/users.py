@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from utils import decode_firebase_token, get_user_id
@@ -64,6 +64,7 @@ async def create_user(
 # Route to delete a user
 @users_router.delete("", status_code=200)
 async def delete_user(
+     background_tasks: BackgroundTasks,
     user_id: int = Depends(authenticate_user),
     store: DocSynthStore = Depends(lambda: app.state.store)
 ):

@@ -63,7 +63,7 @@ app.state.store = store
 
 
 
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
 # Import routers after app is set up
