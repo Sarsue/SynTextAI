@@ -38,7 +38,7 @@ DATABASE_URL = (
 store = DocSynthStore(DATABASE_URL)
 syntext = SyntextAgent()
 
-def transcribe_audio_chunked(file_path: str, lang: str) -> list:
+async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
     """
     Transcribe audio using WhisperModel.
     """
@@ -67,7 +67,7 @@ def transcribe_audio_chunked(file_path: str, lang: str) -> list:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-def process_file_data(user_id: str, user_gc_id: str, filename: str, language: str):
+async def process_file_data(user_id: str, user_gc_id: str, filename: str, language: str):
     """
     Process a file (audio, video, or document) and store its data.
     """
@@ -126,7 +126,7 @@ def process_file_data(user_id: str, user_gc_id: str, filename: str, language: st
         logger.error(f"Error processing {filename}: {str(result_data)}")
         websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(e)})
 
-def process_query_data(id: str, history_id: str, message: str, language: str, comprehension_level: str):
+async def process_query_data(id: str, history_id: str, message: str, language: str, comprehension_level: str):
     """
     Process a user query and generate a response using SyntextAgent.
     """
@@ -145,7 +145,7 @@ def process_query_data(id: str, history_id: str, message: str, language: str, co
         
         websocket_manager.send_message(id, "message_received", {"status": "error", "error": str(e)})
 
-def delete_user_task(user_id: str, user_gc_id: str):
+async def delete_user_task(user_id: str, user_gc_id: str):
     """
     Delete a user's account, subscription, and associated files.
     """

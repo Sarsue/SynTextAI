@@ -5,7 +5,7 @@ from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from typing import Dict, Optional
-
+from tasks import process_file_data
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)

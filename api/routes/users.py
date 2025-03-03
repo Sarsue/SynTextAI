@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from utils import decode_firebase_token, get_user_id
 from docsynth_store import DocSynthStore
 import logging
-
+from tasks import delete_user_task
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
