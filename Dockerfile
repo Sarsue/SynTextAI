@@ -1,6 +1,6 @@
 # Stage 1: Build the frontend
 FROM node:18-alpine AS build-step
-WORKDIR /app
+WORKDIR /app/frontend
 
 # Copy only package files first to leverage caching
 COPY frontend/package.json frontend/package-lock.json ./
@@ -26,10 +26,11 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy only the build artifacts from the first stage (frontend build step), not node_modules
-COPY --from=build-step /app/build ./build
-# Copy backend files (api directory)
+# Copy the backend code
 COPY api/ ./api/
+
+# Copy the React build artifacts from the first stage
+COPY --from=build-step /app/frontend/build ./frontend/build
 
 # Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt

@@ -16,7 +16,6 @@ from utils import get_user_id, decode_firebase_token
 # Load environment variables
 load_dotenv()
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Initialize FastAPI
 app = FastAPI()
 app.add_middleware(
@@ -53,7 +52,8 @@ DATABASE_URL = (
 store = DocSynthStore(database_url=DATABASE_URL)
 app.state.store = store
 
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
+# Set the build path to /app/frontend/build
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
 # Import routers after app is set up
