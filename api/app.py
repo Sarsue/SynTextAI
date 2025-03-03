@@ -1,11 +1,10 @@
-
-from fastapi import FastAPI, Depends, HTTPException, WebSocket
+from fastapi import FastAPI, WebSocket, Depends, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi import Request
-from websocket_manager import websocket_manager
+from websocket_manager import websocket_manager  # Import the centralized instance
 from docsynth_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
@@ -54,9 +53,7 @@ DATABASE_URL = (
 store = DocSynthStore(database_url=DATABASE_URL)
 app.state.store = store
 
-
-
-build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../build"))
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
 # Import routers after app is set up

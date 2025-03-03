@@ -1,3 +1,4 @@
+# Stage 1: Build the frontend
 FROM node:18-alpine AS build-step
 WORKDIR /app
 
@@ -33,16 +34,14 @@ COPY api/ ./api/
 # Install Python dependencies and remove cache
 RUN pip install --no-cache-dir -r ./api/requirements.txt
 
+# Set PYTHONPATH to include the api directory
+ENV PYTHONPATH=/app/api
 
-FROM base
+# Set the working directory to /app/api
+WORKDIR /app/api
 
-# Set permissions for log files and directories (ensure directories are writable)
-RUN mkdir -p /var/log/syntextai && \
-    chown -R root:root /var/log/syntextai && \
-    chmod -R 775 /var/log/syntextai
-
-# Expose thc v=e application port
+# Expose the application port
 EXPOSE 3000
 
-
-CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]
+# Command to start the FastAPI application
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
