@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body
 from fastapi.responses import JSONResponse
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 import stripe
 import logging
 import os
@@ -24,8 +24,12 @@ price_id = os.getenv('STRIPE_PRICE_ID')
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
 
+# Dependency to get the store
+def get_store(request: Request):
+    return request.app.state.store
+
 # Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(lambda: app.state.store)):
+async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
     if not authorization:
         logger.error("Missing Authorization token")
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -41,15 +45,16 @@ async def authenticate_user(authorization: str = Header(None), store: DocSynthSt
         raise HTTPException(status_code=404, detail="User not found")
 
     logger.info(f"Authenticated user_id: {user_id}")
-    return user_id
+    return {"user_id": user_id, "user_info": user_info}
 
 # Route to get subscription status
 @subscriptions_router.get("/status")
 async def subscription_status(
-    user_id: int = Depends(authenticate_user),
-    store: DocSynthStore = Depends(lambda: app.state.store)
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
 ):
     try:
+        user_id = user_data["user_id"]
         subscription = store.get_subscription(user_id)
         
         if not subscription:
@@ -80,10 +85,13 @@ async def subscription_status(
 # Route to start a trial
 @subscriptions_router.post("/start-trial", status_code=201)
 async def start_trial(
-    user_id: int = Depends(authenticate_user),
-    store: DocSynthStore = Depends(lambda: app.state.store)
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
 ):
     try:
+        user_id = user_data["user_id"]
+        user_info = user_data["user_info"]
+
         # Check if the user already has a subscription
         subscription = store.get_subscription(user_id)
         if subscription:
@@ -147,10 +155,11 @@ async def start_trial(
 # Route to cancel a subscription
 @subscriptions_router.post("/cancel", status_code=200)
 async def cancel_sub(
-    user_id: int = Depends(authenticate_user),
-    store: DocSynthStore = Depends(lambda: app.state.store)
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
 ):
     try:
+        user_id = user_data["user_id"]
         subscription_status = store.get_subscription(user_id)
         if not subscription_status:
             raise HTTPException(status_code=404, detail="No subscription found")
@@ -180,10 +189,13 @@ async def cancel_sub(
 @subscriptions_router.post("/subscribe", status_code=201)
 async def create_subscription(
     payment_method: str = Body(..., embed=True),
-    user_id: int = Depends(authenticate_user),
-    store: DocSynthStore = Depends(lambda: app.state.store)
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
 ):
     try:
+        user_id = user_data["user_id"]
+        user_info = user_data["user_info"]
+
         # Check if user already has a subscription
         subscription = store.get_subscription(user_id)
         if subscription:
@@ -282,10 +294,11 @@ async def create_subscription(
 @subscriptions_router.post("/update-payment", status_code=200)
 async def update_payment(
     payment_method: str = Body(..., embed=True),
-    user_id: int = Depends(authenticate_user),
-    store: DocSynthStore = Depends(lambda: app.state.store)
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
 ):
     try:
+        user_id = user_data["user_id"]
         subscription = store.get_subscription(user_id)
         if not subscription:
             raise HTTPException(status_code=404, detail="No subscription found")
@@ -316,7 +329,7 @@ async def update_payment(
 
 # Route to handle Stripe webhooks
 @subscriptions_router.post("/webhook")
-async def webhook(request: Request, store: DocSynthStore = Depends(lambda: app.state.store)):
+async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
     payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
 
