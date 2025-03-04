@@ -64,6 +64,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         success, user_info = decode_firebase_token(token)
         if not success:
             await websocket.close(code=1008)
+            websocket_manager.disconnect(user_id)
             return
 
         # Add the WebSocket connection to the manager
