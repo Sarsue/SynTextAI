@@ -79,7 +79,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             if (files.length > 0) {
                 const formData = new FormData();
                 for (let i = 0; i < files.length; i++) {
-                    formData.append(files[i].name, files[i]);
+                    formData.append("files", files[i]);
                 }
                 const fileDataResponse = await callApiWithToken(
                     `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
