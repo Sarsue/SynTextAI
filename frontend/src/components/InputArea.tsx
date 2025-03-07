@@ -31,11 +31,23 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
 
     const isFileSupported = (file: File): boolean => {
         const supportedTypes = [
-            'application/pdf',         // PDF files
-            'image/jpeg',               // JPEG image
-            'image/png',                // PNG image
-            'image/gif',                // GIF image
-            'text/plain',               // Plain text files
+           // Document formats
+        'application/pdf',         // PDF files
+        'text/plain',              // Plain text files
+
+        // Image formats
+        'image/jpeg',              // JPEG image
+        'image/png',               // PNG image
+        'image/gif',               // GIF image
+
+        // Video formats
+        'video/mp4',               // MP4 video
+     /*    'video/webm',              // WebM video
+        'video/ogg',               // Ogg video
+        'video/quicktime',         // MOV video (QuickTime)
+        'video/x-msvideo',         // AVI video
+        'video/x-matroska',        // MKV video
+        'video/mpeg',    */           // MPEG video    // Plain text files
         ];
         return supportedTypes.includes(file.type);
     };
@@ -45,7 +57,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
         const validFiles = files.filter(isFileSupported); // Filter valid files
 
         if (validFiles.length === 0) {
-            alert('Only PDF, image (JPG, PNG, GIF), and text files are supported.');
+            alert('Only PDF, video, image (JPG, PNG, GIF), and text files are supported.');
         } else if (validFiles.length > 10) {
             alert('There is a maximum limit of 10 files per Upload');
         } else {

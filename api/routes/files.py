@@ -1,11 +1,12 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks, Query
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from docsynth_store import DocSynthStore
+
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
@@ -47,14 +48,14 @@ async def authenticate_user(request: Request, store: DocSynthStore = Depends(get
 async def save_file(
     background_tasks: BackgroundTasks,
     request: Request,
-    language: str = "English",
-    comprehension_level: str = "dropout",
-    files: list[UploadFile] = File(...),
+    language: str = Query(default="English", description="Language of the file content"),
+    comprehension_level: str = Query(default="Beginner", description="Comprehension level of the file content"),
+    files: List[UploadFile] = File(..., description="List of files to upload"),
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
-        from tasks import process_file_data
-        
+        from tasks import process_file_data  # Ensure this import is correct
+
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
         store = request.app.state.store
@@ -64,13 +65,17 @@ async def save_file(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
 
         for file in files:
+            if not file.filename:
+                logger.warning('File has no filename')
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File has no filename")
+
             file_url = upload_to_gcs(file.file, user_gc_id, file.filename)
-            store.add_file(user_id, file.filename, file_url)
             if not file_url:
                 logger.error(f"Failed to upload {file.filename} to GCS")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
-            background_tasks.add_task(process_file_data, user_id, user_gc_id, file.filename, language)
+            store.add_file(user_id, file.filename, file_url)
+            background_tasks.add_task(process_file_data, user_id, user_gc_id, file.filename, language, comprehension_level)
             logger.info(f"Enqueued Task for processing {file.filename}")
 
         return {"message": "File processing queued."}
@@ -83,7 +88,7 @@ async def save_file(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Route to retrieve files
-@files_router.get("", response_model=list)
+@files_router.get("", response_model=List[Dict])
 async def retrieve_files(
     request: Request,
     user_data: Dict = Depends(authenticate_user)
@@ -109,6 +114,9 @@ async def delete_file(
         user_gc_id = user_data["user_gc_id"]
         store = request.app.state.store
         file_info = store.delete_file_entry(user_id, file_id)
+        if not file_info:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
         delete_from_gcs(user_gc_id, file_info['file_name'])
         return None
     except Exception as e:
@@ -126,11 +134,11 @@ async def reextract_file(
         user_id = user_data["user_id"]
         store = request.app.state.store
 
-        # Placeholder for re-extraction logic
-        # file_info = store.get_file_entry(user_id, file_id)
-        # if not file_info:
-        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        file_info = store.get_file_entry(user_id, file_id)
+        if not file_info:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+        # Placeholder for re-extraction logic
         # process_file(file_info['file_path'])  # Replace with your re-processing logic
 
         return {"message": "File re-extraction initiated"}
