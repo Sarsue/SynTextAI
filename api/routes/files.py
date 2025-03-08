@@ -69,7 +69,7 @@ async def save_file(
                 logger.warning('File has no filename')
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File has no filename")
 
-            file_url = upload_to_gcs(file.file, user_gc_id, file.filename)
+            file_url = upload_to_gcs(file, user_gc_id, file.filename)
             if not file_url:
                 logger.error(f"Failed to upload {file.filename} to GCS")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
