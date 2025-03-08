@@ -112,7 +112,7 @@ async def process_file_data(user_id: str, user_gc_id: str, filename: str, langua
   
         result = {'user_id': user_id, 'filename': filename, 'status': 'processed'}
     
-        websocket_manager.send_message(user_id, "file_processed", {"status": "success", "result": result})
+        await websocket_manager.send_message(user_id, "file_processed", {"status": "success", "result": result})
         
         return {"status": "success", "result": result}
     

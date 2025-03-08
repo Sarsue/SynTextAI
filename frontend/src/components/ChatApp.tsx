@@ -408,7 +408,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 return null;
         }
     };
-
+    useEffect(() => {
+        if (user) {
+            fetchUserFiles(); // Fetch files when the component mounts or when the user changes
+        }
+    }, [user]); // Dependency on `user`
     useEffect(() => {
         if (socket) {
             // Handler for incoming messages

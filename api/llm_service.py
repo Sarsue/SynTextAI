@@ -11,6 +11,7 @@ import requests
 from openai import OpenAI
 import tiktoken
 from sentence_transformers import SentenceTransformer
+import time
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
@@ -21,7 +22,7 @@ mistral_client = MistralClient(api_key=mistral_key)
 # Model and Token Limit
 MODEL_NAME = "mistral-small-latest"
 MAX_TOKENS = 4096  # Example token limit for the model (adjust as needed)
-
+delay = 1
 logging.basicConfig(level=logging.INFO)
 
 def get_text_embeddings_in_batches(inputs, batch_size=10):
@@ -40,6 +41,7 @@ def get_text_embeddings_in_batches(inputs, batch_size=10):
         # Extract embeddings for the batch
         embeddings = [response.embedding for response in embeddings_batch_response.data]
         all_embeddings.extend(embeddings)
+        time.sleep(delay)
 
     return all_embeddings
 
