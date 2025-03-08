@@ -75,7 +75,7 @@ async def save_file(
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
             store.add_file(user_id, file.filename, file_url)
-            background_tasks.add_task(process_file_data, user_id, user_gc_id, file.filename, language, comprehension_level)
+            background_tasks.add_task(process_file_data, user_id, user_gc_id, file.filename, language)
             logger.info(f"Enqueued Task for processing {file.filename}")
 
         return {"message": "File processing queued."}
