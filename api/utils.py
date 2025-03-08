@@ -66,8 +66,13 @@ def upload_to_gcs(file_data, user_gc_id, filename):
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
+
+        # Use file_data.file to access the file content
         blob.upload_from_file(file_data.file, content_type=file_data.content_type)
+
+        # Make the file publicly accessible
         blob.make_public()
+
         public_url = blob.public_url
         logger.info(f"Successfully uploaded {filename} to GCS: {public_url}")
         return public_url
@@ -97,6 +102,9 @@ def delete_from_gcs(user_gc_id, filename):
         client = storage.Client()
         bucket = client.get_bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
+        if not blob.exists():
+            logger.warning(f"File {filename} not found in GCS")
+            return
         blob.delete()
         logger.info(f"Successfully deleted {filename} from GCS")
     except Exception as e:
