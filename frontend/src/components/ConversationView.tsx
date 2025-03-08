@@ -5,7 +5,7 @@ import './ConversationView.css';
 import { History, Message } from './types';
 import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
-import { LogUIActions } from '../apiUtils';
+
 
 interface ConversationViewProps {
     history: History | null;
@@ -54,9 +54,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
     const handleCopy = async (message: Message) => {
         onCopy(message);
 
-        // Log message copy
-        // const logUrl = 'api/v1/logs';
-        // await LogUIActions(logUrl, 'POST', `User copied message: ${message.content}`, 'info');
     };
 
     const handleFileError = (error: string) => {

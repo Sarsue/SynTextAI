@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './FileViewerComponent.css';
-import { LogUIActions } from '../apiUtils';
+
 
 interface FileViewerComponentProps {
     fileUrl: string;
@@ -20,7 +20,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
         const detectedFileType = getFileType(fileUrl);
         if (!detectedFileType) {
             const message = `Unsupported file type for: ${fileUrl}`;
-            LogUIActions('api/v1/logs', 'POST', `User attempted to view unsupported file type: ${message}`, 'error');
             console.log(message);
             onError('Unsupported file type');
             return;
@@ -51,13 +50,11 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                     setVideoStartTime(time);
                 }
 
-                LogUIActions('api/v1/logs', 'POST', `File successfully loaded: ${baseUrl}`, 'info');
             } else {
                 throw new Error('Failed to fetch file content');
             }
         } catch (error) {
             console.error('Error fetching file content:', error);
-            LogUIActions('api/v1/logs', 'POST', `Error loading file: ${url}. Error: ${error}`, 'error');
             onError('Failed to load file. Please try again later.');
             setLoading(false);
         }
@@ -128,7 +125,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
     };
 
     const handleClose = () => {
-        LogUIActions('api/v1/logs', 'POST', `User closed file viewer for: ${fileUrl}`, 'info');
         onClose();
     };
 
