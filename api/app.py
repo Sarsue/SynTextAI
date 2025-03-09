@@ -13,9 +13,7 @@ from utils import decode_firebase_token
 load_dotenv()
 
 # Initialize FastAPI
-app = FastAPI(
-    max_request_size=1 * 1024 * 1024 * 1024,  # 100MB
-)
+app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
