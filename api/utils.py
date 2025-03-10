@@ -60,26 +60,32 @@ def format_timestamp(seconds: float) -> str:
         logger.error(f"Error formatting timestamp: {e}")
         raise
 
-def upload_to_gcs(file_data, user_gc_id, filename):
+
+async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str, bucket_name: str):
     try:
         logger.debug(f"Uploading file {filename} to GCS for user {user_gc_id}...")
+
+        # Initialize GCS client
         client = storage.Client()
-        bucket = client.get_bucket(bucket_name)
+        bucket = client.bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
 
-        # Use file_data.file to access the file content
-        blob.upload_from_file(file_data.file, content_type=file_data.content_type)
+        # Stream file upload using chunks
+        with blob.open("wb") as gcs_file:
+            while chunk := await file.read(1024 * 1024):  # Read in 1MB chunks
+                gcs_file.write(chunk)
 
-        # Make the file publicly accessible
-        blob.make_public()
+        # Optionally make the file public
+        # blob.make_public()  
 
         public_url = blob.public_url
         logger.info(f"Successfully uploaded {filename} to GCS: {public_url}")
-        return public_url
+        return public_url  
+
     except Exception as e:
         logger.error(f"Error uploading {filename} to GCS: {e}")
         return None
-
+        
 def download_from_gcs(user_gc_id, filename):
     try:
         logger.debug(f"Downloading file {filename} from GCS for user {user_gc_id}...")
