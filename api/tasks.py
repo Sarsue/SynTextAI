@@ -24,8 +24,21 @@ logger = logging.getLogger(__name__)
 stripe.api_key = os.getenv('STRIPE_SECRET')
 
 # Initialize DocSynthStore and SyntextAgent
-DATABASE_URL = os.getenv("DATABASE_URL")
-store = DocSynthStore(DATABASE_URL)
+
+database_config = {
+    'dbname': os.getenv("DATABASE_NAME"),
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': os.getenv("DATABASE_PORT"),
+}
+
+DATABASE_URL = (
+    f"postgresql://{database_config['user']}:{database_config['password']}"
+    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+)
+
+store = DocSynthStore(database_url=DATABASE_URL)
 syntext = SyntextAgent()
 
 # Model is only loaded when needed to save memory
