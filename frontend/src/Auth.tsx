@@ -6,7 +6,8 @@ import {
     getRedirectResult,
     GoogleAuthProvider,
     setPersistence,
-    browserLocalPersistence
+    browserLocalPersistence,
+    signInWithPopup
 } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { auth } from './firebase';
@@ -16,13 +17,13 @@ const Auth: FC = () => {
     const navigate = useNavigate();
     const { setUser, user, subscriptionStatus, setSubscriptionStatus } = useUserContext();
     const [isLoading, setIsLoading] = useState(true);
+    const isDev = window.location.hostname === 'localhost'; // Check if in dev mode
 
     useEffect(() => {
         if (user && subscriptionStatus !== null) {
             navigate(subscriptionStatus === 'active' || subscriptionStatus === 'trialing' ? '/chat' : '/settings');
         }
     }, [user, subscriptionStatus, navigate]);
-
 
     useEffect(() => {
         const initializeAuth = async () => {
@@ -71,7 +72,14 @@ const Auth: FC = () => {
         try {
             await signOut(auth);
             localStorage.setItem('authState', JSON.stringify({ redirectPath: window.location.pathname }));
-            await signInWithRedirect(auth, provider);
+
+            if (isDev) {
+                // Use popup if in development mode
+                await signInWithPopup(auth, provider);
+            } else {
+                // Use redirect for production
+                await signInWithRedirect(auth, provider);
+            }
         } catch (error) {
             console.error('Sign-in error:', error);
         }
