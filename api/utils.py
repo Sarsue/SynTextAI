@@ -61,7 +61,7 @@ def format_timestamp(seconds: float) -> str:
         raise
 
 
-async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str, bucket_name: str):
+async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
     try:
         logger.debug(f"Uploading file {filename} to GCS for user {user_gc_id}...")
 
