@@ -4,7 +4,7 @@ import re
 import hashlib
 from google.cloud import storage
 import logging
-
+from fastapi import UploadFile
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str, bucket
     except Exception as e:
         logger.error(f"Error uploading {filename} to GCS: {e}")
         return None
-        
+
 def download_from_gcs(user_gc_id, filename):
     try:
         logger.debug(f"Downloading file {filename} from GCS for user {user_gc_id}...")
