@@ -87,7 +87,7 @@ async def process_file_data(user_id: str, user_gc_id: str, filename: str, langua
             with NamedTemporaryFile(delete=True, suffix=os.path.splitext(filename)[1]) as temp_file:
                 temp_file.write(file)
                 temp_file_path = temp_file.name
-                extracted_data = transcribe_audio_chunked(temp_file_path, lang=language) 
+                extracted_data = await transcribe_audio_chunked(temp_file_path, lang=language) 
                 ext = "video"
         else:
             # Good place to have the PDF-to-image logic for better extraction
@@ -119,12 +119,12 @@ async def process_file_data(user_id: str, user_gc_id: str, filename: str, langua
     except ValueError as ve:
         result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(ve)}
         logger.error(f"Error Validating {filename}: {str(result_data)}")
-        websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(ve)})
+        await websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(ve)})
     
     except Exception as e:
         result_data = {'user_id': user_id, 'filename': filename, 'status': 'failed', 'error': str(e)}
         logger.error(f"Error processing {filename}: {str(result_data)}")
-        websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(e)})
+        await websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(e)})
 
 async def process_query_data(id: str, history_id: str, message: str, language: str, comprehension_level: str):
     """
