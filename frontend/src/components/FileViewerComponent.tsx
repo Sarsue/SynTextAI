@@ -81,8 +81,11 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ fileUrl, onCl
                         onLoadedMetadata={(e: any) => {
                             if (videoStartTime) e.target.currentTime = videoStartTime;
                         }}
+                        onError={() => onError('Error loading video')}
                     >
                         <source src={fileUrl} type="video/mp4" />
+                        <source src={fileUrl} type="video/webm" />
+                        <source src={fileUrl} type="video/ogg" />
                         Your browser does not support the video tag or the video format.
                     </video>
                 );
