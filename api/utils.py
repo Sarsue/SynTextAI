@@ -76,7 +76,7 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
                 gcs_file.write(chunk)
 
         # Optionally make the file public
-        # blob.make_public()  
+        blob.make_public()  
 
         public_url = blob.public_url
         logger.info(f"Successfully uploaded {filename} to GCS: {public_url}")
