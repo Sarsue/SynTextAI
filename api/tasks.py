@@ -12,9 +12,11 @@ import stripe
 from websocket_manager import websocket_manager
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, HTTPException
-
+import gc
 # Load environment variables
 load_dotenv()
+# Load Whisper model once at startup
+whisper_model = WhisperModel("medium", device="cpu", compute_type="int8", download_root="/app/models")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -50,26 +52,33 @@ def load_whisper_model():
     finally:
         del model  # Explicitly delete to free memory
 
+
+
 async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
-    """Transcribes an audio file in chunks using WhisperModel."""
+    """Transcribes an audio file and ensures garbage collection."""
     try:
-        with load_whisper_model() as model:
-            transcribe_params = {"beam_size": 5}
-            if lang == 'en':
-                transcribe_params["task"] = "translate"
+        transcribe_params = {"beam_size": 5}
+        if lang == 'en':
+            transcribe_params["task"] = "translate"
 
-            segments, info = model.transcribe(file_path, **transcribe_params)
-            logger.info(f"Detected language '{info.language}' with probability {info.language_probability}")
+        segments, info = whisper_model.transcribe(file_path, **transcribe_params)
+        logger.info(f"Detected language '{info.language}' with probability {info.language_probability}")
 
-            return [
-                {
-                    "start_time": segment.start,
-                    "end_time": segment.end,
-                    "content": segment.text,
-                    "chunks": chunk_text(segment.text),
-                }
-                for segment in segments
-            ]
+        transcribed_data = [
+            {
+                "start_time": segment.start,
+                "end_time": segment.end,
+                "content": segment.text,
+                "chunks": chunk_text(segment.text),
+            }
+            for segment in segments
+        ]
+
+        # Force garbage collection
+        gc.collect()
+
+        return transcribed_data
+
     except Exception as e:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
