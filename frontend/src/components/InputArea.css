@@ -1,3 +1,41 @@
+/* Input Area Controls */
+.input-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 4px;
+    background-color: var(--background-color);
+    border-radius: 8px;
+}
+
+.left-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.control-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    border-radius: 50%;
+    background-color: var(--button-bg);
+    color: var(--button-text-color);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.control-button:hover {
+    background-color: var(--button-hover-bg);
+}
+
+#file-upload {
+    display: none;
+}
+
 /* Input Area */
 .input-area {
     display: flex;

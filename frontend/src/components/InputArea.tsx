@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useUserContext } from '../UserContext';
+import VoiceInput from './VoiceInput';
 import './InputArea.css';
 
 interface InputAreaProps {
@@ -11,6 +12,19 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
     const { darkMode } = useUserContext();
+
+    const handleVoiceInput = (transcript: string) => {
+        console.log('Received Voice Transcript:', transcript);
+        setMessage(prevMessage => {
+            // Trim the previous message and add a space if it's not empty
+            const updatedMessage = prevMessage.trim() 
+                ? `${prevMessage.trim()} ${transcript}` 
+                : transcript;
+            
+            console.log('Updated Message:', updatedMessage);
+            return updatedMessage;
+        });
+    };
 
     const handleSendClick = () => {
         if (!message.trim() && attachedFiles.length === 0) return;
@@ -89,19 +103,6 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
                 disabled={isSending}
                 aria-label="Message input area"
             />
-            <div className="file-input">
-                <label htmlFor="file-upload" className="custom-file-upload" aria-label="Attach a file">
-                    📎
-                </label>
-                <input
-                    id="file-upload"
-                    type="file"
-                    multiple
-                    onChange={handleAttachment}
-                    disabled={isSending}
-                    aria-label="File upload input"
-                />
-            </div>
             <div className="attached-files">
                 {attachedFiles.map((file, index) => (
                     <div key={index} className="attached-file">
@@ -110,14 +111,33 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending }) => {
                     </div>
                 ))}
             </div>
-            <button
-                onClick={handleSendClick}
-                disabled={isSending}
-                className="send-button"
-                aria-label="Send message"
-            >
-                {isSending ? '💬' : '✉️'}
-            </button>
+            <div className="input-controls">
+                <div className="left-controls">
+                    <label htmlFor="file-upload" className="control-button" aria-label="Attach a file">
+                        📎
+                    </label>
+                    <input
+                        id="file-upload"
+                        type="file"
+                        multiple
+                        onChange={handleAttachment}
+                        disabled={isSending}
+                        aria-label="File upload input"
+                    />
+                    <VoiceInput
+                        onTranscript={handleVoiceInput}
+                        darkMode={darkMode}
+                    />
+                </div>
+                <button
+                    onClick={handleSendClick}
+                    disabled={isSending}
+                    className="send-button"
+                    aria-label="Send message"
+                >
+                    {isSending ? '💬' : '✉️'}
+                </button>
+            </div>
         </div>
     );
 };

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import ConversationView from './ConversationView';
 import InputArea from './InputArea';
 import HistoryView from './HistoryView';
+import VoiceInput from './VoiceInput';
 import { Message, History } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
