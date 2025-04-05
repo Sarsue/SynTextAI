@@ -82,6 +82,30 @@
     background-color: #ff3333;
 }
 
+/* Summary button */
+.summary-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1em; /* Adjust as needed */
+  margin-left: 8px; /* Space it from the delete button */
+  padding: 2px;
+  color: #555; /* Adjust color */
+  vertical-align: middle; /* Align with text/other buttons */
+}
+
+.dark-mode .summary-button {
+  color: #bbb;
+}
+
+.summary-button:hover {
+  color: #007bff; /* Highlight on hover */
+}
+
+.dark-mode .summary-button:hover {
+  color: #4da6ff;
+}
+
 /* Processed and Not Processed File Status Styles */
 .processed-file {
     background-color: #e8f5e9;

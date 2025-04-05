@@ -1,0 +1,75 @@
+/* Modal.css */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6); /* Semi-transparent black background */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000; /* Ensure modal is on top */
+}
+
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+  min-width: 300px;
+  max-width: 600px;
+  width: 80%; /* Responsive width */
+  max-height: 80vh; /* Limit height and allow scrolling */
+  overflow-y: auto; /* Enable vertical scrolling if content overflows */
+  position: relative; /* Needed for absolute positioning of close button */
+}
+
+.modal-content.dark-mode {
+  background-color: #333; /* Dark background */
+  color: #f0f0f0; /* Light text */
+  border: 1px solid #555;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+  margin-bottom: 15px;
+}
+
+.modal-content.dark-mode .modal-header {
+  border-bottom: 1px solid #555;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.4em;
+}
+
+.modal-close-button {
+  background: none;
+  border: none;
+  font-size: 1.5em;
+  cursor: pointer;
+  color: #888;
+  padding: 0 5px;
+}
+
+.modal-content.dark-mode .modal-close-button {
+    color: #bbb;
+}
+
+.modal-close-button:hover {
+  color: #333;
+}
+.modal-content.dark-mode .modal-close-button:hover {
+  color: #fff;
+}
+
+.modal-body {
+  padding-top: 10px;
+  white-space: pre-wrap; /* Preserve whitespace and wrap text */
+}

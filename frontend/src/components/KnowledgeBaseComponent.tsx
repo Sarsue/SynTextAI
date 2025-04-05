@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import './KnowledgeBaseComponent.css';
 import { UploadedFile } from './types';
+import Modal from './Modal';
 
 interface KnowledgeBaseComponentProps {
     files: UploadedFile[];
@@ -10,6 +11,8 @@ interface KnowledgeBaseComponentProps {
 }
 
 const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, onDeleteFile, onFileClick, darkMode }) => {
+    const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+    const [currentSummary, setCurrentSummary] = useState<{ title: string; content: string } | null>(null);
 
     const handleFileClick = (file: UploadedFile) => {
         onFileClick(file);
@@ -20,6 +23,14 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
         if (isConfirmed) {
             onDeleteFile(file.id);
         }
+    };
+
+    const handleShowSummary = (file: UploadedFile) => {
+        setCurrentSummary({
+            title: `Summary of ${file.name}`,
+            content: `This is a static summary for the file "${file.name}".\n\nIn a real implementation, this would be fetched from the backend LLM.`
+        });
+        setIsSummaryModalOpen(true);
     };
 
     return (
@@ -38,7 +49,20 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
                         >
                             {file.name} {file.processed ? "✅ (Ready)" : "🕒 (Processing)"}
                         </span>
-                        <button
+                        {file.processed && (
+                             <button
+                                className="summary-button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleShowSummary(file);
+                                }}
+                                title="Show Summary"
+                                aria-label={`Show summary for ${file.name}`}
+                            >
+                                📄
+                            </button>
+                        )}
+                          <button
                             className="delete-button"
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -50,6 +74,16 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
                     </li>
                 ))}
             </ul>
+            {currentSummary && (
+                <Modal
+                    isOpen={isSummaryModalOpen}
+                    onClose={() => setIsSummaryModalOpen(false)}
+                    title={currentSummary.title}
+                    darkMode={darkMode}
+                >
+                    <p>{currentSummary.content}</p>
+                </Modal>
+            )}
         </div>
     );
 };
