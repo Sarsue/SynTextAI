@@ -799,11 +799,17 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def update_file_summary(self, file_id: int, summary: str):
+    def update_file_summary(self, user_id: int, file_name: str, summary: str):
         """Updates the summary field for a specific file."""
         session = self.get_session()
         try:
-            db_file = session.query(File).filter(File.id == file_id).first()
+            # Create or fetch the file entry
+            file_entry = session.query(File).filter(File.user_id == user_id, File.file_name == filename).first()
+            if not file_entry:
+                file_entry = File(file_name=filename, file_type=file_type, user_id=user_id)
+                session.add(file_entry)
+                session.flush()  
+            db_file = session.query(File).filter(File.file_name == file_name).first()
             if db_file:
                 db_file.summary = summary
                 session.commit()
