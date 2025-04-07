@@ -804,7 +804,7 @@ class DocSynthStore:
         session = self.get_session()
         try:
             # Create or fetch the file entry
-            file_entry = session.query(File).filter(File.user_id == user_id, File.file_name == filename).first()
+            file_entry = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
             if not file_entry:
                 file_entry = File(file_name=filename, file_type=file_type, user_id=user_id)
                 session.add(file_entry)
