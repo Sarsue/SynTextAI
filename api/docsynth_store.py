@@ -804,19 +804,14 @@ class DocSynthStore:
         session = self.get_session()
         try:
             # Create or fetch the file entry
-            file_entry = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()
-            if not file_entry:
-                file_entry = File(file_name=filename, file_type=file_type, user_id=user_id)
-                session.add(file_entry)
-                session.flush()  
-            db_file = session.query(File).filter(File.file_name == file_name).first()
+            db_file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()   
             if db_file:
                 db_file.summary = summary
                 session.commit()
                 #logger.info(f"Updated summary for file ID: {file_id}")
             else:
                 #logger.error(f"File not found with ID {file_id} when trying to update summary.")
-                raise ValueError(f"File not found with ID {file_id} when trying to update summary.")
+                raise ValueError(f"File not found with ID {file_name} when trying to update summary.")
         except Exception as e:
             session.rollback()
             #logger.error(f"Error updating summary for file ID {file_id}: {e}")
