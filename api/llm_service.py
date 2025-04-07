@@ -62,6 +62,15 @@ def prompt_llm(query):
         # Consider more specific error handling based on google.api_core.exceptions
         return f"Error: Could not get response from LLM. {e}"
 
+def get_text_embedding(input):
+    client = MistralClient(api_key=mistral_key)
+
+    embeddings_batch_response = client.embeddings(
+        model="mistral-embed",
+        input=input
+    )
+    return embeddings_batch_response.data[0].embedding
+
 # --- Embeddings function (Still uses Mistral, update if needed) ---
 def get_text_embeddings_in_batches(inputs, batch_size=10):
     """
