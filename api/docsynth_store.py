@@ -95,6 +95,7 @@ class File(Base):
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    summary = Column(Text, nullable=True) # Added summary column
     
     # Relationship to chunks
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
@@ -666,6 +667,29 @@ class DocSynthStore:
         finally:
             session.close()
 
+    def get_files_by_user(self, user_id: int) -> list[dict]:
+        """Retrieves all files for a given user, including their summary."""
+        session = self.get_session()
+        try:
+            files = session.query(File).filter(File.user_id == user_id).order_by(File.created_at.desc()).all()
+            # Return a list of dictionaries including the summary
+            return [
+                {
+                    "id": file.id,
+                    "file_name": file.file_name,
+                    "file_url": file.file_url,
+                    "created_at": file.created_at.isoformat(), # Format datetime
+                    "user_id": file.user_id,
+                    "summary": file.summary # Include the summary
+                }
+                for file in files
+            ]
+        except Exception as e:
+            #logger.error(f"Error fetching files for user {user_id}: {e}")
+            return [] # Return empty list on error
+        finally:
+            session.close()
+
     def delete_file_entry(self, user_id, file_id):
         """
         Deletes a file, its associated chunks, and segments from the database.
@@ -775,9 +799,32 @@ class DocSynthStore:
         finally:
             session.close()
 
+    def update_file_summary(self, file_id: int, summary: str):
+        """Updates the summary field for a specific file."""
+        session = self.get_session()
+        try:
+            db_file = session.query(File).filter(File.id == file_id).first()
+            if db_file:
+                db_file.summary = summary
+                session.commit()
+                #logger.info(f"Updated summary for file ID: {file_id}")
+            else:
+                #logger.error(f"File not found with ID {file_id} when trying to update summary.")
+                raise ValueError(f"File not found with ID {file_id} when trying to update summary.")
+        except Exception as e:
+            session.rollback()
+            #logger.error(f"Error updating summary for file ID {file_id}: {e}")
+            raise
+        finally:
+            session.close()
 
-
-    
+    def get_user_by_email(self, email: str) -> User | None:
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.email == email).first()
+            return user
+        finally:
+            session.close()
 
 # Example usage
 # db = DocSynthStore("sqlite:///test.db")

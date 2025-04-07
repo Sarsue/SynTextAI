@@ -98,11 +98,17 @@
   color: #bbb;
 }
 
-.summary-button:hover {
+/* Disabled state for Summary button */
+.summary-button.disabled {
+  opacity: 0.5; /* Make it look greyed out */
+  cursor: default; /* Indicate it's not clickable */
+}
+
+.summary-button:hover:not(.disabled) {
   color: #007bff; /* Highlight on hover */
 }
 
-.dark-mode .summary-button:hover {
+.dark-mode .summary-button:hover:not(.disabled) {
   color: #4da6ff;
 }
 

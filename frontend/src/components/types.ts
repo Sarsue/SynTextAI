@@ -18,6 +18,7 @@ export interface UploadedFile {
     name: string;
     publicUrl: string;
     processed: boolean;
+    summary: string | null;
 }
 
 export interface Message {

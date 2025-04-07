@@ -1,0 +1,25 @@
+# Core dependencies
+fastapi
+uvicorn[standard]
+python-dotenv
+mistralai
+google-generativeai
+pypdf
+openai
+tiktoken
+sentence-transformers
+
+# Database & ORM
+sqlalchemy
+psycopg2-binary
+alembic
+
+# Background Tasks
+celery
+redis
+
+# File processing
+python-magic
+
+# Other utilities
+requests

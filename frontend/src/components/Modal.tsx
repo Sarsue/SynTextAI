@@ -7,9 +7,10 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   darkMode: boolean;
+  onDownload?: () => void; // Optional download handler
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, darkMode }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, darkMode, onDownload }) => {
   if (!isOpen) return null;
 
   return (
@@ -27,6 +28,17 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, darkMod
         </div>
         <div className="modal-body">
           {children}
+        </div>
+        {/* Add Modal Footer with Download Button */}
+        <div className="modal-footer">
+          {onDownload && (
+            <button onClick={onDownload} className="modal-download-button">
+              Download Summary (.txt)
+            </button>
+          )}
+          <button onClick={onClose} className="modal-footer-close-button">
+            Close
+          </button>
         </div>
       </div>
     </div>

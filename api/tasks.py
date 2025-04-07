@@ -6,15 +6,17 @@ from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from docsynth_store import DocSynthStore
-from llm_service import get_text_embeddings_in_batches, get_text_embedding
+from llm_service import get_text_embeddings_in_batches, get_text_embedding, prompt_llm, token_count, MAX_TOKENS
 from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, HTTPException
 import gc
+
 # Load environment variables
 load_dotenv()
+
 # Load Whisper model once at startup
 whisper_model = WhisperModel("medium", device="cpu", compute_type="int8", download_root="/app/models")
 
@@ -116,6 +118,47 @@ async def process_file_data(user_id: str, user_gc_id: str, filename: str, langua
 
         store.update_file_with_chunks(user_id, filename, ext, extracted_data)
 
+        # --- Aggregate Text from All Chunks for Summary --- 
+        full_file_text = " ".join(
+            chunk["content"]
+            for data_item in extracted_data 
+            for chunk in data_item.get("chunks", [])
+        )
+        
+        if not full_file_text:
+             logger.warning(f"Could not aggregate text from chunks for summarization. File ID: {user_id}, Filename: {filename}")
+             # Skip summarization if no text could be aggregated
+             file_summary = None
+        else:
+            # --- Generate Summary --- 
+            logger.info(f"Starting summarization for file: {filename} (ID: {user_id})")
+            summarization_prompt = (
+                f"Provide a concise, comprehensive summary of the following document content. "
+                f"Focus on the main topics, key findings, and overall purpose.\n\n"
+                f"Document Content:\n"
+                f"------------------\n"
+                f"{full_file_text}\n" # Use the aggregated text here
+                f"------------------\n\n"
+                f"Summary:"
+            )
+            
+            prompt_tokens = token_count(summarization_prompt)
+            if prompt_tokens > MAX_TOKENS:
+                 logger.warning(f"Aggregated file content plus prompt ({prompt_tokens} tokens) exceeds model limit ({MAX_TOKENS}) for summarization. Skipping summary for file ID {user_id}.")
+                 file_summary = None
+            else:
+                try:
+                    file_summary = prompt_llm(summarization_prompt)
+                    logger.info(f"Successfully generated summary for file: {filename} (ID: {user_id})")
+                except Exception as e:
+                    logger.error(f"Error generating summary for file ID {user_id}: {e}")
+                    file_summary = None
+        
+        # Save summary to DB (if generated)
+        if file_summary:
+            store.update_file_summary(user_id, filename, file_summary)
+            logger.info(f"Successfully saved summary to database for file ID: {user_id}")
+
         response_data = {"user_id": user_id, "filename": filename, "status": "processed"}
         await websocket_manager.send_message(user_id, "file_processed", {"status": "success", "result": response_data})
         return {"status": "success", "result": response_data}
@@ -129,7 +172,8 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
     """Processes a user query and generates a response using SyntextAgent."""
     try:
         formatted_history = store.format_user_chat_history(history_id, id)
-        topK_chunks = store.query_chunks_by_embedding(id, get_text_embedding(message))
+        # --- Increase top_k for retrieval ---
+        topK_chunks = store.query_chunks_by_embedding(id, get_text_embedding(message), top_k=10)
         response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
         
         store.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)

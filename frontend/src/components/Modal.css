@@ -73,3 +73,69 @@
   padding-top: 10px;
   white-space: pre-wrap; /* Preserve whitespace and wrap text */
 }
+
+/* Modal Footer Styling */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end; /* Align buttons to the right */
+  padding-top: 15px;
+  margin-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.modal-content.dark-mode .modal-footer {
+  border-top: 1px solid #555;
+}
+
+.modal-footer button {
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  margin-left: 10px; /* Space between buttons */
+  font-size: 0.9em;
+}
+
+.modal-download-button {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.modal-download-button:hover {
+  background-color: #0056b3;
+  border-color: #0056b3;
+}
+
+.modal-content.dark-mode .modal-download-button {
+  background-color: #4da6ff;
+  border-color: #4da6ff;
+  color: #222;
+}
+
+.modal-content.dark-mode .modal-download-button:hover {
+  background-color: #1a8cff;
+  border-color: #1a8cff;
+}
+
+.modal-footer-close-button {
+  background-color: #6c757d;
+  color: white;
+  border-color: #6c757d;
+}
+
+.modal-footer-close-button:hover {
+  background-color: #5a6268;
+  border-color: #545b62;
+}
+
+.modal-content.dark-mode .modal-footer-close-button {
+  background-color: #888;
+  border-color: #888;
+  color: #fff;
+}
+
+.modal-content.dark-mode .modal-footer-close-button:hover {
+  background-color: #666;
+  border-color: #666;
+}

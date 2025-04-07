@@ -1,165 +1,117 @@
 import re
 import logging
-from llm_service import prompt_llm
+from llm_service import prompt_llm, token_count, MAX_TOKENS 
 from web_searcher import get_answers_from_web
-from docsynth_store import DocSynthStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class SyntextAgent:
-    """Interface for conversing with document and web content."""
+    """Interface for conversing with document and web content using large context LLMs."""
 
     def __init__(self):
-        self.relevance_thresholds = {
-            "high": 0.8,
-            "low": 0.3
-        }
+        pass 
 
-   
-
-    def assess_relevance(self, query: str, context: str) -> float:
-        """
-        Assess the relevance of the given context (chunk or history) for the query.
-        Calls an LLM to evaluate similarity and extracts a relevance score.
-
-        Args:
-            query (str): The query string.
-            context (str): The context string.
-
-        Returns:
-            float: The relevance score between 0 and 1.
-        """
-        prompt = (
-            f"Evaluate the relevance of the following context to the query '{query}':\n\n{context}\n\n"
-            f"Respond with a relevance score between 0 and 1."
-        )
-        relevance_score: str = prompt_llm(prompt)
-        logging.debug(f"LLM Response: {relevance_score}")
-
-        try:
-            # Extract the float score from the response
-            score_match = re.search(r"\b\d+\.\d+\b", relevance_score)
-            if score_match:
-                score = float(score_match.group())
-            else:
-                score = 0.0  # Default to 0 if no valid score is found
-        except ValueError:
-            score = 0.0  # Default to 0 if an error occurs during parsing
-
-        return score
-
-    def assess_relevance_scores(self, query, top_k_results):
-        """Evaluate relevance scores for each chunk individually."""
-        relevance_scores = []
-        for result in top_k_results:
-            segment = result["content"]
-            score = self.assess_relevance(query, segment )
-            relevance_scores.append({
-                "content": segment,
-                "meta_data": result.get("meta_data"),
-                "cosine_similarity" : result["similarity_score"],
-                "relevance_score": score,
-                "file_url": result["file_url"],
-            })
-        return relevance_scores
-
-    def determine_best_context(self, relevance_scores):
-        """Determine the best context based on relevance score."""
-        best_context = max(relevance_scores, key=lambda x: x["relevance_score"])
-        best_score = best_context["relevance_score"]
-        return best_context, best_score
-
+    def _format_context_and_sources(self, top_k_results: list) -> tuple[str, str]:
+        """Formats retrieved segments for the LLM prompt and creates a source map."""
+        context_parts = []
+        source_map_parts = ["\n\n**Sources:**"]
+        
+        for i, result in enumerate(top_k_results):
+            segment_id = i + 1
+            content = result.get('content', '')
+            file_url_base = result.get('file_url')
+            file_name = result.get('file_name', 'Unknown File')
+            page_num = result.get('page_number')
+            meta = result.get('meta_data', {})
+            
+            # --- Part 1: Format context for LLM --- 
+            context_header = f"--- Context Segment {segment_id} ---"
+            context_parts.append(f"{context_header}\n{content}")
+            
+            # --- Part 2: Create source mapping entry --- 
+            source_text = file_name
+            source_target = file_url_base if file_url_base else "#"
+            
+            if meta.get("type") == "video" and meta.get("start_time") is not None:
+                start_time = meta.get('start_time')
+                end_time = meta.get('end_time')
+                time_str = f"{start_time:.1f}s-{end_time:.1f}s"
+                source_text += f" ({time_str})"
+                if file_url_base: # Add fragment only if URL exists
+                     source_target += f"#t={start_time:.1f}"
+            elif page_num:
+                source_text += f" (Page {page_num})"
+                if file_url_base:
+                     source_target += f"#page={page_num}"
+            
+            source_map_parts.append(f"- **[Segment {segment_id}]**: [{source_text}]({source_target})")
+            
+        formatted_context = "\n\n".join(context_parts)
+        source_map = "\n".join(source_map_parts)
+        return formatted_context, source_map
+    
     def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str, comprehension_level: str) -> str:
         """
-        Main pipeline to process a user query using document chunks and relevance scores.
+        Main pipeline using large context: formats context, prompts LLM to cite sources, 
+        appends source map. Falls back to web search.
         """
         try:
-            # if we have chunks of document that should be the priority for answers
-            if len(top_k_results) > 0:
-
-                relevance_scores = self.assess_relevance_scores(query, top_k_results)
-
-                # Step 2: Get the best context based on the highest relevance score
-                best_context, best_score = self.determine_best_context(relevance_scores)
-                print(best_context, best_score)
+            if top_k_results:
+                # Step 1: Format context and generate the source map string
+                formatted_context, source_map = self._format_context_and_sources(top_k_results)
                 
-                # Step 3: Decide the context based on the relevance score threshold
-                if best_score >= self.relevance_thresholds["high"]:
-                    # Use the full context for high relevance scores
-                    context = best_context["content"]
+                # Step 2: Construct the full prompt with citation instructions
+                history_prompt = f"\n\nPrevious Conversation History:\n{convo_history}\n\n" if convo_history else ""
+                
+                # **** Instruction for LLM ****
+                citation_instruction = (
+                    "When you use information from the provided context segments in your answer, " 
+                    "you MUST cite the segment number(s) using the format [Segment N] or [Segment N, M] " 
+                    "immediately after the information. For example: 'Attention mechanisms allow focus [Segment 1].' " 
+                    "or 'Self-attention relates positions [Segment 1, 2].' " 
+                    "Base your answer *only* on the provided context segments and conversation history."
+                 )
+                # ***************************
 
-                    # Step 4: Create the LLM prompt with the selected context
-                    resp_prompt = (
-                        f"Answer the following question based on the provided text (Respond in {language}): {context} the user would like the answer to be {comprehension_level}\n\n"
-                        f"Question: {query}\n\n"
-                    )
-                    print(resp_prompt)
+                full_prompt = (
+                    f"{citation_instruction}\n\n"
+                    f"Respond in {language}. The user desires a {comprehension_level} level of detail.\n"
+                    f"{history_prompt}"
+                    f"User Question: {query}\n\n"
+                    f"Provided Context Segments:\n"
+                    f"------------------------\n"
+                    f"{formatted_context}\n"
+                    f"------------------------\n\n"
+                    f"Answer:" # LLM starts generating here
+                )
+                
+                # Step 3: Check token count (optional but recommended)
+                prompt_tokens = token_count(full_prompt)
+                if prompt_tokens > MAX_TOKENS:
+                    logger.warning(f"Combined prompt ({prompt_tokens} tokens) exceeds MAX_TOKENS ({MAX_TOKENS}). Truncation/errors may occur.")
+                    # Consider more robust handling like erroring or selective context reduction
 
-                    # Step 5: Get the answer from the LLM
-                    ans = prompt_llm(resp_prompt)
+                # Step 4: Call the LLM with the combined context and instructions
+                llm_answer_with_citations = prompt_llm(full_prompt)
 
-                    # Step 6: Construct the file reference for the selected chunk
-                    meta_data = best_context['meta_data']
-                    file_name = best_context['file_url'].split('/')[-1]
+                # Step 5: Combine LLM answer (with citations) and the source map
+                final_response = llm_answer_with_citations + source_map
+                
+                return final_response
 
-                    # Determine the file type based on metadata
-                    if meta_data.get("type") == "video":
-                        # If it's a video, use start_time and end_time for file_name and file_url
-                        vid = ""
-                        if meta_data.get("start_time"):
-                            vid = f"{meta_data['start_time']} - {meta_data['end_time']}"
-                            file_name += vid
-                        file_url = f"{best_context['file_url']}?{vid}"
-                    else:
-                        # If it's a PDF, use page_number for file_name and file_url
-                        pg_num = 0
-                        if meta_data.get("page_number") > 0:
-                            pg_num = meta_data.get("page_number")
-                            file_name += ' page ' + str(pg_num)
-                        file_url = f"{best_context['file_url']}?page={pg_num}"
-
-                    # Construct the JSON response with the formatted file link
-                    references = [f"[{file_name}]({file_url})"]
-                    reference_links = "\n".join(references)
-                    logger.info(reference_links)
-                    return ans + "\n\n" + reference_links
-
-            # Web search if the document search didn't give good result 
+            # Step 6: Fallback to Web search if no document results found
+            logger.info("No relevant document chunks found, falling back to web search.")
             results, _ = get_answers_from_web(query)
             if results:
-                # The results now include both the answer and reference links
-                return results
-            return "Sorry, I couldn't find a good answer to your question."
+                return results # Assuming web search includes its own sources
+            return "Sorry, I couldn't find an answer in your documents or on the web."
 
         except Exception as e:
-            logger.error(f"Exception occurred: {e}", exc_info=True)
-            return "Syntext ran into issues processing this query. Please rephrase your question."
+            logger.error(f"Exception occurred in query pipeline: {e}", exc_info=True)
+            return "Syntext ran into issues processing this query. Please try again."
 
 
 if __name__ == "__main__":
-    import os
-    from llm_service import get_text_embedding
-    import numpy as np
-    # Construct paths relative to the base directory
-    database_config = {
-        'dbname': os.getenv("DATABASE_NAME"),
-        'user': os.getenv("DATABASE_USER"),
-        'password': os.getenv("DATABASE_PASSWORD"),
-        'host': os.getenv("DATABASE_HOST"),
-        'port': os.getenv("DATABASE_PORT"),
-    }
-    DATABASE_URL = (
-        f"postgresql://{database_config['user']}:{database_config['password']}"
-        f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-    )
-    store = DocSynthStore(database_url=DATABASE_URL)
-    syntext = SyntextAgent()
-    message = "How does attention in LLM work?"
-    # id = 1
-    # language = "english"
-    # query_embedding = get_text_embedding(message)
-    # topK_chunks = store.query_chunks_by_embedding(id,query_embedding)
-    # response = syntext.query_pipeline(message, None, topK_chunks, language)
-
+    pass
