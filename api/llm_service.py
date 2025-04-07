@@ -38,6 +38,38 @@ def token_count(text):
     encoding = tiktoken.get_encoding("cl100k_base") 
     return len(encoding.encode(text))
 
+
+def extract_image_text(base64_image):
+    """Extract text from an image using the Mistral API."""
+    url = "https://api.mistral.ai/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {mistral_key}",
+    }
+    data = {
+        "model": "pixtral-12b-2409",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What’s in this image?"},
+                    {"type": "image_url",
+                        "image_url": f"data:image/jpeg;base64,{base64_image}"}
+                ]
+            }
+        ],
+        "max_tokens": 1500
+    }
+    TIMEOUT_SECONDS = 10 
+    response = requests.post(url, headers=headers,
+                             json=data, timeout=TIMEOUT_SECONDS)
+    if response.status_code == 200:
+        return response.json()['choices'][0]['message']['content']
+    else:
+        logging.error(
+            f"Error extracting text: {response.status_code} - {response.text}")
+        return ""
+
 def prompt_llm(query):
     """Prompt the configured Google Generative AI model."""
 

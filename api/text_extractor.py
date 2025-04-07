@@ -34,8 +34,9 @@ def extract_text_from_image(image_data):
         logging.error(f"Error extracting text from image: {e}")
         return None
 
+
 def extract_data(file_data, file_extension):
-    logging.info("processing file...")
+    logging.info(f"processing file {file_data} with extension {file_extension}...")
     try:
         if file_extension == 'pdf':
             result = extract_document_hierarchy(file_data)
