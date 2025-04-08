@@ -640,14 +640,16 @@ class DocSynthStore:
             session = self.get_session()
 
             # Fetch the files for the user along with a count of their chunks
+            # Now also including the summary field
             files = session.query(
                 File.id, 
                 File.file_name, 
-                File.file_url, 
+                File.file_url,
+                File.summary,  # Added summary field
                 func.count(Chunk.id).label('chunk_count')
-            ).outerjoin(Chunk, Chunk.file_id == File.id) \
-            .filter(File.user_id == user_id) \
-            .group_by(File.id, File.file_name, File.file_url) \
+            ).outerjoin(Chunk, Chunk.file_id == File.id)\
+            .filter(File.user_id == user_id)\
+            .group_by(File.id, File.file_name, File.file_url, File.summary)\
             .all()
 
             file_info_list = []
@@ -656,37 +658,16 @@ class DocSynthStore:
                     'id': file[0],
                     'name': file[1],
                     'publicUrl': file[2],
-                    'processed': file[3] > 0  # True if chunk_count > 0, otherwise False
+                    'summary': file[3],  # Include the summary in the response
+                    'processed': file[4] > 0  # True if chunk_count > 0, otherwise False
                 }
                 file_info_list.append(file_info)
 
             return file_info_list
-        except Exception as e:
-            #logger.error(f"Error getting files for user: {e}")
-            raise
-        finally:
-            session.close()
 
-    def get_files_by_user(self, user_id: int) -> list[dict]:
-        """Retrieves all files for a given user, including their summary."""
-        session = self.get_session()
-        try:
-            files = session.query(File).filter(File.user_id == user_id).order_by(File.created_at.desc()).all()
-            # Return a list of dictionaries including the summary
-            return [
-                {
-                    "id": file.id,
-                    "file_name": file.file_name,
-                    "file_url": file.file_url,
-                    "created_at": file.created_at.isoformat(), # Format datetime
-                    "user_id": file.user_id,
-                    "summary": file.summary # Include the summary
-                }
-                for file in files
-            ]
         except Exception as e:
-            #logger.error(f"Error fetching files for user {user_id}: {e}")
-            return [] # Return empty list on error
+            #logging.error(f"Error fetching files for user {user_id}: {e}")
+            return []
         finally:
             session.close()
 

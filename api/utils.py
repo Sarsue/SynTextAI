@@ -70,16 +70,50 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
 
+        # Determine the correct content type based on file extension
+        content_type = "application/octet-stream"  # Default type
+        extension = filename.lower().split('.')[-1] if '.' in filename else ''
+        
+        # Map common extensions to MIME types
+        mime_types = {
+            'pdf': 'application/pdf',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'txt': 'text/plain',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls': 'application/vnd.ms-excel',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'ppt': 'application/vnd.ms-powerpoint',
+            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'csv': 'text/csv',
+            'mp4': 'video/mp4',
+            'mov': 'video/quicktime',
+            'mp3': 'audio/mpeg',
+        }
+        
+        # Set content type if we recognize the extension
+        if extension in mime_types:
+            content_type = mime_types[extension]
+            logger.info(f"Setting content type to {content_type} for file {filename}")
+
         # Stream file upload using chunks
         with blob.open("wb") as gcs_file:
             while chunk := await file.read(1024 * 1024):  # Read in 1MB chunks
                 gcs_file.write(chunk)
+                
+        # Set the content type and other metadata
+        blob.content_type = content_type
+        blob.metadata = {'Content-Disposition': 'inline'}
+        blob.patch()
 
         # Optionally make the file public
-        blob.make_public()  
+        blob.make_public()
 
         public_url = blob.public_url
-        logger.info(f"Successfully uploaded {filename} to GCS: {public_url}")
+        logger.info(f"Successfully uploaded {filename} to GCS with content type {content_type}: {public_url}")
         return public_url  
 
     except Exception as e:
