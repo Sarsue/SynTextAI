@@ -10,25 +10,33 @@
   justify-content: center;
   align-items: center;
   z-index: 1000; /* Ensure modal is on top */
+  backdrop-filter: blur(3px); /* Adds a subtle blur effect to the background */
+  transition: all 0.3s ease-in-out;
+}
+
+.modal-overlay.dark-overlay {
+  background-color: rgba(0, 0, 0, 0.75); /* Darker overlay for dark mode */
 }
 
 .modal-content {
   background: white;
   padding: 25px;
-  border-radius: 8px;
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.25);
   min-width: 300px;
-  max-width: 600px;
-  width: 80%; /* Responsive width */
-  max-height: 80vh; /* Limit height and allow scrolling */
+  max-width: 800px; /* Increased for better use of screen space */
+  width: 90%; /* More responsive width */
+  max-height: 85vh; /* Increased height for better content viewing */
   overflow-y: auto; /* Enable vertical scrolling if content overflows */
   position: relative; /* Needed for absolute positioning of close button */
+  transition: all 0.2s ease;
+  animation: modal-appear 0.3s ease-out forwards;
 }
 
 .modal-content.dark-mode {
-  background-color: #333; /* Dark background */
+  background-color: #1e1e1e; /* Darker background to match app theme */
   color: #f0f0f0; /* Light text */
-  border: 1px solid #555;
+  border: 1px solid #444;
 }
 
 .modal-header {
@@ -36,8 +44,8 @@
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid #eee;
-  padding-bottom: 10px;
-  margin-bottom: 15px;
+  padding-bottom: 15px; /* Slightly increased */
+  margin-bottom: 20px; /* Slightly increased */
 }
 
 .modal-content.dark-mode .modal-header {
@@ -55,7 +63,15 @@
   font-size: 1.5em;
   cursor: pointer;
   color: #888;
-  padding: 0 5px;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  width: 30px;
+  height: 30px;
+  line-height: 1;
 }
 
 .modal-content.dark-mode .modal-close-button {
@@ -64,23 +80,31 @@
 
 .modal-close-button:hover {
   color: #333;
+  background-color: rgba(0, 0, 0, 0.05);
 }
+
 .modal-content.dark-mode .modal-close-button:hover {
   color: #fff;
+  background-color: rgba(255, 255, 255, 0.1);
 }
 
 .modal-body {
-  padding-top: 10px;
+  padding: 5px 0 15px;
   white-space: pre-wrap; /* Preserve whitespace and wrap text */
+  line-height: 1.5;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 /* Modal Footer Styling */
 .modal-footer {
   display: flex;
   justify-content: flex-end; /* Align buttons to the right */
-  padding-top: 15px;
+  padding-top: 20px;
   margin-top: 20px;
   border-top: 1px solid #eee;
+  flex-wrap: wrap; /* Allow buttons to wrap on very small screens */
+  gap: 10px; /* Modern spacing between elements */
 }
 
 .modal-content.dark-mode .modal-footer {
@@ -88,34 +112,42 @@
 }
 
 .modal-footer button {
-  padding: 8px 15px;
-  border-radius: 4px;
+  padding: 10px 18px;
+  border-radius: 6px;
   cursor: pointer;
   border: 1px solid transparent;
   margin-left: 10px; /* Space between buttons */
-  font-size: 0.9em;
+  font-size: 0.95em;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .modal-download-button {
-  background-color: #007bff;
+  background-color: #2563eb; /* Updated blue to match modern design */
   color: white;
-  border-color: #007bff;
+  border-color: #2563eb;
 }
 
 .modal-download-button:hover {
-  background-color: #0056b3;
-  border-color: #0056b3;
+  background-color: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
 }
 
 .modal-content.dark-mode .modal-download-button {
-  background-color: #4da6ff;
-  border-color: #4da6ff;
-  color: #222;
+  background-color: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
 }
 
 .modal-content.dark-mode .modal-download-button:hover {
-  background-color: #1a8cff;
-  border-color: #1a8cff;
+  background-color: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
 
 .modal-footer-close-button {
@@ -127,15 +159,64 @@
 .modal-footer-close-button:hover {
   background-color: #5a6268;
   border-color: #545b62;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
 }
 
 .modal-content.dark-mode .modal-footer-close-button {
-  background-color: #888;
-  border-color: #888;
+  background-color: #4b5563;
+  border-color: #4b5563;
   color: #fff;
 }
 
 .modal-content.dark-mode .modal-footer-close-button:hover {
-  background-color: #666;
-  border-color: #666;
+  background-color: #374151;
+  border-color: #374151;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Helper styles for button icons */
+.button-icon {
+  margin-right: 8px;
+  font-weight: bold;
+}
+
+/* Animation for modal entrance */
+@keyframes modal-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Media queries for better responsiveness */
+@media (max-width: 768px) {
+  .modal-content {
+    width: 95%;
+    padding: 20px;
+  }
+  
+  .modal-footer {
+    flex-direction: column-reverse;
+  }
+  
+  .modal-footer button {
+    width: 100%;
+    margin-left: 0;
+    margin-bottom: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .modal-content {
+    padding: 15px;
+  }
+  
+  .modal-header h2 {
+    font-size: 1.2em;
+  }
 }

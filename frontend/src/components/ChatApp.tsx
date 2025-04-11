@@ -356,7 +356,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                         />
                         {selectedFile && (
                             <FileViewerComponent
-                                fileUrl={selectedFile.publicUrl}
+                                file={selectedFile}
                                 onClose={handleCloseFileViewer}
                                 onError={handleFileError}
                                 darkMode={darkMode}
@@ -373,6 +373,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                             </div>
                         )}
                         <ConversationView
+                            files={knowledgeBaseFiles}
                             history={currentHistory !== null ? histories[currentHistory] : null}
                             onCopy={handleCopy}
                         />
@@ -485,7 +486,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                             />
                             {selectedFile && (
                                 <FileViewerComponent
-                                    fileUrl={selectedFile.publicUrl}
+                                    file={selectedFile}
                                     onClose={handleCloseFileViewer}
                                     onError={handleFileError}
                                     darkMode={darkMode}
@@ -509,6 +510,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                         {/* Conversation View in the middle */}
                         <div className="conversation-column">
                             <ConversationView
+                                files={knowledgeBaseFiles}
                                 history={currentHistory !== null ? histories[currentHistory] : null}
                                 onCopy={handleCopy}
                             />

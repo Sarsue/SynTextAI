@@ -5,15 +5,16 @@ import './ConversationView.css';
 import { History, Message } from './types';
 import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
-
+import { UploadedFile } from './types';
 
 interface ConversationViewProps {
+    files: UploadedFile[];
     history: History | null;
     onCopy: (message: Message) => void;
 }
 
-const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) => {
-    const [selectedFile, setSelectedFile] = useState<string | null>(null);
+const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onCopy }) => {
+    const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     const [fileError, setFileError] = useState<string | null>(null);
     const { darkMode } = useUserContext();
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -32,17 +33,35 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
         const pathname = parsedUrl.pathname;
 
         // Regular expression to check if the pathname ends with a valid file extension
-        const fileExtensionPattern = /\.(pdf|jpg|jpeg|png|txt|doc|docx|html|ppt|xls|xlsx|csv|zip)$/i;
+        const fileExtensionPattern = /\.(pdf|jpg|jpeg|png|txt|doc|docx|html|ppt|xls|xlsx|csv|zip|mp4|mov)$/i;
 
         // Check if the pathname ends with a valid file extension
         const isFileLink = fileExtensionPattern.test(pathname);
 
         if (url.startsWith('http://') || url.startsWith('https://')) {
             if (isFileLink) {
-                // Handle as a file link
-                setSelectedFile(url);
-                setFileError(null);
-                console.log(`User clicked file link: ${url}`);
+                // Look for the file in our files array that matches this URL
+                const matchingFile = files.find(file =>
+                    url.includes(file.publicUrl)
+                  );
+                  
+                
+                if (matchingFile) {
+                    // Found the file in our system
+                    setSelectedFile(matchingFile);
+                    setFileError(null);
+                    console.log(`Found file: ${matchingFile.name} (${matchingFile.id})`);
+                } else {
+                    // If we can't find the file but it's still a valid URL, create a minimal file object
+                    setSelectedFile({
+                        id: -1, // Use negative ID for external files
+                        name: url.split('/').pop() || 'File',
+                        publicUrl: url,
+                        processed: true,
+                        summary: null
+                    });
+                    console.log(`External file link: ${url}`);
+                }
             } else {
                 // Treat URLs without a file extension (or HTML links) as a webpage
                 console.log(`User clicked webpage link: ${url}`);
@@ -109,7 +128,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ history, onCopy }) 
                 <div className="file-viewer-modal">
                     <div className="file-viewer-content">
                         <FileViewerComponent
-                            fileUrl={selectedFile}
+                            file={selectedFile}
                             onClose={() => setSelectedFile(null)}
                             onError={handleFileError}
                             darkMode={darkMode}

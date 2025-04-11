@@ -15,7 +15,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, darkMod
 
   return (
     // The overlay div covers the whole screen and closes the modal when clicked
-    <div className="modal-overlay" onClick={onClose}>
+    <div className={`modal-overlay ${darkMode ? 'dark-overlay' : ''}`} onClick={onClose}>
       <div 
         // The content div is the actual modal window
         className={`modal-content ${darkMode ? 'dark-mode' : ''}`}
@@ -24,19 +24,29 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, darkMod
       >
         <div className="modal-header">
           <h2>{title}</h2>
-          <button onClick={onClose} className="modal-close-button" aria-label="Close modal">✕</button>
+          <button onClick={onClose} className="modal-close-button" aria-label="Close modal">
+            <span aria-hidden="true">×</span>
+          </button>
         </div>
         <div className="modal-body">
           {children}
         </div>
-        {/* Add Modal Footer with Download Button */}
+        {/* Modal Footer with action buttons */}
         <div className="modal-footer">
           {onDownload && (
-            <button onClick={onDownload} className="modal-download-button">
-              Download Summary (.txt)
+            <button 
+              onClick={onDownload} 
+              className="modal-download-button"
+              aria-label="Download summary as text file"
+            >
+              <span className="button-icon">↓</span> Download
             </button>
           )}
-          <button onClick={onClose} className="modal-footer-close-button">
+          <button 
+            onClick={onClose} 
+            className="modal-footer-close-button"
+            aria-label="Close modal"
+          >
             Close
           </button>
         </div>

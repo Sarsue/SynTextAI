@@ -1,15 +1,17 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime, Float
 from sqlalchemy.orm import declarative_base, relationship,  mapped_column, Mapped
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 from sqlalchemy.types import JSON
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.exc import IntegrityError
-from typing import List
+from typing import List, Optional
 from datetime import datetime
+import calendar
 import logging
 import numpy as np
 from scipy.spatial.distance import cosine, euclidean
+
 
 
 # logging.basicConfig(level=logging.ERROR)
@@ -27,6 +29,7 @@ class User(Base):
     chat_histories = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     files = relationship("File", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
+    explanations = relationship("Explanation", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subscription(Base):
@@ -99,11 +102,9 @@ class File(Base):
     
     # Relationship to chunks
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
-    
-    # Relationship to segments
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
-    
     user = relationship("User", back_populates="files")
+    explanations = relationship("Explanation", back_populates="file", cascade="all, delete-orphan")
 
 
 class Segment(Base):
@@ -143,6 +144,25 @@ class Chunk(Base):
     
     def __repr__(self):
         return f"<Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:50]}...)>"
+
+
+class Explanation(Base):
+    __tablename__ = 'explanations'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
+    content = Column(Text, nullable=True)  # The selected content being explained
+    explanation = Column(Text, nullable=True)  # The AI-generated explanation
+    page = Column(Integer, nullable=True)  # For PDF files
+    video_start = Column(Float, nullable=True)  # For video files (timestamp in seconds)
+    video_end = Column(Float, nullable=True)  # For video files (timestamp in seconds)
+    selection_type = Column(String, nullable=False)  # 'text' or 'video_range'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    file = relationship("File", back_populates="explanations")
+    user = relationship("User", back_populates="explanations")
 
 
 class DocSynthStore:
@@ -807,6 +827,109 @@ class DocSynthStore:
             return user
         finally:
             session.close()
-
+            
+    def get_file_by_id(self, file_id: int) -> Optional[File]:
+        """Get a file by its ID"""
+        session = self.get_session()
+        try:
+            file = session.query(File).filter(File.id == file_id).first()
+            return file
+        finally:
+            session.close()
+            
+    def save_explanation(self, user_id: int, file_id: int, selection_type: str, content: str = None, 
+    explanation: str = None, page: int = None, video_start: float = None, video_end: float = None) -> int:
+        """Save an explanation for a file selection
+        
+        Args:
+            user_id: The ID of the user
+            file_id: The ID of the file
+            selection_type: The type of selection ('text' or 'video_range')
+            content: The selected text content (for PDFs)
+            explanation: The AI-generated explanation
+            page: The page number (for PDFs)
+            video_start: Start timestamp in seconds (for videos)
+            video_end: End timestamp in seconds (for videos)
+            
+        Returns:
+            int: The ID of the created explanation
+        """
+        session = self.get_session()
+        try:
+            explanation_obj = Explanation(
+                user_id=user_id,
+                file_id=file_id,
+                selection_type=selection_type,
+                content=content,
+                explanation=explanation,
+                page=page,
+                video_start=video_start,
+                video_end=video_end
+            )
+            session.add(explanation_obj)
+            session.commit()
+            return explanation_obj.id
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+            
+    def get_explanations_for_file(self, user_id: int, file_id: int) -> List[dict]:
+        """Get all explanations for a specific file
+        
+        Args:
+            user_id: The ID of the user
+            file_id: The ID of the file
+            
+        Returns:
+            List[dict]: A list of explanations with their details
+        """
+        session = self.get_session()
+        try:
+            explanations = session.query(Explanation).filter(
+                Explanation.user_id == user_id,
+                Explanation.file_id == file_id
+            ).order_by(Explanation.created_at.desc()).all()
+            
+            result = []
+            for exp in explanations:
+                exp_dict = {
+                    "id": exp.id,
+                    "selection_type": exp.selection_type,
+                    "content": exp.content,
+                    "explanation": exp.explanation,
+                    "page": exp.page,
+                    "video_start": exp.video_start,
+                    "video_end": exp.video_end,
+                    "created_at": exp.created_at.isoformat() if exp.created_at else None
+                }
+                result.append(exp_dict)
+                
+            return result
+        finally:
+            session.close()
+    
+    def is_premium_user(self, user_id: int) -> bool:
+        """Check if a user has an active premium subscription
+        
+        Args:
+            user_id: The ID of the user to check
+            
+        Returns:
+            bool: True if the user has an active premium subscription, False otherwise
+        """
+        session = self.get_session()
+        try:
+            subscription = session.query(Subscription).filter(
+                Subscription.user_id == user_id,
+                Subscription.status.in_(["active", "trialing"])
+            ).first()
+            
+            # User is premium if they have an active or trialing subscription
+            return subscription is not None
+        finally:
+            session.close()
+    
 # Example usage
 # db = DocSynthStore("sqlite:///test.db")
