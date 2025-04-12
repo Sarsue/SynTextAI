@@ -1,207 +1,171 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './FileViewerComponent.css';
 import { UploadedFile } from './types';
+import { useUserContext } from '../UserContext';
 
 interface FileViewerComponentProps {
-    file: UploadedFile;
-    onClose: () => void;
-    onError: (error: string) => void;
-    darkMode: boolean;
+  file: UploadedFile;
+  onClose: () => void;
+  onError: (error: string) => void;
+  darkMode: boolean;
 }
 
 const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose, onError, darkMode }) => {
-    const fileUrl = file.publicUrl;
-    const [fileType, setFileType] = useState<string | null>(null);
-    const [loading, setLoading] = useState<boolean>(true);
-    const [pageNumber, setPageNumber] = useState<number | null>(null);
-    const [videoStartTime, setVideoStartTime] = useState<number | null>(null);
-    
-    // New states for explain feature
-    const [showExplainPanel, setShowExplainPanel] = useState<boolean>(false);
-    const [selectedContent, setSelectedContent] = useState<string>('');
-    const [explanation, setExplanation] = useState<string>('');
-    const [isExplaining, setIsExplaining] = useState<boolean>(false);
-    const [currentPage, setCurrentPage] = useState<number>(1);
-    const [videoTimeRange, setVideoTimeRange] = useState<{start: number|null, end: number|null}>({ 
-        start: null, 
-        end: null 
-    });
-    
-    // Refs for video and PDF iframe
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const pdfFrameRef = useRef<HTMLIFrameElement>(null);
-    
-    // Listen for selection events from PDF iframe
-    useEffect(() => {
-        if (fileType === 'pdf') {
-            // Setup message listener for PDF selections
-            const handlePdfSelection = (event: MessageEvent) => {
-                if (event.data && event.data.type === 'pdfSelection') {
-                    setSelectedContent(event.data.text);
-                    setCurrentPage(event.data.page || 1);
-                }
-            };
-            
-            window.addEventListener('message', handlePdfSelection);
-            
-            // Inject selection capture script into PDF iframe
-            const injectSelectionScript = () => {
-                if (pdfFrameRef.current && pdfFrameRef.current.contentWindow) {
-                    try {
-                        const script = `
-                            document.addEventListener('mouseup', function() {
-                                const selection = document.getSelection();
-                                if (selection && selection.toString().trim()) {
-                                    const pageElement = selection.anchorNode.parentElement.closest('.page');
-                                    const pageNumber = pageElement ? parseInt(pageElement.dataset.pageNumber) : 1;
-                                    window.parent.postMessage({
-                                        type: 'pdfSelection',
-                                        text: selection.toString(),
-                                        page: pageNumber
-                                    }, '*');
-                                }
-                            });
-                        `;
-                        
-                        // Need to wait for PDF.js to load
-                        setTimeout(() => {
-                            const frameDoc = pdfFrameRef.current?.contentWindow?.document;
-                            if (frameDoc) {
-                                const scriptEl = frameDoc.createElement('script');
-                                scriptEl.textContent = script;
-                                frameDoc.body.appendChild(scriptEl);
-                            }
-                        }, 2000);
-                    } catch (error) {
-                        console.error('Error injecting selection script:', error);
-                    }
-                }
-            };
-            
-            injectSelectionScript();
-            
-            return () => {
-                window.removeEventListener('message', handlePdfSelection);
-            };
-        }
-    }, [fileType]);
-    
-    // Handle explaining the selected content
-    const handleExplain = async () => {
-        if (!selectedContent && !videoTimeRange.start) return;
-        
-        setIsExplaining(true);
-        
-        try {
-            const payload = {
-                fileId: file.id,
-                fileType,
-                selectionType: fileType === 'pdf' ? 'text' : 'video_range',
-                content: fileType === 'pdf' ? selectedContent : null,
-                page: currentPage,
-                videoStart: videoTimeRange.start,
-                videoEnd: videoTimeRange.end || videoTimeRange.start,
-            };
-            
-            const response = await fetch('/api/v1/files/explain', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload),
-            });
-            
-            if (!response.ok) {
-                throw new Error('Failed to get explanation');
-            }
-            
-            const data = await response.json();
-            setExplanation(data.explanation);
-        } catch (error) {
-            console.error('Error getting explanation:', error);
-            onError('Could not generate explanation. Please try again.');
-        } finally {
-            setIsExplaining(false);
-        }
-    };
-    
-    // For video time range selection
-    const handleSetVideoStart = () => {
-        if (videoRef.current) {
-            setVideoTimeRange({
-                ...videoTimeRange,
-                start: videoRef.current.currentTime
-            });
-        }
-    };
-    
-    const handleSetVideoEnd = () => {
-        if (videoRef.current) {
-            setVideoTimeRange({
-                ...videoTimeRange,
-                end: videoRef.current.currentTime
-            });
-        }
+  const { user } = useUserContext();
+  const fileUrl = file.publicUrl;
+
+  const [fileType, setFileType] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [videoStartTime, setVideoStartTime] = useState<number | null>(null);
+  const [selectedContent, setSelectedContent] = useState('');
+  const [explanation, setExplanation] = useState('');
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [showExplainPanel, setShowExplainPanel] = useState(false);
+  const [videoTimeRange, setVideoTimeRange] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const pdfFrameRef = useRef<HTMLIFrameElement>(null);
+  const pdfContainerRef = useRef<HTMLDivElement>(null);
+
+  const hasPremiumAccess = true; // TODO: Replace with real subscription check
+
+  const getFileType = (url: string): string | null => {
+    try {
+      const path = new URL(url).pathname.toLowerCase();
+      if (path.endsWith('.pdf')) return 'pdf';
+      if (/\.(jpe?g|png|gif|webp)$/.test(path)) return 'image';
+      if (/\.(mp4|webm|mov)$/.test(path)) return 'video';
+    } catch (err) {
+      console.error('Invalid URL:', err);
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    if (!fileUrl) {
+      onError('No file URL provided');
+      setLoading(false);
+      return;
+    }
+
+    const type = getFileType(fileUrl);
+    setFileType(type);
+
+    if (!type) {
+      onError('Unsupported file type');
+      setLoading(false);
+      return;
+    }
+
+    const url = new URL(fileUrl);
+    const page = url.searchParams.get('page');
+    const time = url.searchParams.get('time');
+
+    if (page) setCurrentPage(parseInt(page));
+    if (time) setVideoStartTime(parseInt(time));
+
+    setSelectedContent('');
+    setExplanation('');
+    setIsExplaining(false);
+    setShowExplainPanel(false);
+    setVideoTimeRange({ start: null, end: null });
+
+    const timer = setTimeout(() => setLoading(false), 1000);
+    return () => clearTimeout(timer);
+  }, [fileUrl, onError]);
+
+  useEffect(() => {
+    if (fileType !== 'pdf' || !pdfContainerRef.current) return;
+
+    const handleMouseUp = () => {
+      const selectedText = window.getSelection()?.toString().trim();
+      if (selectedText) {
+        setSelectedContent(selectedText);
+        setCurrentPage(currentPage); // fallback
+      }
     };
 
-    useEffect(() => {
-        // Extract page or time parameters if they exist
-        try {
-            const url = new URL(fileUrl);
-            const pageParam = url.searchParams.get('page');
-            if (pageParam) {
-                setPageNumber(parseInt(pageParam, 10));
-            }
-            
-            const timeParam = url.searchParams.get('time');
-            if (timeParam) {
-                setVideoStartTime(parseInt(timeParam, 10));
-            }
-        } catch (e) {
-            console.log('Could not parse URL parameters');
-        }
-        
-        const detectedFileType = getFileType(fileUrl);
-        if (!detectedFileType) {
-            console.log(`Unsupported file type for: ${fileUrl}`);
-            onError('Unsupported file type');
-            setLoading(false);
-            return;
-        }
+    const container = pdfContainerRef.current;
+    container.addEventListener('mouseup', handleMouseUp);
 
-        setFileType(detectedFileType);
-        setLoading(false); // No fetching needed, we're done loading
-    }, [fileUrl, onError]);
+    return () => container.removeEventListener('mouseup', handleMouseUp);
+  }, [fileType]);
 
-    // Re-add getFileType function (assuming it was removed)
-    const getFileType = (fileUrl: string): string | null => {
-        try {
-            const urlObj = new URL(fileUrl.split('?')[0]); // Use only base URL for extension detection
-            const pathname = urlObj.pathname;
-            const extension = pathname.split('.').pop()?.toLowerCase();
+  useEffect(() => {
+    if (fileType !== 'pdf') return;
 
-            switch (extension) {
-                case 'pdf':
-                    return 'pdf';
-                case 'jpg':
-                case 'jpeg':
-                case 'png':
-                case 'gif':
-                    return 'image';
-                case 'mp4':
-                case 'mkv':
-                case 'avi':
-                    return 'video';
-                default:
-                    return null;
-            }
-        } catch (error) {
-            console.error("Error parsing URL in getFileType:", fileUrl, error);
-            return null;
-        }
+    const handlePdfSelection = (event: MessageEvent) => {
+      if (event.data?.type === 'pdfSelection') {
+        setSelectedContent(event.data.text);
+        setCurrentPage(event.data.page || 1);
+      }
     };
 
-    // Enhanced renderFileContent with Explain features
+    window.addEventListener('message', handlePdfSelection);
+    return () => window.removeEventListener('message', handlePdfSelection);
+  }, [fileType]);
+
+  const injectSelectionScript = () => {
+    const frame = pdfFrameRef.current;
+    const doc = frame?.contentDocument || frame?.contentWindow?.document;
+    if (!doc) return;
+
+    const existing = doc.getElementById('pdfSelectionScript');
+    if (existing) return;
+
+    const script = doc.createElement('script');
+    script.id = 'pdfSelectionScript';
+    script.textContent = `
+      document.addEventListener('mouseup', () => {
+        const text = window.getSelection()?.toString().trim();
+        const page = document.querySelector('.page[data-page-number]');
+        const pageNumber = page ? parseInt(page.getAttribute('data-page-number')) : 1;
+        if (text) {
+          window.parent.postMessage({ type: 'pdfSelection', text, page: pageNumber }, '*');
+        }
+      });
+    `;
+    doc.body.appendChild(script);
+  };
+
+  const handleExplain = async () => {
+    if (!user) {
+      onError('Please log in to use the explain feature');
+      return;
+    }
+
+    if (fileType === 'pdf' && !selectedContent) {
+      setSelectedContent(`Content from page ${currentPage}`);
+    }
+
+    if (fileType === 'video') {
+      const { start, end } = videoTimeRange;
+      if (start == null || end == null) {
+        onError('Please set both start and end times for the video clip');
+        return;
+      }
+    }
+
+    setIsExplaining(true);
+    try {
+      // TODO: Replace with real explanation API logic
+      const fakeExplanation = `Explanation for "${selectedContent || `video time ${videoTimeRange.start} - ${videoTimeRange.end}`}"`;
+      await new Promise(res => setTimeout(res, 1000)); // Simulate API call
+      setExplanation(fakeExplanation);
+      setShowExplainPanel(true);
+    } catch (err) {
+      onError('Failed to explain content');
+    } finally {
+      setIsExplaining(false);
+    }
+  };
+    // Handle closing the viewer
+    const handleClose = () => {
+        onClose();
+    };
+
+    // Render file content based on type
     const renderFileContent = () => {
         if (loading) {
             return <div className="loading-indicator">Loading...</div>;
@@ -213,147 +177,238 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
         switch (fileType) {
             case 'pdf':
-                // Use a direct iframe approach with parameters to force viewing
-                // The #view=FitH parameter helps trigger the browser's PDF viewer
-                const pdfUrlWithViewParam = `${fileUrl}#view=FitH`;
                 return (
-                    <div className={`file-viewer-with-explain ${showExplainPanel ? 'with-panel' : ''}`}>
-                        <div className="document-view">
-                            <iframe
-                                ref={pdfFrameRef}
-                                src={pdfUrlWithViewParam}
-                                width="100%"
-                                height="750px"
-                                style={{ border: 'none' }}
-                                title="PDF Viewer"
-                            ></iframe>
-                            
-                            {selectedContent && (
+                    <div ref={pdfContainerRef} className="pdf-container">
+                        {/* PDF Viewer */}
+                        <iframe
+                            ref={pdfFrameRef}
+                            src={fileUrl}
+                            className="pdf-viewer"
+                            onLoad={() => {
+                                setLoading(false);
+                                injectSelectionScript();
+                            }}
+                            title="PDF Viewer"
+                        />
+
+                        {/* PDF Controls */}
+                        <div className="pdf-controls">
+                            {/* Debug button - only in development */}
+                            {process.env.NODE_ENV === 'development' && (
+                                <div className="debug-selections">
+                                    <button onClick={() => console.log('Current selection:', selectedContent)}>
+                                        Debug Selection
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Explain tools for PDF */}
+                            {hasPremiumAccess && (
                                 <div className="selection-tools">
-                                    <button 
+                                    <button
                                         onClick={() => {
-                                            setShowExplainPanel(true);
-                                            handleExplain();
+                                            // Toggle explanation panel
+                                            setShowExplainPanel(!showExplainPanel);
+                                            // If panel is being opened, generate explanation
+                                            if (!showExplainPanel) {
+                                                handleExplain();
+                                            }
                                         }}
                                         className="explain-button"
+                                        title="Get AI Explanation"
                                     >
-                                        Explain Selection
+                                        🧠 Explain Selection
                                     </button>
                                 </div>
                             )}
                         </div>
-                        
-                        {showExplainPanel && (
-                            <div className={`explain-panel ${darkMode ? 'dark-mode' : ''}`}>
-                                <div className="panel-header">
-                                    <h3>AI Explanation</h3>
-                                    <button onClick={() => setShowExplainPanel(false)} className="close-panel-button">×</button>
-                                </div>
-                                <div className="panel-content">
-                                    {isExplaining ? (
-                                        <div className="loading-explanation">Generating explanation...</div>
-                                    ) : (
-                                        <>
-                                            <div className="selection-preview">
-                                                <strong>Selected Text:</strong>
-                                                <p>{selectedContent}</p>
-                                            </div>
-                                            <div className="explanation-content">
-                                                <strong>Explanation:</strong>
-                                                <p>{explanation}</p>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 );
-            case 'image':
-                return <img src={fileUrl} alt="File content" style={{ width: '100%', height: 'auto' }} />;
+
             case 'video':
                 return (
-                    <div className={`file-viewer-with-explain ${showExplainPanel ? 'with-panel' : ''}`}>
-                        <div className="document-view">
-                            <video 
-                                ref={videoRef}
-                                controls 
-                                width="100%" 
-                                height="auto"
-                                {...(videoStartTime ? { currentTime: videoStartTime } : {})}
-                            >
-                                <source src={fileUrl} type="video/mp4" />
-                                Your browser does not support the video tag or the video format.
-                            </video>
-                            
+                    <div className="video-container">
+                        <video
+                            ref={videoRef}
+                            controls
+                            className="video-player"
+                            onLoadedData={() => setLoading(false)}
+                            {...(videoStartTime ? { currentTime: videoStartTime } : {})}
+                        >
+                            <source src={fileUrl} type="video/mp4" />
+                            Your browser does not support the video tag or the video format.
+                        </video>
+
+                        {/* Video time selection controls */}
+                        {hasPremiumAccess && (
                             <div className="video-selection-tools">
-                                <button onClick={handleSetVideoStart} className="set-time-button">
-                                    Set Start ({videoTimeRange.start?.toFixed(1) || 'Not Set'})
+                                <button 
+                                    onClick={() => {
+                                        const time = videoRef.current?.currentTime || null;
+                                        setVideoTimeRange({ start: time, end: null });
+                                    }} 
+                                    className="set-time-button"
+                                >
+                                    Set Start
                                 </button>
-                                <button onClick={handleSetVideoEnd} className="set-time-button">
-                                    Set End ({videoTimeRange.end?.toFixed(1) || 'Not Set'})
+                                <button 
+                                    onClick={() => {
+                                        const time = videoRef.current?.currentTime || null;
+                                        setVideoTimeRange({ ...videoTimeRange, end: time });
+                                    }} 
+                                    className="set-time-button"
+                                >
+                                    Set End
                                 </button>
-                                {videoTimeRange.start !== null && (
-                                    <button 
-                                        onClick={() => {
-                                            setShowExplainPanel(true);
+                                <button
+                                    onClick={() => {
+                                        // Toggle the explanation panel
+                                        setShowExplainPanel(!showExplainPanel);
+                                        // If panel is being opened, generate explanation
+                                        if (!showExplainPanel) {
                                             handleExplain();
-                                        }}
-                                        className="explain-button"
-                                    >
-                                        Explain This Clip
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                        
-                        {showExplainPanel && (
-                            <div className={`explain-panel ${darkMode ? 'dark-mode' : ''}`}>
-                                <div className="panel-header">
-                                    <h3>AI Explanation</h3>
-                                    <button onClick={() => setShowExplainPanel(false)} className="close-panel-button">×</button>
-                                </div>
-                                <div className="panel-content">
-                                    {isExplaining ? (
-                                        <div className="loading-explanation">Generating explanation...</div>
-                                    ) : (
-                                        <>
-                                            <div className="selection-preview">
-                                                <strong>Selected Time Range:</strong>
-                                                <p>
-                                                    {videoTimeRange.start?.toFixed(1)}s 
-                                                    {videoTimeRange.end ? ` to ${videoTimeRange.end.toFixed(1)}s` : ''}
-                                                </p>
-                                            </div>
-                                            <div className="explanation-content">
-                                                <strong>Explanation:</strong>
-                                                <p>{explanation}</p>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
+                                        }
+                                    }}
+                                    className="explain-button"
+                                    title="Get AI Explanation"
+                                >
+                                    🧠 Explain Clip
+                                </button>
                             </div>
                         )}
                     </div>
                 );
-            default:
-                return <div>Unsupported file type</div>;
-        }
-    };
 
-    const handleClose = () => {
-        onClose();
+            case 'image':
+                return (
+                    <div className="image-container">
+                        <img src={fileUrl} alt={file.name} className="image-viewer" onLoad={() => setLoading(false)} />
+                    </div>
+                );
+
+            default:
+                return <div className="error-message">Unsupported file type</div>;
+        }
     };
 
     return (
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
-                {renderFileContent()}
-                {/* Consider making the close button more accessible */}
-                <button onClick={handleClose} className="close-button" aria-label="Close file viewer">❌</button>
+                <div className="document-view">
+                    {renderFileContent()}
+                </div>
+
+                {/* Explain panel */}
+                {showExplainPanel && (
+                    <div className="explain-panel">
+                        <div className="panel-header">
+                            <h3>AI Explanation</h3>
+                            <div className="panel-controls">
+                                <button 
+                                    onClick={handleExplain} 
+                                    className="explain-button" 
+                                    disabled={isExplaining}
+                                    title={isExplaining ? 'Generating...' : 'Generate new explanation'}
+                                >
+                                    {isExplaining ? '🔄' : '🧠'}
+                                </button>
+                                <button 
+                                    onClick={() => setShowExplainPanel(false)} 
+                                    className="close-panel-button"
+                                    title="Close panel"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        </div>
+                        <div className="panel-content">
+                            {isExplaining ? (
+                                <div className="loading-explanation">
+                                    <div className="spinner">🔄</div>
+                                    <p>AI is analyzing your content...</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="selection-preview">
+                                        <h4>{fileType === 'video' ? 'Selected Clip' : 'Selected Content'}</h4>
+                                        {fileType === 'video' ? (
+                                            <div className="time-range">
+                                                <span className="time-label">Start:</span>
+                                                <span className="time-value">
+                                                    {videoTimeRange.start !== null 
+                                                        ? `${videoTimeRange.start.toFixed(1)}s` 
+                                                        : 'Not set'}
+                                                </span>
+                                                <span className="time-label">End:</span>
+                                                <span className="time-value">
+                                                    {videoTimeRange.end !== null 
+                                                        ? `${videoTimeRange.end.toFixed(1)}s` 
+                                                        : 'Not set'}
+                                                </span>
+                                            </div>
+                                        ) : (
+                                            <div className="text-preview">
+                                                <p className="selection">{selectedContent || `Content from page ${currentPage}`}</p>
+                                                {currentPage && <span className="page-number">Page {currentPage}</span>}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="explanation-content">
+                                        <h4>AI Explanation</h4>
+                                        {explanation ? (
+                                            <div className="explanation">{explanation}</div>
+                                        ) : (
+                                            <div className="no-explanation">
+                                                <p>No explanation yet</p>
+                                                <button 
+                                                    onClick={handleExplain}
+                                                    className="generate-button"
+                                                    disabled={isExplaining}
+                                                >
+                                                    🧠 Generate Explanation
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {/* File viewer controls */}
+                <div className="file-viewer-controls">
+                    {/* Explain button - only shown for premium users */}
+                    {hasPremiumAccess && (
+                        <button 
+                            onClick={() => {
+                                if (fileType === 'pdf' && !selectedContent) {
+                                    setSelectedContent(`Content from page ${currentPage}`);
+                                }
+                                setShowExplainPanel(!showExplainPanel);
+                                if (!showExplainPanel) {
+                                    handleExplain();
+                                }
+                            }} 
+                            className="action-button explain-button" 
+                            aria-label="Explain with AI"
+                            title="Explain with AI"
+                            style={{ display: hasPremiumAccess ? 'block' : 'none' }}
+                        >
+                            🧠 Explain
+                        </button>
+                    )}
+                    <button 
+                        onClick={handleClose} 
+                        className="action-button close-button" 
+                        aria-label="Close file viewer"
+                    >
+                        ❌
+                    </button>
+                </div>
             </div>
         </div>
     );
-};
+}
 
 export default FileViewerComponent;

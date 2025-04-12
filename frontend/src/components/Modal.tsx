@@ -42,13 +42,6 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, darkMod
               <span className="button-icon">↓</span> Download
             </button>
           )}
-          <button 
-            onClick={onClose} 
-            className="modal-footer-close-button"
-            aria-label="Close modal"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>

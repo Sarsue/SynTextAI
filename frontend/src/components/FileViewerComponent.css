@@ -14,6 +14,42 @@
     z-index: 1000;
 }
 
+/* File viewer controls */
+.file-viewer-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 10px;
+    z-index: 100;
+}
+
+.action-button {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.action-button:hover {
+    transform: scale(1.1);
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.close-button {
+    color: #e11d48;
+}
+
+.explain-button {
+    color: #2563eb;
+}
+
 /* Modal Content Box */
 .file-viewer-content {
     background-color: #fff;
@@ -167,7 +203,13 @@
     justify-content: space-between;
     align-items: center;
     padding: 10px 15px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid #ddd;
+}
+
+.panel-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
 
 .explain-panel.dark-mode .panel-header {
@@ -185,6 +227,19 @@
     font-size: 1.2rem;
     cursor: pointer;
     color: #888;
+}
+
+.explain-emoji-button {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #2563eb;
+    padding: 0;
+}
+
+.explain-emoji-button:hover {
+    color: #1d4ed8;
 }
 
 .panel-content {
@@ -211,15 +266,18 @@
 }
 
 .selection-tools {
-    position: absolute;
+    position: fixed;
     bottom: 20px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.95);
     border-radius: 20px;
-    padding: 5px 15px;
+    padding: 10px 20px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    z-index: 100;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .explain-button {
@@ -230,6 +288,29 @@
     border-radius: 4px;
     cursor: pointer;
     font-weight: 500;
+    font-size: 16px;
+    transition: background-color 0.2s ease;
+}
+
+.explain-button:hover {
+    background: #1d4ed8;
+}
+
+/* Pulsing animation for explain button */
+.file-viewer-controls .explain-button {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        text-shadow: 0 0 0 rgba(37, 99, 235, 0.7);
+    }
+    70% {
+        text-shadow: 0 0 10px rgba(37, 99, 235, 0.9);
+    }
+    100% {
+        text-shadow: 0 0 0 rgba(37, 99, 235, 0.7);
+    }
 }
 
 .video-selection-tools {
@@ -259,6 +340,8 @@
     color: #666;
 }
 
+
+
 /* Mobile responsive design for explain feature */
 @media (max-width: 768px) {
     .file-viewer-with-explain {
@@ -284,4 +367,6 @@
     .explain-panel.dark-mode {
         border-top: 1px solid #444;
     }
+
+
 }
