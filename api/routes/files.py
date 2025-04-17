@@ -5,9 +5,10 @@ from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from typing import Dict, List, Optional, Union, Any
-from docsynth_store import DocSynthStore
+from docsynth_store import DocSynthStore, Explanation
 from pydantic import BaseModel, Field
 from llm_service import prompt_llm
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
@@ -147,92 +148,176 @@ async def reextract_file(
     except Exception as e:
         logger.error(f"Error reextracting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-        
-# Model for explain content request
-class ExplainRequest(BaseModel):
-    fileId: int
-    fileType: str  # 'pdf' or 'video'
-    selectionType: str  # 'text' or 'video_range'
-    content: Optional[str] = None  # Selected text content for PDF
-    page: Optional[int] = 1  # Page number for PDF
-    videoStart: Optional[float] = None  # Start timestamp for video (seconds)
-    videoEnd: Optional[float] = None  # End timestamp for video (seconds)
 
-# Route to explain file content
-@files_router.post("/explain", status_code=status.HTTP_200_OK)
-async def explain_file_content(
-    request: Request,
-    data: ExplainRequest = Body(...),
+# Pydantic models for Explanations
+class ExplainRequest(BaseModel):
+    context: str
+    selection_type: str = Field(..., pattern="^(text|video_range)$") # 'text' or 'video_range'
+    # Add other potential context details if needed, e.g., page number for PDF
+    page: Optional[int] = None 
+    video_start: Optional[float] = None
+    video_end: Optional[float] = None
+
+class ExplanationResponse(BaseModel):
+    id: int
+    file_id: int
+    user_id: int
+    context_info: Optional[str] = None # Combined context for frontend 
+    explanation_text: Optional[str] = None
+    created_at: datetime
+    # Add specific fields if needed for frontend differentiation
+    selection_type: str
+    page: Optional[int] = None
+    video_start: Optional[float] = None
+    video_end: Optional[float] = None
+    
+    class Config:
+        orm_mode = True
+
+class ExplanationHistoryResponse(BaseModel):
+    explanations: List[ExplanationResponse]
+
+# Placeholder function definition (replace with actual implementation or import)
+async def prompt_llm(prompt: str) -> str:
+    # Replace this with your actual call to the LLM service
+    logger.info(f"Simulating LLM call with prompt: {prompt[:100]}...")
+    await asyncio.sleep(1) # Simulate processing time
+    return f"This is an AI-generated explanation for: {prompt[:100]}..."
+
+# Route to get explanation history for a file
+@files_router.get("/{file_id}/explanations", response_model=ExplanationHistoryResponse, summary="Get Explanation History", description="Retrieves all explanations previously generated for a specific file by the user.")
+async def get_explanation_history(
+    file_id: int,
     user_data: Dict = Depends(authenticate_user)
 ):
-    """Generate AI-powered explanations for selected content in files.
-    
-    Premium users get more detailed explanations with longer context windows.
-    Free users have limited monthly usage.
-    """
     try:
-        user_id = user_data["user_id"]
-        store = request.app.state.store
-        
-        # Check if file exists and belongs to the user
-        file = store.get_file_by_id(data.fileId)
-        if not file or file.user_id != user_id:
+        # Check if file exists and belongs to user (optional, store method handles user_id)
+        file_record = store.get_file_by_id(file_id)
+        if not file_record or file_record.user_id != user_data["user_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-        
-        # Check user's subscription status
-        #is_premium = store.is_premium_user(user_id)
-        
-        # Generate the explanation based on file type and selection
-        explanation = ""
-        
-        if data.selectionType == "text":
-            # Format prompt for text explanation (PDF)
-            if not data.content or not data.content.strip():
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No text content provided to explain")
-                
-            explanation = await generate_text_explanation(
-                content=data.content,
-                file_name=file.file_name,
-                page=data.page,
-                is_premium=is_premium
-            )
             
-        elif data.selectionType == "video_range":
-            # Format prompt for video time range explanation
-            if data.videoStart is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No video timestamp provided")
-                
-            explanation = await generate_video_explanation(
-                file_name=file.file_name,
-                start_time=data.videoStart,
-                end_time=data.videoEnd or data.videoStart,
-                is_premium=is_premium
-            )
-        else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid selection type")
+        explanations_data = store.get_explanations_for_file(user_id=user_data["user_id"], file_id=file_id)
         
-        # Save the explanation to the database
+        # Map DB results to Pydantic models before returning
+        response_list = []
+        for exp_data in explanations_data:
+            # Create the combined context_info for the frontend
+            context_info = exp_data.get('content') # Default to content for text
+            if exp_data.get('selection_type') == 'video_range':
+                start = exp_data.get('video_start')
+                end = exp_data.get('video_end')
+                context_info = f"Video {start:.1f}s - {end:.1f}s" if start is not None and end is not None else "Video time range"
+            elif exp_data.get('selection_type') == 'text' and exp_data.get('page') is not None:
+                 context_info = f"Page {exp_data.get('page')}: {exp_data.get('content', '')[:50]}..." 
+                 
+            response_list.append(ExplanationResponse(
+                id=exp_data['id'],
+                file_id=file_id, # Or get from exp_data if available
+                user_id=user_data["user_id"], # Or get from exp_data if available
+                context_info=context_info, # Use the generated context_info
+                explanation_text=exp_data.get('explanation'),
+                created_at=exp_data['created_at'],
+                selection_type=exp_data['selection_type'],
+                page=exp_data.get('page'),
+                video_start=exp_data.get('video_start'),
+                video_end=exp_data.get('video_end')
+            ))
+            
+        return ExplanationHistoryResponse(explanations=response_list)
+    except Exception as e:
+        logger.error(f"Error fetching explanation history for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve explanation history")
+
+# Route to generate and save a new explanation
+@files_router.post("/{file_id}/explain", response_model=ExplanationResponse, status_code=status.HTTP_201_CREATED, summary="Generate and Save Explanation", description="Generates an AI explanation for a selected part of a file and saves it.")
+async def explain_file_content(
+    file_id: int,
+    request: ExplainRequest,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        # 1. Check if user is premium
+        if not store.is_premium_user(user_data["user_id"]):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Explain feature requires a premium subscription.")
+            
+        # 2. Check if file exists and belongs to the user
+        file_record = store.get_file_by_id(file_id)
+        if not file_record or file_record.user_id != user_data["user_id"]:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+        # 3. Prepare the prompt for the LLM
+        # TODO: Refine prompt engineering - maybe include file context?
+        prompt = f"Explain the following content: {request.context}"
+        
+        # 4. Call the LLM service (replace placeholder)
+        explanation_text = await prompt_llm(prompt)
+        if not explanation_text:
+             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate explanation")
+
+        # 5. Save the explanation to the database
         explanation_id = store.save_explanation(
-            user_id=user_id,
-            file_id=data.fileId,
-            selection_type=data.selectionType,
-            content=data.content,
-            explanation=explanation,
-            page=data.page,
-            video_start=data.videoStart,
-            video_end=data.videoEnd
+            user_id=user_data["user_id"],
+            file_id=file_id,
+            selection_type=request.selection_type,
+            content=request.context if request.selection_type == 'text' else None,
+            explanation=explanation_text,
+            page=request.page if request.selection_type == 'text' else None,
+            video_start=request.video_start if request.selection_type == 'video_range' else None,
+            video_end=request.video_end if request.selection_type == 'video_range' else None
         )
         
-        return {
-            "explanation": explanation,
-            "explanationId": explanation_id,
-            "isPremium": is_premium
-        }
+        # 6. Retrieve the saved explanation to return it
+        # This is slightly inefficient but ensures we return the full object as stored
+        # Alternatively, construct the response directly from inputs + ID + timestamp
+        saved_explanation = store.get_explanation_by_id(explanation_id) # Assumes get_explanation_by_id exists
+        if not saved_explanation:
+             # Fallback: construct response manually if get_explanation_by_id doesn't exist or fails
+             # Determine context_info based on type for the response
+            context_info = request.context
+            if request.selection_type == 'video_range':
+                context_info = f"Video {request.video_start:.1f}s - {request.video_end:.1f}s" if request.video_start is not None and request.video_end is not None else "Video time range"
+            elif request.selection_type == 'text' and request.page is not None:
+                 context_info = f"Page {request.page}: {request.context[:50]}..." 
+                 
+            return ExplanationResponse(
+                id=explanation_id,
+                file_id=file_id,
+                user_id=user_data["user_id"],
+                context_info=context_info,
+                explanation_text=explanation_text,
+                created_at=datetime.utcnow(), # Approximate time
+                selection_type=request.selection_type,
+                page=request.page,
+                video_start=request.video_start,
+                video_end=request.video_end
+            )
         
+        # If get_explanation_by_id worked:
+        context_info = saved_explanation.content
+        if saved_explanation.selection_type == 'video_range':
+            context_info = f"Video {saved_explanation.video_start:.1f}s - {saved_explanation.video_end:.1f}s" if saved_explanation.video_start is not None and saved_explanation.video_end is not None else "Video time range"
+        elif saved_explanation.selection_type == 'text' and saved_explanation.page is not None:
+            context_info = f"Page {saved_explanation.page}: {saved_explanation.content[:50]}..." 
+            
+        return ExplanationResponse(
+            id=saved_explanation.id,
+            file_id=saved_explanation.file_id,
+            user_id=saved_explanation.user_id,
+            context_info=context_info,
+            explanation_text=saved_explanation.explanation,
+            created_at=saved_explanation.created_at,
+            selection_type=saved_explanation.selection_type,
+            page=saved_explanation.page,
+            video_start=saved_explanation.video_start,
+            video_end=saved_explanation.video_end
+        )
+
+    except HTTPException as he:
+        raise he # Re-raise HTTP exceptions directly
     except Exception as e:
-        logger.error(f"Error generating explanation: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-        
+        logger.error(f"Error explaining content for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate or save explanation")
+
 async def generate_text_explanation(content: str, file_name: str, page: int = 1, is_premium: bool = False) -> str:
     """Generate an explanation for text selection from a document"""
     try:
