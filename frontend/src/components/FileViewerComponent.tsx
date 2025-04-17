@@ -70,7 +70,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
-            const response = await fetch(`/api/files/${fileId}/explanations`, {
+            const response = await fetch(`/api/v1/files/${fileId}/explanations`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -132,7 +132,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 fileId: fileId,
             };
 
-            const response = await fetch(`/api/files/${fileId}/explain`, {
+            const response = await fetch(`/api/v1/files/${fileId}/explain`, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${idToken}`,
@@ -281,7 +281,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 throw new Error('Failed to get ID token.');
             }
 
-            const response = await fetch('/api/files/explain', {
+            const response = await fetch('/api/v1/files/explain', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
