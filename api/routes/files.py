@@ -188,6 +188,7 @@ async def prompt_llm(prompt: str) -> str:
 @files_router.get("/{file_id}/explanations", response_model=ExplanationHistoryResponse, summary="Get Explanation History", description="Retrieves all explanations previously generated for a specific file by the user.")
 async def get_explanation_history(
     file_id: int,
+    request: Request, 
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
@@ -196,35 +197,8 @@ async def get_explanation_history(
         file_record = store.get_file_by_id(file_id)
         if not file_record or file_record.user_id != user_data["user_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-            
         explanations_data = store.get_explanations_for_file(user_id=user_data["user_id"], file_id=file_id)
-        
-        # Map DB results to Pydantic models before returning
-        response_list = []
-        for exp_data in explanations_data:
-            # Create the combined context_info for the frontend
-            context_info = exp_data.get('content') # Default to content for text
-            if exp_data.get('selection_type') == 'video_range':
-                start = exp_data.get('video_start')
-                end = exp_data.get('video_end')
-                context_info = f"Video {start:.1f}s - {end:.1f}s" if start is not None and end is not None else "Video time range"
-            elif exp_data.get('selection_type') == 'text' and exp_data.get('page') is not None:
-                 context_info = f"Page {exp_data.get('page')}: {exp_data.get('content', '')[:50]}..." 
-                 
-            response_list.append(ExplanationResponse(
-                id=exp_data['id'],
-                file_id=file_id, # Or get from exp_data if available
-                user_id=user_data["user_id"], # Or get from exp_data if available
-                context_info=context_info, # Use the generated context_info
-                explanation_text=exp_data.get('explanation'),
-                created_at=exp_data['created_at'],
-                selection_type=exp_data['selection_type'],
-                page=exp_data.get('page'),
-                video_start=exp_data.get('video_start'),
-                video_end=exp_data.get('video_end')
-            ))
-            
-        return ExplanationHistoryResponse(explanations=response_list)
+        return ExplanationHistoryResponse(explanations=explanations_data)
     except Exception as e:
         logger.error(f"Error fetching explanation history for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve explanation history")
@@ -233,7 +207,8 @@ async def get_explanation_history(
 @files_router.post("/{file_id}/explain", response_model=ExplanationResponse, status_code=status.HTTP_201_CREATED, summary="Generate and Save Explanation", description="Generates an AI explanation for a selected part of a file and saves it.")
 async def explain_file_content(
     file_id: int,
-    request: ExplainRequest,
+    explain_req: ExplainRequest,
+    request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
@@ -249,7 +224,7 @@ async def explain_file_content(
 
         # 3. Prepare the prompt for the LLM
         # TODO: Refine prompt engineering - maybe include file context?
-        prompt = f"Explain the following content: {request.context}"
+        prompt = f"Explain the following content: {explain_req.context}"
         
         # 4. Call the LLM service (replace placeholder)
         explanation_text = await prompt_llm(prompt)
@@ -260,12 +235,12 @@ async def explain_file_content(
         explanation_id = store.save_explanation(
             user_id=user_data["user_id"],
             file_id=file_id,
-            selection_type=request.selection_type,
-            content=request.context if request.selection_type == 'text' else None,
+            selection_type=explain_req.selection_type,
+            content=explain_req.context if explain_req.selection_type == 'text' else None,
             explanation=explanation_text,
-            page=request.page if request.selection_type == 'text' else None,
-            video_start=request.video_start if request.selection_type == 'video_range' else None,
-            video_end=request.video_end if request.selection_type == 'video_range' else None
+            page=explain_req.page if explain_req.selection_type == 'text' else None,
+            video_start=explain_req.video_start if explain_req.selection_type == 'video_range' else None,
+            video_end=explain_req.video_end if explain_req.selection_type == 'video_range' else None
         )
         
         # 6. Retrieve the saved explanation to return it
@@ -275,11 +250,11 @@ async def explain_file_content(
         if not saved_explanation:
              # Fallback: construct response manually if get_explanation_by_id doesn't exist or fails
              # Determine context_info based on type for the response
-            context_info = request.context
-            if request.selection_type == 'video_range':
-                context_info = f"Video {request.video_start:.1f}s - {request.video_end:.1f}s" if request.video_start is not None and request.video_end is not None else "Video time range"
-            elif request.selection_type == 'text' and request.page is not None:
-                 context_info = f"Page {request.page}: {request.context[:50]}..." 
+            context_info = explain_req.context
+            if explain_req.selection_type == 'video_range':
+                context_info = f"Video {explain_req.video_start:.1f}s - {explain_req.video_end:.1f}s" if explain_req.video_start is not None and explain_req.video_end is not None else "Video time range"
+            elif explain_req.selection_type == 'text' and explain_req.page is not None:
+                 context_info = f"Page {explain_req.page}: {explain_req.context[:50]}..." 
                  
             return ExplanationResponse(
                 id=explanation_id,
@@ -288,10 +263,10 @@ async def explain_file_content(
                 context_info=context_info,
                 explanation_text=explanation_text,
                 created_at=datetime.utcnow(), # Approximate time
-                selection_type=request.selection_type,
-                page=request.page,
-                video_start=request.video_start,
-                video_end=request.video_end
+                selection_type=explain_req.selection_type,
+                page=explain_req.page,
+                video_start=explain_req.video_start,
+                video_end=explain_req.video_end
             )
         
         # If get_explanation_by_id worked:
