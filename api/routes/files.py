@@ -192,6 +192,7 @@ async def get_explanation_history(
 ):
     try:
         # Check if file exists and belongs to user (optional, store method handles user_id)
+        store = request.app.state.store
         file_record = store.get_file_by_id(file_id)
         if not file_record or file_record.user_id != user_data["user_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -237,6 +238,7 @@ async def explain_file_content(
 ):
     try:
         # 1. Check if user is premium
+        store = request.app.state.store
         if not store.is_premium_user(user_data["user_id"]):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Explain feature requires a premium subscription.")
             
