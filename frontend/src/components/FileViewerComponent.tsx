@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useUserContext } from '../UserContext';
 import './FileViewerComponent.css';
-import { UploadedFile } from './types';
+import { UploadedFile, Explanation } from './types';
 import SelectionToolbox from './SelectionToolbox'; // Import the new component
 
 interface FileViewerComponentProps {
@@ -11,30 +11,6 @@ interface FileViewerComponentProps {
     darkMode: boolean;
 }
 
-interface Explanation {
-    id: number;
-    context_info: string | null;
-    explanation_text: string;
-    created_at: string;
-    page: number | null;
-    video_start?: number | null;
-    video_end?: number | null;
-}
-
-interface ExplainApiPayload {
-    fileId: number;
-    contentType: 'pdf' | 'video';
-    pageNumber?: number;
-    startTime?: number;
-    endTime?: number;
-}
-
-interface ExplainMutationVariables {
-    contentType: 'pdf' | 'video';
-    pageNumber?: number;
-    startTime?: number;
-    endTime?: number;
-}
 
 const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose, onError, darkMode }) => {
     const { user } = useUserContext();
@@ -47,9 +23,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const [error, setError] = useState<string | null>(null);
     const [selectionToolboxPosition, setSelectionToolboxPosition] = useState<{ top: number; left: number } | null>(null);
     const [selectionText, setSelectionText] = useState<string>('');
+    const [isPremiumUser, setIsPremiumUser] = useState<boolean>(false);
+    const [showTools, setShowTools] = useState(false);
+    const [isExplanationLoading, setIsExplanationLoading] = useState<boolean>(false);
+    const [explanation, setExplanation] = useState<string | null>(null);
+    const [debugSelection, setDebugSelection] = useState<string>(""); // State to show debug info
+    const [allExplanations, setAllExplanations] = useState<any[]>([]); // State to store all fetched explanations
 
-    const iframeRef = useRef<HTMLIFrameElement>(null);
-    const videoRef = useRef<HTMLVideoElement>(null);
+    const pdfViewerRef = useRef<HTMLIFrameElement>(null);
+    const videoPlayerRef = useRef<HTMLVideoElement>(null);
+
     const fileId = file.id;
     const fileUrl = file.publicUrl;
 
@@ -81,10 +64,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 throw new Error(errorData.detail || `Failed to fetch history: ${response.statusText}`);
             }
 
-            const data: Explanation[] = await response.json();
-            if (!Array.isArray(data)) {
-                throw new Error('API returned malformed data');
+            const responseData = await response.json();
+            if (!responseData || !Array.isArray(responseData.explanations)) {
+                console.error("API response structure incorrect:", responseData); // Log the actual bad response
+                throw new Error('API returned malformed data structure'); // More specific error
             }
+
+            const data: Explanation[] = responseData.explanations; // Extract the array
 
             setExplanationHistory(data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
         } catch (err) {
@@ -98,6 +84,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
     }, [user, fileId, onError]); // Dependencies for the fetch function
 
+
+    useEffect(() => {
+        const type = getFileType(fileUrl || file.name);
+        console.log(`Detected file type: ${type}`); // Debugging statement
+        setFileType(type);
+        if (!type) {
+            onError(`Unsupported file type or could not determine type for: ${file.name}`);
+        }
+    }, [fileUrl, file.name, onError]);
+    
     useEffect(() => {
         if (showExplainPanel && user && fileId) {
             fetchExplanationHistory();
@@ -109,7 +105,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
     }, [showExplainPanel, user, fileId, fetchExplanationHistory]);
 
-    const createExplanation = async (variables: ExplainMutationVariables) => {
+    const createExplanation = async (variables: { startTime?: number; endTime?: number }) => {
         if (!user) {
             setError('User not available');
             onError('User not available');
@@ -127,9 +123,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not found');
 
-            const apiPayload: ExplainApiPayload = {
-                ...variables,
-                fileId: fileId,
+            // Build correct payload for backend
+            const apiPayload = {
+                selection_type: fileType === 'pdf' ? 'text' : 'video_range',
+                page: fileType === 'pdf' ? currentPage : undefined,
+                video_start: fileType === 'video' ? variables.startTime : undefined,
+                video_end: fileType === 'video' ? variables.endTime : undefined,
             };
 
             const response = await fetch(`/api/v1/files/${fileId}/explain`, {
@@ -162,48 +161,115 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
     };
 
-    const handleExplainClick = () => {
-        if (!fileId || !fileType || (fileType !== 'pdf' && fileType !== 'video')) {
-            const msg = "Cannot explain: File type not supported or missing.";
-            setError(msg);
-            onError(msg);
+    const handleExplainClick = async () => {
+        setShowTools(false);
+        setError(null);
+        setExplanation(null);
+        setIsExplanationLoading(true);
+
+        if (!isPremiumUser) {
+            setError("Explain feature requires a premium subscription.");
+            setIsExplanationLoading(false);
             return;
         }
 
-        let variables: ExplainMutationVariables = {
-            contentType: fileType as 'pdf' | 'video',
-        };
+        try {
+            let foundExplanation = null;
 
-        if (fileType === 'pdf') {
-            console.log("Explaining PDF page:", currentPage);
-            variables.pageNumber = currentPage;
-        } else { // fileType === 'video'
-            const currentTime = videoRef.current?.currentTime;
-            if (currentTime !== undefined) {
-                const startTime = Math.floor(currentTime);
-                console.log(`Explaining video at: ${startTime}s`);
-                variables.startTime = startTime;
-                variables.endTime = startTime + 1;
-            } else {
-                const msg = "Could not get video current time.";
-                setError(msg);
-                onError(msg);
-                return;
+            if (fileType === 'pdf') {
+                console.log(`Finding PDF explanation for page: ${currentPage}`);
+                // Find explanation matching the current page
+                foundExplanation = allExplanations.find(
+                    exp => exp.selection_type === 'text' && exp.page === currentPage
+                );
+                if (!foundExplanation) {
+                    console.warn(`No pre-generated explanation found for page ${currentPage}.`);
+                }
+
+            } else if (fileType === 'video' && videoPlayerRef.current) {
+                const currentTime = videoPlayerRef.current.currentTime;
+                console.log(`Finding Video explanation for time: ${currentTime}`);
+                // Find explanation where currentTime is within start/end or closest to start
+                // This logic might need refinement based on how segments/explanations are stored
+                foundExplanation = allExplanations
+                    .filter(exp => exp.selection_type === 'video_range' && exp.video_start !== null)
+                    .sort((a, b) => Math.abs(a.video_start - currentTime) - Math.abs(b.video_start - currentTime))
+                    .find(exp => currentTime >= exp.video_start && (exp.video_end === null || currentTime <= exp.video_end));
+
+                // Fallback to closest start time if no exact match
+                if (!foundExplanation && allExplanations.length > 0) {
+                    foundExplanation = allExplanations
+                        .filter(exp => exp.selection_type === 'video_range' && exp.video_start !== null)
+                        .sort((a, b) => Math.abs(a.video_start - currentTime) - Math.abs(b.video_start - currentTime))[0];
+                    console.warn(`No exact video range match for ${currentTime}s. Using closest explanation starting at ${foundExplanation?.video_start}s.`);
+                }
+
+                if (!foundExplanation) {
+                    console.warn(`No pre-generated explanation found near time ${currentTime}s.`);
+                }
             }
-        }
 
-        // Call the create function directly
-        createExplanation(variables);
+            if (foundExplanation && foundExplanation.explanation_text) {
+                console.log("Displaying pre-generated explanation:", foundExplanation);
+                setExplanation(foundExplanation.explanation_text);
+            } else {
+                // No specific explanation found for this page/time
+                if (allExplanations.length > 0 || !isExplanationLoading) {
+                    // We have explanations loaded, just not for this specific selection
+                    const identifierValue = fileType === 'pdf' ? currentPage : (videoPlayerRef.current?.currentTime ?? 0);
+                    const selectionType = fileType === 'pdf' ? `page ${identifierValue}` : `time ${Number(identifierValue).toFixed(1)}s`;
+                    setError(`No pre-generated explanation found for ${selectionType}.`);
+                } else {
+                    // This might mean explanations failed to load or haven't loaded yet
+                    setError("Explanations are not available for this file or failed to load.");
+                }
+                setExplanation(null); // Clear any old explanation being displayed
+            }
+
+        } catch (error) {
+            console.error('Error during explanation retrieval:', error);
+            let errorMessage = 'An unexpected error occurred while finding the explanation.';
+            if (error instanceof Error) {
+                errorMessage = error.message;
+            }
+            setError(errorMessage);
+        } finally {
+            setIsExplanationLoading(false);
+        }
+    };
+
+    const fetchExplanations = async () => {
+        if (!fileId || !user) return;
+        setIsExplanationLoading(true); // Use existing loading state or add a new one
+        setAllExplanations([]); // Clear previous explanations
+        try {
+            const idToken = await user.getIdToken();
+            if (!idToken) throw new Error('User token not available');
+
+            const response = await fetch(`/api/v1/files/${fileId}/explanations`, {
+                headers: {
+                    'Authorization': `Bearer ${idToken}`
+                }
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            setAllExplanations(data.explanations || []); // Update state with fetched explanations
+            console.log("Fetched explanations:", data.explanations);
+        } catch (error) {
+            console.error('Error fetching explanations:', error);
+            setError('Failed to load explanations.');
+            // Optionally set error state to show in UI
+        } finally {
+            setIsExplanationLoading(false);
+        }
     };
 
     useEffect(() => {
-        const type = getFileType(fileUrl || file.name);
-        console.log(`Detected file type: ${type}`); // Debugging statement
-        setFileType(type);
-        if (!type) {
-            onError(`Unsupported file type or could not determine type for: ${file.name}`);
-        }
-    }, [fileUrl, file.name, onError]);
+        fetchExplanations();
+    }, [fileId, user]);
 
     const handlePdfMessage = useCallback((event: MessageEvent) => {
         const expectedOrigin = 'expected_pdf_viewer_origin'; // Replace with dynamic origin if needed
@@ -235,7 +301,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 return (
                     <div className="pdf-container file-content-area">
                         <iframe
-                            ref={iframeRef}
+                            ref={pdfViewerRef}
                             src={fileUrl}
                             className="pdf-viewer"
                             title={`PDF Viewer - ${file.name}`}
@@ -246,7 +312,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 return (
                     <div className="video-container file-content-area">
                         <video
-                            ref={videoRef}
+                            ref={videoPlayerRef}
                             controls
                             src={fileUrl}
                             className="video-player"
@@ -281,24 +347,28 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 throw new Error('Failed to get ID token.');
             }
 
-            const response = await fetch('/api/v1/files/explain', {
+            const response = await fetch(`/api/v1/files/${file.id}/explain`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    // Use the fetched idToken here
                     'Authorization': `Bearer ${idToken}`,
                 },
-                body: JSON.stringify({ file_id: file.id, selection: selectionText, selection_type: 'text' }),
+                body: JSON.stringify({
+                    selection_type: 'text',
+                    page: currentPage,
+                    video_start: null,
+                    video_end: null,
+                }),
             });
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const data = await response.json();
             console.log('Explanation received:', data);
-            alert(`Explanation: ${data.explanation}`); // Placeholder display
+            alert(`Explanation: ${data.explanation_text || data.explanation}`); // Placeholder display
         } catch (error) {
             console.error('Error explaining selection:', error);
             alert('Failed to get explanation.');
         }
-    }, [selectionText, file, user]); // Update dependency array to include user object
+    }, [selectionText, file, user, currentPage]);
 
     const handleCloseToolbox = useCallback(() => {
         setSelectionToolboxPosition(null); // Hide toolbox
@@ -311,10 +381,10 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const selectedText = selection?.toString().trim();
 
             // Check if selection exists and has text before proceeding
-            if (selectedText && selection && iframeRef.current?.contains(event.target as Node)) { 
+            if (selectedText && selection && pdfViewerRef.current?.contains(event.target as Node)) { 
                 const range = selection.getRangeAt(0); 
                 const rect = range.getBoundingClientRect();
-                const containerRect = iframeRef.current.getBoundingClientRect();
+                const containerRect = pdfViewerRef.current.getBoundingClientRect();
                 const top = rect.bottom - containerRect.top + window.scrollY + 5;
                 const left = rect.left - containerRect.left + window.scrollX + rect.width / 2;
 
@@ -327,7 +397,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             }
         };
 
-        const iframeElement = iframeRef.current;
+        const iframeElement = pdfViewerRef.current;
         if (fileType === 'pdf' && iframeElement) {
             const timerId = setTimeout(() => { document.addEventListener('mouseup', handleMouseUp); }, 100);
             return () => {

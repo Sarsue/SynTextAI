@@ -800,6 +800,68 @@ class DocSynthStore:
         finally:
             session.close()
 
+    def get_segments_for_page(self, file_id: int, page_number: int) -> List[str]:
+        """Get all segment contents for a specific page of a file."""
+        session = self.get_session()
+        try:
+            segments = session.query(Segment.content).filter(
+                Segment.file_id == file_id,
+                Segment.page_number == page_number
+            ).all()
+            # segments will be a list of tuples like [('content1',), ('content2',)]
+            return [content for (content,) in segments]
+        except Exception as e:
+            logging.error(f"Error fetching segments for file {file_id}, page {page_number}: {e}")
+            return [] # Return empty list on error
+        finally:
+            session.close()
+
+    def get_segments_for_time_range(self, file_id: int, start_time: float, end_time: Optional[float] = None) -> List[str]:
+        """Get segment contents for a specific time range of a video file.
+        Assumes segments have 'start' and 'end' keys in meta_data.
+        Retrieves segments that overlap with the requested [start_time, end_time].
+        If end_time is None, retrieves all segments ending at or before start_time.
+        """
+        session = self.get_session()
+        try:
+            query = session.query(Segment.content).filter(
+                Segment.file_id == file_id,
+                Segment.meta_data.isnot(None) # Ensure meta_data exists
+            )
+
+            # --- Overlap Logic --- 
+            # A segment [s_start, s_end] overlaps with request [r_start, r_end] if:
+            # s_start < r_end AND s_end > r_start
+            # We need to cast meta_data values to numeric types for comparison.
+            # Using ->> to get text and ::float to cast in PostgreSQL.
+            # Adjust casting if using a different DB.
+
+            if end_time is not None:
+                # Case 1: Request has a range [r_start, r_end]
+                query = query.filter(
+                    (Segment.meta_data['start'].astext.cast(Float) < end_time),
+                    (Segment.meta_data['end'].astext.cast(Float) > start_time)
+                )
+            else:
+                # Case 2: Request has only a start time [r_start]
+                # Fetch all segments ending at or before r_start
+                query = query.filter(
+                    (Segment.meta_data['end'].astext.cast(Float) <= start_time)
+                )
+            # --- End Overlap Logic ---
+
+            # Order by start time for coherence
+            query = query.order_by(Segment.meta_data['start'].astext.cast(Float))
+
+            segments = query.all()
+            return [content for (content,) in segments]
+        except Exception as e:
+            # Log the error, including potential issues with meta_data structure or casting
+            logging.error(f"Error fetching segments for file {file_id}, time {start_time}-{end_time}: {e}", exc_info=True)
+            return [] # Return empty list on error
+        finally:
+            session.close()
+
     def update_file_summary(self, user_id: int, file_name: str, summary: str):
         """Updates the summary field for a specific file."""
         session = self.get_session()
@@ -837,6 +899,18 @@ class DocSynthStore:
         finally:
             session.close()
             
+    def get_file_by_name(self, user_id: int, filename: str) -> Optional[File]:
+        """Get a file record by user ID and filename."""
+        session = self.get_session()
+        try:
+            file_record = session.query(File).filter(
+                File.user_id == user_id,
+                File.file_name == filename
+            ).order_by(File.created_at.desc()).first() # Get the most recent if multiple exist
+            return file_record
+        finally:
+            session.close()
+
     def save_explanation(self, user_id: int, file_id: int, selection_type: str, content: str = None, 
     explanation: str = None, page: int = None, video_start: float = None, video_end: float = None) -> int:
         """Save an explanation for a file selection
@@ -894,18 +968,29 @@ class DocSynthStore:
             
             result = []
             for exp in explanations:
+                # Compute context_info for frontend
+                if exp.selection_type == 'video_range':
+                    if exp.video_start is not None and exp.video_end is not None:
+                        context_info = f"Video {exp.video_start:.1f}s - {exp.video_end:.1f}s"
+                    else:
+                        context_info = "Video time range"
+                elif exp.selection_type == 'text' and exp.page is not None and exp.content:
+                    context_info = f"Page {exp.page}: {exp.content[:50]}..."
+                else:
+                    context_info = exp.content if exp.content else None
                 exp_dict = {
                     "id": exp.id,
+                    "file_id": exp.file_id,
+                    "user_id": exp.user_id,
+                    "context_info": context_info,
+                    "explanation_text": exp.explanation,
+                    "created_at": exp.created_at if exp.created_at else None,
                     "selection_type": exp.selection_type,
-                    "content": exp.content,
-                    "explanation": exp.explanation,
                     "page": exp.page,
                     "video_start": exp.video_start,
-                    "video_end": exp.video_end,
-                    "created_at": exp.created_at.isoformat() if exp.created_at else None
+                    "video_end": exp.video_end
                 }
                 result.append(exp_dict)
-                
             return result
         finally:
             session.close()

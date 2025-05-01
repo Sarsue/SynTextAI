@@ -20,7 +20,18 @@ export interface UploadedFile {
     processed: boolean;
     summary: string | null;
 }
-
+export interface Explanation {
+    id: number;
+    file_id: number;
+    user_id: number;
+    context_info: string | null;
+    explanation_text: string | null; // Allow null
+    created_at: string;
+    selection_type: string;
+    page: number | null;
+    video_start?: number | null;
+    video_end?: number | null;
+}
 export interface Message {
 
     id: number;

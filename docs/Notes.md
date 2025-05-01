@@ -1,54 +1,61 @@
+SyntextAI
 
-BUSINESS
+preferences
+language
+web search
 
-IDEAS
-- PDF to Markdown FOR BETTER CAPTURING OF  FIGURES AND TABLES EXTRACTS*
-Later using a Multi Modal Model (Pixtral / Qwen / GPT Vision), we ingest information from these type of documents visually let a Multimodal Model extract information for us visually
-https://github.com/kkaarrss/pdf-to-markup/blob/main/pdf_reader.py
+Documents Supported
+PDF
+Youtube link
+Csv
+Images
+PPT
+MP4
 
-- resolve intent, gather context (chat history, web, documents), generate response
+information and knowledge assistant for learning
 
+Preprocessing
+update frontend and give user ability to fix issues in preprocessing pipeline
+dspy 
 
-Deploying
-1 BUILD IMAGE
+- QA
+answers with source from documents and or web pages
+with references included
 
-Build docker build --no-cache -t syntextaiapp .
+Preprocessing
+- Explanations (notes)
+as we extract data we create detailed explanations to help understand the content using web if we must to learn 
 
-RUN docker run --rm -p 3000:3000 --env-file .env --memory 2g syntextaiapp
+give user choice to edit and enhance notes
+- page - pdf
+- time stamps for videos
+- row index for financial sheets
 
-TAG docker tag syntextaiapp:latest osasdeeon/syntextai:latest
-
-PUSH docker push osasdeeon/syntextai:latest
-
-APP PLATFORM CONNECTS TO DOCKER HUB AND DEPLOYS PUSHED IMAGE
-
-2 DEPLOY DROPLET 
-
-3 Copy env file and deploy scripts
-
-copy .env, docker-compose-prod.yml, settings.yml and deploy.sh files
-
-
-scp  /Users/osas/Documents/dev/app/deploy.sh  /Users/osas/Documents/dev/app/docker-compose.yml root@178.128.236.126:/home/root/
-
-ssh root@178.128.236.126
-
-4 Deploy script
-on server chmod +x deploy.sh
- ./deploy.sh
-
-rename files
-
-Troubleshooting scp may fail cos of key gen 
-Open the file: nano ~/.ssh/known_hosts 
-Go to a specific line: Ctrl + _ (underscore), 
-enter the line number, 
-press Enter 
-Delete the line: Ctrl + K
-Save and exit: Ctrl + X, Y, Enter
+-Evaluations (Quiz)
+options for multi-choice or type response (easy | hard mode)
+as we extract data we Generate questions to test the students knowledge of the material based on the option they selected present question with choice or no choices
+save evaluations for historical purposes.
 
 
-how to override searxng settings
-docker run -d -p 8888:8080 --name searxng \
-  -v $(pwd)/settings.yml:/etc/searxng/settings.yml \
-  searxng/searxng:latest
+Testing
+Evals for the Above
+
+finance domain
+Warren Buffet Newsletter
+
+technical domain
+AI papers e.g Attention is All you need (good domain for LLM to be evaluated)
+
+
+Deployment
+CI/CD automation
+github actions for master branch to deploy the changes to current production environment.
+
+
+Marketing
+$15 / month for professionals and students
+$135 / year 
+ 
+
+
+

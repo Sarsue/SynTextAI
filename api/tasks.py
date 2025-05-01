@@ -6,7 +6,7 @@ from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from docsynth_store import DocSynthStore
-from llm_service import get_text_embeddings_in_batches, get_text_embedding, prompt_llm, token_count, MAX_TOKENS
+from llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT
 from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
@@ -85,88 +85,256 @@ async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-async def process_file_data(user_id: str, user_gc_id: str, filename: str, language: str):
-    """Processes a file (audio, video, or document) and stores its data."""
-    logger.info(f"Processing file: {filename} for user_id: {user_id}")
+async def process_file_data(user_id: str, file_id: str, filename: str, file_url: str):
+    """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
+    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id})")
+    store = None # Initialize store to None
+    file_path = None # Initialize file_path to None
+    # Wrap entire process in a try-except block to catch errors
+    try: # Main try block starts here
+        store = DocSynthStore() # Initialize store inside try
+        # Download file from GCS
+        # Create a temporary file path
+        with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
+            file_path = temp_file.name
+            file_data = download_from_gcs(file_url, filename)
+            if not file_data:
+                raise HTTPException(status_code=404, detail="File not found.")
+            temp_file.write(file_data)
 
-    file_data = download_from_gcs(user_gc_id, filename)
-    if not file_data:
-        raise HTTPException(status_code=404, detail="File not found.")
+        # Determine file type and process accordingly
+        _, ext = os.path.splitext(filename)
+        ext = ext.lower().strip('.')
 
-    _, ext = os.path.splitext(filename)
-    ext = ext.lstrip('.').lower()
+        if ext in ["mp4", "mov", "avi", "mkv", "webm", "mp3", "wav", "m4a"]: # Handle common video/audio types
+            # VIDEO/AUDIO PATH
+            logger.info(f"Processing video/audio file: {filename}")
+            # Transcribe (assuming transcribe_audio_chunked works for video files too)
+            language = 'en' # Assuming default language, adjust if needed
+            transcribed_data = await transcribe_audio_chunked(file_path, language)
+            logger.info(f"Transcription complete. Segments: {len(transcribed_data)}")
 
-    try:
-        if ext in {"mp4", "mkv", "avi"}:
-            logger.info("Extracting audio from video...")
-            with tempfile.NamedTemporaryFile(delete=True, suffix=f".{ext}") as temp_file:
-                temp_file.write(file_data)
-                temp_file.flush()
-                extracted_data = await transcribe_audio_chunked(temp_file.name, lang=language)
-                ext = "video"
-        else:
-            logger.info("Processing document file...")
-            extracted_data = extract_data(file_data, ext)
+            # --- Prepare video data structure with embeddings for storage ---+
+            processed_video_data = []
+            all_small_chunks = [] # List to hold tuples of (segment_index, chunk_text)
+            segment_chunk_map = {} # Map segment index to its list of small chunk texts
 
-        # Process and embed data in batches
-        for data in extracted_data:
-            chunk_contents = [chunk["content"] for chunk in data["chunks"]]
-            chunk_embeddings = get_text_embeddings_in_batches(chunk_contents, batch_size=5)
+            logger.info(f"Chunking content for {len(transcribed_data)} video segments...")
+            for i, segment in enumerate(transcribed_data):
+                segment_content = segment.get('content', '')
+                if segment_content.strip():
+                    small_chunks = chunk_text(segment_content)
+                    non_empty_small_chunks = [chk for chk in small_chunks if chk.strip()]
+                    segment_chunk_map[i] = non_empty_small_chunks
+                    for chunk_text_content in non_empty_small_chunks:
+                        all_small_chunks.append((i, chunk_text_content))
+                else:
+                    segment_chunk_map[i] = []
 
-            for chunk, embedding in zip(data["chunks"], chunk_embeddings):
-                chunk["embedding"] = embedding
+            # Generate embeddings for all small chunks across the video in one batch
+            logger.info(f"Generating embeddings for {len(all_small_chunks)} small chunks across video...")
+            all_small_chunk_texts = [text for _, text in all_small_chunks]
+            all_embeddings = []
+            if all_small_chunk_texts:
+                all_embeddings = get_text_embeddings_in_batches(all_small_chunk_texts)
 
-        store.update_file_with_chunks(user_id, filename, ext, extracted_data)
-
-        # --- Aggregate Text from All Chunks for Summary --- 
-        full_file_text = " ".join(
-            chunk["content"]
-            for data_item in extracted_data 
-            for chunk in data_item.get("chunks", [])
-        )
-        
-        if not full_file_text:
-             logger.warning(f"Could not aggregate text from chunks for summarization. File ID: {user_id}, Filename: {filename}")
-             # Skip summarization if no text could be aggregated
-             file_summary = None
-        else:
-            # --- Generate Summary --- 
-            logger.info(f"Starting summarization for file: {filename} (ID: {user_id})")
-            summarization_prompt = (
-                f"Provide a concise, comprehensive summary of the following document content. "
-                f"Focus on the main topics, key findings, and overall purpose.\n\n"
-                f"Document Content:\n"
-                f"------------------\n"
-                f"{full_file_text}\n" # Use the aggregated text here
-                f"------------------\n\n"
-                f"Summary:"
-            )
-            
-            prompt_tokens = token_count(summarization_prompt)
-            if prompt_tokens > MAX_TOKENS:
-                 logger.warning(f"Aggregated file content plus prompt ({prompt_tokens} tokens) exceeds model limit ({MAX_TOKENS}) for summarization. Skipping summary for file ID {user_id}.")
-                 file_summary = None
+            if len(all_embeddings) != len(all_small_chunks):
+                logger.error(f"Mismatch between small chunk count ({len(all_small_chunks)}) and embedding count ({len(all_embeddings)}). Some chunks may not be stored with embeddings.")
+                # Handle mismatch if needed - maybe retry? For now, proceed but some chunks won't get embeddings.
+                embedding_dict = {}
             else:
-                try:
-                    file_summary = prompt_llm(summarization_prompt)
-                    logger.info(f"Successfully generated summary for file: {filename} (ID: {user_id})")
-                except Exception as e:
-                    logger.error(f"Error generating summary for file ID {user_id}: {e}")
-                    file_summary = None
-        
-        # Save summary to DB (if generated)
-        if file_summary:
-            store.update_file_summary(user_id, filename, file_summary)
-            logger.info(f"Successfully saved summary to database for file ID: {user_id}")
+                # Create a dictionary mapping chunk text to its embedding for easier lookup
+                # Using index might be safer if chunk texts aren't unique
+                embedding_dict = {all_small_chunks[i][1] : all_embeddings[i] for i in range(len(all_small_chunks))}
+                # Consider using a tuple (segment_index, chunk_index) as key if texts aren't unique enough
 
-        response_data = {"user_id": user_id, "filename": filename, "status": "processed"}
-        await websocket_manager.send_message(user_id, "file_processed", {"status": "success", "result": response_data})
-        return {"status": "success", "result": response_data}
+            # Reconstruct processed_video_data with segment info and its embedded small chunks
+            logger.info("Structuring video data for storage...")
+            for i, segment in enumerate(transcribed_data):
+                segment_content = segment.get('content', '')
+                structured_item = {
+                    'start_time': segment.get('start_time'),
+                    'end_time': segment.get('end_time'),
+                    'content': segment_content, # Keep segment content for Segment record
+                    'chunks': [] # Initialize chunks list
+                }
+
+                # Populate with the small chunks and their embeddings for this segment
+                small_chunks_for_segment = segment_chunk_map.get(i, [])
+                for small_chunk_text in small_chunks_for_segment:
+                    embedding = embedding_dict.get(small_chunk_text) # Look up embedding
+                    if embedding is not None:
+                        structured_item['chunks'].append({
+                            'embedding': embedding,
+                            'content': small_chunk_text # Store the small chunk content
+                        })
+                    else:
+                        # Optionally store chunk without embedding if lookup failed (due to mismatch)
+                        logger.warning(f"Could not find embedding for chunk in segment {i}. Storing chunk without embedding.")
+                        structured_item['chunks'].append({
+                            'embedding': None, # Explicitly None
+                            'content': small_chunk_text
+                        })
+
+                processed_video_data.append(structured_item)
+            logger.info("Finished structuring video data with embeddings.")
+
+            # --- Generate and save explanations for video segments --- 
+            logger.info(f"Generating explanations for {len(transcribed_data)} video segments...")
+            for i, segment in enumerate(transcribed_data): # Corrected: use enumerate if needed, or just loop
+                try:
+                    segment_content = segment.get('content', '')
+                    if not segment_content.strip():
+                        logger.debug(f"Skipping empty video segment {segment.get('start_time', 0):.1f}s for explanation.")
+                        continue
+
+                    # Call the new DSPy-based explanation function
+                    explanation_text = generate_explanation_dspy(segment_content)
+
+                    if explanation_text and not explanation_text.startswith("Error:"): # Check for valid explanation
+                        store.save_explanation(
+                            user_id=int(user_id),
+                            file_id=file_id,
+                            selection_type='video_range',
+                            explanation=explanation_text,
+                            video_start=segment['start_time'],
+                            video_end=segment['end_time']
+                        )
+                        logger.debug(f"Saved explanation for video segment {segment['start_time']:.1f}s - {segment['end_time']:.1f}s")
+                    else:
+                        logger.warning(f"LLM failed to generate explanation for video segment {segment['start_time']:.1f}s - {segment['end_time']:.1f}s")
+                except Exception as e:
+                    logger.error(f"Error generating/saving explanation for video segment {segment.get('start_time', 0):.1f}s: {e}", exc_info=True)
+            logger.info("Finished generating video segment explanations.")
+
+            # Save the segmented video data with embeddings
+            if processed_video_data:
+                store.update_file_with_chunks(user_id=int(user_id), filename=filename, file_type="video", extracted_data=processed_video_data)
+                logger.info("Processed and stored video segments with chunks.")
+            else:
+                logger.warning("No processed video data with chunks generated, skipping storage update.")
+
+        elif ext == "pdf":
+            logger.info("Extracting text from PDF...")
+            # Use pdf_extracter to get page-based data
+            from pdf_extracter import extract_text_with_page_numbers 
+            page_data = extract_text_with_page_numbers(file_data)
+            logger.info(f"PDF extraction complete. Pages: {len(page_data)}")
+
+            # --- Prepare data structure with embeddings for storage ---+
+            processed_page_data = []
+            logger.info(f"Chunking content for {len(page_data)} PDF pages...") # Consistency
+            for page_item in page_data:
+                try:
+                    page_content = page_item['content']
+                    page_num = page_item['page_num']
+                    if page_content:
+                        # Chunk the page content
+                        text_chunks = chunk_text(page_content)
+                        non_empty_chunks = [chunk for chunk in text_chunks if chunk.strip()]
+                        page_chunks_with_embeddings = []
+
+                        if non_empty_chunks:
+                            # Generate embeddings for all non-empty chunks in batch
+                            chunk_embeddings = get_text_embeddings_in_batches(non_empty_chunks)
+
+                            # Ensure we got the same number of embeddings as chunks
+                            if len(chunk_embeddings) == len(non_empty_chunks):
+                                for i, chunk_content in enumerate(non_empty_chunks):
+                                    page_chunks_with_embeddings.append({
+                                        'embedding': chunk_embeddings[i],
+                                        'content': chunk_content # Optional: store chunk content too
+                                    })
+                            else:
+                                logger.error(f"Mismatch between chunk count ({len(non_empty_chunks)}) and embedding count ({len(chunk_embeddings)}) for page {page_num}")
+                                # Decide how to handle mismatch: skip page, store without embeddings, etc.?
+                                # For now, let's log error and proceed without embeddings for this page
+                                page_chunks_with_embeddings = [] # Clear potentially partial data
+
+                        # Structure data as expected by update_file_with_chunks
+                        structured_item = {
+                            'page_num': page_num,
+                            'content': page_content, # Keep full page content for Segment record
+                            'chunks': page_chunks_with_embeddings # List of chunk dicts
+                        }
+                        processed_page_data.append(structured_item)
+                    else:
+                        logger.warning(f"Skipping chunking/embedding for empty page {page_num}")
+                except Exception as embed_error:
+                    logger.error(f"Error chunking/embedding page {page_item.get('page_num', 'N/A')}: {embed_error}", exc_info=True)
+            logger.info("Finished chunking and generating PDF page embeddings.")
+
+            # --- Generate and save explanations for PDF pages --- 
+            logger.info(f"Generating explanations for {len(page_data)} PDF pages...")
+            for page_item in page_data: # Iterate original page_data for explanations
+                try:
+                    page_content = page_item.get('content', '')
+                    page_num = page_item.get('page_num', 'N/A') # Get page number safely
+                    if not page_content.strip():
+                        logger.debug(f"Skipping empty PDF page {page_num} for explanation.")
+                        continue
+                        
+                    # Call the new DSPy-based explanation function
+                    explanation_text = generate_explanation_dspy(page_content)
+
+                    if explanation_text and not explanation_text.startswith("Error:"):
+                        store.save_explanation(
+                            user_id=int(user_id),
+                            file_id=file_id,
+                            selection_type='page', # Changed to 'page' for clarity
+                            explanation=explanation_text,
+                            page=page_item['page_num'],
+                        )
+                        logger.debug(f"Saved explanation for PDF page {page_item['page_num']}")
+                    else:
+                        logger.warning(f"LLM failed to generate explanation for PDF page {page_item['page_num']}")
+                except Exception as e:
+                    logger.error(f"Error generating/saving explanation for PDF page {page_item['page_num']}: {e}", exc_info=True)
+            logger.info("Finished generating PDF page explanations.")
+
+            # Save the segmented PDF data with embeddings
+            if processed_page_data:
+                store.update_file_with_chunks(user_id=int(user_id), filename=filename, file_type="pdf", extracted_data=processed_page_data)
+                logger.info("Processed and stored PDF segments.")
+            else:
+                logger.warning("No processed PDF data with chunks generated, skipping storage update.")
+
+        else:
+            logger.warning(f"Unsupported file type: {ext}")
+            # Optionally update file status
+            # store.update_file_status(file_id, 'unsupported')
 
     except Exception as e:
-        logger.error(f"Error processing {filename}: {e}")
-        await websocket_manager.send_message(user_id, "file_processed", {"status": "failed", "error": str(e)})
-        raise HTTPException(status_code=500, detail="File processing failed")
+        logger.error(f"Error processing file {filename} (ID: {file_id}): {e}", exc_info=True)
+        # Check if variables exist before using them (user_id, file_id should be defined as function args)
+        # but check store just in case initialization failed
+        if 'user_id' in locals() and user_id is not None:
+            await websocket_manager.send_message(user_id, {"type": "error", "file_id": file_id, "message": f"Error processing file {filename}: {e}"})
+        if 'file_id' in locals() and file_id is not None and store is not None:
+            store.update_file_status(file_id, 'error')
+        # Rollback transaction in case of error if needed
+        # if store is not None: store.rollback_session() # Example if explicit rollback is needed
+
+    finally:
+        if 'file_path' in locals() and os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Cleaned up temporary file: {file_path}")
+        # Check if store exists before closing
+        if store is not None:
+            store.close_session() # Ensure session is closed
+        # Clear Whisper model from memory if loaded
+        # global whisper_model
+        # if whisper_model:
+        #     # Explicitly delete and collect garbage to free GPU memory if applicable
+        #     del whisper_model
+        #     whisper_model = None
+        #     gc.collect()
+        #     if torch.cuda.is_available():
+        #         torch.cuda.empty_cache()
+        #     logger.info("Cleaned up Whisper model from memory.")
+        # else:
+        #     logger.info("Whisper model was not loaded or already cleaned up.")
+        pass # Ensure finally block is not empty if all cleanup is commented out
 
 async def process_query_data(id: str, history_id: str, message: str, language: str, comprehension_level: str):
     """Processes a user query and generates a response using SyntextAgent."""

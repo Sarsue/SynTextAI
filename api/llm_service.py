@@ -7,27 +7,67 @@ import requests
 import tiktoken 
 from sentence_transformers import SentenceTransformer
 import time
-from google import genai
+import google.generativeai as genai
+import dspy 
 
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
 google_api_key = os.getenv("GOOGLE_API_KEY")
 
-
 # Initialize Gemini client and MistralAI client (keep for embeddings if needed)
-client = genai.Client(api_key=google_api_key)
-mistral_client = MistralClient(api_key=mistral_key)
+# Note: genai.Client is deprecated; use genai.configure and GenerativeModel
+if google_api_key:
+    try:
+        genai.configure(api_key=google_api_key)
+        # We'll instantiate the model later or use it via dspy.Google
+        logging.info("Google GenAI configured.")
+    except Exception as e:
+        logging.error(f"Failed to configure Google GenAI: {e}")
+        # Handle lack of configuration appropriately
+else:
+    logging.warning("GOOGLE_API_KEY not found in environment variables.")
+
+# Initialize Mistral client if key exists
+mistral_client = None
+if mistral_key:
+    mistral_client = MistralClient(api_key=mistral_key)
+    logging.info("Mistral client initialized.")
+else:
+    logging.warning("MISTRAL_API_KEY not found, Mistral client not initialized (needed for embeddings).")
+
 
 # --- Updated Model and Token Limit for Gemini --- 
 # Use gemini-1.5-pro for large context window (check availability/pricing)
 # Fallback: gemini-1.0-pro with ~32k limit
-MODEL_NAME = "gemini-2.0-flash" # Or "gemini-1.0-pro"
-# Gemini 1.5 Pro has up to 1 million tokens context window
-# Set a practical limit slightly lower to account for prompt, output, safety margins
-MAX_TOKENS = 1000000 # Adjust if using 1.0 Pro (e.g., 30000)
+# Choose model appropriate for the task. Flash is fast and cheap, good for bulk explanations.
+GEMINI_MODEL_NAME = "gemini-1.5-flash" # Or "gemini-1.5-pro"
+
+# Practical token limits depend on the specific model version and task
+# Gemini 1.5 Flash has 1M context, Pro has up to 2M in preview
+# Set a reasonable limit for explanations, DSPy manages this but good to be aware
+MAX_TOKENS_CONTEXT = 1000000 # Can adjust based on specific Gemini model/needs
+
 delay = 1 # Keep delay if needed for rate limiting (less likely needed with Google)
 logging.basicConfig(level=logging.INFO)
+
+# --- DSPy Configuration --- >
+try:
+    gemini_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
+    dspy.settings.configure(lm=gemini_lm)
+    logging.info(f"DSPy configured successfully with Google model: {GEMINI_MODEL_NAME}")
+except Exception as e:
+    logging.error(f"Failed to configure DSPy with Google: {e}. Explanations via DSPy may fail.")
+    # Depending on requirements, might want to raise an error or have a fallback
+
+# --- DSPy Signature for Explanation --- >
+class GenerateExplanation(dspy.Signature):
+    """Generates a concise 1-2 sentence explanation for the given context."""
+    context = dspy.InputField(desc="The text or transcript segment to explain.")
+    explanation = dspy.OutputField(desc="A concise 1-2 sentence explanation of the context, focusing on the main topic/concept or significance.")
+
+# --- DSPy Predictor for Explanation --- >
+explain_predictor = dspy.Predict(GenerateExplanation)
 
 # --- Token Counter (Using tiktoken as approximation) ---
 # Note: For precise Gemini token counts, use genai.GenerativeModel(MODEL_NAME).count_tokens(text)
@@ -37,7 +77,6 @@ def token_count(text):
     # Choose an appropriate encoding, cl100k_base is common
     encoding = tiktoken.get_encoding("cl100k_base") 
     return len(encoding.encode(text))
-
 
 def extract_image_text(base64_image):
     """Extract text from an image using the Mistral API."""
@@ -71,7 +110,8 @@ def extract_image_text(base64_image):
         return ""
 
 def prompt_llm(query):
-    """Prompt the configured Google Generative AI model."""
+    """Prompt the configured Google Generative AI model. [DEPRECATED - Use DSPy modules]"""
+    logging.warning("Direct call to prompt_llm is deprecated for structured tasks like explanations. Use DSPy modules instead.")
 
     if not google_api_key:
         logging.error("Google API Key not configured.")
@@ -80,7 +120,7 @@ def prompt_llm(query):
     try:
  
         response = client.models.generate_content(
-        model= MODEL_NAME,
+        model= GEMINI_MODEL_NAME,
         contents=query
         )
        # print(response.text)
@@ -94,14 +134,56 @@ def prompt_llm(query):
         # Consider more specific error handling based on google.api_core.exceptions
         return f"Error: Could not get response from LLM. {e}"
 
-def get_text_embedding(input):
-    client = MistralClient(api_key=mistral_key)
+# --- New DSPy-based Explanation Function --- >
+def generate_explanation_dspy(text_chunk: str, max_context_length: int = 2000) -> str:
+    """Generates an explanation for a text chunk using DSPy and Gemini."""
+    if not text_chunk:
+        logging.warning("generate_explanation_dspy called with empty text_chunk.")
+        return ""
 
-    embeddings_batch_response = client.embeddings(
-        model="mistral-embed",
-        input=input
-    )
-    return embeddings_batch_response.data[0].embedding
+    # Truncate context if necessary (DSPy might handle this, but belt-and-suspenders)
+    truncated_chunk = text_chunk[:max_context_length]
+
+    try:
+        # Ensure DSPy was configured
+        if not dspy.settings.lm:
+            logging.error("DSPy LM is not configured. Cannot generate explanation.")
+            return "Error: LLM service not configured."
+            
+        response = explain_predictor(context=truncated_chunk)
+        if response and hasattr(response, 'explanation') and response.explanation:
+             logging.debug(f"DSPy generated explanation: {response.explanation[:50]}...") # Log snippet
+             return response.explanation
+        else:
+            logging.warning(f"DSPy predictor returned empty or invalid response for chunk: {truncated_chunk[:50]}...")
+            return ""
+
+    except Exception as e:
+        logging.error(f"Error generating explanation with DSPy: {e}", exc_info=True)
+        # Return empty string or a specific error message depending on desired behavior
+        return "Error: Failed to generate explanation."
+
+def get_text_embedding(input):
+    # Ensure client is initialized before use
+    if not mistral_client:
+        logging.error("Mistral client not initialized. Cannot get embedding.")
+        # Option: raise error or return None/empty list based on expected handling
+        return [] # Returning empty list might require downstream checks
+        
+    try:
+        embeddings_batch_response = mistral_client.embeddings(
+            model="mistral-embed",
+            input=input
+        )
+        # Add check for data existence
+        if embeddings_batch_response.data:
+            return embeddings_batch_response.data[0].embedding
+        else:
+            logging.warning(f"Mistral embedding returned no data for input: {str(input)[:50]}...")
+            return []
+    except Exception as e:
+        logging.error(f"Error getting embedding from Mistral: {e}", exc_info=True)
+        return [] # Return empty list on error
 
 # --- Embeddings function (Still uses Mistral, update if needed) ---
 def get_text_embeddings_in_batches(inputs, batch_size=10):
@@ -112,7 +194,11 @@ def get_text_embeddings_in_batches(inputs, batch_size=10):
     if not mistral_key:
         logging.error("Mistral API Key not configured for embeddings.")
         return []
-    # Assuming mistral_client is already initialized globally
+    # Ensure client is initialized before use
+    if not mistral_client:
+        logging.error("Mistral client not initialized. Cannot get embeddings in batch.")
+        return []
+        
     all_embeddings = []
     max_retries = 3
     retry_delay = 2 # seconds
