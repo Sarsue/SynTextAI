@@ -76,8 +76,10 @@ async def save_file(
                 logger.error(f"Failed to upload {file.filename} to GCS")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
-            store.add_file(user_id, file.filename, file_url)
-            background_tasks.add_task(process_file_data, user_id, user_gc_id, file.filename, language)
+            # Capture the returned file info, including the ID
+            file_info = store.add_file(user_id, file.filename, file_url) 
+            # Pass the correct arguments: user_gc_id, user_id, file_id, filename, file_url
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], file.filename, file_info['file_url'])
             logger.info(f"Enqueued Task for processing {file.filename}")
 
         return {"message": "File processing queued."}

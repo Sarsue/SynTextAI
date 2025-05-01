@@ -85,22 +85,28 @@ async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-async def process_file_data(user_id: str, file_id: str, filename: str, file_url: str):
+async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str):
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
-    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id})")
+    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id})")
     store = None # Initialize store to None
     file_path = None # Initialize file_path to None
     # Wrap entire process in a try-except block to catch errors
     try: # Main try block starts here
-        store = DocSynthStore() # Initialize store inside try
+        # Use the global store instance, remove the re-initialization below
+        # store = DocSynthStore() # REMOVE THIS LINE 
         # Download file from GCS
         # Create a temporary file path
         with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
             file_path = temp_file.name
-            file_data = download_from_gcs(file_url, filename)
-            if not file_data:
-                raise HTTPException(status_code=404, detail="File not found.")
-            temp_file.write(file_data)
+            logger.debug(f"Created temporary file at {file_path}")
+
+        # Download the file using user_gc_id and filename
+        file_data = download_from_gcs(user_gc_id, filename)
+        if not file_data:
+            # Update file status to 'error' before raising exception
+            store.update_file_status(file_id, 'error') 
+            raise HTTPException(status_code=404, detail="File not found.")
+        temp_file.write(file_data)
 
         # Determine file type and process accordingly
         _, ext = os.path.splitext(filename)
@@ -306,17 +312,19 @@ async def process_file_data(user_id: str, file_id: str, filename: str, file_url:
 
     except Exception as e:
         logger.error(f"Error processing file {filename} (ID: {file_id}): {e}", exc_info=True)
-        # Check if variables exist before using them (user_id, file_id should be defined as function args)
-        # but check store just in case initialization failed
-        if 'user_id' in locals() and user_id is not None:
-            await websocket_manager.send_message(user_id, {"type": "error", "file_id": file_id, "message": f"Error processing file {filename}: {e}"})
+        # Send error message via WebSocket
+        # Ensure user_id and file_id are valid before sending
+        if 'user_id' in locals() and user_id is not None and 'file_id' in locals() and file_id is not None:
+             # Pass event_type="error" as the second argument
+            await websocket_manager.send_message(user_id, "error", {"type": "error", "file_id": file_id, "message": f"Error processing file {filename}: {e}"})
         if 'file_id' in locals() and file_id is not None and store is not None:
             store.update_file_status(file_id, 'error')
         # Rollback transaction in case of error if needed
         # if store is not None: store.rollback_session() # Example if explicit rollback is needed
 
     finally:
-        if 'file_path' in locals() and os.path.exists(file_path):
+        # Check if file_path exists and is not None before removing
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
             logger.info(f"Cleaned up temporary file: {file_path}")
         # Check if store exists before closing

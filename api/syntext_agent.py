@@ -1,6 +1,6 @@
 import re
 import logging
-from llm_service import prompt_llm, token_count, MAX_TOKENS 
+from llm_service import prompt_llm, token_count, MAX_TOKENS_CONTEXT 
 from web_searcher import get_answers_from_web
 
 logging.basicConfig(level=logging.INFO)
@@ -89,8 +89,8 @@ class SyntextAgent:
                 
                 # Step 3: Check token count (optional but recommended)
                 prompt_tokens = token_count(full_prompt)
-                if prompt_tokens > MAX_TOKENS:
-                    logger.warning(f"Combined prompt ({prompt_tokens} tokens) exceeds MAX_TOKENS ({MAX_TOKENS}). Truncation/errors may occur.")
+                if prompt_tokens > MAX_TOKENS_CONTEXT:
+                    logger.warning(f"Combined prompt ({prompt_tokens} tokens) exceeds MAX_TOKENS_CONTEXT ({MAX_TOKENS_CONTEXT}). Truncation/errors may occur.")
                     # Consider more robust handling like erroring or selective context reduction
 
                 # Step 4: Call the LLM with the combined context and instructions

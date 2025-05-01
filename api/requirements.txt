@@ -166,3 +166,6 @@ fastapi
 uvicorn
 google-generativeai
 python-multipart
+ffmpeg-python
+websockets
+
