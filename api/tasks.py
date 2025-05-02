@@ -6,7 +6,7 @@ from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from docsynth_store import DocSynthStore
-from llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT
+from llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT, generate_summary_dspy
 from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
@@ -88,25 +88,32 @@ async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
 async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str):
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id})")
-    store = None # Initialize store to None
     file_path = None # Initialize file_path to None
     # Wrap entire process in a try-except block to catch errors
     try: # Main try block starts here
         # Use the global store instance, remove the re-initialization below
         # store = DocSynthStore() # REMOVE THIS LINE 
-        # Download file from GCS
-        # Create a temporary file path
+        # Create a temporary file path and download inside the 'with' block
         with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
             file_path = temp_file.name
             logger.debug(f"Created temporary file at {file_path}")
-
-        # Download the file using user_gc_id and filename
-        file_data = download_from_gcs(user_gc_id, filename)
-        if not file_data:
-            # Update file status to 'error' before raising exception
-            store.update_file_status(file_id, 'error') 
-            raise HTTPException(status_code=404, detail="File not found.")
-        temp_file.write(file_data)
+            
+            # Download the file using user_gc_id and filename
+            file_data = download_from_gcs(user_gc_id, filename)
+            if not file_data:
+                # Update file status to 'error' before raising exception
+                store.update_file_status(file_id, 'error') 
+                # Need to clean up the temp file manually if download fails *before* writing
+                os.remove(file_path)
+                file_path = None # Prevent cleanup in finally block
+                raise HTTPException(status_code=404, detail="File not found.")
+            
+            # Write the downloaded data to the open temporary file
+            temp_file.write(file_data)
+            # No need to close temp_file, 'with' handles it
+            
+        # Now file_path points to the populated temporary file
+        logger.info(f"Successfully downloaded and saved {filename} to {file_path}")
 
         # Determine file type and process accordingly
         _, ext = os.path.splitext(filename)
@@ -220,6 +227,23 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             else:
                 logger.warning("No processed video data with chunks generated, skipping storage update.")
 
+            # --- Generate and Save Summary (Video/Audio) ---
+            logger.info(f"Attempting to generate summary for video/audio file: {filename}")
+            full_transcription = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
+            if full_transcription:
+                try:
+                    summary_text = generate_summary_dspy(full_transcription)
+                    if summary_text and not summary_text.startswith("Error:"):
+                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
+                        logger.info(f"Successfully generated and saved summary for video/audio file: {filename}")
+                    else:
+                        logger.error(f"Failed to generate summary for video/audio {filename}: {summary_text}")
+                except Exception as summary_err:
+                    logger.error(f"Error during summary generation/saving for video/audio {filename}: {summary_err}", exc_info=True)
+            else:
+                logger.warning(f"No content found to summarize for video/audio file: {filename}")
+            # --------------------------------------------------
+
         elif ext == "pdf":
             logger.info("Extracting text from PDF...")
             # Use pdf_extracter to get page-based data
@@ -237,7 +261,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     if page_content:
                         # Chunk the page content
                         text_chunks = chunk_text(page_content)
-                        non_empty_chunks = [chunk for chunk in text_chunks if chunk.strip()]
+                        non_empty_chunks = [chunk['content'] for chunk in text_chunks if chunk['content'].strip()]
                         page_chunks_with_embeddings = []
 
                         if non_empty_chunks:
@@ -304,6 +328,23 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 logger.info("Processed and stored PDF segments.")
             else:
                 logger.warning("No processed PDF data with chunks generated, skipping storage update.")
+
+            # --- Generate and Save Summary (PDF) ---
+            logger.info(f"Attempting to generate summary for PDF file: {filename}")
+            full_pdf_text = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
+            if full_pdf_text:
+                try:
+                    summary_text = generate_summary_dspy(full_pdf_text)
+                    if summary_text and not summary_text.startswith("Error:"):
+                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
+                        logger.info(f"Successfully generated and saved summary for PDF file: {filename}")
+                    else:
+                        logger.error(f"Failed to generate summary for PDF {filename}: {summary_text}")
+                except Exception as summary_err:
+                    logger.error(f"Error during summary generation/saving for PDF {filename}: {summary_err}", exc_info=True)
+            else:
+                logger.warning(f"No content found to summarize for PDF file: {filename}")
+            # -----------------------------------------
 
         else:
             logger.warning(f"Unsupported file type: {ext}")

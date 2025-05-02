@@ -72,7 +72,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
             const data: Explanation[] = responseData.explanations; // Extract the array
 
-            setExplanationHistory(data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+            setExplanationHistory(data);
         } catch (err) {
             console.error('Error fetching explanation history:', err);
             const errorMsg = err instanceof Error ? err.message : 'Failed to load explanation history.';

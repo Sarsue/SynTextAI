@@ -964,7 +964,7 @@ class DocSynthStore:
             explanations = session.query(Explanation).filter(
                 Explanation.user_id == user_id,
                 Explanation.file_id == file_id
-            ).order_by(Explanation.created_at.desc()).all()
+            ).order_by(Explanation.page.asc().nulls_last(), Explanation.video_start.asc().nulls_last()).all()
             
             result = []
             for exp in explanations:

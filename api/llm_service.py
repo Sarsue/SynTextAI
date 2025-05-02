@@ -62,12 +62,41 @@ except Exception as e:
 
 # --- DSPy Signature for Explanation --- >
 class GenerateExplanation(dspy.Signature):
-    """Generates a concise 1-2 sentence explanation for the given context."""
+    """Generates an explanation for the given context."""
     context = dspy.InputField(desc="The text or transcript segment to explain.")
-    explanation = dspy.OutputField(desc="A concise 1-2 sentence explanation of the context, focusing on the main topic/concept or significance.")
+    explanation = dspy.OutputField(desc="An explanation of the context, focusing on the main topic/concept or significance.")
 
 # --- DSPy Predictor for Explanation --- >
 explain_predictor = dspy.Predict(GenerateExplanation)
+
+# --- DSPy Signature for Summarization --- >
+class SummarizeSignature(dspy.Signature):
+    """Generates a concise summary of the provided text.
+    Instructions: Create a summary capturing the main points of the document text.
+    """
+    document_text = dspy.InputField(desc="The full text of the document to summarize.")
+    summary = dspy.OutputField(desc="A concise summary of the document.")
+
+def generate_summary_dspy(text_to_summarize: str) -> str:
+    """Generates a summary using a configured DSPy module."""
+    if not google_api_key:
+        logging.error("Google API Key not configured. Cannot generate summary.")
+        return "Error: API Key not configured."
+
+    try:
+        # Configure LM specifically for this function call, similar to explanation
+        # This avoids potential issues with global configuration state if other
+        # parts of the app use dspy differently.
+        temp_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
+        with dspy.context(lm=temp_lm):
+            summarizer = dspy.Predict(SummarizeSignature)
+            result = summarizer(document_text=text_to_summarize)
+            logging.info(f"Successfully generated summary.")
+            return result.summary
+    except Exception as e:
+        logging.error(f"Error generating summary with DSPy: {e}", exc_info=True)
+        # Return an error message or None, depending on how caller handles it
+        return "Error: Could not generate summary."
 
 # --- Token Counter (Using tiktoken as approximation) ---
 # Note: For precise Gemini token counts, use genai.GenerativeModel(MODEL_NAME).count_tokens(text)
