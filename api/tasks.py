@@ -189,8 +189,6 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             # Download the file using user_gc_id and filename
             file_data = download_from_gcs(user_gc_id, filename)
             if not file_data:
-                # Update file status to 'error' before raising exception
-                store.update_file_status(file_id, 'error') 
                 # Need to clean up the temp file manually if download fails *before* writing
                 os.remove(file_path)
                 file_path = None # Prevent cleanup in finally block
@@ -436,20 +434,9 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
 
         else:
             logger.warning(f"Unsupported file type: {ext}")
-            # Optionally update file status
-            # store.update_file_status(file_id, 'unsupported')
 
     except Exception as e:
         logger.error(f"Error processing file {filename} (ID: {file_id}): {e}", exc_info=True)
-        # Send error message via WebSocket
-        # Ensure user_id and file_id are valid before sending
-        if 'user_id' in locals() and user_id is not None and 'file_id' in locals() and file_id is not None:
-             # Pass event_type="error" as the second argument
-            await websocket_manager.send_message(user_id, "error", {"type": "error", "file_id": file_id, "message": f"Error processing file {filename}: {e}"})
-        if 'file_id' in locals() and file_id is not None and store is not None:
-            store.update_file_status(file_id, 'error')
-        # Rollback transaction in case of error if needed
-        # if store is not None: store.rollback_session() # Example if explicit rollback is needed
 
     finally:
         # Check if file_path exists and is not None before removing
