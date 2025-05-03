@@ -296,6 +296,29 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return <div className="loading-indicator">Loading file...</div>;
         }
 
+        if (/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//.test(file.publicUrl || file.name)) {
+            // Extract YouTube video ID from URL
+            let videoId = '';
+            const url = file.publicUrl || '';
+            const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?&]v=)|youtu\.be\/)([\w-]{11})/);
+            if (match && match[1]) {
+                videoId = match[1];
+            }
+            return (
+                <div className="youtube-container file-content-area">
+                    <iframe
+                        width="100%"
+                        height="400"
+                        src={`https://www.youtube.com/embed/${videoId}`}
+                        title="YouTube video player"
+                        frameBorder="0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                    />
+                </div>
+            );
+        }
+
         switch (fileType) {
             case 'pdf':
                 return (
@@ -313,9 +336,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                     <div className="video-container file-content-area">
                         <video
                             ref={videoPlayerRef}
-                            controls
                             src={fileUrl}
                             className="video-player"
+                            controls
                             onTimeUpdate={() => { /* Can potentially update state here if needed */ }}
                         >
                             Your browser does not support the video tag.

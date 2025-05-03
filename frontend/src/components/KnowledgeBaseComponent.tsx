@@ -66,10 +66,13 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
                             className={`file-link ${file.processed ? 'link-processed' : 'link-not-processed'}`}
                             onClick={() => handleFileClick(file)}
                         >
+                            {/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//.test(file.publicUrl || file.name) ? (
+                                <span title="YouTube Video" style={{marginRight: 4}}>📺</span>
+                            ) : null}
                             {file.name} {file.processed ? "✅ (Ready)" : "🕒 (Processing)"}
                         </span>
                         {file.processed && (
-                             <button
+                            <button
                                 className={`summary-button ${!file.summary ? 'disabled' : ''}`}
                                 onClick={(e) => {
                                     e.stopPropagation();

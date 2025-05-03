@@ -7,7 +7,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from utils import get_user_id
-from docsynth_store import DocSynthStore
+from docsynth_store import DocSynthStore, Subscription
 
 # Load environment variables
 load_dotenv()
@@ -332,6 +332,7 @@ async def update_payment(
 async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
     payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
+    db_session = None # Initialize db_session
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
@@ -347,9 +348,35 @@ async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
             store.update_subscription_status(stripe_customer_id, "card_declined")
 
         elif event_type == 'customer.subscription.updated':
-            status = data_object['status']
+            current_status = data_object['status']
+            previous_status = event['data'].get('previous_attributes', {}).get('status') # Keep this for potential future use or logging
             current_period_end = data_object['current_period_end']
-            store.update_subscription(stripe_customer_id, status, current_period_end)
+
+            # --- Logic to handle trial end --- 
+            try:
+                db_session = store.get_session()
+                # Find the subscription in our DB *before* updating it
+                subscription_in_db = db_session.query(Subscription).filter_by(stripe_customer_id=stripe_customer_id).first()
+
+                if subscription_in_db and subscription_in_db.status == 'trialing' and current_status != 'trialing':
+                    logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
+                    # TODO: Implement logic here to update the user's plan/tier based on the new status.
+                    # Example: Find the user associated with the subscription (subscription_in_db.user_id)
+                    # and update their plan in the User table (e.g., store.update_user_plan(subscription_in_db.user_id, 'free'))
+                    # Ensure changes are committed if updating directly: db_session.commit()
+                    pass # Placeholder for trial end logic
+
+            except Exception as db_exc:
+                logger.error(f"Database error checking/handling trial end for {stripe_customer_id}: {db_exc}")
+                # Decide if this should prevent the main subscription update - likely not, 
+                # but log it thoroughly.
+            finally:
+                 if db_session:
+                    db_session.close() # Close the session used for checking
+            # --- End trial handling logic --- 
+
+            # Always update the subscription record with the latest status from Stripe
+            store.update_subscription(stripe_customer_id, current_status, current_period_end)
 
         elif event_type == 'customer.subscription.deleted':
             store.update_subscription_status(stripe_customer_id, "canceled")
@@ -363,3 +390,9 @@ async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
         raise HTTPException(status_code=400, detail="Invalid signature")
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
+    finally:
+        # Ensure session is closed if an early exception occurred before the specific check block's finally
+        if db_session and not db_session.is_active:
+             pass # Already closed
+        elif db_session:
+            db_session.close()

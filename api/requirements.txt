@@ -168,4 +168,4 @@ google-generativeai
 python-multipart
 ffmpeg-python
 websockets
-
+youtube-transcript-api

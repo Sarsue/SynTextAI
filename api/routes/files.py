@@ -52,16 +52,34 @@ async def save_file(
     request: Request,
     language: str = Query(default="English", description="Language of the file content"),
     comprehension_level: str = Query(default="Beginner", description="Comprehension level of the file content"),
-    files: List[UploadFile] = File(..., description="List of files to upload"),
+    files: Optional[List[UploadFile]] = File(None, description="List of files to upload"),
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
         from tasks import process_file_data  # Ensure this import is correct
-
+        import re
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
         store = request.app.state.store
 
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("application/json"):
+            # --- Handle YouTube JSON payload ---
+            data = await request.json()
+            if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
+                raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
+            url = data.get("url", "")
+            # Validate YouTube URL
+            youtube_regex = re.compile(r"^(https?://)?(www\.)?(youtube\.com|youtu\.be)/")
+            if not url or not youtube_regex.match(url):
+                raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
+            # Store YouTube file entry (type: 'youtube')
+            file_info = store.add_file(user_id, url, url)  # Just store as a file with url as name and publicUrl
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True)  # True = is_youtube
+            logger.info(f"Enqueued Task for processing YouTube link: {url}")
+            return {"message": "YouTube video processing queued."}
+
+        # --- Handle regular file upload as before ---
         if not files:
             logger.warning('No files provided')
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files provided")
@@ -77,8 +95,7 @@ async def save_file(
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
             # Capture the returned file info, including the ID
-            file_info = store.add_file(user_id, file.filename, file_url) 
-            # Pass the correct arguments: user_gc_id, user_id, file_id, filename, file_url
+            file_info = store.add_file(user_id, file.filename, file_url)
             background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], file.filename, file_info['file_url'])
             logger.info(f"Enqueued Task for processing {file.filename}")
 

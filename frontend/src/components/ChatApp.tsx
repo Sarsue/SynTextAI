@@ -21,6 +21,10 @@ interface ChatAppProps {
 }
 
 const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
+    // --- YouTube link upload state ---
+    const [youtubeUrl, setYoutubeUrl] = useState('');
+    const [isYoutubeSubmitting, setIsYoutubeSubmitting] = useState(false);
+    const [youtubeError, setYoutubeError] = useState('');
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
     const { darkMode, userSettings, fetchSubscriptionStatus, subscriptionStatus } = useUserContext();
@@ -468,6 +472,61 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     return (
         <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>
+            {/* --- YouTube Link Upload UI --- */}
+            <div className="youtube-upload-container" style={{ margin: '1rem 0', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                    type="text"
+                    placeholder="Paste YouTube link..."
+                    value={youtubeUrl}
+                    onChange={e => setYoutubeUrl(e.target.value)}
+                    disabled={isYoutubeSubmitting}
+                    style={{ flex: 1, padding: '0.5rem', borderRadius: 4, border: '1px solid #ccc' }}
+                />
+                <button
+                    onClick={async () => {
+                        setIsYoutubeSubmitting(true);
+                        setYoutubeError('');
+                        try {
+                            if (!youtubeUrl.match(/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//)) {
+                                setYoutubeError('Please enter a valid YouTube URL.');
+                                setIsYoutubeSubmitting(false);
+                                return;
+                            }
+                            const idToken = await user?.getIdToken();
+                            if (!idToken) throw new Error('User token not available');
+                            const res = await fetch('/api/v1/files', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${idToken}`
+                                },
+                                body: JSON.stringify({ type: 'youtube', url: youtubeUrl })
+                            });
+                            if (!res.ok) {
+                                const data = await res.json().catch(() => ({}));
+                                throw new Error(data.detail || 'Failed to add YouTube video');
+                            }
+                            setYoutubeUrl('');
+                            fetchUserFiles();
+                        } catch (err) {
+                            if (err && typeof err === 'object' && 'message' in err) {
+                                setYoutubeError((err as any).message || 'Failed to add YouTube video');
+                            } else {
+                                setYoutubeError('Failed to add YouTube video');
+                            }
+                        } finally {
+                            setIsYoutubeSubmitting(false);
+                        }
+                    }}
+                    disabled={isYoutubeSubmitting || !youtubeUrl}
+                    style={{ padding: '0.5rem 1rem', borderRadius: 4, background: '#e53e3e', color: '#fff', border: 'none', fontWeight: 600 }}
+                >
+                    {isYoutubeSubmitting ? 'Adding...' : 'Add YouTube Video'}
+                </button>
+                {youtubeError && (
+                    <span style={{ color: 'red', marginLeft: '1rem' }}>{youtubeError}</span>
+                )}
+            </div>
             <div className="layout-container">
                 {isMobile ? (
                     <>

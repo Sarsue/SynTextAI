@@ -85,9 +85,97 @@ async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str):
+async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False):
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id})")
+    # --- YOUTUBE LINK HANDLING ---
+    if is_youtube or (filename.startswith('http') and ('youtube.com' in filename or 'youtu.be' in filename)):
+        logger.info(f"Processing YouTube link: {filename}")
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+            import re
+            # Extract video ID from URL
+            yt_match = re.search(r'(?:v=|youtu.be/|embed/)([\w-]{11})', filename)
+            video_id = yt_match.group(1) if yt_match else None
+            if not video_id:
+                logger.error(f"Could not extract video ID from YouTube URL: {filename}")
+            try:
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                transcript = transcript_list.find_transcript(['en'])
+                transcript_data = transcript.fetch()
+            except (TranscriptsDisabled, NoTranscriptFound):
+                logger.warning(f"No transcript available for YouTube video: {filename}")
+                return
+            except Exception as e:
+                logger.error(f"Error fetching transcript for YouTube video: {filename}: {e}")
+                return
+            # Process transcript into segments
+            processed_video_data = []
+            all_small_chunks = [] # List to hold tuples of (segment_index, chunk_text)
+            segment_chunk_map = {} # Map segment index to its list of small chunk texts
+            for entry in transcript_data:
+                segment = {
+                    'start_time': entry.start,
+                    'end_time': entry.start + entry.duration,
+                    'content': entry.text,
+                    'duration': entry.duration
+                }
+                processed_video_data.append(segment)
+                all_small_chunks.append((len(processed_video_data)-1, entry.text))
+                segment_chunk_map[len(processed_video_data)-1] = [entry.text]
+            # --- Chunk, embed, explain, summarize (reuse video logic) ---
+            # Generate embeddings for all small chunks across the video in one batch
+            logger.info(f"Generating embeddings for {len(all_small_chunks)} small chunks across video...")
+            all_small_chunk_texts = [text for _, text in all_small_chunks]
+            all_embeddings = []
+            if all_small_chunk_texts:
+                all_embeddings = get_text_embeddings_in_batches(all_small_chunk_texts)
+            embedding_dict = {all_small_chunks[i][1]: all_embeddings[i] for i in range(len(all_small_chunks))} if len(all_embeddings) == len(all_small_chunks) else {}
+            # Attach embeddings to segments
+            for i, segment in enumerate(processed_video_data):
+                segment_chunks = segment_chunk_map.get(i, [])
+                segment['chunks'] = []
+                for small_chunk_text in segment_chunks:
+                    embedding = embedding_dict.get(small_chunk_text)
+                    segment['chunks'].append({
+                        'embedding': embedding,
+                        'content': small_chunk_text
+                    })
+            # Explanations
+            for i, segment in enumerate(processed_video_data):
+                try:
+                    segment_content = segment.get('content', '')
+                    if not segment_content.strip():
+                        continue
+                    explanation_text = generate_explanation_dspy(segment_content)
+                    if explanation_text and not explanation_text.startswith("Error:"):
+                        store.save_explanation(
+                            user_id=int(user_id),
+                            file_id=file_id,
+                            selection_type='video_range',
+                            explanation=explanation_text,
+                            video_start=segment['start_time'],
+                            video_end=segment['end_time']
+                        )
+                except Exception as e:
+                    logger.error(f"Error generating/saving explanation for YouTube segment {segment.get('start_time', 0):.1f}s: {e}")
+            # Save chunks
+            store.update_file_with_chunks(user_id=int(user_id), filename=filename, extracted_data=processed_video_data, public_url=filename)
+            # Summary
+            full_transcription = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
+            if full_transcription:
+                try:
+                    summary_text = generate_summary_dspy(full_transcription)
+                    if summary_text and not summary_text.startswith("Error:"):
+                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
+                except Exception as summary_err:
+                    logger.error(f"Error during summary generation/saving for YouTube video {filename}: {summary_err}")
+            logger.info(f"Finished processing YouTube video: {filename}")
+            return
+        except Exception as e:
+            logger.error(f"Error processing YouTube link {filename}: {e}")
+            return
+    # --- END YOUTUBE HANDLING ---
     file_path = None # Initialize file_path to None
     # Wrap entire process in a try-except block to catch errors
     try: # Main try block starts here
