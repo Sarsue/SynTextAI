@@ -1,16 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import './KnowledgeBaseComponent.css';
 import { UploadedFile } from './types';
 import Modal from './Modal';
 
 interface KnowledgeBaseComponentProps {
     files: UploadedFile[];
+    token: string;
+    fetchFiles: () => void;
     onDeleteFile: (fileId: number) => void;
     onFileClick: (file: UploadedFile) => void;
-    darkMode: boolean;
+    darkMode?: boolean;
 }
 
-const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, onDeleteFile, onFileClick, darkMode }) => {
+const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ 
+    files, 
+    token, 
+    fetchFiles, 
+    onDeleteFile, 
+    onFileClick, 
+    darkMode 
+}) => {
     const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
     const [currentSummary, setCurrentSummary] = useState<{ title: string; content: string; fileName?: string } | null>(null);
 
@@ -66,9 +75,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
                             className={`file-link ${file.processed ? 'link-processed' : 'link-not-processed'}`}
                             onClick={() => handleFileClick(file)}
                         >
-                            {/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//.test(file.publicUrl || file.name) ? (
-                                <span title="YouTube Video" style={{marginRight: 4}}>📺</span>
-                            ) : null}
                             {file.name} {file.processed ? "✅ (Ready)" : "🕒 (Processing)"}
                         </span>
                         {file.processed && (
@@ -85,7 +91,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
                                 📄
                             </button>
                         )}
-                          <button
+                        <button
                             className="delete-button"
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -97,15 +103,20 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ files, 
                     </li>
                 ))}
             </ul>
+
+            <div style={{ padding: '10px', borderTop: '1px solid #ccc', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Removed file input element */}
+            </div>
+
             {currentSummary && (
                 <Modal
                     isOpen={isSummaryModalOpen}
                     onClose={() => setIsSummaryModalOpen(false)}
                     title={currentSummary.title}
-                    darkMode={darkMode}
-                    onDownload={handleDownloadSummary}
+                    darkMode={darkMode ?? false} 
                 >
-                    <p>{currentSummary.content}</p>
+                    <p>File Name: {currentSummary.fileName || 'N/A'}</p>
+                    <p>{currentSummary.content}</p> 
                 </Modal>
             )}
         </div>

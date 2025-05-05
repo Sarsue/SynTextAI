@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useNavigate } from 'react-router-dom';
@@ -32,6 +32,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
+    const [idToken, setIdToken] = useState<string | null>(null); // State for ID token
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState("chat"); // Default to "chat"
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -49,6 +50,24 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         window.addEventListener("resize", handleResize);
         return () => window.removeEventListener("resize", handleResize);
     }, []);
+
+    // Effect to get ID token
+    useEffect(() => {
+        const fetchToken = async () => {
+            if (user) {
+                try {
+                    const token = await user.getIdToken();
+                    setIdToken(token);
+                } catch (error) {
+                    console.error('Error fetching ID token:', error);
+                    setIdToken(null); // Handle error case
+                }
+            } else {
+                setIdToken(null); // Clear token if no user
+            }
+        };
+        fetchToken();
+    }, [user]);
 
     const handleSettingsClick = () => {
         navigate('/settings');
@@ -313,21 +332,29 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         setSelectedFile(null);
     };
 
-    const fetchUserFiles = async () => {
-        if (!user) return;
+    const fetchUserFiles = useCallback(async () => {
+        console.log("Fetching user files...");
+        if (!user || !idToken) return; // Ensure user and token are available
         try {
-            const token = await user.getIdToken();
-            const response = await fetch(`api/v1/files`, { headers: { 'Authorization': `Bearer ${token}` } });
-            if (response.ok) {
-                const files: UploadedFile[] = await response.json();
-                setKnowledgeBaseFiles(files);
+            const response = await callApiWithToken('/api/v1/files', 'GET');
+            if (response && response.ok) {
+                const filesData: UploadedFile[] = await response.json();
+                console.log("Files received:", filesData);
+                setKnowledgeBaseFiles(filesData);
             } else {
-                console.error('Failed to fetch user files:', response.statusText);
+                console.error('Failed to fetch files:', response ? response.statusText : 'No response');
+                setKnowledgeBaseFiles([]); // Clear files on failure
             }
         } catch (error) {
             console.error('Error fetching user files:', error);
+            setKnowledgeBaseFiles([]); // Clear files on error
         }
-    };
+    }, [user, idToken]); // Added dependencies
+
+    // Fetch files initially and when user/token changes
+    useEffect(() => {
+        fetchUserFiles();
+    }, [fetchUserFiles]);
 
     const handleDeleteFile = async (fileId: number) => {
         if (!user) {
@@ -353,6 +380,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 return (
                     <div className={`files-column ${activeTab === "files" ? "active" : ""}`}>
                         <KnowledgeBaseComponent
+                            token={idToken ?? ''}
+                            fetchFiles={fetchUserFiles}
                             files={knowledgeBaseFiles}
                             onDeleteFile={handleDeleteFile}
                             onFileClick={handleFileClick}
@@ -381,7 +410,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                             history={currentHistory !== null ? histories[currentHistory] : null}
                             onCopy={handleCopy}
                         />
-                        <InputArea onSend={handleSend} isSending={isSending} />
+                        <InputArea
+                            onSend={handleSend}
+                            isSending={isSending}
+                            token={idToken}
+                            onContentAdded={fetchUserFiles}
+                        />
                         {/* Settings Button at the bottom left */}
                         {user !== null && (
                             <button
@@ -414,6 +448,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 return null;
         }
     };
+
     useEffect(() => {
         if (user) {
             fetchUserFiles(); // Fetch files when the component mounts or when the user changes
@@ -472,61 +507,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     return (
         <div className={`chat-app-container ${darkMode ? "dark-mode" : ""}`}>
-            {/* --- YouTube Link Upload UI --- */}
-            <div className="youtube-upload-container" style={{ margin: '1rem 0', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <input
-                    type="text"
-                    placeholder="Paste YouTube link..."
-                    value={youtubeUrl}
-                    onChange={e => setYoutubeUrl(e.target.value)}
-                    disabled={isYoutubeSubmitting}
-                    style={{ flex: 1, padding: '0.5rem', borderRadius: 4, border: '1px solid #ccc' }}
-                />
-                <button
-                    onClick={async () => {
-                        setIsYoutubeSubmitting(true);
-                        setYoutubeError('');
-                        try {
-                            if (!youtubeUrl.match(/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//)) {
-                                setYoutubeError('Please enter a valid YouTube URL.');
-                                setIsYoutubeSubmitting(false);
-                                return;
-                            }
-                            const idToken = await user?.getIdToken();
-                            if (!idToken) throw new Error('User token not available');
-                            const res = await fetch('/api/v1/files', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${idToken}`
-                                },
-                                body: JSON.stringify({ type: 'youtube', url: youtubeUrl })
-                            });
-                            if (!res.ok) {
-                                const data = await res.json().catch(() => ({}));
-                                throw new Error(data.detail || 'Failed to add YouTube video');
-                            }
-                            setYoutubeUrl('');
-                            fetchUserFiles();
-                        } catch (err) {
-                            if (err && typeof err === 'object' && 'message' in err) {
-                                setYoutubeError((err as any).message || 'Failed to add YouTube video');
-                            } else {
-                                setYoutubeError('Failed to add YouTube video');
-                            }
-                        } finally {
-                            setIsYoutubeSubmitting(false);
-                        }
-                    }}
-                    disabled={isYoutubeSubmitting || !youtubeUrl}
-                    style={{ padding: '0.5rem 1rem', borderRadius: 4, background: '#e53e3e', color: '#fff', border: 'none', fontWeight: 600 }}
-                >
-                    {isYoutubeSubmitting ? 'Adding...' : 'Add YouTube Video'}
-                </button>
-                {youtubeError && (
-                    <span style={{ color: 'red', marginLeft: '1rem' }}>{youtubeError}</span>
-                )}
-            </div>
+            {/* Removed old standalone YouTube link upload UI */}
+            
+            {/* Main Content Layout */}
             <div className="layout-container">
                 {isMobile ? (
                     <>
@@ -538,6 +521,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                         {/* Files Column on the left */}
                         <div className="files-column">
                             <KnowledgeBaseComponent
+                                token={idToken ?? ''}
+                                fetchFiles={fetchUserFiles}
                                 files={knowledgeBaseFiles}
                                 onDeleteFile={handleDeleteFile}
                                 onFileClick={handleFileClick}
@@ -573,7 +558,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                                 history={currentHistory !== null ? histories[currentHistory] : null}
                                 onCopy={handleCopy}
                             />
-                            <InputArea onSend={handleSend} isSending={isSending} />
+                            <InputArea
+                                onSend={handleSend}
+                                isSending={isSending}
+                                token={idToken}
+                                onContentAdded={fetchUserFiles}
+                            />
                             <ToastContainer />
                         </div>
 
