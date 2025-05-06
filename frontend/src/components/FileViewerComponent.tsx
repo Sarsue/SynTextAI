@@ -37,12 +37,23 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const fileUrl = file.publicUrl;
 
     const getFileType = (urlOrName: string): string | null => {
+        // Check for YouTube URLs first using a regex
+        const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/)/i;
+        if (youtubeRegex.test(urlOrName)) {
+            return 'youtube';
+        }
+
+        // Original extension-based check
         const extension = urlOrName.split('.').pop()?.toLowerCase();
-        if (!extension) return null;
+        if (!extension) {
+            return null; // No extension and not identified as YouTube
+        }
+
         if (extension === 'pdf') return 'pdf';
         if (['mp4', 'webm', 'ogg', 'mov'].includes(extension)) return 'video';
         if (['jpg', 'jpeg', 'png', 'gif'].includes(extension)) return 'image';
-        return null;
+        
+        return null; // Unknown extension
     };
 
     const fetchExplanationHistory = useCallback(async () => {
@@ -86,13 +97,19 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
 
     useEffect(() => {
-        const type = getFileType(fileUrl || file.name);
-        console.log(`Detected file type: ${type}`); // Debugging statement
+        const urlToTest = fileUrl || file.name; // Prioritize publicUrl
+        const type = getFileType(urlToTest);
+        
+        // Enhanced logging
+        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'.`);
         setFileType(type);
+
         if (!type) {
+            // If getFileType still returns null,
+            // then it's an unsupported/unidentifiable file.
             onError(`Unsupported file type or could not determine type for: ${file.name}`);
         }
-    }, [fileUrl, file.name, onError]);
+    }, [fileUrl, file.name, onError]); // Removed file.type from dependencies
     
     useEffect(() => {
         if (showExplainPanel && user && fileId) {
@@ -296,19 +313,20 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return <div className="loading-indicator">Loading file...</div>;
         }
 
-        if (/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//.test(file.publicUrl || file.name)) {
+        if (fileType === 'youtube') { // This condition relies on getFileType correctly setting it
             // Extract YouTube video ID from URL
             let videoId = '';
-            const url = file.publicUrl || '';
-            const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?&]v=)|youtu\.be\/)([\w-]{11})/);
+            const url = file.publicUrl || ''; // Use file.publicUrl, fallback to file.name if needed
+            const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?\&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/);
             if (match && match[1]) {
                 videoId = match[1];
             }
             return (
                 <div className="youtube-container file-content-area">
                     <iframe
+                        className="youtube-iframe" // Added class
                         width="100%"
-                        height="400"
+                        // height="400" // Removed inline height
                         src={`https://www.youtube.com/embed/${videoId}`}
                         title="YouTube video player"
                         frameBorder="0"

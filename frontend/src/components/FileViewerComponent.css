@@ -195,28 +195,62 @@
 }
 
 /* PDF/Video/Image containers */
-.pdf-container, .video-container, .image-container {
+.pdf-container, 
+.image-container {
     width: 100%;
     height: 100%;
     display: block; /* Changed from flex */
     overflow: hidden; /* Hide potential overflow of inner element */
 }
 
-.pdf-viewer, .video-player, .image-viewer {
+/* Specific styles for the YouTube video container to maintain aspect ratio */
+.youtube-container {
+    position: relative;
+    width: 100%;
+    padding-bottom: 56.25%; /* 16:9 aspect ratio (9 / 16 = 0.5625) */
+    height: 0;
+    overflow: hidden;
+    background-color: #000; /* Optional: background for letterbox area if any issues */
+}
+
+/* General video container for non-YouTube videos if needed separately */
+.video-container {
+    width: 100%;
+    height: 100%;
+    display: flex; /* Use flex to center video if it doesn't fill */
+    justify-content: center;
+    align-items: center;
+    background-color: #000; /* Background for video player */
+}
+
+.pdf-viewer, 
+.video-player, 
+.image-viewer {
     width: 100%;
     height: 100%;
     display: block; /* Ensure it behaves like a block element */
-    object-fit: fill; /* TEST: Force content to stretch and fill */
     border: none;
 }
 
+/* Specific selectors for player elements to ensure they fill their containers */
 .pdf-viewer iframe,
 .video-player video,
 .image-viewer img {
     width: 100%;
     height: 100%;
-    border: none; /* Ensure no iframe border */
-    display: block; /* Ensure block display */
+    border: none;
+    display: block;
+}
+
+/* Styles for the YouTube iframe itself, to fill the aspect-ratio container */
+.youtube-iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
 }
 
 /* Toolbar / Controls Area - Simplified Anchor (Vertical Stack) */

@@ -13,6 +13,7 @@ from websocket_manager import websocket_manager
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, HTTPException
 import gc
+from typing import Optional
 
 # Load environment variables
 load_dotenv()
@@ -85,9 +86,9 @@ async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False):
+async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, explanation_interval_seconds: Optional[int] = None):
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
-    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id})")
+    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Interval: {explanation_interval_seconds})")
     # --- YOUTUBE LINK HANDLING ---
     if is_youtube or (filename.startswith('http') and ('youtube.com' in filename or 'youtu.be' in filename)):
         logger.info(f"Processing YouTube link: {filename}")
@@ -136,33 +137,70 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 segment_chunks = segment_chunk_map.get(i, [])
                 segment['chunks'] = []
                 for small_chunk_text in segment_chunks:
-                    embedding = embedding_dict.get(small_chunk_text)
+                    embedding = embedding_dict.get(small_chunk_text) # Look up embedding
                     segment['chunks'].append({
                         'embedding': embedding,
                         'content': small_chunk_text
                     })
-            # Explanations
-            for i, segment in enumerate(processed_video_data):
-                try:
-                    segment_content = segment.get('content', '')
-                    if not segment_content.strip():
-                        continue
-                    explanation_text = generate_explanation_dspy(segment_content)
-                    if explanation_text and not explanation_text.startswith("Error:"):
-                        store.save_explanation(
-                            user_id=int(user_id),
-                            file_id=file_id,
-                            selection_type='video_range',
-                            explanation=explanation_text,
-                            video_start=segment['start_time'],
-                            video_end=segment['end_time']
-                        )
-                except Exception as e:
-                    logger.error(f"Error generating/saving explanation for YouTube segment {segment.get('start_time', 0):.1f}s: {e}")
+            # Explanations based on configurable intervals for YouTube videos
+            if transcript_data: # Ensure we have transcript data
+                # Determine interval: use parameter, else default to 30s. Ensure positive.
+                interval_to_use = 30 # Default
+                if explanation_interval_seconds is not None:
+                    if explanation_interval_seconds > 0:
+                        interval_to_use = explanation_interval_seconds
+                    else:
+                        logger.warning(f"Provided explanation_interval_seconds ({explanation_interval_seconds}) for file {file_id} is not positive. Defaulting to 30s.")
+                
+                logger.info(f"Using video explanation interval: {interval_to_use} seconds for file ID {file_id}")
+
+                # Calculate total duration from the last transcript entry
+                total_video_duration = transcript_data[-1].start + transcript_data[-1].duration
+
+                for current_interval_start_sec in range(0, int(total_video_duration) + 1, interval_to_use):
+                    interval_start_time = float(current_interval_start_sec)
+                    interval_end_time = min(float(current_interval_start_sec + interval_to_use), total_video_duration)
+
+                    if interval_start_time >= total_video_duration: # Avoid empty last interval if total_duration is a multiple of interval_seconds
+                        break
+
+                    # Collect text within this specific interval
+                    text_for_interval = []
+                    for entry in transcript_data:
+                        entry_start_val = entry.start 
+                        entry_duration_val = entry.duration
+                        entry_text_val = entry.text
+                        
+                        entry_end_val = entry_start_val + entry_duration_val
+                        # Check for overlap: max(A_start, B_start) < min(A_end, B_end)
+                        if max(interval_start_time, entry_start_val) < min(interval_end_time, entry_end_val):
+                            text_for_interval.append(entry_text_val)
+                    
+                    full_interval_text = " ".join(text_for_interval).strip()
+
+                    if full_interval_text:
+                        try:
+                            logger.info(f"Generating explanation for video ID {file_id}, interval: {interval_start_time:.1f}s - {interval_end_time:.1f}s")
+                            explanation_text_content = generate_explanation_dspy(full_interval_text) # Renamed variable
+                            if explanation_text_content and not explanation_text_content.startswith("Error:"):
+                                store.save_explanation(
+                                    user_id=int(user_id),
+                                    file_id=int(file_id),       # Ensuring file_id is int
+                                    selection_type='video_range',
+                                    explanation=explanation_text_content,
+                                    video_start=interval_start_time,
+                                    video_end=interval_end_time
+                                )
+                        except Exception as e:
+                            logger.error(f"Error generating/saving explanation for YouTube video ID {file_id}, interval {interval_start_time:.1f}s-{interval_end_time:.1f}s: {e}")
+                    
+                    if interval_end_time >= total_video_duration:
+                        break # Processed the whole video
+            
             # Save chunks
             store.update_file_with_chunks(user_id=int(user_id), filename=filename, extracted_data=processed_video_data, public_url=filename)
             # Summary
-            full_transcription = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
+            full_transcription = " ".join([seg.get('content', '') for seg in processed_video_data if seg.get('content', '').strip()])
             if full_transcription:
                 try:
                     summary_text = generate_summary_dspy(full_transcription)

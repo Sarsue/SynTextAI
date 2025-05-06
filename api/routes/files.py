@@ -69,14 +69,16 @@ async def save_file(
             if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
                 raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
             url = data.get("url", "")
+            explanation_interval_seconds = data.get("explanation_interval_seconds") # Get optional interval
+
             # Validate YouTube URL
             youtube_regex = re.compile(r"^(https?://)?(www\.)?(youtube\.com|youtu\.be)/")
             if not url or not youtube_regex.match(url):
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             # Store YouTube file entry (type: 'youtube')
             file_info = store.add_file(user_id, url, url)  # Just store as a file with url as name and publicUrl
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True)  # True = is_youtube
-            logger.info(f"Enqueued Task for processing YouTube link: {url}")
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True, explanation_interval_seconds=explanation_interval_seconds)  # True = is_youtube, pass interval
+            logger.info(f"Enqueued Task for processing YouTube link: {url} with interval: {explanation_interval_seconds}")
             return {"message": "YouTube video processing queued."}
 
         # --- Handle regular file upload as before ---
