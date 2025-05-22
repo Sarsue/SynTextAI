@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
 import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { useUserContext } from './UserContext';
@@ -25,7 +25,7 @@ const App: React.FC = () => {
                             path="/chat"
                             element={
                                 user ? (
-                                    subscriptionStatus === 'active' ? (
+                                    subscriptionStatus === 'active' || subscriptionStatus === 'trialing' ? (
                                         <ChatApp user={user} onLogout={() => { }} />
                                     ) : (
                                         <Navigate to="/settings" replace />
@@ -39,6 +39,8 @@ const App: React.FC = () => {
                             path="/settings"
                             element={user ? <SettingsPage stripePromise={stripePromise} user={user} /> : <Navigate to="/login" replace />}
                         />
+                        {/* ✅ Fix: Redirect all unknown routes to home */}
+                        <Route path="*" element={<Navigate to="/" />} />
                     </Routes>
                 </div>
             </Router>

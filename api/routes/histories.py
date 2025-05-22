@@ -1,92 +1,108 @@
-from flask import Blueprint, request, jsonify, current_app
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
+from typing import Optional
 from utils import get_user_id
+from docsynth_store import DocSynthStore
+import logging
+from typing import Dict
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-histories_bp = Blueprint("histories", __name__, url_prefix="api/v1/histories")
+# Initialize FastAPI router
+histories_router = APIRouter(prefix="/api/v1/histories", tags=["histories"])
 
+# Dependency to get the store
+def get_store(request: Request):
+    return request.app.state.store
 
-def get_id_helper(store, success, user_info):
+# Helper function to authenticate user and retrieve user ID
+async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
+    if not authorization:
+        logger.error("Missing Authorization token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    success, user_info = get_user_id(authorization)
     if not success:
-        return jsonify(user_info), 401
+        logger.error("Failed to authenticate user with token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Now you can use the user_info dictionary to allow or restrict actions
-    name = user_info['name']
-    email = user_info['email']
-    id = store.get_user_id_from_email(email)
-    return id
+    user_id = store.get_user_id_from_email(user_info['email'])
+    if not user_id:
+        logger.error(f"No user ID found for email: {user_info['email']}")
+        raise HTTPException(status_code=404, detail="User not found")
 
+    logger.info(f"Authenticated user_id: {user_id}")
+    return {"user_id": user_id, "user_info": user_info}
 
-@histories_bp.route('', methods=['POST'])
-def create_history():
-    store = current_app.store
-    title = request.args.get('title')
-    token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    id = get_id_helper(store, success, user_info)
-    history = store.add_chat_history(title, id)
-    return history
-
-
-@histories_bp.route('', methods=['GET'])
-def get_history_messages():
+# Route to create a new chat history
+@histories_router.post("", status_code=201)
+async def create_history(
+    title: str = Query(..., description="Title of the chat history"),
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
     try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        id = get_id_helper(store, success, user_info)
-        # message list is history and the messages in it
-        message_list = store.get_all_user_chat_histories(id)
+        user_id = user_data["user_id"]
+        history = store.add_chat_history(title, user_id)
+        return history
+    except Exception as e:
+        logger.error(f"Error creating chat history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Route to get all chat histories for a user
+@histories_router.get("")
+async def get_history_messages(
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
+    try:
+        user_id = user_data["user_id"]
+        message_list = store.get_all_user_chat_histories(user_id)
         return message_list
     except Exception as e:
-        print(str(e))
+        logger.error(f"Error retrieving chat histories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-
-
-@histories_bp.route('', methods=['GET'])
-def get_specific_history_messages():
-    store = current_app.store
-    token = request.headers.get('Authorization')
-    success, user_info = get_user_id(token)
-    id = get_id_helper(store, success, user_info)
-    history_id = int(request.args.get('history-id'))
-    message_list = store.get_messages_for_chat_history(id, history_id)
-    return message_list
-
-
-@histories_bp.route('', methods=['DELETE'])
-def delete_specific_history_messages():
+# Route to get messages for a specific chat history
+@histories_router.get("/messages")
+async def get_specific_history_messages(
+    history_id: int = Query(..., description="ID of the chat history"),
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
     try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        id = get_id_helper(store, success, user_info)
-        history_id = int(request.args.get('history-id'))
-
-        # Delete the chat history and messages
-        store.delete_chat_history(id, history_id)
-
-        # Return a success response with the deleted history ID
-        return jsonify({'message': 'History deleted successfully', 'deletedHistoryId': history_id}), 200
-
+        user_id = user_data["user_id"]
+        message_list = store.get_messages_for_chat_history(user_id, history_id)
+        return message_list
     except Exception as e:
-        # Handle exceptions and return an error response
-        print(str(e))
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error retrieving messages for history {history_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@histories_bp.route('/all', methods=['DELETE'])
-def delete_all_user_histories():
+# Route to delete a specific chat history
+@histories_router.delete("", status_code=200)
+async def delete_specific_history_messages(
+    history_id: int = Query(..., description="ID of the chat history to delete"),
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
     try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        success, user_info = get_user_id(token)
-        id = get_id_helper(store, success, user_info)
-        store.delete_all_user_histories(id)
-
-        # Return a simple success response
-        return jsonify({'message': 'All histories deleted successfully'}), 200
-
+        user_id = user_data["user_id"]
+        store.delete_chat_history(user_id, history_id)
+        return {"message": "History deleted successfully", "deletedHistoryId": history_id}
     except Exception as e:
-        # Handle exceptions and return an error response
-        print(str(e))
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error deleting history {history_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Route to delete all chat histories for a user
+@histories_router.delete("/all", status_code=200)
+async def delete_all_user_histories(
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
+    try:
+        user_id = user_data["user_id"]
+        store.delete_all_user_histories(user_id)
+        return {"message": "All histories deleted successfully"}
+    except Exception as e:
+        logger.error(f"Error deleting all histories for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

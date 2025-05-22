@@ -1,5 +1,3 @@
-// UserContext.tsx
-
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 
@@ -16,12 +14,13 @@ interface SubscriptionData {
     card_brand?: string;
     card_exp_month?: string;
     card_exp_year?: string;
+    trial_end?: string;
 }
 
 // Define the type for UserContext
 interface UserContextType {
-    user: FirebaseUser | null; // Add user state
-    setUser: (user: FirebaseUser | null) => void; // Method to set user
+    user: FirebaseUser | null;
+    setUser: (user: FirebaseUser | null) => void;
     darkMode: boolean;
     toggleDarkMode: () => void;
     setDarkMode: (darkMode: boolean) => void;
@@ -37,6 +36,9 @@ interface UserContextType {
     subscriptionData: SubscriptionData | null;
     setSubscriptionData: (data: SubscriptionData | null) => void;
     registerUserInBackend: (user: FirebaseUser) => Promise<void>;
+    socket: WebSocket | null;
+    initializeWebSocket: () => Promise<void>;
+    disconnectWebSocket: () => void;
 }
 
 // Create the UserContext with initial values
@@ -61,11 +63,14 @@ const UserContext = createContext<UserContextType>({
     subscriptionData: null,
     setSubscriptionData: () => { },
     registerUserInBackend: async () => { },
+    socket: null,
+    initializeWebSocket: async () => { },
+    disconnectWebSocket: () => { },
 });
 
 // Define UserProvider component
 export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [user, setUser] = useState<FirebaseUser | null>(null); // Manage user state here
+    const [user, setUser] = useState<FirebaseUser | null>(null);
     const [darkMode, setDarkMode] = useState<boolean>(false);
     const [userSettings, setUserSettings] = useState<UserSettings>({
         comprehensionLevel: 'Beginner',
@@ -75,6 +80,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
     const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
+    const [socket, setWebsocket] = useState<WebSocket | null>(null);
 
     const toggleDarkMode = () => {
         setDarkMode((prevMode) => !prevMode);
@@ -96,15 +102,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }
 
                 const data = await response.json();
-                console.log(data)
+                console.log(data);
                 setSubscriptionStatus(data.subscription_status ?? null);
-                setSubscriptionData(data); // Set the subscription data here
-
+                setSubscriptionData(data);
             }
         } catch (error) {
             console.error('Error fetching subscription status:', error);
             setSubscriptionStatus(null);
-            setSubscriptionData(null); // Reset subscription data in case of error
+            setSubscriptionData(null);
         }
     };
 
@@ -129,29 +134,99 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     };
 
+    const disconnectWebSocket = () => {
+        if (socket) {
+            socket.close();
+            setWebsocket(null);
+        }
+    };
+
+    const initializeWebSocket = async () => {
+        if (!user || socket) return;
+
+        try {
+            const token = await user.getIdToken();
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'; // Use 'wss' for HTTPS, 'ws' for HTTP
+            const wsUrl = `${protocol}://${window.location.host}/ws/${user.uid}`;
+            const ws = new WebSocket(wsUrl);
+
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                // Send the authentication token after connection
+                ws.send(JSON.stringify({ type: 'auth', token }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log('WebSocket message received:', data);
+
+                // Handle specific events
+                if (data.event === 'file_processed') {
+                    if (data.status === 'success') {
+                        console.log(`File ${data.result.filename} processed successfully`);
+                    } else {
+                        console.error(`Error processing file ${data.result.filename}: ${data.error}`);
+                    }
+                } else if (data.event === 'message_received') {
+                    if (data.status === 'error') {
+                        console.error(`Error: ${data.error}`);
+                    } else {
+                        console.log('Message received:', data.message);
+                    }
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                // Attempt to reconnect after a delay
+                setTimeout(() => initializeWebSocket(), 3000);
+            };
+
+            setWebsocket(ws);
+        } catch (error) {
+            console.error('Error initializing WebSocket:', error);
+        }
+    };
+
     // UseEffect to call fetchSubscriptionStatus when the user is set
     useEffect(() => {
-        if (!user) return;  
+        if (!user) return;
         const registerAndFetchSubscription = async () => {
             if (user) {
                 try {
-                    await registerUserInBackend(user);  // Wait for the user registration to complete
-                    await fetchSubscriptionStatus();    // Only fetch subscription status after registration
+                    await registerUserInBackend(user);
+                    await fetchSubscriptionStatus();
                 } catch (error) {
                     console.error("Error in user registration or subscription status fetch:", error);
                 }
             }
         };
 
-        registerAndFetchSubscription(); // Call the async function
+        registerAndFetchSubscription();
+    }, [user]);
 
-    }, [user]); // This effect runs when 'user' state changes
+    // Initialize WebSocket when user is set
+    useEffect(() => {
+        if (user) {
+            initializeWebSocket();
+        } else {
+            disconnectWebSocket();
+        }
+        return () => {
+            disconnectWebSocket();
+        };
+    }, [user]);
 
     return (
         <UserContext.Provider
             value={{
                 user,
-                setUser, // Provide setter for user state
+                setUser,
                 darkMode,
                 toggleDarkMode,
                 setDarkMode,
@@ -165,8 +240,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setSubscriptionStatus,
                 fetchSubscriptionStatus,
                 subscriptionData,
-                setSubscriptionData, // Provide setter for subscriptionData
-                registerUserInBackend, // Provide registerUserInBackend method
+                setSubscriptionData,
+                registerUserInBackend,
+                socket,
+                initializeWebSocket,
+                disconnectWebSocket,
             }}
         >
             {children}

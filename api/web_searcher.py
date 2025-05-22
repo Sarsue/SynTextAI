@@ -1,169 +1,238 @@
-import logging
-from llm_service import prompt_llm, summarize  # Import the LLM service
-import re
-import json
-from bs4 import BeautifulSoup
-from duckduckgo_search import DDGS
-from markdownify import MarkdownConverter
 import requests
-import datetime
-import textwrap
-import time
-import random
+import os
+from bs4 import BeautifulSoup
+from llm_service import prompt_llm  # Ensure this is correctly defined in your project
+import re
+import time  # Import time module to add delays
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
+# URL for searxng and Tavily APIs
+searxng_url =  os.getenv("SEARXNG_URL") 
+tavily_url = "https://api.tavily.com/search"
 
-safety_settings = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-]
+def get_best_answer(api_response):
+    results = api_response.get('results', [])
+    if not results:
+        return None, None  # No results available
 
-class WebSearch:
-    """Perform DuckDuckGo searches and fetch web content."""
+    # Sort results by score (descending) to get the most relevant one
+    best_result = max(results, key=lambda x: x.get('score', 0))
+    return best_result.get('content', ''), best_result.get('url', '')
 
-    def __init__(self, verbose=False, retry_limit=3):
-        self.verbose = verbose
-        self.retry_limit = retry_limit
-        self.cache = {}
+# Function for Tavily search
+def tavily_search(query):
+    api_key = os.getenv("TAVILY_API_KEY")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    data = {"query": query}
+    response = requests.post(tavily_url, headers=headers, json=data)
+    
+    if response.status_code == 200:
+        api_response = response.json()
+        answer, url = get_best_answer(api_response)
+        print(answer, url)
+        return answer, url
+    else:
+        return None, None
 
-    def fetch(self, url):
-        """Fetch a URL with retry logic and exponential backoff."""
-        for attempt in range(self.retry_limit):
-            try:
-                if self.verbose:
-                    logging.info(f"Attempting to fetch URL: {url} (Attempt {attempt + 1})")
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    return response.content
-                logging.warning(f"Failed to fetch {url}: HTTP {response.status_code}")
-            except requests.RequestException as e:
-                logging.warning(f"Error fetching {url}: {e}")
-            logging.info(f"Retrying ({attempt + 1}/{self.retry_limit})...")
-            time.sleep(2 ** attempt + random.uniform(0, 1))  # Exponential backoff with jitter
-        logging.error(f"Failed to fetch URL after {self.retry_limit} attempts: {url}")
+
+# Function for SearxNG search with timeout
+def searxng_search(query, timeout=30):  # Default timeout set to 10 seconds
+    params = {"q": query, "format": "json"}
+    try:
+        response = requests.get(searxng_url, params=params, timeout=timeout)  # Adding timeout
+        if response.status_code == 200:
+            return response.json()  
+        else:
+            print(f"Error: {response.status_code}")
+            return None
+    except requests.exceptions.Timeout:
+        print("The request timed out.")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred: {e}")
         return None
 
-    def ddg_search(self, topic):
-        """Search DuckDuckGo for a topic with rate limiting handling."""
-        try:
-            if self.verbose:
-                logging.info(f"Searching DuckDuckGo for: {topic}")
-            results = DDGS().text(topic)
-            if '202 Ratelimit' in results:
-                logging.warning(f"Rate limited by DuckDuckGo for topic: {topic}")
-                time.sleep(10)  # Add a delay to handle rate limiting
-                results = DDGS().text(topic)
-            return results
-        except Exception as e:
-            logging.error(f"Error during DuckDuckGo search for '{topic}': {e}")
+# Function to fetch page content from URL with timeout
+def fetch_page_content(url, timeout=15):  # Default timeout set to 10 seconds
+    try:
+        response = requests.get(url, timeout=timeout)  # Adding timeout
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Remove href attributes from <a> tags but keep the text
+            for a in soup.find_all("a"):
+                a.replace_with(a.get_text())
+
+            # Extract text
+            text = soup.get_text(separator=" ")
+
+            # Remove excessive whitespace and newlines
+            cleaned_text = re.sub(r'\s+', ' ', text).strip()
+            return cleaned_text
+        else:
+            print(f"Error: Unable to fetch {url}, status code: {response.status_code}")
+            return None
+    except requests.exceptions.Timeout:
+        print(f"Timeout occurred while fetching {url}")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching {url}: {e}")
+        return None
+
+# Function to query the LLM with the page content
+def query_llm_with_text(text, query):
+    prompt = f"""
+    Based on the following text, answer the question: {query}
+
+    {text}
+
+    Please also provide a confidence rating (between 0 and 1) based on how confident you are in the quality and relevance of the text in answering this question. 
+    The confidence should be in the format 'Confidence: <score>'.
+    """
+    # Get the response from the LLM
+    response_text = prompt_llm(prompt)
+
+    # Extract the answer (assuming the response is structured to start with the answer)
+    answer = response_text.strip()
+
+    # Use regex to find a confidence score in the response text
+    score_match = re.search(r"Confidence: (\d\.\d{1,2})", response_text)
+    
+    # If a confidence score is found, use it; otherwise, default to 0.0
+    score = float(score_match.group(1)) if score_match else 0.0
+
+    # Clean the answer by removing the confidence score from the text
+    cleaned_answer = re.sub(r"Confidence: \d\.\d{1,2}", "", answer).strip()
+
+    return cleaned_answer, score
+
+def get_search_results(query, k=5, max_tokens_per_source=800):
+    """
+    Searches the web and returns a list of search results.
+    Each result contains title, url, content, and score.
+    
+    Args:
+        query: Search query string
+        k: Maximum number of results to return
+        max_tokens_per_source: Maximum tokens to keep per source to avoid context length issues
+    """
+    try:
+        search_results = searxng_search(query)
+        if not search_results:
             return []
 
-    def ddg_top_hit(self, topic, skip=()):
-        """Search DuckDuckGo for a topic and return the top hit."""
-        results = self.ddg_search(topic)
-        logging.info(f"Search results for '{topic}': {results}")
-        for result in results:
-            if result.get('href') in skip:
-                continue
-            html = self.fetch(result.get('href'))
-            if html:
-                title = self.extract_title(html)
-                content = self.simplify_html(html)
-                logging.info(f"Fetched content for '{topic}': {content}")
-                if content:
-                    return result['href'], title, content
-        return None, None, None
+        # Step 2: Extract top results and fetch page content
+        top_results = []
+        for result in search_results.get('results', [])[:k]:
+            url = result.get('url')
+            title = result.get('title')
+            score = result.get('score', 0)
+            
+            # Fetch page content
+            page_content = fetch_page_content(url)
+            if page_content:
+                # Truncate content to avoid token limit issues
+                # Rough approximation: 1 token ≈ 4 chars
+                max_chars = max_tokens_per_source * 4
+                if len(page_content) > max_chars:
+                    page_content = page_content[:max_chars] + "..."
 
-    @staticmethod
-    def extract_title(html):
-        """Extract the title from an HTML document."""
-        soup = BeautifulSoup(html, 'html.parser')
-        return soup.title.string.strip() if soup.title else "Untitled"
+                top_results.append({
+                    'title': title,
+                    'url': url,
+                    'content': page_content,
+                    'score': score
+                })
+            time.sleep(1)  # Sleep between queries
 
-    @staticmethod
-    def simplify_html(html):
-        """Convert HTML to markdown, removing some tags and links."""
-        soup = BeautifulSoup(html, 'html.parser')
-        for tag in soup.find_all(["script", "style"]):
-            tag.decompose()
-        for tag in soup.find_all("a"):
-            del tag["href"]
-        for tag in soup.find_all("img"):
-            del tag["src"]
-        text = MarkdownConverter().convert_soup(soup)
-        return re.sub(r"\n(\s*\n)+", "\n\n", text)
+        return top_results
 
-    @staticmethod
-    def extract_json_from_markdown(markdown_text):
-        """Extract JSON from Markdown-formatted string."""
-        json_match = re.search(r'json\s*(\[\s*.+\s*\])\s*', markdown_text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except json.JSONDecodeError as e:
-                logging.error(f"Error decoding JSON: {e}")
-        logging.warning("No JSON found in Markdown.")
-        return None
+    except Exception as e:
+        print(f"Error in get_search_results: {e}")
+        return []
 
-    def fetch_sources(self, search_prompt):
-        """Fetch sources for a question with caching."""
-        try:
-            if search_prompt in self.cache:
-                return self.cache[search_prompt]
+def get_answers_from_web(query):
+    try:
+        # Step 1: Get search results
+        top_results = get_search_results(query)
+        if not top_results:
+            return None, None
+            
+        # Step 2: Query LLM with each result's content
+        answers = []
+        for result in top_results:
+            # Create a prompt for this specific source
+            prompt = f"""Based on the following source, answer this question: {query}
 
-            search_text = prompt_llm(search_prompt)
-            logging.info(f"LLM search text: {search_text}")
-            searches = self.extract_json_from_markdown(search_text)
-            logging.info(f"Extracted searches: {searches}")
-            if not searches:
-                logging.warning("No search topics generated by LLM.")
-                return "", []
-            background_text, sources = "", []
-            for search in searches:
-                source, title, content = self.ddg_top_hit(search, skip=[s[0] for s in sources])
-                if source:
-                    background_text += f"# {search}\n\n{content}\n\n"
-                    sources.append((source, title))
-            self.cache[search_prompt] = (background_text, sources)
-            return background_text, sources
-        except Exception as e:
-            logging.error(f"Error during source fetching: {e}")
-            return "", []
+Source:
+Title: {result['title']}
+URL: {result['url']}
+Content:
+{result['content']}
 
-    def format_answer(self, answer, sources):
-        """Format the answer with sources."""
-        paragraphs = answer.splitlines()
-        wrapped_paragraphs = [textwrap.fill(p, width=80) for p in paragraphs if p.strip()]
-        sources_str = "\nSources:" + "\n".join([f"* [{title}]({url})" for url, title in sources])
-        return "\n".join(wrapped_paragraphs) + "\n\n" + sources_str
+Important instructions:
+1. Only include information that is explicitly stated in the source
+2. If you're not confident about answering based on this source, indicate low confidence
+3. Keep the answer focused and relevant to the query
+"""
+            answer, score = query_llm_with_text(result['content'], query)
+            answers.append({
+                'title': result['title'],
+                'url': result['url'],
+                'answer': answer,
+                'score': score
+            })
 
-    def search_topic(self, topic):
-        """Search a topic and format the response."""
-        try:
-            today_prompt = f"Today is {datetime.date.today().strftime('%a, %b %e, %Y')}."
-            search_prompt = (
-                f"{today_prompt}\nPrepare for this prompt: {topic}\n\n"
-                "What 3 Internet search topics would help you answer this question? "
-                "Answer in a JSON list only."
-            )
-            background_text, sources = self.fetch_sources(search_prompt)
-            logging.info(f"Background text: {background_text}")
-            logging.info(f"Sources: {sources}")
-            summarized_text = summarize(background_text)
-            logging.info(f"Summarized text: {summarized_text}")
-            answer = prompt_llm("\n".join([today_prompt, summarized_text, f"# Prompt\n{topic}"]))
-            logging.info(f"LLM answer: {answer}")
-            formatted_answer = self.format_answer(answer, sources)
-            logging.info("Final Answer:\n" + formatted_answer)
-            return formatted_answer  # Ensure the answer is returned
-        except Exception as e:
-            logging.error(f"Error during topic search: {e}")
-            return None
+            time.sleep(1)  # Sleep between queries
 
-# Example usage
+        # Step 3: Filter answers with good confidence scores and synthesize them
+        good_answers = [a for a in answers if a['score'] > 0.6]  # Adjust threshold as needed
+        
+        if good_answers:
+            # Create a prompt to synthesize information from multiple sources
+            sources_text = "\n\n".join([
+                f"Source {i+1} ({answer['url']}):\n{answer['answer']}"
+                for i, answer in enumerate(good_answers)
+            ])
+            
+            synthesis_prompt = f"""Synthesize a comprehensive answer to the question: "{query}"
+            
+Using information from these sources:
+
+{sources_text}
+
+Instructions:
+1. Combine relevant information from all sources
+2. Resolve any contradictions between sources
+3. Present a clear, coherent answer
+4. Keep the response focused and relevant
+"""
+            
+            final_answer = prompt_llm(synthesis_prompt)
+            
+            # Add reference links at the end
+            reference_links = "\n\nReferences:\n" + "\n".join([
+                f"- {answer['url']}" for answer in good_answers
+            ])
+            
+            return final_answer + reference_links, None  # Return None for single URL since we're using multiple
+        else:
+            return None, None
+    
+    except Exception as e:
+        print(f"Error occurred: {e}")  # Log the error for debugging
+        return None, None
+
+# Function to initiate search and get the best answer
+def search(query):
+    result, url = get_answers_from_web(query)
+    if result == None:
+        result, url =  tavily_search(query)
+    return result, url
+
+
 if __name__ == "__main__":
-    searcher = WebSearch()
-    ans = searcher.search_topic(topic="How does Tariff work?")
-    print(ans)
+    query = "how do I make jollof rice?"
+    print(get_answers_from_web(query))
+

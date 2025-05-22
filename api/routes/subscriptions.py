@@ -1,58 +1,71 @@
-from flask import Blueprint, request, jsonify, current_app
-import stripe
-from dotenv import load_dotenv
-from utils import decode_firebase_token, get_user_id
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body
+from fastapi.responses import JSONResponse
 from datetime import datetime
-import os
+from typing import Dict, Optional
+import stripe
 import logging
+import os
+from dotenv import load_dotenv
+from utils import get_user_id
+from docsynth_store import DocSynthStore, Subscription
+
+# Load environment variables
 load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s: %(message)s')
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
+# Initialize FastAPI router
+subscriptions_router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
 
+# Stripe configuration
 price_id = os.getenv('STRIPE_PRICE_ID')
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
-subscriptions_bp = Blueprint("subscriptions", __name__, url_prefix="/api/v1/subscriptions")
 
-def get_id_helper(store, success, user_info):
+# Dependency to get the store
+def get_store(request: Request):
+    return request.app.state.store
+
+# Helper function to authenticate user and retrieve user ID
+async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
+    if not authorization:
+        logger.error("Missing Authorization token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    success, user_info = get_user_id(authorization)
     if not success:
-        return jsonify(user_info), 401
+        logger.error("Failed to authenticate user with token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Now you can use the user_info dictionary to allow or restrict actions
-    name = user_info['name']
-    email = user_info['email']
-    id = store.get_user_id_from_email(email)
-    return id
+    user_id = store.get_user_id_from_email(user_info['email'])
+    if not user_id:
+        logger.error(f"No user ID found for email: {user_info['email']}")
+        raise HTTPException(status_code=404, detail="User not found")
 
-@subscriptions_bp.route('/status', methods=['GET'])
-def subscription_status():
+    logger.info(f"Authenticated user_id: {user_id}")
+    return {"user_id": user_id, "user_info": user_info}
+
+# Route to get subscription status
+@subscriptions_router.get("/status")
+async def subscription_status(
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
     try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        
-        if not token:
-            return jsonify({'error': 'Authorization token is missing'}), 401
-        
-        success, user_info = get_user_id(token)
-        if not success:
-            return jsonify({'error': 'User authentication failed'}), 401
-        
-        user_id = get_id_helper(store, success, user_info)
-        if not user_id:
-            return jsonify({'error': 'User ID not found'}), 404
-
+        user_id = user_data["user_id"]
         subscription = store.get_subscription(user_id)
         
         if not subscription:
-            return jsonify({
+            return {
                 'subscription_status': 'none',
                 'card_last4': None,
                 'card_brand': None,
                 'card_exp_month': None,
-                'card_exp_year': None
-            }), 200
+                'card_exp_year': None,
+                'trial_end': None
+            }
         
         # Prepare subscription data to return
         response = {
@@ -60,82 +73,44 @@ def subscription_status():
             'card_last4': subscription["card_last4"],
             'card_brand': subscription["card_brand"],
             'card_exp_month': subscription["exp_month"],
-            'card_exp_year': subscription["exp_year"]
+            'card_exp_year': subscription["exp_year"],
+            'trial_end': subscription["trial_end"]  
         }
         
-        return jsonify(response), 200
+        return response
     except Exception as e:
-        current_app.logger.error(f"Error in subscription_status: {str(e)}")
-        return jsonify({'error': 'An internal error occurred'}), 500
+        logger.error(f"Error in subscription_status: {str(e)}")
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
-
-@subscriptions_bp.route('/cancel', methods=['POST'])
-def cancel_sub():
+# Route to start a trial
+@subscriptions_router.post("/start-trial", status_code=201)
+async def start_trial(
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
     try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Authorization token is missing'}), 401
-        success, user_info = get_user_id(token)
-        user_id = get_id_helper(store, success, user_info)
-        subscription_status = store.get_subscription(user_id)
-        if not subscription_status:
-            return jsonify({'error': 'No subscription found'}), 404
+        user_id = user_data["user_id"]
+        user_info = user_data["user_info"]
 
-        subscription_id = subscription_status.get('stripe_subscription_id')
-        if not subscription_id:
-            return jsonify({'error': 'Subscription ID is missing'}), 400
-
-        cancellation_result = stripe.Subscription.delete(subscription_id)
-        store.update_subscription_status(
-            subscription_status['stripe_customer_id'],
-            cancellation_result['status']
-        )
-    
-        return jsonify({'subscription_status': cancellation_result['status'],
-                       'card_last4': subscription_status["card_last4"],
-                        'card_brand': subscription_status["card_brand"],
-                        'card_exp_month': subscription_status["exp_month"],
-                        'card_exp_year': subscription_status["exp_year"]}), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 403
-
-@subscriptions_bp.route('/subscribe', methods=['POST'])
-def create_subscription():
-    try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Authorization token is missing'}), 401
-        success, user_info = get_user_id(token)
-        user_id = get_id_helper(store, success, user_info)
-
-        # Check if user already has a subscription
+        # Check if the user already has a subscription
         subscription = store.get_subscription(user_id)
         if subscription:
-            # If subscription exists, get the customer ID from it
-            stripe_customer_id = subscription.get('stripe_customer_id')
+            # If subscription exists, check its status
             if subscription.get('status') == 'active':
-                logging.error(f"Request came from an already active subscription: {user_id}")
-                return jsonify({'error': 'Active subscription already exists'}), 400
+                logger.error(f"Request came from an already active subscription: {user_id}")
+                raise HTTPException(status_code=400, detail="Active subscription already exists")
+            else:
+                # If subscription exists but is not active, handle the logic for reactivating or restarting the trial
+                pass
         else:
-            # If no subscription exists, stripe_customer_id is None
+            # No subscription found, start a trial
             stripe_customer_id = None
-        
-        # Retrieve the payment method ID from the request
-        payment_method_id = request.json.get('payment_method')
-        if not payment_method_id:
-            logging.error(f"Request came without a valid payment method ID: {user_id}")
-            return jsonify({'error': 'Payment method ID is missing'}), 400
 
-        # If stripe_customer_id is still None, check if the customer exists in Stripe
-        if not stripe_customer_id:
-            # Look for an existing customer using the email
+            # Create a new Stripe customer if needed
             existing_customers = stripe.Customer.list(email=user_info.get('email'))
             if existing_customers.data:
                 stripe_customer_id = existing_customers.data[0].id
-                logging.info(f"Found existing Stripe customer: {stripe_customer_id}")
+                logger.info(f"Found existing Stripe customer: {stripe_customer_id}")
             else:
                 # Create a new Stripe customer if no existing customer is found
                 customer = stripe.Customer.create(
@@ -144,7 +119,117 @@ def create_subscription():
                     name=user_info.get('name')
                 )
                 stripe_customer_id = customer.id
-                logging.info(f"Created new Stripe customer: {stripe_customer_id}")
+                logger.info(f"Created new Stripe customer: {stripe_customer_id}")
+
+            # Create a trial subscription for the user
+            created_subscription = stripe.Subscription.create(
+                customer=stripe_customer_id,
+                items=[{'price': price_id}],
+                trial_period_days=30,  # Adjust to your trial period duration
+            )
+
+            # Store the subscription in the database with the 'trial' status
+            store.add_or_update_subscription(
+                user_id=user_id,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=created_subscription.id,
+                status=created_subscription["status"],
+                current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
+                trial_end=datetime.utcfromtimestamp(created_subscription.trial_end),  # Pass trial_end
+                card_last4=None,  # No card details at the start of the trial
+                card_type=None,
+                exp_month=None,
+                exp_year=None
+            )
+
+            return {
+                'message': 'Trial started successfully',
+                'subscription_status': created_subscription["status"],
+                'trial_end': datetime.utcfromtimestamp(created_subscription.trial_end)  # Correct trial_end value
+            }
+
+    except Exception as e:
+        logger.error(f"Error starting trial: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Route to cancel a subscription
+@subscriptions_router.post("/cancel", status_code=200)
+async def cancel_sub(
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
+    try:
+        user_id = user_data["user_id"]
+        subscription_status = store.get_subscription(user_id)
+        if not subscription_status:
+            raise HTTPException(status_code=404, detail="No subscription found")
+
+        subscription_id = subscription_status.get('stripe_subscription_id')
+        if not subscription_id:
+            raise HTTPException(status_code=400, detail="Subscription ID is missing")
+
+        cancellation_result = stripe.Subscription.delete(subscription_id)
+        store.update_subscription_status(
+            subscription_status['stripe_customer_id'],
+            cancellation_result['status']
+        )
+    
+        return {
+            'subscription_status': cancellation_result['status'],
+            'card_last4': subscription_status["card_last4"],
+            'card_brand': subscription_status["card_brand"],
+            'card_exp_month': subscription_status["exp_month"],
+            'card_exp_year': subscription_status["exp_year"]
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+# Route to create a subscription
+@subscriptions_router.post("/subscribe", status_code=201)
+async def create_subscription(
+    payment_method: str = Body(..., embed=True),
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
+    try:
+        user_id = user_data["user_id"]
+        user_info = user_data["user_info"]
+
+        # Check if user already has a subscription
+        subscription = store.get_subscription(user_id)
+        if subscription:
+            # If subscription exists, get the customer ID from it
+            stripe_customer_id = subscription.get('stripe_customer_id')
+            if subscription.get('status') == 'active':
+                logger.error(f"Request came from an already active subscription: {user_id}")
+                raise HTTPException(status_code=400, detail="Active subscription already exists")
+        else:
+            # If no subscription exists, stripe_customer_id is None
+            stripe_customer_id = None
+        
+        # Retrieve the payment method ID from the request
+        payment_method_id = payment_method
+        if not payment_method_id:
+            logger.error(f"Request came without a valid payment method ID: {user_id}")
+            raise HTTPException(status_code=400, detail="Payment method ID is missing")
+
+        # If stripe_customer_id is still None, check if the customer exists in Stripe
+        if not stripe_customer_id:
+            # Look for an existing customer using the email
+            existing_customers = stripe.Customer.list(email=user_info.get('email'))
+            if existing_customers.data:
+                stripe_customer_id = existing_customers.data[0].id
+                logger.info(f"Found existing Stripe customer: {stripe_customer_id}")
+            else:
+                # Create a new Stripe customer if no existing customer is found
+                customer = stripe.Customer.create(
+                    description=f"Customer for user_id {user_id}",
+                    email=user_info.get('email'),
+                    name=user_info.get('name')
+                )
+                stripe_customer_id = customer.id
+                logger.info(f"Created new Stripe customer: {stripe_customer_id}")
 
         try:
             # Attach the payment method to the customer
@@ -180,14 +265,14 @@ def create_subscription():
                 exp_year=payment_method.card.exp_year
             )
 
-            return jsonify({
+            return {
                 'message': 'Subscription created successfully',
                 "subscription_status": created_subscription.status, 
                 'card_last4': payment_method.card.last4,
                 'card_brand': payment_method.card.brand,
                 'card_exp_month': payment_method.card.exp_month,
                 'card_exp_year': payment_method.card.exp_year
-            }), 200
+            }
 
         except Exception as e:
             # Handle card errors
@@ -199,63 +284,55 @@ def create_subscription():
                 status="none",
                 current_period_end=None,
             )
-            return jsonify({'error': error_msg, 'message': 'Card error occurred'}), 400
+            raise HTTPException(status_code=400, detail=error_msg)
 
     except Exception as e:
-        logging.error(f"Subscription error: {str(e)}")
-        return jsonify({'error': str(e)}), 403
+        logger.error(f"Subscription error: {str(e)}")
+        raise HTTPException(status_code=403, detail=str(e))
 
-
-@subscriptions_bp.route('/update-payment', methods=['POST'])
-def update_payment():
+# Route to update payment method
+@subscriptions_router.post("/update-payment", status_code=200)
+async def update_payment(
+    payment_method: str = Body(..., embed=True),
+    user_data: Dict = Depends(authenticate_user),
+    store: DocSynthStore = Depends(get_store)
+):
     try:
-        store = current_app.store
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Authorization token is missing'}), 401
-        success, user_info = get_user_id(token)
-        user_id = get_id_helper(store, success, user_info)
-
-        payment_method_id = request.json.get('payment_method')
-        if not payment_method:
-            return jsonify({'error': 'Payment method is missing'}), 400
-
-       
+        user_id = user_data["user_id"]
         subscription = store.get_subscription(user_id)
         if not subscription:
-            return jsonify({'error': 'No subscription found'}), 404
+            raise HTTPException(status_code=404, detail="No subscription found")
 
         stripe_customer_id = subscription.get('stripe_customer_id')
-
         subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
-            return jsonify({'error': 'Subscription ID is missing'}), 400
+            raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
-        payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
-        stripe.PaymentMethod.attach(payment_method_id, customer=stripe_customer_id)
-        stripe.Subscription.modify(subscription_id, default_payment_method=payment_method_id)
+        payment_method = stripe.PaymentMethod.retrieve(payment_method)
+        stripe.PaymentMethod.attach(payment_method, customer=stripe_customer_id)
+        stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
 
         store.update_subscription(
             stripe_customer_id=stripe_customer_id,
             status=subscription["status"],  # Or retrieve status from Stripe if required
             current_period_end=datetime.utcfromtimestamp(subscription["current_period_end"]),  # Retrieve current period end from Stripe if needed
-            card_last4 = payment_method.card.last4,
-            card_type = payment_method.card.brand,
-            exp_month = payment_method.card.exp_month,
-            exp_year = payment_method.card.exp_year
+            card_last4=payment_method.card.last4,
+            card_type=payment_method.card.brand,
+            exp_month=payment_method.card.exp_month,
+            exp_year=payment_method.card.exp_year
         )
 
-
-        return jsonify({'success': True}), 200
+        return {'success': True}
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@subscriptions_bp.route('/webhook', methods=['POST'])
-def webhook():
-    store = current_app.store
-    payload = request.get_data()
+# Route to handle Stripe webhooks
+@subscriptions_router.post("/webhook")
+async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
+    payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
+    db_session = None # Initialize db_session
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
@@ -271,19 +348,51 @@ def webhook():
             store.update_subscription_status(stripe_customer_id, "card_declined")
 
         elif event_type == 'customer.subscription.updated':
-            status = data_object['status']
+            current_status = data_object['status']
+            previous_status = event['data'].get('previous_attributes', {}).get('status') # Keep this for potential future use or logging
             current_period_end = data_object['current_period_end']
-            store.update_subscription(stripe_customer_id, status, current_period_end)
+
+            # --- Logic to handle trial end --- 
+            try:
+                db_session = store.get_session()
+                # Find the subscription in our DB *before* updating it
+                subscription_in_db = db_session.query(Subscription).filter_by(stripe_customer_id=stripe_customer_id).first()
+
+                if subscription_in_db and subscription_in_db.status == 'trialing' and current_status != 'trialing':
+                    logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
+                    # TODO: Implement logic here to update the user's plan/tier based on the new status.
+                    # Example: Find the user associated with the subscription (subscription_in_db.user_id)
+                    # and update their plan in the User table (e.g., store.update_user_plan(subscription_in_db.user_id, 'free'))
+                    # Ensure changes are committed if updating directly: db_session.commit()
+                    pass # Placeholder for trial end logic
+
+            except Exception as db_exc:
+                logger.error(f"Database error checking/handling trial end for {stripe_customer_id}: {db_exc}")
+                # Decide if this should prevent the main subscription update - likely not, 
+                # but log it thoroughly.
+            finally:
+                 if db_session:
+                    db_session.close() # Close the session used for checking
+            # --- End trial handling logic --- 
+
+            # Always update the subscription record with the latest status from Stripe
+            store.update_subscription(stripe_customer_id, current_status, current_period_end)
 
         elif event_type == 'customer.subscription.deleted':
             store.update_subscription_status(stripe_customer_id, "canceled")
 
         else:
-            return jsonify({"error": "Unhandled event"}), 400
+            raise HTTPException(status_code=400, detail="Unhandled event")
 
-        return jsonify({"status": "success"}), 200
+        return {"status": "success"}
 
     except stripe.error.SignatureVerificationError:
-        return jsonify({"error": "Invalid signature"}), 400
+        raise HTTPException(status_code=400, detail="Invalid signature")
     except ValueError:
-        return jsonify({"error": "Invalid payload"}), 400
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    finally:
+        # Ensure session is closed if an early exception occurred before the specific check block's finally
+        if db_session and not db_session.is_active:
+             pass # Already closed
+        elif db_session:
+            db_session.close()

@@ -1,5 +1,6 @@
+# Stage 1: Build the frontend
 FROM node:18-alpine AS build-step
-WORKDIR /app
+WORKDIR /app/frontend
 
 # Copy only package files first to leverage caching
 COPY frontend/package.json frontend/package-lock.json ./
@@ -11,10 +12,10 @@ RUN npm ci --only=production && npm prune --production
 COPY frontend/ ./
 RUN npm run build && npm cache clean --force
 
-# Stage 2: Set up the Python backend with FFmpeg and Whisper
+# Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
 FROM python:3.10-slim AS base
 
-# Install FFmpeg, system dependencies, and other tools
+# Install system dependencies including FFmpeg
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ffmpeg \
@@ -23,35 +24,31 @@ RUN apt-get update && \
     supervisor && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
-\
 
-# Copy only the build artifacts from the first stage (frontend build step), not node_modules
-COPY --from=build-step /app/build ./build
-
-# Copy backend files (api directory)
+# Copy backend files
 COPY api/ ./api/
 
-# Install Python dependencies and remove cache
+# Install Python dependencies
 RUN pip install --no-cache-dir -r ./api/requirements.txt
 
-# # Install Playwright and the necessary browsers
-# RUN pip install playwright && \
-#     python -m playwright install
+# Set environment variable for Whisper model directory
+ENV WHISPER_CACHE_DIR=/app/models
 
+# Download the 1.5GB Whisper model and store it in the image
+RUN mkdir -p $WHISPER_CACHE_DIR && \
+    pip install faster-whisper && \
+    python -c "from faster_whisper import WhisperModel; WhisperModel('medium', download_root='$WHISPER_CACHE_DIR')"
 
-FROM base
+# Copy the frontend build from the first stage
+COPY --from=build-step /app/frontend/build ./frontend/build
 
-# Set permissions for log files and directories (ensure directories are writable)
-RUN mkdir -p /var/log/syntextai && \
-    chown -R root:root /var/log/syntextai && \
-    chmod -R 775 /var/log/syntextai
-
-# Expose thc v=e application port
+# Expose the application port
 EXPOSE 3000
 
-# Supervisor Configuration
-COPY supervisord.conf /etc/supervisor/supervisord.conf
+# Set the working directory to /app/api
+WORKDIR /app/api
 
-# Command to start Supervisor (or your application)
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+# Command to start FastAPI
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]

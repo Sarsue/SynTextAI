@@ -6,6 +6,13 @@
     --button-bg: #007bff;
     --button-text-color: #ffffff;
     --button-hover-bg: #0056b3;
+    --pricing-bg: #eef2ff;
+    --pricing-text: #1a237e;
+    --feature-bg: #ffffff;
+    --feature-text-color: #212529;
+    --feature-border: rgba(0, 123, 255, 0.2);
+    --use-case-bg: #f8f9fa;
+    --use-case-border: #e9ecef;
 }
 
 /* Dark Mode */
@@ -13,6 +20,13 @@
     --background-color: #121212;
     --text-color: #e0e0e0;
     --header-footer-bg: #1f1f1f;
+    --pricing-bg: #1a1a2e;
+    --pricing-text: #bb86fc;
+    --feature-bg: #1f1f1f;
+    --feature-text-color: #e0e0e0;
+    --feature-border: rgba(187, 134, 252, 0.2);
+    --use-case-bg: #2d2d2d;
+    --use-case-border: #333333;
 }
 
 /* Base Styles */
@@ -36,35 +50,37 @@ body {
 header {
     background-color: var(--header-footer-bg);
     color: var(--text-color);
-    padding: 20px;
+    padding: clamp(12px, 2vw, 20px);
     text-align: center;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 /* Logo */
 .logo-container .app-title {
-    font-size: 2rem;
+    font-size: clamp(1.5rem, 3vw, 2rem);
     font-weight: 600;
     margin: 0;
 }
 
 /* Authentication Button */
 .auth-buttons {
-    margin-top: 10px;
+    margin-top: clamp(5px, 1vw, 10px);
 }
 
-.google-sign-in-button {
+.primary-button {
     background-color: var(--button-bg);
     color: var(--button-text-color);
     border: none;
-    padding: 12px 24px;
-    font-size: 1rem;
+    padding: clamp(10px, 2vw, 14px) clamp(20px, 4vw, 28px);
+    font-size: clamp(0.9rem, 2vw, 1.1rem);
     border-radius: 6px;
     cursor: pointer;
     transition: background-color 0.3s ease;
+    width: min(90%, 300px);
+    /* More responsive */
 }
 
-.google-sign-in-button:hover {
+.primary-button:hover {
     background-color: var(--button-hover-bg);
 }
 
@@ -76,42 +92,212 @@ header {
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 80px 20px;
+    padding: clamp(40px, 10vw, 80px) clamp(16px, 5vw, 24px);
 }
 
 /* Hero Section */
 .hero-section {
-    max-width: 800px;
+    max-width: min(90%, 600px);
+    /* More responsive */
+    text-align: center;
 }
 
 .hero-title {
-    font-size: 3.2rem;
+    font-size: clamp(1.8rem, 4vw, 3rem);
     font-weight: 700;
-    margin-bottom: 16px;
+    margin-bottom: clamp(10px, 2vw, 16px);
     line-height: 1.2;
 }
 
 .hero-description {
-    font-size: 1.25rem;
+    font-size: clamp(1rem, 2vw, 1.2rem);
     line-height: 1.6;
-    color: rgba(0, 0, 0, 0.7);
-    margin-bottom: 24px;
+    color: rgba(0, 0, 0, 0.75);
+    margin-bottom: clamp(16px, 2vw, 24px);
 }
 
 .dark-mode .hero-description {
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* Features Section */
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    margin-top: 40px;
+    width: 100%;
+    max-width: 1200px;
+}
+
+.feature-item {
+    background-color: var(--feature-bg);
+    color: var(--feature-text-color);
+    padding: 32px;
+    border-radius: 12px;
+    text-align: left;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border: 1px solid var(--feature-border);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.feature-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+}
+
+.feature-icon {
+    font-size: 2.5rem;
+    margin-bottom: 16px;
+}
+
+.feature-item h3 {
+    font-size: 1.25rem;
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.feature-item p {
+    font-size: 1rem;
+    line-height: 1.6;
+    opacity: 0.9;
+}
+
+/* Video Container */
+.video-container {
+    width: 100%;
+    max-width: 800px;
+    margin: auto;
+}
+
+.video-container iframe {
+    width: 100%;
+    height: clamp(180px, 35vw, 360px);
+}
+
+/* Testimonials Section */
+.testimonials-section {
+    margin-top: 40px;
+    width: 100%;
+}
+
+.testimonial-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    width: 100%;
+}
+
+.testimonial-item {
+    background-color: var(--pricing-bg);
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+/* Pricing Section */
+.pricing-section {
+    background-color: var(--pricing-bg);
+    color: var(--pricing-text);
+    padding: clamp(20px, 5vw, 40px);
+    border-radius: 10px;
+    margin: clamp(20px, 4vw, 40px) auto;
+    text-align: center;
+    max-width: 600px;
+    box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.pricing-title {
+    font-size: clamp(1.5rem, 3vw, 2.5rem);
+    font-weight: 700;
+    margin-bottom: 10px;
 }
 
 /* Footer */
 footer {
     background-color: var(--header-footer-bg);
-    padding: 20px;
+    padding: clamp(12px, 2vw, 20px);
     text-align: center;
-    font-size: 0.9rem;
+    font-size: clamp(0.85rem, 2vw, 1rem);
     border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 footer p {
     margin: 0;
     opacity: 0.8;
+}
+
+/* New Use Cases Section */
+.use-cases-section {
+    width: 100%;
+    max-width: 1200px;
+    margin: 60px auto;
+}
+
+.use-cases-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-top: 30px;
+}
+
+.use-case-item {
+    background-color: var(--use-case-bg);
+    border: 1px solid var(--use-case-border);
+    padding: 24px;
+    border-radius: 8px;
+    text-align: center;
+    transition: transform 0.3s ease;
+}
+
+.use-case-item:hover {
+    transform: translateY(-3px);
+}
+
+.use-case-item h3 {
+    font-size: 1.2rem;
+    margin-bottom: 12px;
+    color: var(--text-color);
+}
+
+.use-case-item p {
+    font-size: 0.95rem;
+    color: var(--text-color);
+    opacity: 0.9;
+}
+
+/* Responsive Tweaks */
+@media (max-width: 768px) {
+    .features-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .testimonial-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pricing-section {
+        max-width: 90%;
+    }
+}
+
+@media (max-width: 480px) {
+    .hero-title {
+        font-size: 1.8rem;
+    }
+
+    .primary-button {
+        font-size: 1rem;
+        padding: 12px 20px;
+    }
+
+    .testimonial-grid,
+    .features-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pricing-section {
+        padding: 20px;
+    }
 }

@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  syntextaiapp:
+    image: osasdeeon/syntextai:latest
+    container_name: syntextaiapp
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    networks:
+      - syntextai_network
+    deploy:
+      resources:
+        limits:
+          memory: 4G  # Limit to 4GB
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml
+    networks:
+      - syntextai_network
+    deploy:
+      resources:
+        limits:
+          memory: 8G  # Limit to 4GB
+
+networks:
+  syntextai_network:
+    driver: bridge

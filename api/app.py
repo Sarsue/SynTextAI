@@ -1,17 +1,34 @@
-from flask import Flask, send_from_directory
-from flask_cors import CORS
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from websocket_manager import websocket_manager
 from docsynth_store import DocSynthStore
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
-from redis import StrictRedis, ConnectionPool  # Added connection pooling
 import os
-from celery import Celery
-from kombu.utils.url import safequote
+import logging
+from utils import decode_firebase_token
 # Load environment variables
 load_dotenv()
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# Construct paths relative to the base directory
+# Initialize FastAPI
+app = FastAPI(max_request_body_size= 2 * 1024 * 1024 * 1024)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize Firebase and Redis
+initialize_firebase()
+
 database_config = {
     'dbname': os.getenv("DATABASE_NAME"),
     'user': os.getenv("DATABASE_USER"),
@@ -19,105 +36,77 @@ database_config = {
     'host': os.getenv("DATABASE_HOST"),
     'port': os.getenv("DATABASE_PORT"),
 }
+
 DATABASE_URL = (
     f"postgresql://{database_config['user']}:{database_config['password']}"
     f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
 )
 
-redis_username = os.getenv('REDIS_USERNAME')
-redis_pwd = os.getenv('REDIS_PASSWORD')
-redis_host = os.getenv('REDIS_HOST')
-redis_port = os.getenv('REDIS_PORT')
+store = DocSynthStore(database_url=DATABASE_URL)
+app.state.store = store
 
-# Path to the certificate
-ssl_cert_path = os.path.join(BASE_DIR, "config", "ca-certificate.crt")
+# Dependency to get the store
+def get_store(request: Request):
+    return request.app.state.store
 
-# Redis connection pool for Celery with SSL configuration
-redis_url = (
-    f"rediss://:{safequote(redis_pwd)}@{redis_host}:{redis_port}/0"
-    "?ssl_cert_reqs=CERT_REQUIRED&ssl_ca_certs=config/ca-certificate.crt"
-)
+# WebSocket endpoint
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    await websocket.accept()
+    try:
+        # Authenticate the user
+        data = await websocket.receive_json()
+        if data.get("type") != "auth":
+            await websocket.close(code=1008)
+            return
 
-redis_connection_pool_options = {
-    'ssl_cert_reqs': 'CERT_REQUIRED',
-    'ssl_ca_certs': ssl_cert_path,
-}
+        token = data.get("token")
+        success, user_info = decode_firebase_token(token)
+        if not success:
+            await websocket.close(code=1008)
+            websocket_manager.disconnect(user_id)
+            return
 
-def create_app():
-    app = Flask(__name__, static_folder='../build', static_url_path='/')
+        # Add the WebSocket connection to the manager
+        await websocket_manager.connect(user_id, websocket)
 
-    # Initialize Firebase
-    initialize_firebase()
+        # Keep the connection alive
+        while True:
+            message = await websocket.receive_text()
+            # Handle the message (e.g., broadcast to other clients)
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(user_id)
+        logger.info(f"User {user_id} disconnected")
 
-    # Set up CORS
-    CORS(app, supports_credentials=True)
+# Import routers after app is set up
+from routes.files import files_router
+from routes.histories import histories_router
+from routes.messages import messages_router
+from routes.subscriptions import subscriptions_router
+from routes.users import users_router
 
-    # Instantiate your store with the database config
-    store = DocSynthStore(database_url=DATABASE_URL)
-    app.store = store
+# Include routers
+app.include_router(files_router)
+app.include_router(histories_router)
+app.include_router(messages_router)
+app.include_router(subscriptions_router)
+app.include_router(users_router)
 
-    # Redis Configuration with Connection Pooling
-    pool = ConnectionPool.from_url(
-        redis_url, 
-        max_connections=10, 
-        connection_class=StrictRedis,
-        **redis_connection_pool_options
-    )
-    redis_client = StrictRedis(connection_pool=pool)
-    app.redis_client = redis_client  # Make Redis available in your app
+# Serve static files (React app)
+build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
+app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
-    # Register Blueprints
-    from routes.users import users_bp
-    from routes.histories import histories_bp
-    from routes.messages import messages_bp
-    from routes.files import files_bp
-    from routes.subscriptions import subscriptions_bp
-    from routes.logs import logs_bp
+@app.get("/")
+async def serve_react_app():
+    index_path = os.path.join(build_path, "index.html")
+    if not os.path.exists(index_path):
+        raise HTTPException(status_code=404, detail="App not found. Build the App first.")
+    return FileResponse(index_path)
 
-    app.register_blueprint(users_bp, url_prefix="/api/v1/users")
-    app.register_blueprint(histories_bp, url_prefix="/api/v1/histories")
-    app.register_blueprint(messages_bp, url_prefix="/api/v1/messages")
-    app.register_blueprint(files_bp, url_prefix="/api/v1/files")
-    app.register_blueprint(subscriptions_bp, url_prefix="/api/v1/subscriptions")
-    app.register_blueprint(logs_bp,  url_prefix="/api/v1/logs")
-  
-    @app.route('/')
-    def serve_react_app():
-        return send_from_directory(app.static_folder, 'index.html')
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
-    @app.route('/<path:path>')
-    def serve_static_file(path):
-        return send_from_directory(app.static_folder, path)
-
-    return app
-
-def make_celery(app):
-    # Initialize Celery with the application's import name, broker, and backend
-    celery = Celery(
-        app.import_name,
-        backend=redis_url,
-        broker=redis_url,
-    )
-    celery.conf.update({
-        'broker_url': redis_url,
-        'result_backend': redis_url,
-        'broker_transport_options': redis_connection_pool_options,
-        'task_time_limit': 900,
-        'task_soft_time_limit': 600,
-        'worker_prefetch_multiplier': 1,
-        'broker_connection_retry_on_startup': True,
-        'broker_connection_max_retries': None,
-    })
-
-    # Ensure that Celery tasks run within the Flask application context
-    class ContextTask(celery.Task):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return self.run(*args, **kwargs)
-
-    celery.Task = ContextTask
-    return celery
-
-# Initialize the Flask app and Celery
-app = create_app()
-celery = make_celery(app)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=3000)

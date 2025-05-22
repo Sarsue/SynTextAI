@@ -4,6 +4,7 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { UserProvider } from './UserContext'; // Import DarkModeProvider
+import * as serviceWorkerRegistration from "./serviceWorkerRegistration"; // Import service worker
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 root.render(

@@ -21,6 +21,7 @@ dataclasses-json==0.6.6
 Deprecated==1.2.14
 dirtyjson==1.0.8
 distro==1.9.0
+dspy
 exceptiongroup==1.2.1
 filelock==3.14.0
 frozenlist==1.4.1
@@ -161,4 +162,10 @@ markdownify==0.14.1
 pgvector==0.3.6
 psycopg2-binary
 supervisor
-
+fastapi
+uvicorn
+google-generativeai
+python-multipart
+ffmpeg-python
+websockets
+youtube-transcript-api

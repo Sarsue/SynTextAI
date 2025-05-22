@@ -1,15 +1,17 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime, Float
 from sqlalchemy.orm import declarative_base, relationship,  mapped_column, Mapped
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 from sqlalchemy.types import JSON
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.exc import IntegrityError
-from typing import List
+from typing import List, Optional
 from datetime import datetime
+import calendar
 import logging
 import numpy as np
 from scipy.spatial.distance import cosine, euclidean
+
 
 
 # logging.basicConfig(level=logging.ERROR)
@@ -27,6 +29,7 @@ class User(Base):
     chat_histories = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     files = relationship("File", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
+    explanations = relationship("Explanation", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subscription(Base):
@@ -39,6 +42,8 @@ class Subscription(Base):
     current_period_end = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+    trial_end = Column(TIMESTAMP, nullable=True)
+
 
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
     user = relationship("User", back_populates="subscriptions")
@@ -93,14 +98,13 @@ class File(Base):
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    summary = Column(Text, nullable=True) # Added summary column
     
     # Relationship to chunks
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
-    
-    # Relationship to segments
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
-    
     user = relationship("User", back_populates="files")
+    explanations = relationship("Explanation", back_populates="file", cascade="all, delete-orphan")
 
 
 class Segment(Base):
@@ -140,6 +144,25 @@ class Chunk(Base):
     
     def __repr__(self):
         return f"<Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:50]}...)>"
+
+
+class Explanation(Base):
+    __tablename__ = 'explanations'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
+    content = Column(Text, nullable=True)  # The selected content being explained
+    explanation = Column(Text, nullable=True)  # The AI-generated explanation
+    page = Column(Integer, nullable=True)  # For PDF files
+    video_start = Column(Float, nullable=True)  # For video files (timestamp in seconds)
+    video_end = Column(Float, nullable=True)  # For video files (timestamp in seconds)
+    selection_type = Column(String, nullable=False)  # 'text' or 'video_range'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    file = relationship("File", back_populates="explanations")
+    user = relationship("User", back_populates="explanations")
 
 
 class DocSynthStore:
@@ -187,27 +210,30 @@ class DocSynthStore:
             if not user:
                 raise ValueError(f"User with ID {user_id} not found.")
 
-            # Explicitly delete related objects (redundant but ensures cleanup)
-            session.query(CardDetails).filter(CardDetails.subscription_id.in_(
-                session.query(Subscription.id).filter(Subscription.user_id == user_id)
-            )).delete(synchronize_session=False)
+            # Fetch the user's subscription
+            subscription = session.query(Subscription).filter(Subscription.user_id == user_id).first()
+            if subscription:
+                # Update subscription status to 'deleted' and clear stripe_subscription_id
+                subscription.status = 'deleted'
+                subscription.stripe_subscription_id = None
+                session.add(subscription)
 
-            session.query(Subscription).filter(Subscription.user_id == user_id).delete(synchronize_session=False)
+            # Delete related records, but don't delete user or subscription
+            session.query(CardDetails).filter(CardDetails.subscription_id == subscription.id).delete(synchronize_session=False)
             session.query(Message).filter(Message.user_id == user_id).delete(synchronize_session=False)
             session.query(ChatHistory).filter(ChatHistory.user_id == user_id).delete(synchronize_session=False)
             session.query(File).filter(File.user_id == user_id).delete(synchronize_session=False)
 
-            # Finally, delete the user
-            session.delete(user)
+            # Commit changes
             session.commit()
+
         except Exception as e:
             session.rollback()
             raise
         finally:
             session.close()
 
-
-    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
+    def add_or_update_subscription(self, user_id, stripe_customer_id, stripe_subscription_id, status, current_period_end=None, trial_end=None, card_last4=None, card_type=None, exp_month=None, exp_year=None):
         session = self.get_session()
         update_time = datetime.utcnow()
         try:
@@ -219,6 +245,7 @@ class DocSynthStore:
                 subscription.stripe_subscription_id = stripe_subscription_id
                 subscription.status = status
                 subscription.current_period_end = current_period_end
+                subscription.trial_end = trial_end  # Update trial_end if provided
                 subscription.updated_at = update_time
                 
                 # Update card details if provided
@@ -248,6 +275,7 @@ class DocSynthStore:
                     stripe_subscription_id=stripe_subscription_id,
                     status=status,
                     current_period_end=current_period_end,
+                    trial_end=trial_end,  # Set trial_end if available
                     updated_at=update_time
                 )
                 session.add(subscription)
@@ -273,15 +301,14 @@ class DocSynthStore:
                     'stripe_subscription_id': stripe_subscription_id,
                     'status': status,
                     'current_period_end': current_period_end,
+                    'trial_end': trial_end.strftime("%Y-%m-%d %H:%M:%S") if trial_end else None,  # Include trial_end in the response
                     'card_last4': card_last4 if card_last4 else None,
                     'card_brand': card_type if card_type else None,
                     'exp_month': exp_month if exp_month else None,
                     'exp_year': exp_year if exp_year else None
                 } 
-
         except Exception as e:
             session.rollback()
-            # logger.error(f"Error adding/updating subscription: {e}")
             raise
         finally:
             session.close()
@@ -351,6 +378,7 @@ class DocSynthStore:
                     'stripe_subscription_id': subscription_data.stripe_subscription_id,
                     'status': subscription_data.status,
                     'current_period_end': subscription_data.current_period_end,
+                      'trial_end': subscription_data.trial_end,  
                     'created_at': subscription_data.created_at,
                     'updated_at': subscription_data.updated_at,
                     'card_last4': card_data.card_last4 if card_data else None,
@@ -632,14 +660,16 @@ class DocSynthStore:
             session = self.get_session()
 
             # Fetch the files for the user along with a count of their chunks
+            # Now also including the summary field
             files = session.query(
                 File.id, 
                 File.file_name, 
-                File.file_url, 
+                File.file_url,
+                File.summary,  # Added summary field
                 func.count(Chunk.id).label('chunk_count')
-            ).outerjoin(Chunk, Chunk.file_id == File.id) \
-            .filter(File.user_id == user_id) \
-            .group_by(File.id, File.file_name, File.file_url) \
+            ).outerjoin(Chunk, Chunk.file_id == File.id)\
+            .filter(File.user_id == user_id)\
+            .group_by(File.id, File.file_name, File.file_url, File.summary)\
             .all()
 
             file_info_list = []
@@ -648,14 +678,16 @@ class DocSynthStore:
                     'id': file[0],
                     'name': file[1],
                     'publicUrl': file[2],
-                    'processed': file[3] > 0  # True if chunk_count > 0, otherwise False
+                    'summary': file[3],  # Include the summary in the response
+                    'processed': file[4] > 0  # True if chunk_count > 0, otherwise False
                 }
                 file_info_list.append(file_info)
 
             return file_info_list
+
         except Exception as e:
-            #logger.error(f"Error getting files for user: {e}")
-            raise
+            #logging.error(f"Error fetching files for user {user_id}: {e}")
+            return []
         finally:
             session.close()
 
@@ -768,9 +800,221 @@ class DocSynthStore:
         finally:
             session.close()
 
+    def get_segments_for_page(self, file_id: int, page_number: int) -> List[str]:
+        """Get all segment contents for a specific page of a file."""
+        session = self.get_session()
+        try:
+            segments = session.query(Segment.content).filter(
+                Segment.file_id == file_id,
+                Segment.page_number == page_number
+            ).all()
+            # segments will be a list of tuples like [('content1',), ('content2',)]
+            return [content for (content,) in segments]
+        except Exception as e:
+            logging.error(f"Error fetching segments for file {file_id}, page {page_number}: {e}")
+            return [] # Return empty list on error
+        finally:
+            session.close()
 
+    def get_segments_for_time_range(self, file_id: int, start_time: float, end_time: Optional[float] = None) -> List[str]:
+        """Get segment contents for a specific time range of a video file.
+        Assumes segments have 'start' and 'end' keys in meta_data.
+        Retrieves segments that overlap with the requested [start_time, end_time].
+        If end_time is None, retrieves all segments ending at or before start_time.
+        """
+        session = self.get_session()
+        try:
+            query = session.query(Segment.content).filter(
+                Segment.file_id == file_id,
+                Segment.meta_data.isnot(None) # Ensure meta_data exists
+            )
 
+            # --- Overlap Logic --- 
+            # A segment [s_start, s_end] overlaps with request [r_start, r_end] if:
+            # s_start < r_end AND s_end > r_start
+            # We need to cast meta_data values to numeric types for comparison.
+            # Using ->> to get text and ::float to cast in PostgreSQL.
+            # Adjust casting if using a different DB.
+
+            if end_time is not None:
+                # Case 1: Request has a range [r_start, r_end]
+                query = query.filter(
+                    (Segment.meta_data['start'].astext.cast(Float) < end_time),
+                    (Segment.meta_data['end'].astext.cast(Float) > start_time)
+                )
+            else:
+                # Case 2: Request has only a start time [r_start]
+                # Fetch all segments ending at or before r_start
+                query = query.filter(
+                    (Segment.meta_data['end'].astext.cast(Float) <= start_time)
+                )
+            # --- End Overlap Logic ---
+
+            # Order by start time for coherence
+            query = query.order_by(Segment.meta_data['start'].astext.cast(Float))
+
+            segments = query.all()
+            return [content for (content,) in segments]
+        except Exception as e:
+            # Log the error, including potential issues with meta_data structure or casting
+            logging.error(f"Error fetching segments for file {file_id}, time {start_time}-{end_time}: {e}", exc_info=True)
+            return [] # Return empty list on error
+        finally:
+            session.close()
+
+    def update_file_summary(self, user_id: int, file_name: str, summary: str):
+        """Updates the summary field for a specific file."""
+        session = self.get_session()
+        try:
+            # Create or fetch the file entry
+            db_file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()   
+            if db_file:
+                db_file.summary = summary
+                session.commit()
+                #logger.info(f"Updated summary for file ID: {file_id}")
+            else:
+                #logger.error(f"File not found with ID {file_id} when trying to update summary.")
+                raise ValueError(f"File not found with ID {file_name} when trying to update summary.")
+        except Exception as e:
+            session.rollback()
+            #logger.error(f"Error updating summary for file ID {file_id}: {e}")
+            raise
+        finally:
+            session.close()
+
+    def get_user_by_email(self, email: str) -> User | None:
+        session = self.get_session()
+        try:
+            user = session.query(User).filter(User.email == email).first()
+            return user
+        finally:
+            session.close()
+            
+    def get_file_by_id(self, file_id: int) -> Optional[File]:
+        """Get a file by its ID"""
+        session = self.get_session()
+        try:
+            file = session.query(File).filter(File.id == file_id).first()
+            return file
+        finally:
+            session.close()
+            
+    def get_file_by_name(self, user_id: int, filename: str) -> Optional[File]:
+        """Get a file record by user ID and filename."""
+        session = self.get_session()
+        try:
+            file_record = session.query(File).filter(
+                File.user_id == user_id,
+                File.file_name == filename
+            ).order_by(File.created_at.desc()).first() # Get the most recent if multiple exist
+            return file_record
+        finally:
+            session.close()
+
+    def save_explanation(self, user_id: int, file_id: int, selection_type: str, content: str = None, 
+    explanation: str = None, page: int = None, video_start: float = None, video_end: float = None) -> int:
+        """Save an explanation for a file selection
+        
+        Args:
+            user_id: The ID of the user
+            file_id: The ID of the file
+            selection_type: The type of selection ('text' or 'video_range')
+            content: The selected text content (for PDFs)
+            explanation: The AI-generated explanation
+            page: The page number (for PDFs)
+            video_start: Start timestamp in seconds (for videos)
+            video_end: End timestamp in seconds (for videos)
+            
+        Returns:
+            int: The ID of the created explanation
+        """
+        session = self.get_session()
+        try:
+            explanation_obj = Explanation(
+                user_id=user_id,
+                file_id=file_id,
+                selection_type=selection_type,
+                content=content,
+                explanation=explanation,
+                page=page,
+                video_start=video_start,
+                video_end=video_end
+            )
+            session.add(explanation_obj)
+            session.commit()
+            return explanation_obj.id
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+            
+    def get_explanations_for_file(self, user_id: int, file_id: int) -> List[dict]:
+        """Get all explanations for a specific file
+        
+        Args:
+            user_id: The ID of the user
+            file_id: The ID of the file
+            
+        Returns:
+            List[dict]: A list of explanations with their details
+        """
+        session = self.get_session()
+        try:
+            explanations = session.query(Explanation).filter(
+                Explanation.user_id == user_id,
+                Explanation.file_id == file_id
+            ).order_by(Explanation.page.asc().nulls_last(), Explanation.video_start.asc().nulls_last()).all()
+            
+            result = []
+            for exp in explanations:
+                # Compute context_info for frontend
+                if exp.selection_type == 'video_range':
+                    if exp.video_start is not None and exp.video_end is not None:
+                        context_info = f"Video {exp.video_start:.1f}s - {exp.video_end:.1f}s"
+                    else:
+                        context_info = "Video time range"
+                elif exp.selection_type == 'text' and exp.page is not None and exp.content:
+                    context_info = f"Page {exp.page}: {exp.content[:50]}..."
+                else:
+                    context_info = exp.content if exp.content else None
+                exp_dict = {
+                    "id": exp.id,
+                    "file_id": exp.file_id,
+                    "user_id": exp.user_id,
+                    "context_info": context_info,
+                    "explanation_text": exp.explanation,
+                    "created_at": exp.created_at if exp.created_at else None,
+                    "selection_type": exp.selection_type,
+                    "page": exp.page,
+                    "video_start": exp.video_start,
+                    "video_end": exp.video_end
+                }
+                result.append(exp_dict)
+            return result
+        finally:
+            session.close()
     
-
+    def is_premium_user(self, user_id: int) -> bool:
+        """Check if a user has an active premium subscription
+        
+        Args:
+            user_id: The ID of the user to check
+            
+        Returns:
+            bool: True if the user has an active premium subscription, False otherwise
+        """
+        session = self.get_session()
+        try:
+            subscription = session.query(Subscription).filter(
+                Subscription.user_id == user_id,
+                Subscription.status.in_(["active", "trialing"])
+            ).first()
+            
+            # User is premium if they have an active or trialing subscription
+            return subscription is not None
+        finally:
+            session.close()
+    
 # Example usage
 # db = DocSynthStore("sqlite:///test.db")

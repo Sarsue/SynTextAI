@@ -1,11 +1,12 @@
 /* Knowledge Base Container */
 .files-column {
-    width: 300px;
-    padding: 16px;
+    width: clamp(250px, 25vw, 300px);
+    padding: clamp(12px, 2vw, 16px);
     background-color: #f5f5f5;
-    border-radius: 8px;
+    border-radius: clamp(6px, 1vw, 8px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     overflow-y: auto;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 /* Dark Mode for Knowledge Base */
@@ -16,14 +17,14 @@
 
 /* Toggle Button */
 .knowledgebase-toggle button {
-    margin-top: 16px;
-    padding: 8px 16px;
-    font-size: 14px;
+    margin-top: clamp(12px, 2vw, 16px);
+    padding: clamp(6px, 1vw, 8px) clamp(12px, 2vw, 16px);
+    font-size: clamp(12px, 2vw, 14px);
     cursor: pointer;
     background-color: #0078d4;
     color: white;
     border: none;
-    border-radius: 4px;
+    border-radius: clamp(3px, 0.5vw, 4px);
     transition: background-color 0.3s ease;
 }
 
@@ -39,27 +40,31 @@
 }
 
 .file-list li {
-    margin-bottom: 8px;
+    margin-bottom: clamp(6px, 1vw, 8px);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: clamp(6px, 1vw, 8px);
+    border-radius: clamp(3px, 0.5vw, 4px);
+    transition: background-color 0.3s ease;
 }
 
 /* Common styles for the file link */
 .file-list .file-link {
     cursor: pointer;
     text-decoration: underline;
+    font-size: clamp(12px, 2vw, 14px);
 }
 
 /* Styles for processed and not processed file links */
 .link-processed {
     color: #4caf50;
-    /* Red for processed files */
+    /* Green for processed files */
 }
 
 .link-not-processed {
     color: #ff0000;
-    /* Blue for not processed files */
+    /* Red for not processed files */
 }
 
 /* Delete button */
@@ -68,8 +73,8 @@
     border: none;
     color: white;
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: clamp(3px, 0.5vw, 4px) clamp(6px, 1vw, 8px);
+    border-radius: clamp(3px, 0.5vw, 4px);
     transition: background-color 0.3s ease;
 }
 
@@ -77,13 +82,138 @@
     background-color: #ff3333;
 }
 
+/* Summary button */
+.summary-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1em; /* Adjust as needed */
+  margin-left: 8px; /* Space it from the delete button */
+  padding: 2px;
+  color: #555; /* Adjust color */
+  vertical-align: middle; /* Align with text/other buttons */
+}
+
+.dark-mode .summary-button {
+  color: #bbb;
+}
+
+/* Disabled state for Summary button */
+.summary-button.disabled {
+  opacity: 0.5; /* Make it look greyed out */
+  cursor: default; /* Indicate it's not clickable */
+}
+
+.summary-button:hover:not(.disabled) {
+  color: #007bff; /* Highlight on hover */
+}
+
+.dark-mode .summary-button:hover:not(.disabled) {
+  color: #4da6ff;
+}
+
 /* Processed and Not Processed File Status Styles */
 .processed-file {
+    background-color: #e8f5e9;
+    /* Light green background for processed */
     color: #4caf50;
     /* Green color for processed */
 }
 
 .not-processed-file {
-    color: #ff9800;
-    /* Orange color for not processed */
+    background-color: #ffebee;
+    /* Light red background for not processed */
+    color: #ff0000;
+    /* Red color for not processed */
+}
+
+/* Legend Styling */
+.file-status-legend {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 10px;
+    font-size: clamp(12px, 1.5vw, 14px);
+}
+
+.file-status-legend p {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.red-indicator,
+.green-indicator {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    border-radius: 50%;
+}
+
+.red-indicator {
+    background-color: red;
+}
+
+.green-indicator {
+    background-color: green;
+}
+
+/* Mobile view optimizations */
+@media (max-width: 768px) {
+    .files-column {
+        width: clamp(200px, 30vw, 250px);
+        padding: clamp(10px, 2vw, 14px);
+    }
+
+    .knowledgebase-toggle button {
+        padding: clamp(4px, 1vw, 6px) clamp(10px, 2vw, 14px);
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .file-list li {
+        padding: clamp(4px, 1vw, 6px);
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .file-list .file-link {
+        font-size: clamp(11px, 2vw, 13px);
+    }
+
+    .file-list .delete-button {
+        padding: clamp(2px, 0.5vw, 3px) clamp(4px, 1vw, 6px);
+        font-size: clamp(10px, 1vw, 12px);
+    }
+
+    .file-status-legend {
+        font-size: clamp(11px, 1.5vw, 13px);
+    }
+}
+
+@media (max-width: 480px) {
+    .files-column {
+        width: clamp(180px, 40vw, 220px);
+        padding: clamp(8px, 3vw, 12px);
+    }
+
+    .knowledgebase-toggle button {
+        padding: clamp(4px, 2vw, 6px) clamp(8px, 3vw, 12px);
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .file-list li {
+        padding: clamp(4px, 2vw, 6px);
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .file-list .file-link {
+        font-size: clamp(10px, 3vw, 12px);
+    }
+
+    .file-list .delete-button {
+        padding: clamp(2px, 1vw, 4px) clamp(4px, 2vw, 6px);
+        font-size: clamp(9px, 2vw, 11px);
+    }
+
+    .file-status-legend {
+        font-size: clamp(10px, 1.5vw, 12px);
+    }
 }

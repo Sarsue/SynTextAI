@@ -12,12 +12,12 @@
 
 /* PaymentView styling */
 .PaymentView {
-    max-width: 600px;
+    max-width: clamp(400px, 60vw, 600px);
     width: 90%;
-    margin: 20px auto;
-    padding: 20px;
+    margin: clamp(15px, 2vw, 20px) auto;
+    padding: clamp(15px, 2vw, 20px);
     border: 1px solid var(--header-footer-bg);
-    border-radius: 8px;
+    border-radius: clamp(6px, 1vw, 8px);
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     background-color: var(--background-color);
     color: var(--text-color);
@@ -29,10 +29,10 @@
 .PaymentView input,
 .PaymentView .StripeElement {
     width: 100%;
-    padding: 10px;
-    margin-bottom: 16px;
+    padding: clamp(8px, 1vw, 10px);
+    margin-bottom: clamp(12px, 1.5vw, 16px);
     border: 1px solid var(--header-footer-bg);
-    border-radius: 4px;
+    border-radius: clamp(3px, 0.5vw, 4px);
     background-color: var(--input-background-color);
     color: var(--input-text-color);
     transition: background-color 0.3s ease, color 0.3s ease;
@@ -49,14 +49,14 @@
 
 /* Button styling */
 .PaymentView button {
-    width: 100%;
+    width: clamp(150px, 50%, 300px);
     background-color: var(--button-bg);
     color: var(--button-text-color);
-    padding: 12px;
+    padding: clamp(10px, 1vw, 12px);
     border: none;
-    border-radius: 4px;
+    border-radius: clamp(3px, 0.5vw, 4px);
     cursor: pointer;
-    font-size: 16px;
+    font-size: clamp(14px, 1.5vw, 16px);
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
@@ -66,16 +66,16 @@
 
 /* Card details styling */
 .CardDetails {
-    margin-top: 10px;
-    padding: 10px;
+    margin-top: clamp(8px, 1vw, 10px);
+    padding: clamp(8px, 1vw, 10px);
     border: 1px solid var(--header-footer-bg);
-    border-radius: 5px;
+    border-radius: clamp(4px, 0.5vw, 5px);
     background-color: var(--background-color);
     color: var(--text-color);
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .CardDetails p {
-    margin: 5px 0;
-    font-size: 14px;
+    margin: clamp(4px, 0.5vw, 5px) 0;
+    font-size: clamp(12px, 1vw, 14px);
 }
