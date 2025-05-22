@@ -62,22 +62,29 @@ except Exception as e:
 
 # --- DSPy Signature for Explanation --- >
 class GenerateExplanation(dspy.Signature):
-    """Generates an explanation for the given context."""
+    """Generates an explanation for the given context, tailored to the specified language and comprehension level.
+    Instructions: Explain the context clearly in the specified language for someone with a {comprehension_level} understanding.
+    Focus on the main topic, concept, or significance.
+    """
     context = dspy.InputField(desc="The text or transcript segment to explain.")
-    explanation = dspy.OutputField(desc="An explanation of the context, focusing on the main topic/concept or significance.")
+    language = dspy.InputField(desc="Target language for the explanation (e.g., English, Spanish).", default="English")
+    comprehension_level = dspy.InputField(desc="Target comprehension level (e.g., Beginner, Intermediate, Advanced).", default="Beginner")
+    explanation = dspy.OutputField(desc="An explanation of the context, tailored to the language and comprehension level.")
 
 # --- DSPy Predictor for Explanation --- >
 explain_predictor = dspy.Predict(GenerateExplanation)
 
 # --- DSPy Signature for Summarization --- >
 class SummarizeSignature(dspy.Signature):
-    """Generates a concise summary of the provided text.
-    Instructions: Create a summary capturing the main points of the document text.
+    """Generates a concise summary of the provided text, in the specified language and for the target comprehension level.
+    Instructions: Create a summary capturing the main points of the document text. Write the summary in {language} for a {comprehension_level} audience.
     """
     document_text = dspy.InputField(desc="The full text of the document to summarize.")
-    summary = dspy.OutputField(desc="A concise summary of the document.")
+    language = dspy.InputField(desc="Target language for the summary (e.g., English, Spanish).", default="English")
+    comprehension_level = dspy.InputField(desc="Target comprehension level (e.g., Beginner, Intermediate, Advanced).", default="Beginner")
+    summary = dspy.OutputField(desc="A concise summary of the document, tailored to the language and comprehension level.")
 
-def generate_summary_dspy(text_to_summarize: str) -> str:
+def generate_summary_dspy(text_to_summarize: str, language: str = "English", comprehension_level: str = "Beginner") -> str:
     """Generates a summary using a configured DSPy module."""
     if not google_api_key:
         logging.error("Google API Key not configured. Cannot generate summary.")
@@ -90,7 +97,7 @@ def generate_summary_dspy(text_to_summarize: str) -> str:
         temp_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
         with dspy.context(lm=temp_lm):
             summarizer = dspy.Predict(SummarizeSignature)
-            result = summarizer(document_text=text_to_summarize)
+            result = summarizer(document_text=text_to_summarize, language=language, comprehension_level=comprehension_level)
             logging.info(f"Successfully generated summary.")
             return result.summary
     except Exception as e:
@@ -164,7 +171,7 @@ def prompt_llm(query):
         return f"Error: Could not get response from LLM. {e}"
 
 # --- New DSPy-based Explanation Function --- >
-def generate_explanation_dspy(text_chunk: str, max_context_length: int = 2000) -> str:
+def generate_explanation_dspy(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_length: int = 2000) -> str:
     """Generates an explanation for a text chunk using DSPy and Gemini."""
     if not text_chunk:
         logging.warning("generate_explanation_dspy called with empty text_chunk.")
@@ -179,7 +186,7 @@ def generate_explanation_dspy(text_chunk: str, max_context_length: int = 2000) -
             logging.error("DSPy LM is not configured. Cannot generate explanation.")
             return "Error: LLM service not configured."
             
-        response = explain_predictor(context=truncated_chunk)
+        response = explain_predictor(context=truncated_chunk, language=language, comprehension_level=comprehension_level)
         if response and hasattr(response, 'explanation') and response.explanation:
              logging.debug(f"DSPy generated explanation: {response.explanation[:50]}...") # Log snippet
              return response.explanation

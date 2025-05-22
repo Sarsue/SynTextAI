@@ -77,7 +77,7 @@ async def save_file(
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             # Store YouTube file entry (type: 'youtube')
             file_info = store.add_file(user_id, url, url)  # Just store as a file with url as name and publicUrl
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True, explanation_interval_seconds=explanation_interval_seconds)  # True = is_youtube, pass interval
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True, explanation_interval_seconds=explanation_interval_seconds, language=language, comprehension_level=comprehension_level)  # True = is_youtube, pass interval
             logger.info(f"Enqueued Task for processing YouTube link: {url} with interval: {explanation_interval_seconds}")
             return {"message": "YouTube video processing queued."}
 
@@ -98,7 +98,7 @@ async def save_file(
 
             # Capture the returned file info, including the ID
             file_info = store.add_file(user_id, file.filename, file_url)
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], file.filename, file_info['file_url'])
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], file.filename, file_info['file_url'], language=language, comprehension_level=comprehension_level)
             logger.info(f"Enqueued Task for processing {file.filename}")
 
         return {"message": "File processing queued."}

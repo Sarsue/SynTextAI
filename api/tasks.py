@@ -86,9 +86,9 @@ async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
         logger.exception("Error in transcription")
         raise HTTPException(status_code=500, detail="Transcription failed")
 
-async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, explanation_interval_seconds: Optional[int] = None):
+async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, explanation_interval_seconds: Optional[int] = None, language: str = "English", comprehension_level: str = "Beginner"):
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
-    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Interval: {explanation_interval_seconds})")
+    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Interval: {explanation_interval_seconds}, Lang: {language}, Level: {comprehension_level})")
     # --- YOUTUBE LINK HANDLING ---
     if is_youtube or (filename.startswith('http') and ('youtube.com' in filename or 'youtu.be' in filename)):
         logger.info(f"Processing YouTube link: {filename}")
@@ -181,7 +181,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     if full_interval_text:
                         try:
                             logger.info(f"Generating explanation for video ID {file_id}, interval: {interval_start_time:.1f}s - {interval_end_time:.1f}s")
-                            explanation_text_content = generate_explanation_dspy(full_interval_text) # Renamed variable
+                            explanation_text_content = generate_explanation_dspy(full_interval_text, language=language, comprehension_level=comprehension_level) # Renamed variable
                             if explanation_text_content and not explanation_text_content.startswith("Error:"):
                                 store.save_explanation(
                                     user_id=int(user_id),
@@ -203,7 +203,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             full_transcription = " ".join([seg.get('content', '') for seg in processed_video_data if seg.get('content', '').strip()])
             if full_transcription:
                 try:
-                    summary_text = generate_summary_dspy(full_transcription)
+                    summary_text = generate_summary_dspy(full_transcription, language=language, comprehension_level=comprehension_level)
                     if summary_text and not summary_text.startswith("Error:"):
                         store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
                 except Exception as summary_err:
@@ -326,7 +326,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                         continue
 
                     # Call the new DSPy-based explanation function
-                    explanation_text = generate_explanation_dspy(segment_content)
+                    explanation_text = generate_explanation_dspy(segment_content, language=language, comprehension_level=comprehension_level)
 
                     if explanation_text and not explanation_text.startswith("Error:"): # Check for valid explanation
                         store.save_explanation(
@@ -356,7 +356,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             full_transcription = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
             if full_transcription:
                 try:
-                    summary_text = generate_summary_dspy(full_transcription)
+                    summary_text = generate_summary_dspy(full_transcription, language=language, comprehension_level=comprehension_level)
                     if summary_text and not summary_text.startswith("Error:"):
                         store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
                         logger.info(f"Successfully generated and saved summary for video/audio file: {filename}")
@@ -429,7 +429,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                         continue
                         
                     # Call the new DSPy-based explanation function
-                    explanation_text = generate_explanation_dspy(page_content)
+                    explanation_text = generate_explanation_dspy(page_content, language=language, comprehension_level=comprehension_level)
 
                     if explanation_text and not explanation_text.startswith("Error:"):
                         store.save_explanation(
@@ -458,7 +458,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             full_pdf_text = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
             if full_pdf_text:
                 try:
-                    summary_text = generate_summary_dspy(full_pdf_text)
+                    summary_text = generate_summary_dspy(full_pdf_text, language=language, comprehension_level=comprehension_level)
                     if summary_text and not summary_text.startswith("Error:"):
                         store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
                         logger.info(f"Successfully generated and saved summary for PDF file: {filename}")

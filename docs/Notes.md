@@ -11,10 +11,11 @@ web search
 Documents to be supported
 PDF
 Youtube link
+MP4
 Csv
 Images
 PPT
-MP4
+
 
 
 Preprocessing
@@ -53,6 +54,27 @@ AI papers e.g Attention is All you need (good domain for LLM to be evaluated)
 Deployment
 CI/CD automation
 github actions for master branch to deploy the changes to current production environment.
+
+BUILD docker build --no-cache -t syntextaiapp .
+
+RUN docker run --rm -p 3000:3000 --env-file .env --memory 2g syntextaiapp
+
+TAG docker tag syntextaiapp:latest osasdeeon/syntextai:latest
+
+PUSH docker push osasdeeon/syntextai:latest
+
+APP PLATFORM CONNECTS TO DOCKER HUB AND DEPLOYS PUSHED IMAGE
+
+2 DEPLOY DROPLET
+
+3 Copy env file and deploy scripts
+
+copy .env.prod, docker-compose-prod.yml and deploy.sh files
+
+scp deploy.sh docker-compose-prod.yml root@147.182.150.68:/root/ scp /Users/osas/Documents/dev/docsynth/deploy.sh root@146.190.246.13:/root/ scp /Users/osas/Documents/dev/app/deploy.sh /Users/osas/Documents/dev/app/.env root@178.128.236.126:/home/root/
+
+4 Deploy script on server chmod +x deploy.sh ./deploy.sh
+
 
 Marketing
 $15 / month for professionals and students
