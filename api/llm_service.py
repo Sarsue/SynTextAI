@@ -54,8 +54,9 @@ delay = 1 # Keep delay if needed for rate limiting (less likely needed with Goog
 logging.basicConfig(level=logging.INFO)
 
 # --- DSPy Configuration --- >
+gemini_lm = None  # Initialize to None
 try:
-    gemini_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
+    gemini_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key, max_output_tokens=2048)
     dspy.settings.configure(lm=gemini_lm)
     logging.info(f"DSPy configured successfully with Google model: {GEMINI_MODEL_NAME}")
 except Exception as e:
@@ -158,7 +159,7 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
 
     try:
         logging.info(f"Generating key concepts for document text (first 100 chars): {document_text[:100]}...")
-        response = key_concept_extractor(document_content=document_text)
+        response = key_concept_extractor(document_text=document_text)
         
         if response and hasattr(response, 'key_concepts_json') and response.key_concepts_json:
             logging.debug(f"DSPy generated key_concepts_json: {response.key_concepts_json[:200]}...")

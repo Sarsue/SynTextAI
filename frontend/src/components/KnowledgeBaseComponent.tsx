@@ -22,7 +22,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
 }) => {
     const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
     const [currentSummary, setCurrentSummary] = useState<{ title: string; content: string; fileName?: string } | null>(null);
-
     const handleFileClick = (file: UploadedFile) => {
         onFileClick(file);
     };
@@ -32,33 +31,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         if (isConfirmed) {
             onDeleteFile(file.id);
         }
-    };
-
-    const handleShowSummary = (file: UploadedFile) => {
-        if (file.summary) { 
-            setCurrentSummary({
-                title: `Summary of ${file.name}`,
-                content: file.summary, 
-                fileName: `${file.name}_summary.txt`
-            });
-            setIsSummaryModalOpen(true);
-        } else {
-            console.log(`Summary not available for ${file.name}. Modal not opened.`);
-        }
-    };
-
-    const handleDownloadSummary = () => {
-        if (!currentSummary || !currentSummary.content || !currentSummary.fileName) return;
-
-        const blob = new Blob([currentSummary.content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = currentSummary.fileName;
-        document.body.appendChild(link); 
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url); 
     };
 
     return (
@@ -77,28 +49,11 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
                         >
                             {file.name} {file.processed ? "✅ (Ready)" : "🕒 (Processing)"}
                         </span>
-                        {file.processed && (
-                            <button
-                                className={`summary-button ${!file.summary ? 'disabled' : ''}`}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (file.summary) handleShowSummary(file); 
-                                }}
-                                title={file.summary ? "Show Summary" : "Summary Not Available"}
-                                aria-label={file.summary ? `Show summary for ${file.name}` : `Summary not available for ${file.name}`}
-                                disabled={!file.summary}
-                            >
-                                📄
-                            </button>
-                        )}
-                        <button
-                            className="delete-button"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteClick(file);
-                            }}
+                        <button 
+                            onClick={() => onDeleteFile(file.id)}
+                            className="kb-action-button delete-button"
                         >
-                            X
+                            Delete
                         </button>
                     </li>
                 ))}
@@ -108,17 +63,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
                 {/* Removed file input element */}
             </div>
 
-            {currentSummary && (
-                <Modal
-                    isOpen={isSummaryModalOpen}
-                    onClose={() => setIsSummaryModalOpen(false)}
-                    title={currentSummary.title}
-                    darkMode={darkMode ?? false} 
-                >
-                    <p>File Name: {currentSummary.fileName || 'N/A'}</p>
-                    <p>{currentSummary.content}</p> 
-                </Modal>
-            )}
         </div>
     );
 };

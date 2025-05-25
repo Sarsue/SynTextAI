@@ -447,9 +447,8 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
             logger.info(f"Cleaned up temporary file: {file_path}")
-        # Check if store exists before closing
-        if store is not None:
-            store.close_session() # Ensure session is closed
+        # Check if store exists (though it should if used above)
+        # Sessions are managed internally by DocSynthStore methods, so no explicit close here.
         # Clear Whisper model from memory if loaded
         # global whisper_model
         # if whisper_model:
