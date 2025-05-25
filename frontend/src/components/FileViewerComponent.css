@@ -33,334 +33,204 @@
     box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
 }
 
-/* Main area containing document and explanation */
-.file-viewer-main-content {
-    flex-grow: 1; /* Takes up available vertical space */
+/* Main layout for document view and key concepts panel */
+.file-viewer-main-layout {
+    flex-grow: 1;
     display: flex;
-    flex-direction: row; /* Document and explanation side-by-side */
+    flex-direction: row; /* Side-by-side by default */
     min-height: 0; /* Fix for flex height issues */
-    height: 100%; /* Ensure main content itself has 100% height */
-    overflow: hidden; /* Prevent overflow */
-    position: relative; /* For positioning controls */
-    box-sizing: border-box;
+    overflow: hidden;
 }
 
-/* New Header Toolbar Styles */
-.viewer-header-toolbar {
-    display: flex;
-    justify-content: flex-end; /* Push buttons to the right */
-    align-items: center; /* Vertically center items */
-    width: 100%; /* Force to take full width of parent */
-    flex-wrap: nowrap; /* Prevent buttons from stacking */
-    padding: 10px 15px; /* Add some padding */
-    background-color: #f8f9fa; /* Light background */
-    border-bottom: 1px solid #dee2e6; /* Separator line */
-    gap: 10px; /* Space between buttons */
-    flex-shrink: 0; /* Prevent toolbar from shrinking */
+.document-view-container {
+    flex: 3; /* Document view takes more space */
+    overflow: auto;
+    position: relative; /* For any absolutely positioned children if needed */
+    display: flex; /* To make the child (renderFileContent's output) fill height */
+    flex-direction: column;
 }
 
-.dark-mode .viewer-header-toolbar {
-    background-color: #343a40;
-    border-bottom-color: #495057;
-}
-
-/* Adjust Button Styles (Remove absolute positioning) */
-.viewer-header-toolbar .toolbar-button {
-    /* --- Button Base Styles (Keep) --- */
-    display: inline-flex; 
-    align-items: center;
-    justify-content: center;
-    padding: 6px 10px;
-    min-width: 40px; 
-    border: 1px solid #0056b3;
-    border-radius: 4px;
-    background-color: #007bff;
-    color: white;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: background-color 0.2s ease, border-color 0.2s ease;
-    white-space: nowrap;
-}
-
-.dark-mode .viewer-header-toolbar .toolbar-button {
-    background-color: #444;
-    color: #eee;
-    border-color: #666;
-}
-
-.viewer-header-toolbar .toolbar-button:hover {
-    background-color: #0056b3;
-    border-color: #004085;
-}
-
-.dark-mode .viewer-header-toolbar .toolbar-button:hover {
-    background-color: #555;
-    border-color: #888;
-}
-
-.viewer-header-toolbar .toolbar-button.explain-button.active {
-    background-color: #cce5ff;
-    border-color: #b8daff;
-}
-
-.dark-mode .viewer-header-toolbar .toolbar-button.explain-button.active {
-    background-color: #0056b3;
-    border-color: #004085;
-}
-
-/* Document View Area */
-.document-view {
-    flex: 1; /* Takes up primary space */
-    overflow: auto; /* Allow scrolling for content */
-    background-color: #f0f0f0; /* Light background for contrast */
-    padding: 0; /* Remove padding, let inner container handle it */
-    box-sizing: border-box;
-    height: 100%; /* Ensure it takes full height of the flex container */
-    min-height: 0; /* Fix for flex height issues */
-}
-
-.dark-mode .document-view {
-    background-color: #1e1e1e; /* Dark background */
-}
-
-/* Explanation Panel */
-.explanation-panel {
-    width: 300px; /* Fixed width, adjust as needed */
-    flex-shrink: 0;
+/* Key Concepts Panel (repurposing .explanation-panel styles) */
+.key-concepts-panel {
+    flex: 1; /* Key concepts panel takes less space */
+    min-width: 280px; /* Minimum width for the panel */
+    max-width: 400px; /* Maximum width */
     border-left: 1px solid #ccc;
     padding: 15px;
     overflow-y: auto;
     background-color: #f9f9f9;
-    box-sizing: border-box;
-    transition: background-color 0.3s ease, border-color 0.3s ease;
-}
-
-.dark-mode .explanation-panel {
-    background-color: #3a3a3a;
-    border-left: 1px solid #555;
-    color: #eee;
-}
-
-.explanation-panel h3 {
-    margin-top: 0;
-    margin-bottom: 15px;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: inherit;
-}
-
-.explanation-list {
     display: flex;
     flex-direction: column;
     gap: 15px;
 }
 
-.explanation-item {
+.dark-mode .key-concepts-panel {
+    background-color: #3a3a3a;
+    border-left-color: #555;
+    color: #e0e0e0;
+}
+
+.key-concepts-panel h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1.2em;
+    color: #333;
+}
+
+.dark-mode .key-concepts-panel h3 {
+    color: #f0f0f0;
+}
+
+.key-concepts-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.key-concept-item {
     background-color: #fff;
-    padding: 10px 12px;
-    border-radius: 4px;
-    border: 1px solid #eee;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    padding: 12px 15px;
+    border-radius: 5px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-bottom: 12px;
     font-size: 0.9rem;
 }
 
-.dark-mode .explanation-item {
+.dark-mode .key-concept-item {
     background-color: #4a4a4a;
     border-color: #666;
     box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
-.explanation-item p {
-    margin: 5px 0;
+.key-concept-item h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    font-size: 1em;
+    font-weight: 600;
 }
 
-.explanation-item small {
+.key-concept-item p {
+    margin: 0 0 8px 0;
+    line-height: 1.5;
+}
+
+.key-concept-item small {
     display: block;
     margin-top: 8px;
-    font-size: 0.8rem;
-    color: #666;
+    font-size: 0.8em;
+    color: #555;
 }
 
-.dark-mode .explanation-item small {
+.dark-mode .key-concept-item small {
     color: #bbb;
 }
 
-.explanation-panel .error-message {
-    color: #d9534f;
-    font-weight: bold;
-}
-
-.dark-mode .explanation-panel .error-message {
-    color: #f9a7a7;
-}
-
-/* PDF/Video/Image containers */
-.pdf-container, 
-.image-container {
-    width: 100%;
-    height: 100%;
-    display: block; /* Changed from flex */
-    overflow: hidden; /* Hide potential overflow of inner element */
-}
-
-/* Specific styles for the YouTube video container to maintain aspect ratio */
-.youtube-container {
-    position: relative;
-    width: 100%;
-    padding-bottom: 56.25%; /* 16:9 aspect ratio (9 / 16 = 0.5625) */
-    height: 0;
-    overflow: hidden;
-    background-color: #000; /* Optional: background for letterbox area if any issues */
-}
-
-/* General video container for non-YouTube videos if needed separately */
-.video-container {
-    width: 100%;
-    height: 100%;
-    display: flex; /* Use flex to center video if it doesn't fill */
-    justify-content: center;
-    align-items: center;
-    background-color: #000; /* Background for video player */
-}
-
-.pdf-viewer, 
-.video-player, 
-.image-viewer {
-    width: 100%;
-    height: 100%;
-    display: block; /* Ensure it behaves like a block element */
+.key-concept-item .source-link {
+    background: none;
     border: none;
-}
-
-/* Specific selectors for player elements to ensure they fill their containers */
-.pdf-viewer iframe,
-.video-player video,
-.image-viewer img {
-    width: 100%;
-    height: 100%;
-    border: none;
-    display: block;
-}
-
-/* Styles for the YouTube iframe itself, to fill the aspect-ratio container */
-.youtube-iframe {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    border: none;
-    display: block;
-}
-
-/* Toolbar / Controls Area - Simplified Anchor (Vertical Stack) */
-.viewer-controls {
-    position: absolute;
-    top: 10px; 
-    right: 10px;
-    height: 90px; /* Approx height for 2 buttons + gap + padding */
-    width: 60px; /* Approx width for 1 button + padding */
-    z-index: 1050;
-}
-
-/* Button Styles with Absolute Positioning (Vertical Stack) */
-.viewer-controls .toolbar-button {
-    position: absolute;
-    top: 8px; /* Position near the top of the .viewer-controls container */
-    right: 8px;
-    display: inline-flex; 
-    align-items: center;
-    justify-content: center;
-    padding: 6px 10px;
-    min-width: 40px; 
-    border: 1px solid #0056b3;
-    border-radius: 4px;
-    background-color: #007bff;
-    color: white;
+    color: #007bff;
+    text-decoration: underline;
     cursor: pointer;
-    font-size: 0.9rem;
-    transition: background-color 0.2s ease, border-color 0.2s ease;
-    white-space: nowrap;
+    padding: 0 2px;
+    font-size: 0.9em;
 }
 
-.dark-mode .viewer-controls .toolbar-button {
-    background-color: #444;
-    color: #eee;
-    border-color: #666;
+.dark-mode .key-concept-item .source-link {
+    color: #61dafb;
 }
 
-/* Position Close button at the top-right */
-.viewer-controls .close-button {
-    top: 8px; /* Near top */
-    right: 8px; 
+.key-concept-item .source-link:hover {
+    color: #0056b3;
 }
 
-/* Position Explain button below Close button */
-.viewer-controls .explain-button {
-    /* (Close button top) + (approx button height) + (gap) */
-    top: calc(8px + 30px + 10px); /* Roughly 48px from the container top */
-    right: 8px; /* Align horizontally with Close button */
+.dark-mode .key-concept-item .source-link:hover {
+    color: #bbeeff;
 }
 
-.viewer-controls .toolbar-button:hover {
-    background-color: #0056b3;
-    border-color: #004085;
+/* Bottom Controls Area */
+.viewer-controls-bottom {
+    display: flex;
+    justify-content: flex-end;
+    padding: 10px 15px;
+    border-top: 1px solid #dee2e6;
+    background-color: #f8f9fa;
 }
 
-.dark-mode .viewer-controls .toolbar-button:hover {
+.dark-mode .viewer-controls-bottom {
+    background-color: #343a40;
+    border-top-color: #495057;
+}
+
+.toolbar-button.close-button-bottom {
+    padding: 8px 15px;
+    background-color: #6c757d;
+    border-color: #6c757d;
+    color: white;
+}
+
+.toolbar-button.close-button-bottom:hover {
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
+.dark-mode .toolbar-button.close-button-bottom {
     background-color: #555;
-    border-color: #888;
+    border-color: #555;
 }
 
-.viewer-controls .toolbar-button.explain-button.active {
-    background-color: #cce5ff;
-    border-color: #b8daff;
+.dark-mode .toolbar-button.close-button-bottom:hover {
+    background-color: #444;
+    border-color: #444;
 }
 
-.dark-mode .viewer-controls .toolbar-button.explain-button.active {
-    background-color: #0056b3;
-    border-color: #004085;
-}
+/* Old Header Toolbar Styles - to be removed or adapted if still used elsewhere */
+/* .viewer-header-toolbar { ... } */
+/* .dark-mode .viewer-header-toolbar { ... } */
+/* .viewer-header-toolbar .toolbar-button { ... } */
 
 /* Adjust Mobile View */
 @media (max-width: 768px) {
     .file-viewer-modal {
-        padding: 0; /* Remove padding for full screen on mobile */
+        padding: 0;
     }
 
     .file-viewer-content {
-        border-radius: 0; /* No radius on mobile */
+        border-radius: 0;
         width: 100%;
         height: 100%;
     }
 
-    .file-viewer-main-content {
-        flex-direction: column; /* Stack vertically on mobile */
-        /* Controls are absolutely positioned */
+    .file-viewer-main-layout {
+        flex-direction: column; /* Stack key concepts below document view on mobile */
     }
 
-    .viewer-header-toolbar {
-        padding: 5px;
-        gap: 5px;
-        display: flex;
-        justify-content: flex-start; /* Or center or space-between depending on layout */
-        margin-bottom: 1rem; 
+    .document-view-container {
+        flex: 1; /* Takes available space above key concepts */
     }
 
-    .viewer-header-toolbar .toolbar-button {
-        padding: 6px 8px;
-        font-size: 0.8rem;
-    }
-
-    .explanation-panel {
+    .key-concepts-panel {
         width: 100%; /* Full width */
-        height: 40%; /* Fixed height portion */
-        flex-shrink: 0;
+        flex: 0 0 auto; /* Don't grow, height based on content or a fixed value */
+        max-height: 45vh; /* Max height for key concepts on mobile */
         border-left: none;
         border-top: 1px solid #ccc;
+        min-width: unset; /* Override desktop min-width */
     }
 
-    .dark-mode .explanation-panel {
-        border-top: 1px solid #555;
+    .dark-mode .key-concepts-panel {
+        border-top-color: #555;
+    }
+
+    /* Adjust header toolbar for mobile if it existed - currently no top toolbar in new layout */
+    /* .viewer-header-toolbar { ... } */
+
+    .viewer-controls-bottom {
+        padding: 8px;
+    }
+
+    .toolbar-button.close-button-bottom {
+        width: 100%;
+        text-align: center;
     }
 }

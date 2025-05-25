@@ -18,19 +18,19 @@ export interface UploadedFile {
     name: string;
     publicUrl: string;
     processed: boolean;
-    summary: string | null;
+    // summary: string | null; // Removed summary
 }
-export interface Explanation {
+
+export interface KeyConcept {
     id: number;
     file_id: number;
-    user_id: number;
-    context_info: string | null;
-    explanation_text: string | null; // Allow null
+    concept_title?: string | null;
+    concept_explanation?: string | null;
+    display_order?: number | null;
+    source_page_number?: number | null;
+    source_video_timestamp_start_seconds?: number | null;
+    source_video_timestamp_end_seconds?: number | null;
     created_at: string;
-    selection_type: string;
-    page: number | null;
-    video_start?: number | null;
-    video_end?: number | null;
 }
 export interface Message {
 

@@ -29,7 +29,6 @@ class User(Base):
     chat_histories = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     files = relationship("File", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
-    explanations = relationship("Explanation", back_populates="user", cascade="all, delete-orphan")
 
 
 class Subscription(Base):
@@ -98,13 +97,12 @@ class File(Base):
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    summary = Column(Text, nullable=True) # Added summary column
     
     # Relationship to chunks
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
-    explanations = relationship("Explanation", back_populates="file", cascade="all, delete-orphan")
+    key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
 
 
 class Segment(Base):
@@ -146,23 +144,26 @@ class Chunk(Base):
         return f"<Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:50]}...)>"
 
 
-class Explanation(Base):
-    __tablename__ = 'explanations'
+class KeyConcept(Base):
+    __tablename__ = "key_concepts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'))
-    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'))
-    content = Column(Text, nullable=True)  # The selected content being explained
-    explanation = Column(Text, nullable=True)  # The AI-generated explanation
-    page = Column(Integer, nullable=True)  # For PDF files
-    video_start = Column(Float, nullable=True)  # For video files (timestamp in seconds)
-    video_end = Column(Float, nullable=True)  # For video files (timestamp in seconds)
-    selection_type = Column(String, nullable=False)  # 'text' or 'video_range'
-    created_at = Column(DateTime, default=datetime.utcnow)
+    concept_title = Column(String, nullable=False)
+    concept_explanation = Column(Text, nullable=False)
     
-    # Relationships
-    file = relationship("File", back_populates="explanations")
-    user = relationship("User", back_populates="explanations")
+    display_order = Column(Integer, nullable=True, default=0) 
+
+    source_page_number = Column(Integer, nullable=True) 
+    source_video_timestamp_start_seconds = Column(Integer, nullable=True)
+    source_video_timestamp_end_seconds = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<KeyConcept(id={self.id}, file_id={self.file_id}, title='{self.concept_title[:30]}...')>"
 
 
 class DocSynthStore:
@@ -665,11 +666,10 @@ class DocSynthStore:
                 File.id, 
                 File.file_name, 
                 File.file_url,
-                File.summary,  # Added summary field
                 func.count(Chunk.id).label('chunk_count')
             ).outerjoin(Chunk, Chunk.file_id == File.id)\
             .filter(File.user_id == user_id)\
-            .group_by(File.id, File.file_name, File.file_url, File.summary)\
+            .group_by(File.id, File.file_name, File.file_url)\
             .all()
 
             file_info_list = []
@@ -678,8 +678,7 @@ class DocSynthStore:
                     'id': file[0],
                     'name': file[1],
                     'publicUrl': file[2],
-                    'summary': file[3],  # Include the summary in the response
-                    'processed': file[4] > 0  # True if chunk_count > 0, otherwise False
+                    'processed': file[3] > 0  # True if chunk_count > 0, otherwise False
                 }
                 file_info_list.append(file_info)
 
@@ -862,34 +861,37 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def update_file_summary(self, user_id: int, file_name: str, summary: str):
-        """Updates the summary field for a specific file."""
+    def add_key_concept(self, 
+                        file_id: int, 
+                        concept_title: str, 
+                        concept_explanation: str, 
+                        display_order: Optional[int] = None, 
+                        source_page_number: Optional[int] = None, 
+                        source_video_timestamp_start_seconds: Optional[int] = None, 
+                        source_video_timestamp_end_seconds: Optional[int] = None) -> int:
+        """Adds a new key concept associated with a file."""
         session = self.get_session()
         try:
-            # Create or fetch the file entry
-            db_file = session.query(File).filter(File.user_id == user_id, File.file_name == file_name).first()   
-            if db_file:
-                db_file.summary = summary
-                session.commit()
-                #logger.info(f"Updated summary for file ID: {file_id}")
-            else:
-                #logger.error(f"File not found with ID {file_id} when trying to update summary.")
-                raise ValueError(f"File not found with ID {file_name} when trying to update summary.")
+            new_concept = KeyConcept(
+                file_id=file_id,
+                concept_title=concept_title,
+                concept_explanation=concept_explanation,
+                display_order=display_order,
+                source_page_number=source_page_number,
+                source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
+                source_video_timestamp_end_seconds=source_video_timestamp_end_seconds
+            )
+            session.add(new_concept)
+            session.commit()
+            session.refresh(new_concept) # To get the ID and other server-generated defaults
+            return new_concept.id
         except Exception as e:
             session.rollback()
-            #logger.error(f"Error updating summary for file ID {file_id}: {e}")
+            logging.error(f"Error adding key concept for file_id {file_id}: {e}", exc_info=True)
             raise
         finally:
             session.close()
 
-    def get_user_by_email(self, email: str) -> User | None:
-        session = self.get_session()
-        try:
-            user = session.query(User).filter(User.email == email).first()
-            return user
-        finally:
-            session.close()
-            
     def get_file_by_id(self, file_id: int) -> Optional[File]:
         """Get a file by its ID"""
         session = self.get_session()
@@ -911,90 +913,6 @@ class DocSynthStore:
         finally:
             session.close()
 
-    def save_explanation(self, user_id: int, file_id: int, selection_type: str, content: str = None, 
-    explanation: str = None, page: int = None, video_start: float = None, video_end: float = None) -> int:
-        """Save an explanation for a file selection
-        
-        Args:
-            user_id: The ID of the user
-            file_id: The ID of the file
-            selection_type: The type of selection ('text' or 'video_range')
-            content: The selected text content (for PDFs)
-            explanation: The AI-generated explanation
-            page: The page number (for PDFs)
-            video_start: Start timestamp in seconds (for videos)
-            video_end: End timestamp in seconds (for videos)
-            
-        Returns:
-            int: The ID of the created explanation
-        """
-        session = self.get_session()
-        try:
-            explanation_obj = Explanation(
-                user_id=user_id,
-                file_id=file_id,
-                selection_type=selection_type,
-                content=content,
-                explanation=explanation,
-                page=page,
-                video_start=video_start,
-                video_end=video_end
-            )
-            session.add(explanation_obj)
-            session.commit()
-            return explanation_obj.id
-        except Exception as e:
-            session.rollback()
-            raise e
-        finally:
-            session.close()
-            
-    def get_explanations_for_file(self, user_id: int, file_id: int) -> List[dict]:
-        """Get all explanations for a specific file
-        
-        Args:
-            user_id: The ID of the user
-            file_id: The ID of the file
-            
-        Returns:
-            List[dict]: A list of explanations with their details
-        """
-        session = self.get_session()
-        try:
-            explanations = session.query(Explanation).filter(
-                Explanation.user_id == user_id,
-                Explanation.file_id == file_id
-            ).order_by(Explanation.page.asc().nulls_last(), Explanation.video_start.asc().nulls_last()).all()
-            
-            result = []
-            for exp in explanations:
-                # Compute context_info for frontend
-                if exp.selection_type == 'video_range':
-                    if exp.video_start is not None and exp.video_end is not None:
-                        context_info = f"Video {exp.video_start:.1f}s - {exp.video_end:.1f}s"
-                    else:
-                        context_info = "Video time range"
-                elif exp.selection_type == 'text' and exp.page is not None and exp.content:
-                    context_info = f"Page {exp.page}: {exp.content[:50]}..."
-                else:
-                    context_info = exp.content if exp.content else None
-                exp_dict = {
-                    "id": exp.id,
-                    "file_id": exp.file_id,
-                    "user_id": exp.user_id,
-                    "context_info": context_info,
-                    "explanation_text": exp.explanation,
-                    "created_at": exp.created_at if exp.created_at else None,
-                    "selection_type": exp.selection_type,
-                    "page": exp.page,
-                    "video_start": exp.video_start,
-                    "video_end": exp.video_end
-                }
-                result.append(exp_dict)
-            return result
-        finally:
-            session.close()
-    
     def is_premium_user(self, user_id: int) -> bool:
         """Check if a user has an active premium subscription
         

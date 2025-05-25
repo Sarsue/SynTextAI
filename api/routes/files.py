@@ -169,43 +169,40 @@ async def reextract_file(
         logger.error(f"Error reextracting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-# Pydantic models for Explanations
-class ExplanationResponse(BaseModel):
+# Pydantic models for Key Concepts
+class KeyConceptResponse(BaseModel):
     id: int
     file_id: int
-    user_id: int
-    context_info: Optional[str] = None # Combined context for frontend 
-    explanation_text: Optional[str] = None
+    concept_title: Optional[str] = None
+    concept_explanation: Optional[str] = None
+    display_order: Optional[int] = None
+    source_page_number: Optional[int] = None
+    source_video_timestamp_start_seconds: Optional[int] = None
+    source_video_timestamp_end_seconds: Optional[int] = None
     created_at: datetime
-    # Add specific fields if needed for frontend differentiation
-    selection_type: str
-    page: Optional[int] = None
-    video_start: Optional[float] = None
-    video_end: Optional[float] = None
-    
+
     class Config:
         orm_mode = True
 
-class ExplanationHistoryResponse(BaseModel):
-    explanations: List[ExplanationResponse]
+class KeyConceptsFileResponse(BaseModel):
+    key_concepts: List[KeyConceptResponse]
 
-
-# Route to get explanation history for a file
-@files_router.get("/{file_id}/explanations", response_model=ExplanationHistoryResponse, summary="Get Explanation History", description="Retrieves all explanations previously generated for a specific file by the user.")
-async def get_explanation_history(
+# Route to get key concepts for a file
+@files_router.get("/{file_id}/key_concepts", response_model=KeyConceptsFileResponse, summary="Get Key Concepts for File", description="Retrieves all key concepts extracted for a specific file.")
+async def get_key_concepts_for_file(
     file_id: int,
-    request: Request, 
+    request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
-        # Check if file exists and belongs to user (optional, store method handles user_id)
         store = request.app.state.store
-        file_record = store.get_file_by_id(file_id)
+        file_record = store.get_file_by_id(file_id) # This should load key_concepts due to lazy='selectin'
         if not file_record or file_record.user_id != user_data["user_id"]:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-        explanations_data = store.get_explanations_for_file(user_id=user_data["user_id"], file_id=file_id)
-        # explanations_data now contains all fields required by ExplanationResponse
-        return ExplanationHistoryResponse(explanations=explanations_data)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied")
+        
+        # The file_record.key_concepts should be a list of KeyConcept SQLAlchemy objects.
+        # Pydantic will automatically serialize them based on KeyConceptResponse model.
+        return KeyConceptsFileResponse(key_concepts=file_record.key_concepts)
     except Exception as e:
-        logger.error(f"Error fetching explanation history for file {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve explanation history")
+        logger.error(f"Error fetching key concepts for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve key concepts")

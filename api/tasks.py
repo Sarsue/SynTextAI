@@ -6,7 +6,7 @@ from text_extractor import extract_data
 from faster_whisper import WhisperModel
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from docsynth_store import DocSynthStore
-from llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT, generate_summary_dspy
+from llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
 from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
@@ -316,57 +316,40 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 processed_video_data.append(structured_item)
             logger.info("Finished structuring video data with embeddings.")
 
-            # --- Generate and save explanations for video segments --- 
-            logger.info(f"Generating explanations for {len(transcribed_data)} video segments...")
-            for i, segment in enumerate(transcribed_data): # Corrected: use enumerate if needed, or just loop
+            # --- Generate and Save Key Concepts for Video ---
+            full_transcript_text = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
+            if full_transcript_text:
+                logger.info(f"Attempting to generate key concepts for video: {filename}")
                 try:
-                    segment_content = segment.get('content', '')
-                    if not segment_content.strip():
-                        logger.debug(f"Skipping empty video segment {segment.get('start_time', 0):.1f}s for explanation.")
-                        continue
-
-                    # Call the new DSPy-based explanation function
-                    explanation_text = generate_explanation_dspy(segment_content, language=language, comprehension_level=comprehension_level)
-
-                    if explanation_text and not explanation_text.startswith("Error:"): # Check for valid explanation
-                        store.save_explanation(
-                            user_id=int(user_id),
-                            file_id=file_id,
-                            selection_type='video_range',
-                            explanation=explanation_text,
-                            video_start=segment['start_time'],
-                            video_end=segment['end_time']
-                        )
-                        logger.debug(f"Saved explanation for video segment {segment['start_time']:.1f}s - {segment['end_time']:.1f}s")
+                    key_concepts = generate_key_concepts_dspy(
+                        document_text=full_transcript_text
+                    )
+                    if key_concepts:
+                        for i_kc, concept in enumerate(key_concepts):
+                            store.add_key_concept(
+                                file_id=int(file_id),
+                                concept_title=concept.get("concept_title"),
+                                concept_explanation=concept.get("concept_explanation"),
+                                display_order=i_kc + 1,
+                                source_page_number=concept.get("source_page_number"), 
+                                source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
+                                source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                            )
+                        logger.info(f"Saved {len(key_concepts)} key concepts for video: {filename}")
                     else:
-                        logger.warning(f"LLM failed to generate explanation for video segment {segment['start_time']:.1f}s - {segment['end_time']:.1f}s")
-                except Exception as e:
-                    logger.error(f"Error generating/saving explanation for video segment {segment.get('start_time', 0):.1f}s: {e}", exc_info=True)
-            logger.info("Finished generating video segment explanations.")
+                        logger.warning(f"No key concepts generated or returned empty for video: {filename}.")
+                except Exception as kc_err:
+                    logger.error(f"Error during key concept generation/saving for video {filename}: {kc_err}", exc_info=True)
+            else:
+                logger.warning(f"No transcript content found to generate key concepts for video file: {filename}")
+            # --------------------------------------------------
 
             # Save the segmented video data with embeddings
             if processed_video_data:
                 store.update_file_with_chunks(user_id=int(user_id), filename=filename, file_type="video", extracted_data=processed_video_data)
-                logger.info("Processed and stored video segments with chunks.")
+                logger.info("Processed and stored video segments.")
             else:
                 logger.warning("No processed video data with chunks generated, skipping storage update.")
-
-            # --- Generate and Save Summary (Video/Audio) ---
-            logger.info(f"Attempting to generate summary for video/audio file: {filename}")
-            full_transcription = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
-            if full_transcription:
-                try:
-                    summary_text = generate_summary_dspy(full_transcription, language=language, comprehension_level=comprehension_level)
-                    if summary_text and not summary_text.startswith("Error:"):
-                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
-                        logger.info(f"Successfully generated and saved summary for video/audio file: {filename}")
-                    else:
-                        logger.error(f"Failed to generate summary for video/audio {filename}: {summary_text}")
-                except Exception as summary_err:
-                    logger.error(f"Error during summary generation/saving for video/audio {filename}: {summary_err}", exc_info=True)
-            else:
-                logger.warning(f"No content found to summarize for video/audio file: {filename}")
-            # --------------------------------------------------
 
         elif ext == "pdf":
             logger.info("Extracting text from PDF...")
@@ -418,33 +401,33 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     logger.error(f"Error chunking/embedding page {page_item.get('page_num', 'N/A')}: {embed_error}", exc_info=True)
             logger.info("Finished chunking and generating PDF page embeddings.")
 
-            # --- Generate and save explanations for PDF pages --- 
-            logger.info(f"Generating explanations for {len(page_data)} PDF pages...")
-            for page_item in page_data: # Iterate original page_data for explanations
+            # --- Generate and Save Key Concepts for PDF ---
+            all_text_content = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
+            if all_text_content:
+                logger.info(f"Attempting to generate key concepts for PDF: {filename}")
                 try:
-                    page_content = page_item.get('content', '')
-                    page_num = page_item.get('page_num', 'N/A') # Get page number safely
-                    if not page_content.strip():
-                        logger.debug(f"Skipping empty PDF page {page_num} for explanation.")
-                        continue
-                        
-                    # Call the new DSPy-based explanation function
-                    explanation_text = generate_explanation_dspy(page_content, language=language, comprehension_level=comprehension_level)
-
-                    if explanation_text and not explanation_text.startswith("Error:"):
-                        store.save_explanation(
-                            user_id=int(user_id),
-                            file_id=file_id,
-                            selection_type='page', # Changed to 'page' for clarity
-                            explanation=explanation_text,
-                            page=page_item['page_num'],
-                        )
-                        logger.debug(f"Saved explanation for PDF page {page_item['page_num']}")
+                    key_concepts = generate_key_concepts_dspy(
+                        document_text=all_text_content
+                    )
+                    if key_concepts:
+                        for i_kc, concept in enumerate(key_concepts):
+                            store.add_key_concept(
+                                file_id=int(file_id),
+                                concept_title=concept.get("concept_title"),
+                                concept_explanation=concept.get("concept_explanation"),
+                                display_order=i_kc + 1,
+                                source_page_number=concept.get("source_page_number"),
+                                source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
+                                source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                            )
+                        logger.info(f"Saved {len(key_concepts)} key concepts for PDF: {filename}")
                     else:
-                        logger.warning(f"LLM failed to generate explanation for PDF page {page_item['page_num']}")
-                except Exception as e:
-                    logger.error(f"Error generating/saving explanation for PDF page {page_item['page_num']}: {e}", exc_info=True)
-            logger.info("Finished generating PDF page explanations.")
+                        logger.warning(f"No key concepts generated or returned empty for PDF: {filename}.")
+                except Exception as kc_err:
+                    logger.error(f"Error during key concept generation/saving for PDF {filename}: {kc_err}", exc_info=True)
+            else:
+                logger.warning(f"No content found to generate key concepts for PDF file: {filename}")
+            # -----------------------------------------
 
             # Save the segmented PDF data with embeddings
             if processed_page_data:
@@ -452,23 +435,6 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 logger.info("Processed and stored PDF segments.")
             else:
                 logger.warning("No processed PDF data with chunks generated, skipping storage update.")
-
-            # --- Generate and Save Summary (PDF) ---
-            logger.info(f"Attempting to generate summary for PDF file: {filename}")
-            full_pdf_text = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
-            if full_pdf_text:
-                try:
-                    summary_text = generate_summary_dspy(full_pdf_text, language=language, comprehension_level=comprehension_level)
-                    if summary_text and not summary_text.startswith("Error:"):
-                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
-                        logger.info(f"Successfully generated and saved summary for PDF file: {filename}")
-                    else:
-                        logger.error(f"Failed to generate summary for PDF {filename}: {summary_text}")
-                except Exception as summary_err:
-                    logger.error(f"Error during summary generation/saving for PDF {filename}: {summary_err}", exc_info=True)
-            else:
-                logger.warning(f"No content found to summarize for PDF file: {filename}")
-            # -----------------------------------------
 
         else:
             logger.warning(f"Unsupported file type: {ext}")
