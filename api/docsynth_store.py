@@ -169,7 +169,12 @@ class KeyConcept(Base):
 class DocSynthStore:
     def __init__(self, database_url):
         self.database_url = database_url
-        self.engine = create_engine(database_url, echo=True)
+        self.engine = create_engine(
+            database_url,
+            echo=True,
+            pool_pre_ping=True,
+            pool_recycle=1800  # Recycle connections every 30 minutes
+        )
         self.Session = sessionmaker(bind=self.engine)
         self.create_tables()
 

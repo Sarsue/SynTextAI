@@ -6,6 +6,7 @@ from requests.exceptions import Timeout, RequestException
 import requests
 import tiktoken
 import json
+import re
 from sentence_transformers import SentenceTransformer
 import time
 import google.generativeai as genai
@@ -56,12 +57,21 @@ logging.basicConfig(level=logging.INFO)
 # --- DSPy Configuration --- >
 gemini_lm = None  # Initialize to None
 try:
-    gemini_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key, max_output_tokens=2048)
+    # Instantiate dspy.Google with parameters it directly uses for the Google SDK.
+    # max_output_tokens is the correct parameter for the Google API.
+    gemini_lm = dspy.Google(
+        model=GEMINI_MODEL_NAME,
+        api_key=google_api_key,
+        max_output_tokens=2048  # This is a valid parameter for genai.GenerationConfig
+    )
+    
+    # Configure DSPy settings. dspy.settings.lm.kwargs will reflect gemini_lm.kwargs.
+    # It will NOT contain 'max_tokens' at this stage, which is intended.
     dspy.settings.configure(lm=gemini_lm)
-    logging.info(f"DSPy configured successfully with Google model: {GEMINI_MODEL_NAME}")
+    logging.info(f"DSPy configured successfully with Google model: {GEMINI_MODEL_NAME}. LM kwargs from dspy.Google init: {gemini_lm.kwargs}. dspy.settings.lm.kwargs: {dspy.settings.lm.kwargs}")
 except Exception as e:
-    logging.error(f"Failed to configure DSPy with Google: {e}. Explanations via DSPy may fail.")
-    # Depending on requirements, might want to raise an error or have a fallback
+    logging.error(f"Failed to configure DSPy with Google: {e}. Explanations via DSPy may fail.", exc_info=True)
+    gemini_lm = None # Explicitly ensure gemini_lm is None if configuration fails
 
 # --- DSPy Signature for Explanation --- >
 class GenerateExplanation(dspy.Signature):
@@ -123,10 +133,12 @@ def generate_summary_dspy(text_to_summarize: str, language: str = "English", com
         # parts of the app use dspy differently.
         temp_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
         with dspy.context(lm=temp_lm):
-            summarizer = dspy.Predict(SummarizeSignature)
-            result = summarizer(document_text=text_to_summarize, language=language, comprehension_level=comprehension_level)
+            # Provide max_tokens via config to dspy.Predict for dsp.generate to use.
+            # Adjust max_tokens if a different limit is desired for summaries.
+            summary_module = dspy.Predict(SummarizeSignature, config=dict(max_tokens=2048))
+            response = summary_module(document_text=text_to_summarize, language=language, comprehension_level=comprehension_level)
             logging.info(f"Successfully generated summary.")
-            return result.summary
+            return response.summary
     except Exception as e:
         logging.error(f"Error generating summary with DSPy: {e}", exc_info=True)
         # Return an error message or None, depending on how caller handles it
@@ -159,12 +171,22 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
 
     try:
         logging.info(f"Generating key concepts for document text (first 100 chars): {document_text[:100]}...")
-        response = key_concept_extractor(document_text=document_text)
+        response = key_concept_extractor(document_content=document_text)  # Corrected argument name to match signature
         
         if response and hasattr(response, 'key_concepts_json') and response.key_concepts_json:
-            logging.debug(f"DSPy generated key_concepts_json: {response.key_concepts_json[:200]}...")
+            raw_json_output = response.key_concepts_json
+            logging.debug(f"DSPy generated key_concepts_json (raw): {raw_json_output[:200]}...")
+            
+            # Strip markdown fences if present
+            match = re.search(r"```(?:json)?\n(.*)\n```", raw_json_output, re.DOTALL)
+            if match:
+                json_to_parse = match.group(1).strip()
+                logging.debug(f"Extracted JSON content: {json_to_parse[:200]}...")
+            else:
+                json_to_parse = raw_json_output.strip() # Assume it's raw JSON if no fences
+
             try:
-                parsed_concepts = json.loads(response.key_concepts_json)
+                parsed_concepts = json.loads(json_to_parse)
                 if isinstance(parsed_concepts, list):
                     return parsed_concepts
                 else:

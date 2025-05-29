@@ -7,7 +7,7 @@
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    padding: 2vh 2vw; /* Add some padding around the content box */
+    /* padding: 2vh 2vw; */ /* Moved to .file-viewer-content */
     box-sizing: border-box;
 }
 
@@ -17,14 +17,17 @@
     background-color: #fff;
     border-radius: 8px; /* Consistent radius */
     box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
-    width: 100%; /* Fill padded modal area */
-    height: 100%; /* Fill padded modal area */
+    width: calc(100% - 4vw); /* Fill modal area, accounting for desired padding */
+    height: calc(100% - 4vh); /* Fill modal area, accounting for desired padding */
+    max-width: 1800px; /* Optional: prevent it from becoming too wide on huge screens */
+    max-height: 95vh; /* Optional: ensure some space around it */
     display: flex;
     flex-direction: column;
     min-height: 0; /* Fix for flex height issues */
-    overflow: hidden; /* Prevent content overflow */
+    overflow: hidden; /* Changed from auto, as in old .file-viewer-content */
     transition: background-color 0.3s ease, color 0.3s ease;
-    padding: 0; /* Remove previous padding, control spacing internally */
+    /* padding: 0; */ /* Padding is now part of width/height calculation or implicit */
+    box-sizing: border-box; /* Ensure padding/border are included in width/height */
 }
 
 .dark-mode .file-viewer-content {
@@ -38,8 +41,10 @@
     flex-grow: 1;
     display: flex;
     flex-direction: row; /* Side-by-side by default */
-    min-height: 0; /* Fix for flex height issues */
-    overflow: hidden;
+    min-height: 0; /* Restored */
+    height: 100%; /* Added, as in old .file-viewer-main-content */
+    overflow: hidden; /* Restored from visible */
+    /* background-color: rgba(0, 255, 0, 0.1); Removed debug color */
 }
 
 .document-view-container {
@@ -48,6 +53,9 @@
     position: relative; /* For any absolutely positioned children if needed */
     display: flex; /* To make the child (renderFileContent's output) fill height */
     flex-direction: column;
+    min-height: 0; /* Added for flex sizing */
+    height: 100%; /* Added, as in old .document-view */
+    /* background-color: rgba(0, 0, 255, 0.1); Removed debug color */
 }
 
 /* Key Concepts Panel (repurposing .explanation-panel styles) */
@@ -62,6 +70,8 @@
     display: flex;
     flex-direction: column;
     gap: 15px;
+    height: 100%; /* Added for consistency with document-view-container */
+    min-height: 0; /* Added for flex sizing */
 }
 
 .dark-mode .key-concepts-panel {
@@ -164,30 +174,84 @@
 
 .toolbar-button.close-button-bottom {
     padding: 8px 15px;
-    background-color: #6c757d;
-    border-color: #6c757d;
+    background-color: #007bff; /* Blue */
+    border-color: #007bff; /* Blue */
     color: white;
 }
 
 .toolbar-button.close-button-bottom:hover {
-    background-color: #5a6268;
-    border-color: #545b62;
+    background-color: #0056b3; /* Darker blue on hover */
+    border-color: #0056b3; /* Darker blue on hover */
 }
 
 .dark-mode .toolbar-button.close-button-bottom {
-    background-color: #555;
-    border-color: #555;
+    background-color: #3da9fc; /* Lighter blue for dark mode */
+    border-color: #3da9fc; /* Lighter blue for dark mode */
+    color: white;
 }
 
 .dark-mode .toolbar-button.close-button-bottom:hover {
-    background-color: #444;
-    border-color: #444;
+    background-color: #1e90ff; /* Darker Lighter blue for dark mode hover */
+    border-color: #1e90ff; /* Darker Lighter blue for dark mode hover */
 }
 
 /* Old Header Toolbar Styles - to be removed or adapted if still used elsewhere */
 /* .viewer-header-toolbar { ... } */
 /* .dark-mode .viewer-header-toolbar { ... } */
 /* .viewer-header-toolbar .toolbar-button { ... } */
+
+.error-message {
+    padding: 20px;
+    background-color: #fff0f0;
+    border: 1px solid #ffdddd;
+    color: #d8000c;
+    text-align: center;
+    margin: auto; /* Center it if it's the main content of the container */
+    border-radius: 4px;
+}
+
+.dark-mode .error-message {
+    background-color: #5c2a2a;
+    border-color: #8b4040;
+    color: #ffc0c0;
+}
+
+/* Styles for the wrapper div around the actual file content (iframe, video, img) */
+.file-content-area {
+    flex: 1; /* Grow to fill parent (.document-view-container) */
+    min-height: 0; /* Essential for flex children sizing */
+    /* display: flex; Removed - parent will size it, iframe will fill it as block */
+    /* flex-direction: column; Removed */
+    /* No background color here, let the child (pdf-viewer) show its color */
+}
+
+/* Styles for specific file content viewers */
+.pdf-viewer,
+.video-player,
+.image-viewer,
+.youtube-iframe { /* Added .youtube-iframe */
+width: 100%;
+height: 100%; /* Restored - to fill .file-content-area */
+border: none;
+/* flex: 1; Removed */
+/* min-height: 0; Removed */
+display: block; /* Restored - to behave as a simple block filling parent */
+/* background-color: rgba(255, 0, 0, 0.1); Removed debug color */
+}
+
+.video-player,
+.image-viewer {
+object-fit: contain; /* Adjust as needed: cover, fill, etc. */
+}
+
+.image-container {
+    display: flex; /* Allows image to center or be sized within */
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden; /* If image is larger than container with object-fit: contain */
+}
 
 /* Adjust Mobile View */
 @media (max-width: 768px) {

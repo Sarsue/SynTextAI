@@ -182,7 +182,7 @@ class KeyConceptResponse(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class KeyConceptsFileResponse(BaseModel):
     key_concepts: List[KeyConceptResponse]
@@ -200,9 +200,9 @@ async def get_key_concepts_for_file(
         if not file_record or file_record.user_id != user_data["user_id"]:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied")
         
-        # The file_record.key_concepts should be a list of KeyConcept SQLAlchemy objects.
-        # Pydantic will automatically serialize them based on KeyConceptResponse model.
-        return KeyConceptsFileResponse(key_concepts=file_record.key_concepts)
+        # Explicitly convert SQLAlchemy KeyConcept objects to KeyConceptResponse Pydantic models.
+        key_concept_responses = [KeyConceptResponse.from_orm(kc) for kc in file_record.key_concepts]
+        return KeyConceptsFileResponse(key_concepts=key_concept_responses)
     except Exception as e:
         logger.error(f"Error fetching key concepts for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve key concepts")
