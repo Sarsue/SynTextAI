@@ -216,13 +216,13 @@
 /* .viewer-header-toolbar .toolbar-button { ... } */
 
 .error-message {
-    padding: 20px;
-    background-color: #fff0f0;
-    border: 1px solid #ffdddd;
-    color: #d8000c;
-    text-align: center;
-    margin: auto; /* Center it if it's the main content of the container */
-    border-radius: 4px;
+padding: 20px;
+background-color: #fff0f0;
+border: 1px solid #ffdddd;
+color: #d8000c;
+text-align: center;
+margin: auto; /* Center it if it's the main content of the container */
+border-radius: 4px;
 }
 
 .loading-indicator,
@@ -369,5 +369,88 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
     .toolbar-button.close-button-bottom {
         width: 100%;
         text-align: center;
+    }
+}
+/* Dark mode styles for the key concepts enhancements */
+.dark-mode .key-concepts-container {
+    color: #e0e0e0;
+}
+
+.dark-mode .key-concepts-header {
+    border-bottom-color: #555;
+}
+
+.dark-mode .key-concepts-header h3 {
+    color: #f0f0f0;
+}
+
+.dark-mode .key-concepts-controls button {
+    background-color: #444;
+    color: #e0e0e0;
+    border-color: #666;
+}
+
+.dark-mode .key-concepts-controls button:hover {
+    background-color: #555;
+}
+
+.dark-mode .key-concepts-controls button.active {
+    background-color: #3da9fc;
+    color: #fff;
+    border-color: #3da9fc;
+}
+
+.dark-mode .concept-card {
+    background-color: #444;
+    border-color: #555;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.dark-mode .concept-card:hover {
+    background-color: #4d4d4d;
+}
+
+.dark-mode .concept-card.highlight {
+    animation: dark-pulse 2s;
+}
+
+.dark-mode .concept-header h4 {
+    color: #f0f0f0;
+}
+
+.dark-mode .concept-content p {
+    color: #ccc;
+}
+
+.dark-mode .source-link.pdf-source {
+    background-color: #2c5282;
+    border-color: #2c5282;
+}
+
+.dark-mode .source-link.pdf-source:hover {
+    background-color: #3a689c;
+}
+
+.dark-mode .source-link.video-source {
+    background-color: #822c3a;
+    border-color: #822c3a;
+}
+
+.dark-mode .source-link.video-source:hover {
+    background-color: #9c3a4a;
+}
+
+@keyframes dark-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(61, 169, 252, 0.7);
+        background-color: #3a3a3a;
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(61, 169, 252, 0);
+        background-color: #555;
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(61, 169, 252, 0);
+        background-color: #444;
     }
 }

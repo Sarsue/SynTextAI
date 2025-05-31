@@ -73,6 +73,9 @@ copy .env.prod, docker-compose-prod.yml and deploy.sh files
 
 scp docker-compose.yml deploy.sh .env root@178.128.236.126:/home/root/
 
+log in
+ssh root@178.128.236.126
+
 4 Deploy script on server
 chmod +x deploy.sh 
 ./deploy.sh
