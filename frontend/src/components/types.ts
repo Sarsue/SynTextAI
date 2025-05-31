@@ -18,6 +18,7 @@ export interface UploadedFile {
     name: string;
     publicUrl: string;
     processed: boolean;
+    upload_time?: string;
     // summary: string | null; // Removed summary
 }
 

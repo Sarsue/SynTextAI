@@ -666,7 +666,6 @@ class DocSynthStore:
             session = self.get_session()
 
             # Fetch the files for the user along with a count of their chunks
-            # Now also including the summary field
             files = session.query(
                 File.id, 
                 File.file_name, 
@@ -936,6 +935,34 @@ class DocSynthStore:
             
             # User is premium if they have an active or trialing subscription
             return subscription is not None
+        finally:
+            session.close()
+            
+    def update_file_processing_status(self, file_id: int, processed: bool) -> bool:
+        """Update the processing status of a file
+        
+        Args:
+            file_id: ID of the file to update
+            processed: New processing status (True if processed, False if needs processing)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        session = self.get_session()
+        try:
+            file = session.query(File).filter(File.id == file_id).first()
+            if not file:
+                logging.error(f"File with ID {file_id} not found")
+                return False
+                
+            file.processed = processed
+            session.commit()
+            logging.info(f"Updated processing status for file ID {file_id} to {processed}")
+            return True
+        except Exception as e:
+            session.rollback()
+            logging.error(f"Error updating processing status for file ID {file_id}: {e}")
+            return False
         finally:
             session.close()
     

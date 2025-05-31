@@ -72,6 +72,13 @@
     outline: none;
 }
 
+/* Add any additional styles here */
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* File upload styling */
 .custom-file-upload {
     display: inline-block;

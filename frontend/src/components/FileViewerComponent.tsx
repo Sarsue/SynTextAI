@@ -52,57 +52,73 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (!user || !fileId) return;
         setIsLoadingKeyConcepts(true);
         setError(null);
+        
+        console.log(`Fetching key concepts for file ID: ${fileId}, type: ${fileType}, isYouTube: ${fileType === 'youtube'}`);
+        
         try {
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
+            console.log(`Making API request to /api/v1/files/${fileId}/key_concepts`);
             const response = await fetch(`/api/v1/files/${fileId}/key_concepts`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
             });
 
+            console.log(`Key concepts API response status: ${response.status}`);
+            
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: `HTTP error! status: ${response.status}` }));
                 throw new Error(errorData.detail || `Failed to fetch key concepts: ${response.statusText}`);
             }
 
             const responseData = await response.json();
+            console.log(`Key concepts API response data:`, responseData);
+            
             if (!responseData || !Array.isArray(responseData.key_concepts)) {
                 console.error("API response structure incorrect for key concepts:", responseData);
                 throw new Error('API returned malformed data structure for key concepts');
             }
 
             const data: KeyConcept[] = responseData.key_concepts;
+            console.log(`Parsed ${data.length} key concepts for file ID: ${fileId}`);
+            
+            if (data.length === 0) {
+                console.warn(`No key concepts found for file ID: ${fileId}, type: ${fileType}`);
+            }
+            
             setKeyConcepts(data);
         } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'An unknown error occurred';
-            console.error('Failed to fetch key concepts:', errorMsg);
+            console.error(`Failed to fetch key concepts for file ID: ${fileId}, type: ${fileType}:`, errorMsg);
             setError(errorMsg);
             onError(errorMsg); 
         } finally {
             setIsLoadingKeyConcepts(false);
         }
-    }, [user, fileId, onError]); 
+    }, [user, fileId, fileType, onError]); 
 
 
     useEffect(() => {
+        // Set file type immediately to avoid null values in logs and UI
         const urlToTest = fileUrl || file.name; 
         const type = getFileType(urlToTest);
         
-        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'.`);
+        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File processed: ${file.processed}`);
+        
+        // Set file type right away
         setFileType(type);
 
         if (!type) {
             onError(`Unsupported file type or could not determine type for: ${file.name}`);
         }
-    }, [fileUrl, file.name, onError]); 
-    
-    useEffect(() => {
-        const type = getFileType(fileUrl);
-        setFileType(type);
-        fetchKeyConcepts(); 
-    }, [fileUrl, fetchKeyConcepts]); 
+        
+        // Only fetch key concepts if user is logged in and file ID exists
+        if (user && fileId) {
+            fetchKeyConcepts();
+        }
+    }, [fileUrl, file.name, onError, file.processed, user, fileId]); 
 
 
     const handleKeyConceptSourceClick = (concept: KeyConcept) => {
@@ -117,6 +133,11 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const renderFileContent = () => {
         if (!fileType) {
             return <div className="loading-indicator">Loading file...</div>;
+        }
+        
+        // Show loading indicator for unprocessed files
+        if (!file.processed) {
+            return <div className="processing-indicator">File is being processed. Key concepts will appear when ready.</div>;
         }
 
         if (fileType === 'youtube') { 
@@ -178,6 +199,72 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
     };
 
+    const renderKeyConcepts = () => {
+        if (isLoadingKeyConcepts) {
+            return <div className="loading-indicator">Loading key concepts...</div>;
+        }
+
+        if (error) {
+            return <div className="error-message">{error}</div>;
+        }
+
+        if (!file.processed) {
+            return <div className="processing-message">
+                <p>This file is still being processed.</p>
+                <p>Key concepts will appear here once processing is complete.</p>
+                <div className="processing-spinner"></div>
+            </div>;
+        }
+
+        if (!keyConcepts || keyConcepts.length === 0) {
+            // Add more specific messaging for YouTube videos
+            if (fileType === 'youtube') {
+                return (
+                    <div className="no-key-concepts">
+                        <p>No key concepts available for this YouTube video.</p>
+                        <p>This may be due to one of the following reasons:</p>
+                        <ul>
+                            <li>The video transcript could not be properly extracted</li>
+                            <li>The video content doesn't contain enough information for key concept generation</li>
+                            <li>There was an error during key concept processing</li>
+                        </ul>
+                        <p><small>Check the browser console for detailed logs</small></p>
+                    </div>
+                );
+            }
+            return <div className="no-key-concepts">No key concepts available for this file.</div>;
+        }
+
+        return (
+            <ul className="key-concepts-list">
+                {keyConcepts.map((concept) => (
+                    <li key={concept.id} className="key-concept-item">
+                        <h4>{concept.concept_title || 'Untitled Concept'}</h4>
+                        <p>{concept.concept_explanation}</p>
+                        <small>
+                            Source: 
+                            {concept.source_page_number && (
+                                <button onClick={() => handleKeyConceptSourceClick(concept)} className="source-link">
+                                    Page {concept.source_page_number}
+                                </button>
+                            )}
+                            {(concept.source_video_timestamp_start_seconds !== null && concept.source_video_timestamp_start_seconds !== undefined) && (
+                                <button onClick={() => handleKeyConceptSourceClick(concept)} className="source-link">
+                                    Time: {new Date(concept.source_video_timestamp_start_seconds * 1000).toISOString().substr(14, 5)}
+                                    {concept.source_video_timestamp_end_seconds && 
+                                        ` - ${new Date(concept.source_video_timestamp_end_seconds * 1000).toISOString().substr(14, 5)}`}
+                                </button>
+                            )}
+                            {!concept.source_page_number && (concept.source_video_timestamp_start_seconds === null || concept.source_video_timestamp_start_seconds === undefined) && <span>N/A</span>}
+                            <br />
+                            <em>Added: {new Date(concept.created_at).toLocaleString()}</em>
+                        </small>
+                    </li>
+                ))}
+            </ul>
+        );
+    };
+
     return (
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
@@ -187,37 +274,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                     </div>
                     <div className="key-concepts-panel">
                         <h3>Key Concepts</h3>
-                        {isLoadingKeyConcepts && <p>Loading key concepts...</p>}
-                        {error && <p className="error-message">{error}</p>}
-                        {!isLoadingKeyConcepts && keyConcepts.length === 0 && !error && <p>No key concepts extracted for this file.</p>}
-                        {keyConcepts.length > 0 && (
-                            <ul className="key-concepts-list">
-                                {keyConcepts.map((concept) => (
-                                    <li key={concept.id} className="key-concept-item">
-                                        <h4>{concept.concept_title || 'Untitled Concept'}</h4>
-                                        <p>{concept.concept_explanation}</p>
-                                        <small>
-                                            Source: 
-                                            {concept.source_page_number && (
-                                                <button onClick={() => handleKeyConceptSourceClick(concept)} className="source-link">
-                                                    Page {concept.source_page_number}
-                                                </button>
-                                            )}
-                                            {(concept.source_video_timestamp_start_seconds !== null && concept.source_video_timestamp_start_seconds !== undefined) && (
-                                                <button onClick={() => handleKeyConceptSourceClick(concept)} className="source-link">
-                                                    Time: {new Date(concept.source_video_timestamp_start_seconds * 1000).toISOString().substr(14, 5)}
-                                                    {concept.source_video_timestamp_end_seconds && 
-                                                        ` - ${new Date(concept.source_video_timestamp_end_seconds * 1000).toISOString().substr(14, 5)}`}
-                                                </button>
-                                            )}
-                                            {!concept.source_page_number && (concept.source_video_timestamp_start_seconds === null || concept.source_video_timestamp_start_seconds === undefined) && <span>N/A</span>}
-                                            <br />
-                                            <em>Added: {new Date(concept.created_at).toLocaleString()}</em>
-                                        </small>
-                                    </li>
-                                ))}
-                            </ul>
-                        )}
+                        {renderKeyConcepts()}
                     </div>
                 </div>
                 <div className="viewer-controls-bottom">

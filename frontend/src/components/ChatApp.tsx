@@ -189,54 +189,43 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-    const handleClearHistory = async () => {
-        try {
-            const clearHistoryResponse = await callApiWithToken(`api/v1/histories/all`, 'DELETE');
-            if (!clearHistoryResponse?.ok) {
-                console.error('Failed to clear history:', clearHistoryResponse?.statusText);
-                return;
-            }
-            await fetchHistories();
-            setCurrentHistory(null);
-        } catch (error) {
-            console.error('Error clearing history:', error);
-        }
-    };
-
     const handleNewChat = async () => {
         try {
-            const createHistoryResponse = await callApiWithToken(`api/v1/histories?title=New%20Chat`, 'POST');
-            if (createHistoryResponse) {
-                const createHistoryData = createHistoryResponse.ok ? await createHistoryResponse.json() : null;
-                if (createHistoryData?.id) {
-                    const newHistory: History = { id: createHistoryData.id, title: createHistoryData.title, messages: [] };
-                    setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: newHistory }));
-                    setCurrentHistory(newHistory.id);
-                }
+            const response = await callApiWithToken('/api/chat/history', 'POST');
+            if (response && response.ok) {
+                const newHistory = await response.json();
+                setHistories(prev => ({ ...prev, [newHistory.id]: newHistory }));
+                setCurrentHistory(newHistory.id);
+                toast.success('New chat started');
+            } else {
+                toast.error('Failed to start new chat');
             }
         } catch (error) {
-            console.error('Error creating new chat:', error);
+            console.error('Error starting new chat:', error);
+            toast.error('Error starting new chat');
         }
     };
 
-    const handleDeleteHistory = async (historyId: number | History) => {
+    const handleDeleteHistory = async (historyIdOrObject: number | History) => {
+        const historyId = typeof historyIdOrObject === 'number' ? historyIdOrObject : historyIdOrObject.id;
         try {
-            const idToDelete = typeof historyId === 'number' ? historyId : historyId.id;
-            const deleteHistoryResponse = await callApiWithToken(`api/v1/histories?history-id=${encodeURIComponent(idToDelete)}`, 'DELETE');
-            if (deleteHistoryResponse) {
-                const deleteHistoryData = await deleteHistoryResponse.json();
-                if (deleteHistoryData?.message === 'History deleted successfully') {
-                    console.log('History deleted successfully');
-                    await fetchHistories();
-                    if (currentHistory === idToDelete) {
-                        setCurrentHistory(null);
-                    }
-                } else {
-                    console.error('Failed to delete history:', deleteHistoryData?.message);
+            const response = await callApiWithToken(`/api/chat/history/${historyId}`, 'DELETE');
+            if (response && response.ok) {
+                setHistories(prev => {
+                    const newHistories = { ...prev };
+                    delete newHistories[historyId];
+                    return newHistories;
+                });
+                if (currentHistory === historyId) {
+                    setCurrentHistory(null); // Or set to the latest, or none
                 }
+                toast.success('Chat history deleted');
+            } else {
+                toast.error('Failed to delete history');
             }
         } catch (error) {
             console.error('Error deleting history:', error);
+            toast.error('Error deleting history');
         }
     };
 
@@ -291,34 +280,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         navigate('/');
     };
 
-    const handleDownloadHistory = async () => {
-        if (!Object.keys(histories).length) {
-            console.error('No chat histories available to download.');
-            toast.error('No chat histories available to download.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
-            return;
-        }
-        try {
-            const historiesArray = Object.values(histories);
-            const dataStr = JSON.stringify(historiesArray, null, 2);
-            const blob = new Blob([dataStr], { type: 'application/json' });
-            const username = user?.displayName;
-            const url = URL.createObjectURL(blob);
-            const now = new Date();
-            const datetimeString = now.toISOString().replace(/[:.]/g, '-');
-            const filename = `${username}_${datetimeString}_history.json`;
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            toast.success('Chat histories downloaded successfully!', { position: 'top-right', autoClose: 3000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
-        } catch (error) {
-            console.error('Error downloading chat histories:', error);
-            toast.error('Error downloading chat histories. Please try again.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
-        }
-    };
 
     const handleFileError = (error: string) => {
         setSelectedFile(null);
@@ -434,14 +395,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             case "history":
                 return (
                     <div className={`history-column ${activeTab === "history" ? "active" : ""}`}>
-                        <HistoryView
-                            histories={Object.values(histories)}
-                            setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
-                            onClearHistory={handleClearHistory}
-                            onNewChat={handleNewChat}
-                            onDeleteHistory={handleDeleteHistory}
-                            onDownloadHistory={handleDownloadHistory}
-                        />
+                            <HistoryView
+                                histories={Object.values(histories)}
+                                setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
+                                onNewChat={handleNewChat}
+                                onDeleteHistory={handleDeleteHistory}
+                            />
                     </div>
                 );
             default:
@@ -577,10 +536,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                             <HistoryView
                                 histories={Object.values(histories)}
                                 setCurrentHistory={setCurrentHistory as React.Dispatch<React.SetStateAction<number | History | null>>}
-                                onClearHistory={handleClearHistory}
                                 onNewChat={handleNewChat}
                                 onDeleteHistory={handleDeleteHistory}
-                                onDownloadHistory={handleDownloadHistory}
                             />
                         </div>
                     </>

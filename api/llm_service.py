@@ -89,7 +89,9 @@ explain_predictor = dspy.Predict(GenerateExplanation)
 
 # --- DSPy Signature for Key Concept Extraction --- >
 class ExtractKeyConcepts(dspy.Signature):
-    """You are an expert academic tutor. Your task is to analyze the following document content and extract the key concepts a student should learn from it.
+    """You are an expert academic tutor. Your task is to analyze the following {document_type} and extract the key concepts a student should learn from it.
+    {content_instruction}
+    
     For each key concept, provide:
     1. A concise title for the concept.
     2. A clear and brief explanation of the concept, as if you were explaining it to a student for the first time.
@@ -106,6 +108,8 @@ class ExtractKeyConcepts(dspy.Signature):
     - "source_video_timestamp_end_seconds": (integer or null) The end timestamp in seconds for video sources.
     """
     document_content = dspy.InputField(desc="The full text content of the document (PDF text or video transcript).")
+    document_type = dspy.InputField(desc="Type of document (e.g., 'PDF document', 'video transcript')", default="document content")
+    content_instruction = dspy.InputField(desc="Additional instructions for processing this specific type of content", default="Extract the main concepts, definitions, and key ideas from this content.")
     key_concepts_json = dspy.OutputField(desc="A JSON array of objects, where each object represents a key concept with its title, explanation, and source location (page number or video timestamps).")
 
 # --- DSPy Predictor for Key Concept Extraction --- >
@@ -144,7 +148,7 @@ def generate_summary_dspy(text_to_summarize: str, language: str = "English", com
         # Return an error message or None, depending on how caller handles it
         return "Error: Could not generate summary."
 
-def generate_key_concepts_dspy(document_text: str, language: str = "English", comprehension_level: str = "Beginner") -> List[dict]:
+def generate_key_concepts_dspy(document_text: str, language: str = "English", comprehension_level: str = "Beginner", is_video: bool = False) -> List[dict]:
     """Generates key concepts with explanations and source links from document text using DSPy.
     
     Args:
@@ -170,8 +174,20 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
         # document_text = truncate_text_to_tokens(document_text, max_tokens_for_doc) # Implement this if needed
 
     try:
-        logging.info(f"Generating key concepts for document text (first 100 chars): {document_text[:100]}...")
-        response = key_concept_extractor(document_content=document_text)  # Corrected argument name to match signature
+        logging.info(f"Generating key concepts for {'video transcript' if is_video else 'document text'} (first 100 chars): {document_text[:100]}...")
+        
+        # Use different prompts for videos vs documents
+        if is_video:
+            # Customize the key concept extraction for videos to focus on timestamps
+            logging.info("Using video-specific key concept extraction method")
+            response = key_concept_extractor(
+                document_content=document_text,
+                document_type="video transcript",
+                content_instruction="Focus on the main ideas and concepts presented in this video transcript. Include specific timestamps where possible."
+            )
+        else:
+            # Standard document processing
+            response = key_concept_extractor(document_content=document_text)  # Use default prompt
         
         if response and hasattr(response, 'key_concepts_json') and response.key_concepts_json:
             raw_json_output = response.key_concepts_json

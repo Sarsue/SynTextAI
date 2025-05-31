@@ -6,19 +6,15 @@ import { useUserContext } from '../UserContext';
 interface HistoryViewProps {
     histories: History[];
     setCurrentHistory: (historyId: number) => void;
-    onClearHistory: () => void;
     onNewChat: () => void;
     onDeleteHistory: (historyId: number | History) => void;
-    onDownloadHistory: () => void;
 }
 
 const HistoryView: React.FC<HistoryViewProps> = ({
     histories,
     setCurrentHistory,
-    onClearHistory,
     onNewChat,
     onDeleteHistory,
-    onDownloadHistory,
 }) => {
     const [selectedHistoryId, setSelectedHistoryId] = React.useState<number | null>(null);
     const { darkMode } = useUserContext(); // Access the darkMode state
@@ -65,11 +61,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                 ))}
             </div>
 
-            {/* Save and Clear buttons at the bottom */}
-            <div className="history-actions bottom-actions">
-                <button className="history-action" onClick={onDownloadHistory}>⬇️</button>
-                <button className="history-action" onClick={onClearHistory}>🗑️</button>
-            </div>
+            {/* Save and Clear buttons removed */}
         </div>
 
     );

@@ -69,7 +69,6 @@ async def save_file(
             if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
                 raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
             url = data.get("url", "")
-            explanation_interval_seconds = data.get("explanation_interval_seconds") # Get optional interval
 
             # Validate YouTube URL
             youtube_regex = re.compile(r"^(https?://)?(www\.)?(youtube\.com|youtu\.be)/")
@@ -77,8 +76,8 @@ async def save_file(
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             # Store YouTube file entry (type: 'youtube')
             file_info = store.add_file(user_id, url, url)  # Just store as a file with url as name and publicUrl
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True, explanation_interval_seconds=explanation_interval_seconds, language=language, comprehension_level=comprehension_level)  # True = is_youtube, pass interval
-            logger.info(f"Enqueued Task for processing YouTube link: {url} with interval: {explanation_interval_seconds}")
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True, language=language, comprehension_level=comprehension_level)  # True = is_youtube
+            logger.info(f"Enqueued Task for processing YouTube link: {url}")
             return {"message": "YouTube video processing queued."}
 
         # --- Handle regular file upload as before ---
@@ -146,27 +145,48 @@ async def delete_file(
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-# Route to re-extract a file
+# Route to re-extract a file (retry processing)
 @files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
 async def reextract_file(
     file_id: int,
+    background_tasks: BackgroundTasks,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
+        from tasks import process_file_data
+        
         user_id = user_data["user_id"]
+        user_gc_id = user_data["user_gc_id"]
         store = request.app.state.store
 
-        file_info = store.get_file_entry(user_id, file_id)
-        if not file_info:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-
-        # Placeholder for re-extraction logic
-        # process_file(file_info['file_path'])  # Replace with your re-processing logic
-
-        return {"message": "File re-extraction initiated"}
+        # Get file information
+        file_info = store.get_file_by_id(file_id)
+        if not file_info or file_info.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        # Reset processing status to mark it for reprocessing
+        store.update_file_processing_status(file_id, False)
+        
+        # Check if it's a YouTube file
+        is_youtube = 'youtube' in file_info.file_name.lower()
+        
+        # Restart processing task
+        background_tasks.add_task(
+            process_file_data, 
+            user_gc_id, 
+            user_id, 
+            file_id, 
+            file_info.file_name,
+            file_info.file_url,
+            is_youtube
+        )
+        
+        logger.info(f"Restarted processing for file ID: {file_id}, name: {file_info.file_name}")
+        return {"message": "File processing restarted successfully"}
+        
     except Exception as e:
-        logger.error(f"Error reextracting file: {e}")
+        logger.error(f"Error reextracting file: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Pydantic models for Key Concepts

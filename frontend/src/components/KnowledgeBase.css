@@ -1,0 +1,191 @@
+.knowledge-base {
+    padding: 15px;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    height: 100%;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.file-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    flex-grow: 1;
+    overflow-y: auto;
+}
+
+.file-item {
+    margin-bottom: 10px;
+    background-color: white;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    overflow: hidden;
+    position: relative;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    cursor: pointer;
+    position: relative;
+}
+
+.file-icon {
+    margin-right: 10px;
+    font-size: 1.2rem;
+}
+
+.file-link {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    overflow: hidden;
+    color: #333;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-status {
+    margin-left: 8px;
+    font-size: 12px;
+}
+
+.file-expand-icon {
+    margin-left: 10px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #777;
+}
+
+.file-details {
+    padding: 10px;
+    border-top: 1px solid #eee;
+    background-color: #f9f9f9;
+    font-size: 13px;
+}
+
+.file-status-text, .file-time {
+    margin-bottom: 5px;
+    color: #555;
+}
+
+.file-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.kb-action-button {
+    padding: 5px 10px;
+    border: none;
+    border-radius: 4px;
+    background-color: #f0f0f0;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background-color 0.2s;
+}
+
+.kb-action-button:hover {
+    background-color: #e0e0e0;
+}
+
+.delete-button {
+    background-color: #dc3545;
+    color: white;
+    font-weight: 500;
+    border-radius: 4px;
+}
+
+.delete-button:hover {
+    background-color: #c82333;
+}
+
+.delete-button.always-visible {
+    margin-left: 10px;
+    padding: 4px 10px;
+    background-color: #dc3545;
+    color: white;
+    opacity: 0.85;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.delete-button.always-visible:hover {
+    opacity: 1;
+    background-color: #c82333;
+}
+
+.delete-button:disabled {
+    background-color: #e9ecef;
+    color: #6c757d;
+    cursor: not-allowed;
+}
+
+.file-info:hover .delete-button.always-visible {
+    opacity: 1;
+}
+
+.link-processed {
+    color: #28a745;
+}
+
+.link-not-processed {
+    color: #6c757d;
+}
+
+.processing-status {
+    font-size: 12px;
+    color: #6c757d;
+    font-style: italic;
+}
+
+.file-error-message {
+    margin-top: 5px;
+    color: #dc3545;
+    font-size: 12px;
+}
+
+.kb-help-text {
+    margin-top: 15px;
+    font-size: 13px;
+    color: #6c757d;
+    padding: 10px;
+    border-top: 1px solid #eee;
+}
+
+.kb-help-text p {
+    margin: 5px 0;
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6c757d;
+}
+
+/* Responsive tweaks */
+@media (max-width: 768px) {
+    .knowledge-base {
+        padding: 10px;
+    }
+    
+    .file-item {
+        margin-bottom: 8px;
+    }
+}
