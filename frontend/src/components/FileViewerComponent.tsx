@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useUserContext } from '../UserContext';
 import './FileViewerComponent.css';
-import { UploadedFile, Explanation } from './types';
-import SelectionToolbox from './SelectionToolbox'; // Import the new component
+import { UploadedFile, KeyConcept } from './types';
+import { useUserContext } from '../UserContext';
+import { toast } from 'react-toastify';
 
 interface FileViewerComponentProps {
     file: UploadedFile;
@@ -15,23 +15,17 @@ interface FileViewerComponentProps {
 const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose, onError, darkMode }) => {
     const { user } = useUserContext();
     const [fileType, setFileType] = useState<string | null>(null);
-    const [currentPage, setCurrentPage] = useState<number>(1);
-    const [showExplainPanel, setShowExplainPanel] = useState<boolean>(false);
-    const [isExplaining, setIsExplaining] = useState<boolean>(false);
-    const [explanationHistory, setExplanationHistory] = useState<Explanation[]>([]);
-    const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+    const [currentPage, setCurrentPage] = useState<number>(1); // Keep for PDF page tracking if needed
+    const [keyConcepts, setKeyConcepts] = useState<KeyConcept[]>([]);
+    const [isLoadingKeyConcepts, setIsLoadingKeyConcepts] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
-    const [selectionToolboxPosition, setSelectionToolboxPosition] = useState<{ top: number; left: number } | null>(null);
-    const [selectionText, setSelectionText] = useState<string>('');
-    const [isPremiumUser, setIsPremiumUser] = useState<boolean>(false);
-    const [showTools, setShowTools] = useState(false);
-    const [isExplanationLoading, setIsExplanationLoading] = useState<boolean>(false);
-    const [explanation, setExplanation] = useState<string | null>(null);
-    const [debugSelection, setDebugSelection] = useState<string>(""); // State to show debug info
-    const [allExplanations, setAllExplanations] = useState<any[]>([]); // State to store all fetched explanations
-
+    const [expandedConcepts, setExpandedConcepts] = useState<number[]>([]);
+    const [sortOrder, setSortOrder] = useState<string>('default');
+    const [highlightedConceptId, setHighlightedConceptId] = useState<number | null>(null);
+    
     const pdfViewerRef = useRef<HTMLIFrameElement>(null);
     const videoPlayerRef = useRef<HTMLVideoElement>(null);
+    const youtubePlayerRef = useRef<any>(null);
 
     const fileId = file.id;
     const fileUrl = file.publicUrl;
@@ -53,270 +47,171 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (['mp4', 'webm', 'ogg', 'mov'].includes(extension)) return 'video';
         if (['jpg', 'jpeg', 'png', 'gif'].includes(extension)) return 'image';
         
-        return null; // Unknown extension
+        return null; 
     };
 
-    const fetchExplanationHistory = useCallback(async () => {
+    const fetchKeyConcepts = useCallback(async () => {
         if (!user || !fileId) return;
-        setIsLoadingHistory(true);
+        setIsLoadingKeyConcepts(true);
         setError(null);
+        
+        console.log(`Fetching key concepts for file ID: ${fileId}, type: ${fileType}, isYouTube: ${fileType === 'youtube'}`);
+        
         try {
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
-            const response = await fetch(`/api/v1/files/${fileId}/explanations`, {
+            console.log(`Making API request to /api/v1/files/${fileId}/key_concepts`);
+            const response = await fetch(`/api/v1/files/${fileId}/key_concepts`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
             });
 
+            console.log(`Key concepts API response status: ${response.status}`);
+            
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: `HTTP error! status: ${response.status}` }));
-                throw new Error(errorData.detail || `Failed to fetch history: ${response.statusText}`);
+                throw new Error(errorData.detail || `Failed to fetch key concepts: ${response.statusText}`);
             }
 
             const responseData = await response.json();
-            if (!responseData || !Array.isArray(responseData.explanations)) {
-                console.error("API response structure incorrect:", responseData); // Log the actual bad response
-                throw new Error('API returned malformed data structure'); // More specific error
+            console.log(`Key concepts API response data:`, responseData);
+            
+            if (!responseData || !Array.isArray(responseData.key_concepts)) {
+                console.error("API response structure incorrect for key concepts:", responseData);
+                throw new Error('API returned malformed data structure for key concepts');
             }
 
-            const data: Explanation[] = responseData.explanations; // Extract the array
-
-            setExplanationHistory(data);
+            const data: KeyConcept[] = responseData.key_concepts;
+            console.log(`Parsed ${data.length} key concepts for file ID: ${fileId}`);
+            
+            if (data.length === 0) {
+                console.warn(`No key concepts found for file ID: ${fileId}, type: ${fileType}`);
+            }
+            
+            setKeyConcepts(data);
         } catch (err) {
-            console.error('Error fetching explanation history:', err);
-            const errorMsg = err instanceof Error ? err.message : 'Failed to load explanation history.';
+            const errorMsg = err instanceof Error ? err.message : 'An unknown error occurred';
+            console.error(`Failed to fetch key concepts for file ID: ${fileId}, type: ${fileType}:`, errorMsg);
             setError(errorMsg);
-            onError(errorMsg); // Notify parent
-            setExplanationHistory([]); // Clear history on error
+            onError(errorMsg); 
         } finally {
-            setIsLoadingHistory(false);
+            setIsLoadingKeyConcepts(false);
         }
-    }, [user, fileId, onError]); // Dependencies for the fetch function
+    }, [user, fileId, fileType, onError]); 
 
 
     useEffect(() => {
-        const urlToTest = fileUrl || file.name; // Prioritize publicUrl
+        // Set file type immediately to avoid null values in logs and UI
+        const urlToTest = fileUrl || file.name; 
         const type = getFileType(urlToTest);
         
-        // Enhanced logging
-        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'.`);
+        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File processed: ${file.processed}`);
+        
+        // Set file type right away
         setFileType(type);
 
         if (!type) {
-            // If getFileType still returns null,
-            // then it's an unsupported/unidentifiable file.
             onError(`Unsupported file type or could not determine type for: ${file.name}`);
         }
-    }, [fileUrl, file.name, onError]); // Removed file.type from dependencies
-    
-    useEffect(() => {
-        if (showExplainPanel && user && fileId) {
-            fetchExplanationHistory();
+        
+        // Only fetch key concepts if user is logged in and file ID exists
+        if (user && fileId) {
+            fetchKeyConcepts();
         }
-        // Clear history if the panel is closed or file changes
-        if (!showExplainPanel) {
-            // Optionally clear history when panel closes, or keep it cached in state
-            // setExplanationHistory([]);
-        }
-    }, [showExplainPanel, user, fileId, fetchExplanationHistory]);
+    }, [fileUrl, file.name, onError, file.processed, user, fileId]); 
 
-    const createExplanation = async (variables: { startTime?: number; endTime?: number }) => {
-        if (!user) {
-            setError('User not available');
-            onError('User not available');
-            return;
-        }
-        if (!fileType || (fileType !== 'pdf' && fileType !== 'video')) {
-            setError('Unsupported file type for explanation.');
-            onError('Unsupported file type for explanation.');
-            return;
-        }
 
-        setIsExplaining(true);
-        setError(null);
-        try {
-            const idToken = await user.getIdToken();
-            if (!idToken) throw new Error('User token not found');
-
-            // Build correct payload for backend
-            const apiPayload = {
-                selection_type: fileType === 'pdf' ? 'text' : 'video_range',
-                page: fileType === 'pdf' ? currentPage : undefined,
-                video_start: fileType === 'video' ? variables.startTime : undefined,
-                video_end: fileType === 'video' ? variables.endTime : undefined,
-            };
-
-            const response = await fetch(`/api/v1/files/${fileId}/explain`, {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${idToken}`,
-                    'Content-Type': 'application/json',
-                },
-                mode: 'cors',
-                body: JSON.stringify(apiPayload),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `HTTP error! status: ${response.status}` }));
-                throw new Error(errorData.detail || `Failed to explain: ${response.statusText}`);
-            }
-
-            const newExplanation: Explanation = await response.json();
-            setExplanationHistory((prev) =>
-                [newExplanation, ...prev].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-            );
-            if (!showExplainPanel) setShowExplainPanel(true); // Ensure panel is visible
-        } catch (error) {
-            console.error('Explanation creation error:', error);
-            const errorMsg = error instanceof Error ? error.message : 'An unknown error occurred during explanation.';
-            setError(errorMsg);
-            onError(errorMsg);
-        } finally {
-            setIsExplaining(false);
-        }
+    const formatVideoTimestamp = (seconds: number | undefined): string => {
+        if (seconds === undefined || seconds === null) return '00:00';
+        
+        const date = new Date(0);
+        date.setSeconds(seconds);
+        // For videos longer than an hour, show hours
+        return seconds >= 3600 
+            ? date.toISOString().substr(11, 8)  // hh:mm:ss
+            : date.toISOString().substr(14, 5); // mm:ss
     };
 
-    const handleExplainClick = async () => {
-        setShowTools(false);
-        setError(null);
-        setExplanation(null);
-        setIsExplanationLoading(true);
-
-        if (!isPremiumUser) {
-            setError("Explain feature requires a premium subscription.");
-            setIsExplanationLoading(false);
-            return;
-        }
-
-        try {
-            let foundExplanation = null;
-
-            if (fileType === 'pdf') {
-                console.log(`Finding PDF explanation for page: ${currentPage}`);
-                // Find explanation matching the current page
-                foundExplanation = allExplanations.find(
-                    exp => exp.selection_type === 'text' && exp.page === currentPage
-                );
-                if (!foundExplanation) {
-                    console.warn(`No pre-generated explanation found for page ${currentPage}.`);
-                }
-
-            } else if (fileType === 'video' && videoPlayerRef.current) {
-                const currentTime = videoPlayerRef.current.currentTime;
-                console.log(`Finding Video explanation for time: ${currentTime}`);
-                // Find explanation where currentTime is within start/end or closest to start
-                // This logic might need refinement based on how segments/explanations are stored
-                foundExplanation = allExplanations
-                    .filter(exp => exp.selection_type === 'video_range' && exp.video_start !== null)
-                    .sort((a, b) => Math.abs(a.video_start - currentTime) - Math.abs(b.video_start - currentTime))
-                    .find(exp => currentTime >= exp.video_start && (exp.video_end === null || currentTime <= exp.video_end));
-
-                // Fallback to closest start time if no exact match
-                if (!foundExplanation && allExplanations.length > 0) {
-                    foundExplanation = allExplanations
-                        .filter(exp => exp.selection_type === 'video_range' && exp.video_start !== null)
-                        .sort((a, b) => Math.abs(a.video_start - currentTime) - Math.abs(b.video_start - currentTime))[0];
-                    console.warn(`No exact video range match for ${currentTime}s. Using closest explanation starting at ${foundExplanation?.video_start}s.`);
-                }
-
-                if (!foundExplanation) {
-                    console.warn(`No pre-generated explanation found near time ${currentTime}s.`);
-                }
-            }
-
-            if (foundExplanation && foundExplanation.explanation_text) {
-                console.log("Displaying pre-generated explanation:", foundExplanation);
-                setExplanation(foundExplanation.explanation_text);
+    const expandConcept = (conceptId: number) => {
+        setExpandedConcepts(prev => {
+            if (prev.includes(conceptId)) {
+                return prev.filter(id => id !== conceptId);
             } else {
-                // No specific explanation found for this page/time
-                if (allExplanations.length > 0 || !isExplanationLoading) {
-                    // We have explanations loaded, just not for this specific selection
-                    const identifierValue = fileType === 'pdf' ? currentPage : (videoPlayerRef.current?.currentTime ?? 0);
-                    const selectionType = fileType === 'pdf' ? `page ${identifierValue}` : `time ${Number(identifierValue).toFixed(1)}s`;
-                    setError(`No pre-generated explanation found for ${selectionType}.`);
-                } else {
-                    // This might mean explanations failed to load or haven't loaded yet
-                    setError("Explanations are not available for this file or failed to load.");
-                }
-                setExplanation(null); // Clear any old explanation being displayed
+                return [...prev, conceptId];
             }
+        });
+    };
+    
+    const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        setSortOrder(e.target.value);
+    };
 
-        } catch (error) {
-            console.error('Error during explanation retrieval:', error);
-            let errorMessage = 'An unexpected error occurred while finding the explanation.';
-            if (error instanceof Error) {
-                errorMessage = error.message;
-            }
-            setError(errorMessage);
-        } finally {
-            setIsExplanationLoading(false);
+    const sortKeyConcepts = (concepts: KeyConcept[]): KeyConcept[] => {
+        switch(sortOrder) {
+            case 'alphabetical':
+                return [...concepts].sort((a, b) => {
+                    return (a.concept_title || '').localeCompare(b.concept_title || '');
+                });
+            case 'chronological':
+                return [...concepts].sort((a, b) => {
+                    // First sort by page number
+                    const pageComparison = (a.source_page_number || 0) - (b.source_page_number || 0);
+                    if (pageComparison !== 0) return pageComparison;
+                    
+                    // Then by video timestamp if page numbers are the same
+                    return (a.source_video_timestamp_start_seconds || 0) - (b.source_video_timestamp_start_seconds || 0);
+                });
+            default:
+                return concepts; // Default order as returned by API
         }
     };
 
-    const fetchExplanations = async () => {
-        if (!fileId || !user) return;
-        setIsExplanationLoading(true); // Use existing loading state or add a new one
-        setAllExplanations([]); // Clear previous explanations
-        try {
-            const idToken = await user.getIdToken();
-            if (!idToken) throw new Error('User token not available');
-
-            const response = await fetch(`/api/v1/files/${fileId}/explanations`, {
-                headers: {
-                    'Authorization': `Bearer ${idToken}`
-                }
-            });
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            setAllExplanations(data.explanations || []); // Update state with fetched explanations
-            console.log("Fetched explanations:", data.explanations);
-        } catch (error) {
-            console.error('Error fetching explanations:', error);
-            setError('Failed to load explanations.');
-            // Optionally set error state to show in UI
-        } finally {
-            setIsExplanationLoading(false);
+    const handleKeyConceptSourceClick = (concept: KeyConcept) => {
+        // Store the currently viewed concept ID for highlighting
+        if (concept.id) {
+            setHighlightedConceptId(concept.id);
         }
+        
+        if (concept.source_page_number && pdfViewerRef.current) {
+            // For PDFs, navigate to the page number
+            const iframe = pdfViewerRef.current;
+            iframe.contentWindow?.postMessage({ type: 'goto-page', page: concept.source_page_number }, '*');
+            toast.info(`Navigated to page ${concept.source_page_number}`);
+        } else if (concept.source_video_timestamp_start_seconds !== null && concept.source_video_timestamp_start_seconds !== undefined) {
+            const timestamp = concept.source_video_timestamp_start_seconds;
+            
+            if (videoPlayerRef.current) {
+                // For regular videos
+                videoPlayerRef.current.currentTime = timestamp;
+                videoPlayerRef.current.play();
+                toast.info(`Jumped to ${formatVideoTimestamp(timestamp)}`);
+            } else if (youtubePlayerRef.current && fileType === 'youtube') {
+                // For YouTube videos
+                youtubePlayerRef.current.seekTo(timestamp);
+                youtubePlayerRef.current.playVideo();
+                toast.info(`Jumped to ${formatVideoTimestamp(timestamp)}`);
+            }
+        }
+        
+        // Clear highlight after animation
+        setTimeout(() => setHighlightedConceptId(null), 2000);
     };
-
-    useEffect(() => {
-        fetchExplanations();
-    }, [fileId, user]);
-
-    const handlePdfMessage = useCallback((event: MessageEvent) => {
-        const expectedOrigin = 'expected_pdf_viewer_origin'; // Replace with dynamic origin if needed
-        if (event.origin !== expectedOrigin) return;
-
-        const data = event.data;
-        if (data && typeof data === 'object' && data.type === 'pageChange') {
-            if (typeof data.pageNumber === 'number') {
-                setCurrentPage(data.pageNumber);
-                console.log("PDF Page changed to:", data.pageNumber);
-            }
-        }
-    }, []);
-
-    useEffect(() => {
-        window.addEventListener('message', handlePdfMessage);
-        return () => {
-            window.removeEventListener('message', handlePdfMessage);
-        };
-    }, [handlePdfMessage]);
 
     const renderFileContent = () => {
         if (!fileType) {
             return <div className="loading-indicator">Loading file...</div>;
         }
+        
+        // Show loading indicator for unprocessed files
+        if (!file.processed) {
+            return <div className="processing-indicator">File is being processed. Key concepts will appear when ready.</div>;
+        }
 
-        if (fileType === 'youtube') { // This condition relies on getFileType correctly setting it
-            // Extract YouTube video ID from URL
+        if (fileType === 'youtube') { 
             let videoId = '';
-            const url = file.publicUrl || ''; // Use file.publicUrl, fallback to file.name if needed
+            const url = file.publicUrl || ''; 
             const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?\&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/);
             if (match && match[1]) {
                 videoId = match[1];
@@ -324,9 +219,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return (
                 <div className="youtube-container file-content-area">
                     <iframe
-                        className="youtube-iframe" // Added class
+                        className="youtube-iframe" 
                         width="100%"
-                        // height="400" // Removed inline height
                         src={`https://www.youtube.com/embed/${videoId}`}
                         title="YouTube video player"
                         frameBorder="0"
@@ -374,145 +268,150 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
     };
 
-    const handleExplainSelection = useCallback(async () => {
-        // Ensure user and selectionText exist before trying to get token
-        if (!selectionText || !file || !user) {
-            console.error('User, file, or selection text missing.');
-            return;
+    // Enhanced SourceLink component for better UI and clearer navigation
+    const SourceLink = ({ concept, onNavigate }: { concept: KeyConcept, onNavigate: (concept: KeyConcept) => void }) => {
+        const hasPageNumber = concept.source_page_number !== null && concept.source_page_number !== undefined;
+        const hasVideoTimestamp = concept.source_video_timestamp_start_seconds !== null && concept.source_video_timestamp_start_seconds !== undefined;
+        
+        if (!hasPageNumber && !hasVideoTimestamp) {
+            return <small>No source location available</small>;
         }
-        console.log('Explain clicked for text:', selectionText);
-        try {
-            // Get the ID token asynchronously
-            const idToken = await user.getIdToken();
-            if (!idToken) {
-                throw new Error('Failed to get ID token.');
+        
+        return (
+            <div className="source-link-container">
+                <small>Found in: </small>
+                {hasPageNumber && (
+                    <button 
+                        onClick={() => onNavigate(concept)} 
+                        className="source-link pdf-source"
+                    >
+                        <span className="source-icon">📄</span>
+                        Page {concept.source_page_number}
+                    </button>
+                )}
+                
+                {hasVideoTimestamp && concept.source_video_timestamp_start_seconds !== null && (
+                    <button 
+                        onClick={() => onNavigate(concept)} 
+                        className="source-link video-source"
+                    >
+                        <span className="source-icon">🎬</span>
+                        {formatVideoTimestamp(concept.source_video_timestamp_start_seconds)}
+                        {concept.source_video_timestamp_end_seconds !== null && 
+                            ` - ${formatVideoTimestamp(concept.source_video_timestamp_end_seconds)}`}
+                    </button>
+                )}
+            </div>
+        );
+    };
+
+    const renderKeyConcepts = () => {
+        if (isLoadingKeyConcepts) {
+            return <div className="loading-indicator">Loading key concepts...</div>;
+        }
+
+        if (error) {
+            return <div className="error-message">{error}</div>;
+        }
+
+        if (!file.processed) {
+            return <div className="processing-message">
+                <p>This file is still being processed.</p>
+                <p>Key concepts will appear here once processing is complete.</p>
+                <div className="processing-spinner"></div>
+            </div>;
+        }
+
+        if (!keyConcepts || keyConcepts.length === 0) {
+            // Add more specific messaging for YouTube videos
+            if (fileType === 'youtube') {
+                return (
+                    <div className="no-key-concepts">
+                        <p>No key concepts available for this YouTube video.</p>
+                        <p>This may be due to one of the following reasons:</p>
+                        <ul>
+                            <li>The video transcript could not be properly extracted</li>
+                            <li>The video content doesn't contain enough information for key concept generation</li>
+                            <li>There was an error during key concept processing</li>
+                        </ul>
+                        <p><small>Check the browser console for detailed logs</small></p>
+                    </div>
+                );
             }
-
-            const response = await fetch(`/api/v1/files/${file.id}/explain`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`,
-                },
-                body: JSON.stringify({
-                    selection_type: 'text',
-                    page: currentPage,
-                    video_start: null,
-                    video_end: null,
-                }),
-            });
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const data = await response.json();
-            console.log('Explanation received:', data);
-            alert(`Explanation: ${data.explanation_text || data.explanation}`); // Placeholder display
-        } catch (error) {
-            console.error('Error explaining selection:', error);
-            alert('Failed to get explanation.');
+            return <div className="no-key-concepts">No key concepts available for this file.</div>;
         }
-    }, [selectionText, file, user, currentPage]);
 
-    const handleCloseToolbox = useCallback(() => {
-        setSelectionToolboxPosition(null); // Hide toolbox
-        setSelectionText(''); // Clear selected text state
-    }, []);
+        // Apply sorting based on user selection
+        const sortedConcepts = sortKeyConcepts(keyConcepts);
 
-    useEffect(() => {
-        const handleMouseUp = (event: MouseEvent) => {
-            const selection = window.getSelection();
-            const selectedText = selection?.toString().trim();
-
-            // Check if selection exists and has text before proceeding
-            if (selectedText && selection && pdfViewerRef.current?.contains(event.target as Node)) { 
-                const range = selection.getRangeAt(0); 
-                const rect = range.getBoundingClientRect();
-                const containerRect = pdfViewerRef.current.getBoundingClientRect();
-                const top = rect.bottom - containerRect.top + window.scrollY + 5;
-                const left = rect.left - containerRect.left + window.scrollX + rect.width / 2;
-
-                setSelectionText(selectedText);
-                setSelectionToolboxPosition({ top, left });
-            } else {
-                if (!(event.target as Element)?.closest('.selection-toolbox')) {
-                    handleCloseToolbox();
-                }
-            }
-        };
-
-        const iframeElement = pdfViewerRef.current;
-        if (fileType === 'pdf' && iframeElement) {
-            const timerId = setTimeout(() => { document.addEventListener('mouseup', handleMouseUp); }, 100);
-            return () => {
-                clearTimeout(timerId);
-                document.removeEventListener('mouseup', handleMouseUp);
-            };
-        }
-        // Ensure listener is removed if conditions aren't met or component unmounts
-        return () => { document.removeEventListener('mouseup', handleMouseUp); };
-    }, [fileType, handleCloseToolbox]);
+        return (
+            <div className="key-concepts-container">
+                <div className="key-concepts-header">
+                    <h3>Key Concepts</h3>
+                    <div className="key-concepts-controls">
+                        <select onChange={handleSortChange} value={sortOrder}>
+                            <option value="default">Default Order</option>
+                            <option value="alphabetical">Alphabetical</option>
+                            <option value="chronological">Source Order</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div className="key-concepts-list">
+                    {sortedConcepts.map((concept) => (
+                        <div 
+                            key={concept.id} 
+                            className={`key-concept-card ${highlightedConceptId === concept.id ? 'concept-highlight' : ''}`}
+                        >
+                            <div 
+                                className="concept-header"
+                                onClick={() => expandConcept(concept.id)}
+                            >
+                                <h4>{concept.concept_title || 'Untitled Concept'}</h4>
+                                <span className="expand-icon">
+                                    {expandedConcepts.includes(concept.id) ? "−" : "+"}
+                                </span>
+                            </div>
+                            
+                            {expandedConcepts.includes(concept.id) && (
+                                <div className="concept-content">
+                                    <p>{concept.concept_explanation}</p>
+                                    <SourceLink concept={concept} onNavigate={handleKeyConceptSourceClick} />
+                                    <small>
+                                        <em>Added: {new Date(concept.created_at).toLocaleString()}</em>
+                                    </small>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
             <div className="file-viewer-content">
-                <div className="file-viewer-main-content">
-                    <div className="viewer-controls">
-                        <button
-                            onClick={() => {
-                                if (!showExplainPanel) {
-                                    setShowExplainPanel(true);
-                                    handleExplainClick();
-                                } else {
-                                    setShowExplainPanel(false);
-                                }
-                            }}
-                            className={`toolbar-button explain-button ${showExplainPanel ? 'active' : ''}`}
-                            title={showExplainPanel ? "Hide Explanations / Explain Again" : "Show Explanations / Explain Current View"}
-                            disabled={isExplaining || isLoadingHistory}
-                            aria-label={showExplainPanel ? "Hide Explanations / Explain Again" : "Show Explanations / Explain Current View"}
-                        >
-                            {isExplaining ? '⏳' : '✨'} {/* Use emojis: Sparkles for Explain, Hourglass for Loading */}
-                        </button>
-                        <button
-                            onClick={onClose}
-                            className="toolbar-button close-button"
-                            title="Close Viewer"
-                            aria-label="Close file viewer"
-                        >
-                            ❌ {/* Use emoji: Cross Mark for Close */}
-                        </button>
+                <div className="file-viewer-main-layout">
+                    <div className="document-view-container">
+                        {renderFileContent()} 
                     </div>
-
-                    <div className="document-view">
-                        {renderFileContent()}
+                    <div className="key-concepts-panel">
+                        {renderKeyConcepts()}
                     </div>
-
-                    {showExplainPanel && (
-                        <div className="explanation-panel">
-                            <h3>Explanation History</h3>
-                            {isLoadingHistory && <p>Loading history...</p>}
-                            {error && <p className="error-message">{error}</p>}
-                            {isExplaining && <p>Generating new explanation...</p>}
-                            <div className="explanation-list">
-                                {explanationHistory.length > 0 ? (
-                                    explanationHistory.map((exp) => (
-                                        <div key={exp.id} className="explanation-item">
-                                            <p><strong>Context:</strong> {exp.context_info || (exp.page ? `Page ${exp.page}` : (exp.video_start !== null ? `Time ${exp.video_start?.toFixed(1)}s` : 'General'))}</p>
-                                            <p>{exp.explanation_text}</p>
-                                            <small>{new Date(exp.created_at).toLocaleString()}</small>
-                                        </div>
-                                    ))
-                                ) : (
-                                    !isLoadingHistory && !isExplaining && <p>No explanations yet for this file.</p>
-                                )}
-                            </div>
-                        </div>
-                    )}
+                </div>
+                <div className="viewer-controls-bottom">
+                    <button
+                        onClick={onClose}
+                        className="toolbar-button close-button-bottom"
+                        title="Close Viewer"
+                        aria-label="Close file viewer"
+                    >
+                        Close Viewer
+                    </button>
                 </div>
             </div>
-            <SelectionToolbox 
-                position={selectionToolboxPosition} 
-                onExplain={handleExplainSelection} 
-                onClose={handleCloseToolbox} 
-            />
+            {/* SelectionToolbox removed as its primary function (explain selection) is gone */}
         </div>
     );
 }

@@ -4,9 +4,13 @@ import tempfile
 from contextlib import contextmanager
 from text_extractor import extract_data
 from faster_whisper import WhisperModel
+import yt_dlp
+import os
+import tempfile
+import asyncio # Ensure asyncio is imported
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from docsynth_store import DocSynthStore
-from llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT, generate_summary_dspy
+from llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
 from syntext_agent import SyntextAgent
 import stripe
 from websocket_manager import websocket_manager
@@ -19,11 +23,35 @@ from typing import Optional
 load_dotenv()
 
 # Load Whisper model once at startup
-whisper_model = WhisperModel("medium", device="cpu", compute_type="int8", download_root="/app/models")
+whisper_model = None # Initialize as None, will be loaded by load_whisper_model
+
+def load_whisper_model_if_needed():
+    global whisper_model
+    if whisper_model is None:
+        logger.info("Loading faster-whisper model...")
+        # Consider making model size/params configurable if needed later
+        whisper_model = WhisperModel("medium", device="cpu", compute_type="int8", download_root="/app/models")
+        logger.info("Faster-whisper model loaded.")
+    return whisper_model
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+LANGUAGE_CODE_MAP = {
+    "english": "en",
+    "spanish": "es",
+    "french": "fr",
+    "german": "de",
+    "portuguese": "pt",
+    "italian": "it",
+    "dutch": "nl",
+    "russian": "ru",
+    "japanese": "ja",
+    "korean": "ko",
+    "chinese": "zh",
+    # Add more as needed. The youtube_transcript_api might also accept full names.
+}
 
 # Initialize Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET')
@@ -57,38 +85,102 @@ def load_whisper_model():
 
 
 
-async def transcribe_audio_chunked(file_path: str, lang: str) -> list:
-    """Transcribes an audio file and ensures garbage collection."""
+async def transcribe_audio_chunked(file_path: str, language: str = "en", chunk_duration_ms: int = 30000, overlap_ms: int = 5000) -> tuple[list, any]:
+    model = load_whisper_model_if_needed() # Ensure model is loaded
+    transcribe_params = {
+        'language': language if language else None, # None for auto-detect, or specify lang code
+        'beam_size': 5,
+        'vad_filter': True,
+        'vad_parameters': dict(min_silence_duration_ms=500)
+    }
+    logger.info(f"Transcribing audio file {file_path} with params: {transcribe_params}")
     try:
-        transcribe_params = {"beam_size": 5}
-        if lang == 'en':
-            transcribe_params["task"] = "translate"
-
-        segments, info = whisper_model.transcribe(file_path, **transcribe_params)
-        logger.info(f"Detected language '{info.language}' with probability {info.language_probability}")
-
-        transcribed_data = [
-            {
-                "start_time": segment.start,
-                "end_time": segment.end,
-                "content": segment.text,
-                "chunks": chunk_text(segment.text),
-            }
-            for segment in segments
-        ]
-
-        # Force garbage collection
-        gc.collect()
-
-        return transcribed_data
-
+        # Run the blocking transcribe call in a separate thread
+        segments_generator, info = await asyncio.to_thread(
+            model.transcribe, file_path, **transcribe_params
+        )
+        # Convert generator to list of segments
+        processed_segments = []
+        for segment in segments_generator:
+            processed_segments.append({
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text
+            })
+        logger.info(f"Transcription successful for {file_path}. Detected language: {info.language}, Confidence: {info.language_probability}")
+        return processed_segments, info
     except Exception as e:
-        logger.exception("Error in transcription")
-        raise HTTPException(status_code=500, detail="Transcription failed")
+        logger.error(f"Error during transcription of {file_path}: {e}", exc_info=True)
+        return [], None
 
-async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, explanation_interval_seconds: Optional[int] = None, language: str = "English", comprehension_level: str = "Beginner"):
-    """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate explanations, and update database."""
-    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Interval: {explanation_interval_seconds}, Lang: {language}, Level: {comprehension_level})")
+def download_youtube_audio_segment(video_id: str, language_code_for_whisper: Optional[str] = None) -> Optional[str]:
+    """Downloads audio from a YouTube video, trying to get an audio track that matches the language if possible."""
+    output_dir = tempfile.mkdtemp()
+    output_template = os.path.join(output_dir, '%(id)s.%(ext)s')
+    
+    ydl_opts = {
+        'format': 'bestaudio/best', # Prioritize best audio quality
+        'outtmpl': output_template,
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True, # Sometimes helps with SSL issues
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3', # Or 'wav', 'm4a'
+            'preferredquality': '192', # Standard quality
+        }],
+    }
+
+    # If a language code is provided, try to get audio for that language (if available as separate track)
+    # This is more relevant for multi-language videos, often not the case.
+    # if language_code_for_whisper:
+    #     ydl_opts['format'] = f'bestaudio[language={language_code_for_whisper}]/bestaudio/best'
+
+    logger.info(f"Attempting to download audio for YouTube video ID: {video_id} with options: {ydl_opts}")
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=True)
+            downloaded_file = ydl.prepare_filename(info_dict)
+            # yt-dlp might add .webm or other extension before ffmpeg converts it.
+            # The actual output file will be what ffmpeg creates (e.g., .mp3)
+            base, _ = os.path.splitext(downloaded_file)
+            expected_mp3_file = base + '.mp3'
+            if os.path.exists(expected_mp3_file):
+                logger.info(f"Audio successfully downloaded and converted to: {expected_mp3_file}")
+                return expected_mp3_file
+            else:
+                # Fallback check if the original downloaded file (before potential conversion) exists
+                # This might happen if ffmpeg postprocessor is not found or fails silently
+                if os.path.exists(downloaded_file):
+                    logger.warning(f"FFmpeg postprocessing to MP3 might have failed. Using original download: {downloaded_file}")
+                    return downloaded_file
+                logger.error(f"Audio download for {video_id} seemed to complete, but expected file {expected_mp3_file} not found.")
+                return None
+    except yt_dlp.utils.DownloadError as de:
+        logger.error(f"yt-dlp DownloadError for video ID {video_id}: {de}")
+        return None
+    except Exception as e:
+        logger.error(f"Error downloading YouTube audio for video ID {video_id}: {e}", exc_info=True)
+        return None
+
+def adapt_whisper_segments_to_transcript_data(whisper_segments: list) -> list:
+    """Converts Whisper segments to the format expected by downstream processing."""
+    transcript_data = []
+    for segment in whisper_segments:
+        start_time = float(segment['start'])
+        end_time = float(segment['end'])
+        duration = end_time - start_time
+        transcript_data.append({
+            'start': start_time,
+            'duration': duration,
+            'text': segment['text']
+            # 'end_time' is not directly in this structure but can be derived
+        })
+    return transcript_data
+
+async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, language: str = "English", comprehension_level: str = "Beginner"):
+    """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate key concepts, and update database."""
+    logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
     # --- YOUTUBE LINK HANDLING ---
     if is_youtube or (filename.startswith('http') and ('youtube.com' in filename or 'youtu.be' in filename)):
         logger.info(f"Processing YouTube link: {filename}")
@@ -100,16 +192,84 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             video_id = yt_match.group(1) if yt_match else None
             if not video_id:
                 logger.error(f"Could not extract video ID from YouTube URL: {filename}")
+            target_lang_code = LANGUAGE_CODE_MAP.get(language.lower(), language.lower()) # Use mapped code or original if not in map (e.g. 'en')
+            if not target_lang_code: # Handle empty language string if it occurs
+                target_lang_code = 'en'
+
+            transcript_data = None
             try:
                 transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                transcript = transcript_list.find_transcript(['en'])
-                transcript_data = transcript.fetch()
-            except (TranscriptsDisabled, NoTranscriptFound):
-                logger.warning(f"No transcript available for YouTube video: {filename}")
-                return
-            except Exception as e:
-                logger.error(f"Error fetching transcript for YouTube video: {filename}: {e}")
-                return
+
+                # Attempt 1: Requested language
+                try:
+                    logger.info(f"Attempting to fetch transcript in requested language: {language} (code: {target_lang_code}) for {filename}")
+                    transcript = transcript_list.find_transcript([target_lang_code])
+                    transcript_data = transcript.fetch()
+                    logger.info(f"Successfully fetched transcript in {language} ({target_lang_code})")
+                except NoTranscriptFound:
+                    logger.warning(f"Transcript for requested language '{language} ({target_lang_code})' not found for {filename}.")
+                    # If requested language was not English, try English as a fallback
+                    if target_lang_code != 'en':
+                        logger.info(f"Attempting fallback to English ('en') for {filename}")
+                        try:
+                            transcript = transcript_list.find_transcript(['en'])
+                            transcript_data = transcript.fetch()
+                            logger.info("Successfully fetched transcript in English ('en') as fallback.")
+                        except NoTranscriptFound:
+                            logger.warning(f"English ('en') transcript also not found as fallback for {filename}.")
+                            # transcript_data will remain None
+                    # If target_lang_code was 'en' and it failed, transcript_data remains None
+                
+                if not transcript_data:
+                    # This means either original NoTranscriptFound or 'en' fallback NoTranscriptFound
+                    raise NoTranscriptFound(video_id=video_id, language_codes=[target_lang_code, 'en'])
+
+            except (TranscriptsDisabled, NoTranscriptFound) as e:
+                logger.warning(f"No suitable transcript available (checked {target_lang_code} and possibly 'en') for YouTube video: {filename}. Details: {str(e)}")
+                # TODO: Consider updating file status in DB to 'no_transcript_available' or similar
+                return # Exit processing for this file
+            
+            except Exception as e: # Catches other errors like the "no element found" XML parsing error
+                logger.error(f"Initial YouTube API transcript fetch failed for {filename}. Error: {e}", exc_info=True)
+                logger.info(f"Attempting fallback to local Whisper transcription for {filename} (video_id: {video_id})")
+                
+                temp_audio_file_path = None
+                try:
+                    temp_audio_file_path = download_youtube_audio_segment(video_id, language_code_for_whisper=target_lang_code)
+                    if temp_audio_file_path:
+                        logger.info(f"Successfully downloaded audio to {temp_audio_file_path} for Whisper processing.")
+                        # Determine language for Whisper: use target_lang_code if specific, else None for auto-detect
+                        whisper_lang_code = target_lang_code if target_lang_code and target_lang_code != 'en' else None # Prefer specific lang unless it was default 'en'
+                        raw_whisper_segments, _ = await transcribe_audio_chunked(temp_audio_file_path, language=whisper_lang_code)
+                        if raw_whisper_segments:
+                            transcript_data = adapt_whisper_segments_to_transcript_data(raw_whisper_segments)
+                            logger.info(f"Successfully transcribed YouTube audio locally using Whisper for {filename}.")
+                        else:
+                            logger.error(f"Whisper transcription returned no segments for {filename}.")
+                            return # Exit if Whisper also fails
+                    else:
+                        logger.error(f"Failed to download audio for Whisper fallback for {filename}.")
+                        return # Exit if download fails
+                except Exception as whisper_fallback_e:
+                    logger.error(f"Error during Whisper fallback for YouTube video {filename}: {whisper_fallback_e}", exc_info=True)
+                    return # Exit if Whisper fallback encounters an error
+                finally:
+                    if temp_audio_file_path and os.path.exists(temp_audio_file_path):
+                        try:
+                            os.remove(temp_audio_file_path)
+                            logger.info(f"Cleaned up temporary audio file: {temp_audio_file_path}")
+                        except OSError as oe:
+                            logger.error(f"Error deleting temporary audio file {temp_audio_file_path}: {oe}")
+                
+                if not transcript_data:
+                    logger.error(f"Whisper fallback initiated but failed to produce transcript_data for {filename}.")
+                    # TODO: Consider updating file status in DB to 'transcript_fetch_error' or 'whisper_fallback_failed'
+                    return # Exit processing for this file
+
+            # Ensure transcript_data is not None before proceeding (should be handled by returns, but as a safeguard)
+            if not transcript_data:
+                 logger.error(f"Reached post-transcript fetching block but transcript_data is unexpectedly None for {filename}. This should not happen.")
+                 return
             # Process transcript into segments
             processed_video_data = []
             all_small_chunks = [] # List to hold tuples of (segment_index, chunk_text)
@@ -142,72 +302,89 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                         'embedding': embedding,
                         'content': small_chunk_text
                     })
-            # Explanations based on configurable intervals for YouTube videos
-            if transcript_data: # Ensure we have transcript data
-                # Determine interval: use parameter, else default to 30s. Ensure positive.
-                interval_to_use = 30 # Default
-                if explanation_interval_seconds is not None:
-                    if explanation_interval_seconds > 0:
-                        interval_to_use = explanation_interval_seconds
-                    else:
-                        logger.warning(f"Provided explanation_interval_seconds ({explanation_interval_seconds}) for file {file_id} is not positive. Defaulting to 30s.")
-                
-                logger.info(f"Using video explanation interval: {interval_to_use} seconds for file ID {file_id}")
+            # Save segments and their embedded chunks
+            logger.info(f"Storing segments and chunks for YouTube video: {filename} (File ID: {file_id})")
+            try:
+                store.update_file_with_chunks(
+                    user_id=int(user_id), 
+                    filename=filename, # DocSynthStore.update_file_with_chunks uses filename to find/create File record
+                    file_type="video", 
+                    extracted_data=processed_video_data
+                )
+                logger.info(f"Successfully stored segments and chunks for file ID: {file_id}")
+            except Exception as e_chunk_save:
+                logger.error(f"Error storing segments/chunks for YouTube video {filename} (File ID: {file_id}): {e_chunk_save}", exc_info=True)
+                # Decide if we should return or continue to key concept extraction
+                # For now, let's attempt key concepts even if chunk saving fails, as transcript is available
 
-                # Calculate total duration from the last transcript entry
-                total_video_duration = transcript_data[-1].start + transcript_data[-1].duration
-
-                for current_interval_start_sec in range(0, int(total_video_duration) + 1, interval_to_use):
-                    interval_start_time = float(current_interval_start_sec)
-                    interval_end_time = min(float(current_interval_start_sec + interval_to_use), total_video_duration)
-
-                    if interval_start_time >= total_video_duration: # Avoid empty last interval if total_duration is a multiple of interval_seconds
-                        break
-
-                    # Collect text within this specific interval
-                    text_for_interval = []
-                    for entry in transcript_data:
-                        entry_start_val = entry.start 
-                        entry_duration_val = entry.duration
-                        entry_text_val = entry.text
-                        
-                        entry_end_val = entry_start_val + entry_duration_val
-                        # Check for overlap: max(A_start, B_start) < min(A_end, B_end)
-                        if max(interval_start_time, entry_start_val) < min(interval_end_time, entry_end_val):
-                            text_for_interval.append(entry_text_val)
-                    
-                    full_interval_text = " ".join(text_for_interval).strip()
-
-                    if full_interval_text:
-                        try:
-                            logger.info(f"Generating explanation for video ID {file_id}, interval: {interval_start_time:.1f}s - {interval_end_time:.1f}s")
-                            explanation_text_content = generate_explanation_dspy(full_interval_text, language=language, comprehension_level=comprehension_level) # Renamed variable
-                            if explanation_text_content and not explanation_text_content.startswith("Error:"):
-                                store.save_explanation(
-                                    user_id=int(user_id),
-                                    file_id=int(file_id),       # Ensuring file_id is int
-                                    selection_type='video_range',
-                                    explanation=explanation_text_content,
-                                    video_start=interval_start_time,
-                                    video_end=interval_end_time
-                                )
-                        except Exception as e:
-                            logger.error(f"Error generating/saving explanation for YouTube video ID {file_id}, interval {interval_start_time:.1f}s-{interval_end_time:.1f}s: {e}")
-                    
-                    if interval_end_time >= total_video_duration:
-                        break # Processed the whole video
+            # --- Key Concept Extraction --- 
+            full_transcription_for_concepts = " ".join([
+                segment.get('content', '') 
+                for segment in processed_video_data 
+                if segment.get('content', '').strip()
+            ])
             
-            # Save chunks
-            store.update_file_with_chunks(user_id=int(user_id), filename=filename, extracted_data=processed_video_data, public_url=filename)
-            # Summary
-            full_transcription = " ".join([seg.get('content', '') for seg in processed_video_data if seg.get('content', '').strip()])
-            if full_transcription:
+            logger.info(f"YouTube transcript length for key concepts: {len(full_transcription_for_concepts)} characters for file ID: {file_id}")
+            
+            if not full_transcription_for_concepts or len(full_transcription_for_concepts.strip()) < 50:
+                logger.error(f"YouTube transcript too short or empty for key concept extraction. File ID: {file_id}")
+                # Still mark the file as processed to prevent infinite retry loop
+                store.update_file_processing_status(int(file_id), True) 
+                return
+
+            if full_transcription_for_concepts:
                 try:
-                    summary_text = generate_summary_dspy(full_transcription, language=language, comprehension_level=comprehension_level)
-                    if summary_text and not summary_text.startswith("Error:"):
-                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
-                except Exception as summary_err:
-                    logger.error(f"Error during summary generation/saving for YouTube video {filename}: {summary_err}")
+                    logger.info(f"Generating key concepts for YouTube video: {filename} (File ID: {file_id})")
+                    
+                    try:
+                        # Log sample of the transcript to help with debugging
+                        transcript_sample = full_transcription_for_concepts[:500] + "..." if len(full_transcription_for_concepts) > 500 else full_transcription_for_concepts
+                        logger.info(f"Transcript sample for key concept generation (File ID: {file_id}): {transcript_sample}")
+                        
+                        # The generate_key_concepts_dspy function is synchronous, not async
+                        # Remove await and call it directly
+                        logger.info(f"Using video-specific key concept extraction method")
+                        key_concepts_list = generate_key_concepts_dspy(
+                            document_text=full_transcription_for_concepts,
+                            language=language,
+                            comprehension_level=comprehension_level,
+                            is_video=True  # Flag to indicate this is a video for better timestamp handling
+                        )
+                        
+                        logger.info(f"LLM returned {len(key_concepts_list) if key_concepts_list else 0} key concepts for YouTube video ID: {file_id}")
+                    except Exception as llm_error:
+                        logger.error(f"Error in LLM key concept generation for YouTube video {filename} (File ID: {file_id}): {llm_error}", exc_info=True)
+                        # Mark as processed to prevent infinite retry loop
+                        store.update_file_processing_status(int(file_id), True)
+                        return
+
+                    if key_concepts_list and len(key_concepts_list) > 0:
+                        # Fetch the file entry using file_id to ensure we have the correct DB object
+                        # This is important because update_file_with_chunks might create the file if it didn't exist,
+                        # and we need its actual ID for foreign key relations.
+                        # However, process_file_data is initiated with a file_id that should already exist from routes/files.py.
+                        # So, using the passed file_id directly should be fine if it's guaranteed to be valid.
+                        db_file_id = int(file_id) # Assuming file_id passed to process_file_data is the correct DB ID
+
+                        logger.info(f"Storing {len(key_concepts_list)} key concepts for file ID: {db_file_id}")
+                        for concept_data in key_concepts_list:
+                            store.add_key_concept(
+                                file_id=db_file_id,
+                                concept_title=concept_data.get("concept_title"),
+                                concept_explanation=concept_data.get("concept_explanation"),
+                                source_page_number=concept_data.get("source_page_number"), # Will be None for videos
+                                source_video_timestamp_start_seconds=concept_data.get("source_video_timestamp_start_seconds"),
+                                source_video_timestamp_end_seconds=concept_data.get("source_video_timestamp_end_seconds")
+                                # display_order=concept_data.get("display_order") # Add if/when available
+                            )
+                        logger.info(f"Successfully stored key concepts for file ID: {db_file_id}")
+                    else:
+                        logger.info(f"No key concepts generated for file ID: {file_id}")
+                except Exception as kc_error:
+                    logger.error(f"Error during key concept generation or storage for {filename} (File ID: {file_id}): {kc_error}", exc_info=True)
+            else:
+                logger.info(f"Skipping key concept generation for {filename} (File ID: {file_id}) as full transcription is empty.")
+
             logger.info(f"Finished processing YouTube video: {filename}")
             return
         except Exception as e:
@@ -316,57 +493,40 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 processed_video_data.append(structured_item)
             logger.info("Finished structuring video data with embeddings.")
 
-            # --- Generate and save explanations for video segments --- 
-            logger.info(f"Generating explanations for {len(transcribed_data)} video segments...")
-            for i, segment in enumerate(transcribed_data): # Corrected: use enumerate if needed, or just loop
+            # --- Generate and Save Key Concepts for Video ---
+            full_transcript_text = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
+            if full_transcript_text:
+                logger.info(f"Attempting to generate key concepts for video: {filename}")
                 try:
-                    segment_content = segment.get('content', '')
-                    if not segment_content.strip():
-                        logger.debug(f"Skipping empty video segment {segment.get('start_time', 0):.1f}s for explanation.")
-                        continue
-
-                    # Call the new DSPy-based explanation function
-                    explanation_text = generate_explanation_dspy(segment_content, language=language, comprehension_level=comprehension_level)
-
-                    if explanation_text and not explanation_text.startswith("Error:"): # Check for valid explanation
-                        store.save_explanation(
-                            user_id=int(user_id),
-                            file_id=file_id,
-                            selection_type='video_range',
-                            explanation=explanation_text,
-                            video_start=segment['start_time'],
-                            video_end=segment['end_time']
-                        )
-                        logger.debug(f"Saved explanation for video segment {segment['start_time']:.1f}s - {segment['end_time']:.1f}s")
+                    key_concepts = generate_key_concepts_dspy(
+                        document_text=full_transcript_text
+                    )
+                    if key_concepts:
+                        for i_kc, concept in enumerate(key_concepts):
+                            store.add_key_concept(
+                                file_id=int(file_id),
+                                concept_title=concept.get("concept_title"),
+                                concept_explanation=concept.get("concept_explanation"),
+                                display_order=i_kc + 1,
+                                source_page_number=concept.get("source_page_number"), 
+                                source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
+                                source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                            )
+                        logger.info(f"Saved {len(key_concepts)} key concepts for video: {filename}")
                     else:
-                        logger.warning(f"LLM failed to generate explanation for video segment {segment['start_time']:.1f}s - {segment['end_time']:.1f}s")
-                except Exception as e:
-                    logger.error(f"Error generating/saving explanation for video segment {segment.get('start_time', 0):.1f}s: {e}", exc_info=True)
-            logger.info("Finished generating video segment explanations.")
+                        logger.warning(f"No key concepts generated or returned empty for video: {filename}.")
+                except Exception as kc_err:
+                    logger.error(f"Error during key concept generation/saving for video {filename}: {kc_err}", exc_info=True)
+            else:
+                logger.warning(f"No transcript content found to generate key concepts for video file: {filename}")
+            # --------------------------------------------------
 
             # Save the segmented video data with embeddings
             if processed_video_data:
                 store.update_file_with_chunks(user_id=int(user_id), filename=filename, file_type="video", extracted_data=processed_video_data)
-                logger.info("Processed and stored video segments with chunks.")
+                logger.info("Processed and stored video segments.")
             else:
                 logger.warning("No processed video data with chunks generated, skipping storage update.")
-
-            # --- Generate and Save Summary (Video/Audio) ---
-            logger.info(f"Attempting to generate summary for video/audio file: {filename}")
-            full_transcription = " ".join([seg.get('content', '') for seg in transcribed_data if seg.get('content', '').strip()])
-            if full_transcription:
-                try:
-                    summary_text = generate_summary_dspy(full_transcription, language=language, comprehension_level=comprehension_level)
-                    if summary_text and not summary_text.startswith("Error:"):
-                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
-                        logger.info(f"Successfully generated and saved summary for video/audio file: {filename}")
-                    else:
-                        logger.error(f"Failed to generate summary for video/audio {filename}: {summary_text}")
-                except Exception as summary_err:
-                    logger.error(f"Error during summary generation/saving for video/audio {filename}: {summary_err}", exc_info=True)
-            else:
-                logger.warning(f"No content found to summarize for video/audio file: {filename}")
-            # --------------------------------------------------
 
         elif ext == "pdf":
             logger.info("Extracting text from PDF...")
@@ -418,33 +578,33 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     logger.error(f"Error chunking/embedding page {page_item.get('page_num', 'N/A')}: {embed_error}", exc_info=True)
             logger.info("Finished chunking and generating PDF page embeddings.")
 
-            # --- Generate and save explanations for PDF pages --- 
-            logger.info(f"Generating explanations for {len(page_data)} PDF pages...")
-            for page_item in page_data: # Iterate original page_data for explanations
+            # --- Generate and Save Key Concepts for PDF ---
+            all_text_content = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
+            if all_text_content:
+                logger.info(f"Attempting to generate key concepts for PDF: {filename}")
                 try:
-                    page_content = page_item.get('content', '')
-                    page_num = page_item.get('page_num', 'N/A') # Get page number safely
-                    if not page_content.strip():
-                        logger.debug(f"Skipping empty PDF page {page_num} for explanation.")
-                        continue
-                        
-                    # Call the new DSPy-based explanation function
-                    explanation_text = generate_explanation_dspy(page_content, language=language, comprehension_level=comprehension_level)
-
-                    if explanation_text and not explanation_text.startswith("Error:"):
-                        store.save_explanation(
-                            user_id=int(user_id),
-                            file_id=file_id,
-                            selection_type='page', # Changed to 'page' for clarity
-                            explanation=explanation_text,
-                            page=page_item['page_num'],
-                        )
-                        logger.debug(f"Saved explanation for PDF page {page_item['page_num']}")
+                    key_concepts = generate_key_concepts_dspy(
+                        document_text=all_text_content
+                    )
+                    if key_concepts:
+                        for i_kc, concept in enumerate(key_concepts):
+                            store.add_key_concept(
+                                file_id=int(file_id),
+                                concept_title=concept.get("concept_title"),
+                                concept_explanation=concept.get("concept_explanation"),
+                                display_order=i_kc + 1,
+                                source_page_number=concept.get("source_page_number"),
+                                source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
+                                source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                            )
+                        logger.info(f"Saved {len(key_concepts)} key concepts for PDF: {filename}")
                     else:
-                        logger.warning(f"LLM failed to generate explanation for PDF page {page_item['page_num']}")
-                except Exception as e:
-                    logger.error(f"Error generating/saving explanation for PDF page {page_item['page_num']}: {e}", exc_info=True)
-            logger.info("Finished generating PDF page explanations.")
+                        logger.warning(f"No key concepts generated or returned empty for PDF: {filename}.")
+                except Exception as kc_err:
+                    logger.error(f"Error during key concept generation/saving for PDF {filename}: {kc_err}", exc_info=True)
+            else:
+                logger.warning(f"No content found to generate key concepts for PDF file: {filename}")
+            # -----------------------------------------
 
             # Save the segmented PDF data with embeddings
             if processed_page_data:
@@ -452,23 +612,6 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 logger.info("Processed and stored PDF segments.")
             else:
                 logger.warning("No processed PDF data with chunks generated, skipping storage update.")
-
-            # --- Generate and Save Summary (PDF) ---
-            logger.info(f"Attempting to generate summary for PDF file: {filename}")
-            full_pdf_text = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
-            if full_pdf_text:
-                try:
-                    summary_text = generate_summary_dspy(full_pdf_text, language=language, comprehension_level=comprehension_level)
-                    if summary_text and not summary_text.startswith("Error:"):
-                        store.update_file_summary(user_id=int(user_id), file_name=filename, summary=summary_text)
-                        logger.info(f"Successfully generated and saved summary for PDF file: {filename}")
-                    else:
-                        logger.error(f"Failed to generate summary for PDF {filename}: {summary_text}")
-                except Exception as summary_err:
-                    logger.error(f"Error during summary generation/saving for PDF {filename}: {summary_err}", exc_info=True)
-            else:
-                logger.warning(f"No content found to summarize for PDF file: {filename}")
-            # -----------------------------------------
 
         else:
             logger.warning(f"Unsupported file type: {ext}")
@@ -481,9 +624,8 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
             logger.info(f"Cleaned up temporary file: {file_path}")
-        # Check if store exists before closing
-        if store is not None:
-            store.close_session() # Ensure session is closed
+        # Check if store exists (though it should if used above)
+        # Sessions are managed internally by DocSynthStore methods, so no explicit close here.
         # Clear Whisper model from memory if loaded
         # global whisper_model
         # if whisper_model:

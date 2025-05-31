@@ -4,11 +4,14 @@ from dotenv import load_dotenv
 from mistralai.client import MistralClient
 from requests.exceptions import Timeout, RequestException
 import requests
-import tiktoken 
+import tiktoken
+import json
+import re
 from sentence_transformers import SentenceTransformer
 import time
 import google.generativeai as genai
-import dspy 
+import dspy
+from typing import List
 
 # Load environment variables
 load_dotenv()
@@ -52,13 +55,23 @@ delay = 1 # Keep delay if needed for rate limiting (less likely needed with Goog
 logging.basicConfig(level=logging.INFO)
 
 # --- DSPy Configuration --- >
+gemini_lm = None  # Initialize to None
 try:
-    gemini_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
+    # Instantiate dspy.Google with parameters it directly uses for the Google SDK.
+    # max_output_tokens is the correct parameter for the Google API.
+    gemini_lm = dspy.Google(
+        model=GEMINI_MODEL_NAME,
+        api_key=google_api_key,
+        max_output_tokens=2048  # This is a valid parameter for genai.GenerationConfig
+    )
+    
+    # Configure DSPy settings. dspy.settings.lm.kwargs will reflect gemini_lm.kwargs.
+    # It will NOT contain 'max_tokens' at this stage, which is intended.
     dspy.settings.configure(lm=gemini_lm)
-    logging.info(f"DSPy configured successfully with Google model: {GEMINI_MODEL_NAME}")
+    logging.info(f"DSPy configured successfully with Google model: {GEMINI_MODEL_NAME}. LM kwargs from dspy.Google init: {gemini_lm.kwargs}. dspy.settings.lm.kwargs: {dspy.settings.lm.kwargs}")
 except Exception as e:
-    logging.error(f"Failed to configure DSPy with Google: {e}. Explanations via DSPy may fail.")
-    # Depending on requirements, might want to raise an error or have a fallback
+    logging.error(f"Failed to configure DSPy with Google: {e}. Explanations via DSPy may fail.", exc_info=True)
+    gemini_lm = None # Explicitly ensure gemini_lm is None if configuration fails
 
 # --- DSPy Signature for Explanation --- >
 class GenerateExplanation(dspy.Signature):
@@ -73,6 +86,34 @@ class GenerateExplanation(dspy.Signature):
 
 # --- DSPy Predictor for Explanation --- >
 explain_predictor = dspy.Predict(GenerateExplanation)
+
+# --- DSPy Signature for Key Concept Extraction --- >
+class ExtractKeyConcepts(dspy.Signature):
+    """You are an expert academic tutor. Your task is to analyze the following {document_type} and extract the key concepts a student should learn from it.
+    {content_instruction}
+    
+    For each key concept, provide:
+    1. A concise title for the concept.
+    2. A clear and brief explanation of the concept, as if you were explaining it to a student for the first time.
+    3. The source location within the document where this concept is most prominently discussed.
+        - For PDF documents, provide the page number as an integer (e.g., "source_page_number": 15).
+        - For video transcripts, provide the start and end timestamps in seconds (e.g., "source_video_timestamp_start_seconds": 302, "source_video_timestamp_end_seconds": 361).
+        - If a precise page or timestamp is not applicable or cannot be determined, use null for that specific source field.
+
+    Please return your response as a JSON array, where each element is an object representing a key concept. Each object should have the following keys:
+    - "concept_title": (string) The title of the concept.
+    - "concept_explanation": (string) The explanation of the concept.
+    - "source_page_number": (integer or null) The page number for PDF sources.
+    - "source_video_timestamp_start_seconds": (integer or null) The start timestamp in seconds for video sources.
+    - "source_video_timestamp_end_seconds": (integer or null) The end timestamp in seconds for video sources.
+    """
+    document_content = dspy.InputField(desc="The full text content of the document (PDF text or video transcript).")
+    document_type = dspy.InputField(desc="Type of document (e.g., 'PDF document', 'video transcript')", default="document content")
+    content_instruction = dspy.InputField(desc="Additional instructions for processing this specific type of content", default="Extract the main concepts, definitions, and key ideas from this content.")
+    key_concepts_json = dspy.OutputField(desc="A JSON array of objects, where each object represents a key concept with its title, explanation, and source location (page number or video timestamps).")
+
+# --- DSPy Predictor for Key Concept Extraction --- >
+key_concept_extractor = dspy.Predict(ExtractKeyConcepts)
 
 # --- DSPy Signature for Summarization --- >
 class SummarizeSignature(dspy.Signature):
@@ -96,14 +137,88 @@ def generate_summary_dspy(text_to_summarize: str, language: str = "English", com
         # parts of the app use dspy differently.
         temp_lm = dspy.Google(model=GEMINI_MODEL_NAME, api_key=google_api_key)
         with dspy.context(lm=temp_lm):
-            summarizer = dspy.Predict(SummarizeSignature)
-            result = summarizer(document_text=text_to_summarize, language=language, comprehension_level=comprehension_level)
+            # Provide max_tokens via config to dspy.Predict for dsp.generate to use.
+            # Adjust max_tokens if a different limit is desired for summaries.
+            summary_module = dspy.Predict(SummarizeSignature, config=dict(max_tokens=2048))
+            response = summary_module(document_text=text_to_summarize, language=language, comprehension_level=comprehension_level)
             logging.info(f"Successfully generated summary.")
-            return result.summary
+            return response.summary
     except Exception as e:
         logging.error(f"Error generating summary with DSPy: {e}", exc_info=True)
         # Return an error message or None, depending on how caller handles it
         return "Error: Could not generate summary."
+
+def generate_key_concepts_dspy(document_text: str, language: str = "English", comprehension_level: str = "Beginner", is_video: bool = False) -> List[dict]:
+    """Generates key concepts with explanations and source links from document text using DSPy.
+    
+    Args:
+        document_text: The full text of the document.
+        language: Target language (currently used by prompt, could be dspy.InputField if needed).
+        comprehension_level: Target comprehension level (currently used by prompt).
+        
+    Returns:
+        A list of dictionaries, where each dictionary represents a key concept,
+        or an empty list if parsing fails or no concepts are found.
+    """
+    if not gemini_lm: # Check if DSPy LM is configured
+        logging.error("DSPy Google LM not configured. Cannot generate key concepts.")
+        return []
+
+    # Truncate document_text if it's too long for the model's context window
+    # This is a basic truncation; more sophisticated chunking might be needed for very large docs.
+    # DSPy's `dspy.Predict` should handle context limits, but good to be mindful.
+    # max_tokens_for_doc = MAX_TOKENS_CONTEXT - 1000 # Reserve some tokens for prompt and output
+    # if token_count(document_text) > max_tokens_for_doc:
+    #     # This is a placeholder for a more sophisticated truncation/chunking strategy
+    #     logging.warning(f"Document text is very long ({token_count(document_text)} tokens) and might be truncated.")
+        # document_text = truncate_text_to_tokens(document_text, max_tokens_for_doc) # Implement this if needed
+
+    try:
+        logging.info(f"Generating key concepts for {'video transcript' if is_video else 'document text'} (first 100 chars): {document_text[:100]}...")
+        
+        # Use different prompts for videos vs documents
+        if is_video:
+            # Customize the key concept extraction for videos to focus on timestamps
+            logging.info("Using video-specific key concept extraction method")
+            response = key_concept_extractor(
+                document_content=document_text,
+                document_type="video transcript",
+                content_instruction="Focus on the main ideas and concepts presented in this video transcript. Include specific timestamps where possible."
+            )
+        else:
+            # Standard document processing
+            response = key_concept_extractor(document_content=document_text)  # Use default prompt
+        
+        if response and hasattr(response, 'key_concepts_json') and response.key_concepts_json:
+            raw_json_output = response.key_concepts_json
+            logging.debug(f"DSPy generated key_concepts_json (raw): {raw_json_output[:200]}...")
+            
+            # Strip markdown fences if present
+            match = re.search(r"```(?:json)?\n(.*)\n```", raw_json_output, re.DOTALL)
+            if match:
+                json_to_parse = match.group(1).strip()
+                logging.debug(f"Extracted JSON content: {json_to_parse[:200]}...")
+            else:
+                json_to_parse = raw_json_output.strip() # Assume it's raw JSON if no fences
+
+            try:
+                parsed_concepts = json.loads(json_to_parse)
+                if isinstance(parsed_concepts, list):
+                    return parsed_concepts
+                else:
+                    logging.error(f"LLM returned JSON, but it's not a list: {type(parsed_concepts)}")
+                    return [] # Or attempt to wrap if it's a single dict meant to be a list
+            except json.JSONDecodeError as je:
+                logging.error(f"Failed to parse JSON from LLM response: {je}")
+                logging.error(f"LLM Raw Output: {response.key_concepts_json}")
+                return []
+        else:
+            logging.warning(f"DSPy predictor returned empty or invalid response for key concepts.")
+            return []
+
+    except Exception as e:
+        logging.error(f"Error generating key concepts with DSPy: {e}", exc_info=True)
+        return [] 
 
 # --- Token Counter (Using tiktoken as approximation) ---
 # Note: For precise Gemini token counts, use genai.GenerativeModel(MODEL_NAME).count_tokens(text)

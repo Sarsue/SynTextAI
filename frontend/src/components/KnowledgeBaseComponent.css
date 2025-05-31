@@ -142,7 +142,8 @@
 }
 
 .red-indicator,
-.green-indicator {
+.green-indicator,
+.yellow-indicator {
     width: 12px;
     height: 12px;
     display: inline-block;
@@ -155,6 +156,231 @@
 
 .green-indicator {
     background-color: green;
+}
+
+.yellow-indicator {
+    background-color: #f5ba42;
+}
+
+/* File item specific styles */
+.file-item {
+    border-radius: 6px;
+    margin-bottom: 8px;
+    border: 1px solid #e0e0e0;
+}
+
+.dark-mode .file-item {
+    border-color: #444;
+}
+
+.file-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 5px;
+    transition: background-color 0.2s;
+    position: relative;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    flex-grow: 1;
+    cursor: pointer;
+}
+
+.file-icon {
+    margin-right: 10px;
+    font-size: 16px;
+}
+
+.file-expand-icon {
+    margin-left: 10px;
+    font-size: 14px;
+    color: #777;
+    cursor: pointer;
+    padding: 5px 8px;
+    border-radius: 3px;
+}
+
+.file-expand-icon:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.dark-mode .file-expand-icon {
+    color: #aaa;
+}
+
+.file-status {
+    margin-left: 6px;
+    font-size: 12px;
+}
+
+.file-details {
+    padding: 10px 12px;
+    border-top: 1px solid #eee;
+    background-color: rgba(0, 0, 0, 0.03);
+    font-size: 13px;
+}
+
+.dark-mode .file-details {
+    border-top: 1px solid #333;
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.file-status-text {
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.file-time {
+    color: #777;
+    margin-bottom: 12px;
+    font-size: 12px;
+}
+
+.dark-mode .file-time {
+    color: #aaa;
+}
+
+.file-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.kb-action-button {
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.kb-action-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.view-button {
+    background-color: #4caf50;
+    color: white;
+}
+
+.view-button:hover:not(:disabled) {
+    background-color: #43a047;
+}
+
+.processing-status {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #777;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    text-align: center;
+    font-style: italic;
+}
+
+.dark-mode .processing-status {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #aaa;
+}
+
+.delete-button {
+    background-color: #f44336;
+    color: white;
+}
+
+.delete-button:hover:not(:disabled) {
+    background-color: #e53935;
+}
+
+.file-error-message {
+    margin-top: 8px;
+    color: #f44336;
+    font-size: 12px;
+    padding: 6px;
+    background-color: rgba(244, 67, 54, 0.1);
+    border-radius: 4px;
+}
+
+.kb-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.kb-header h4 {
+    margin: 0;
+}
+
+.kb-refresh-button {
+    background-color: #e0e0e0;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s ease;
+}
+
+.dark-mode .kb-refresh-button {
+    background-color: #333;
+    color: #fff;
+}
+
+.kb-refresh-button:hover {
+    background-color: #ccc;
+}
+
+.dark-mode .kb-refresh-button:hover {
+    background-color: #444;
+}
+
+.stuck-file {
+    background-color: #fff8e1; /* Light yellow background */
+    color: #ffa000; /* Amber color */
+}
+
+.dark-mode .stuck-file {
+    background-color: #332700;
+    color: #ffb300;
+}
+
+.link-stuck {
+    color: #ff9800; /* Orange for stuck files */
+}
+
+.empty-file-list {
+    padding: 15px;
+    text-align: center;
+    color: #777;
+    font-style: italic;
+}
+
+.dark-mode .empty-file-list {
+    color: #aaa;
+}
+
+.kb-help-text {
+    padding: 10px;
+    margin-top: 15px;
+    border-top: 1px solid #eee;
+    font-size: 12px;
+    color: #777;
+}
+
+.dark-mode .kb-help-text {
+    border-top: 1px solid #333;
+    color: #aaa;
+}
+
+.kb-help-text p {
+    margin: 4px 0;
 }
 
 /* Mobile view optimizations */

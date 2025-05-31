@@ -12,12 +12,12 @@ const Home: React.FC = () => {
             <header className="header">
                 <div className="logo-container">
                     <h1 className="app-title">SynText AI</h1>
-                    <p className="tagline">Your Intelligent Research Partner</p>
+                    <p className="tagline">Your AI Learning Companion</p>
                 </div>
                 <div className="auth-buttons">
                     <Link to="/login" className="signin-link">
                         <button className="primary-button">
-                            Start Researching
+                            Start Learning
                         </button>
                     </Link>
                 </div>
@@ -26,10 +26,10 @@ const Home: React.FC = () => {
             {/* Hero Section */}
             <main className="content-container">
                 <section className="hero-section">
-                    <h2 className="hero-title">AI-Powered Research Assistant</h2>
+                    <h2 className="hero-title">AI-Powered Learning Assistant</h2>
                     <p className="hero-description">
-                        Transform complex research into actionable insights. Perfect for consulting firms, 
-                        analysts, and knowledge workers who need quick, reliable intelligence.
+                        Transform complex educational content into easy-to-understand key concepts. Perfect for students,
+                        lifelong learners, and educators who want to accelerate understanding and retention.
                     </p>
                     <Link to="/login" className="signin-link">
                         <button className="cta-button">Start Free Trial</button>
@@ -38,27 +38,27 @@ const Home: React.FC = () => {
 
                 {/* Features Section */}
                 <section className="features-section">
-                    <h2 className="section-title">Powerful Research Tools</h2>
+                    <h2 className="section-title">Powerful Learning Tools</h2>
                     <div className="features-grid">
                         <div className="feature-item">
-                            <div className="feature-icon">📊</div>
-                            <h3>Intelligent Summarization</h3>
-                            <p>Automatically digest long reports and research papers into key insights and actionable points.</p>
+                            <div className="feature-icon">📄</div>
+                            <h3>PDF Document Analysis</h3>
+                            <p>Upload PDF textbooks, papers, and documents to extract key concepts and explanations with page references.</p>
                         </div>
                         <div className="feature-item">
-                            <div className="feature-icon">🔍</div>
-                            <h3>Research Synthesis</h3>
-                            <p>Gather and analyze information from multiple sources for comprehensive research reports.</p>
+                            <div className="feature-icon">📺</div>
+                            <h3>YouTube Video Learning</h3>
+                            <p>Process educational YouTube videos and get key concepts with precise timestamp links for review.</p>
                         </div>
                         <div className="feature-item">
-                            <div className="feature-icon">🎯</div>
-                            <h3>Competitive Intelligence</h3>
-                            <p>Stay ahead with AI-powered market research and competitor analysis.</p>
+                            <div className="feature-icon">🔑</div>
+                            <h3>Key Concept Extraction</h3>
+                            <p>Automatically identify and explain the most important concepts from any learning material.</p>
                         </div>
                         <div className="feature-item">
                             <div className="feature-icon">📚</div>
-                            <h3>Smart Explanations</h3>
-                            <p>Get clear, context-aware explanations of complex topics and industry terminology.</p>
+                            <h3>Interactive Learning</h3>
+                            <p>Chat with your content, ask questions, and get tailored explanations based on your comprehension level.</p>
                         </div>
                     </div>
                 </section>
@@ -68,30 +68,30 @@ const Home: React.FC = () => {
                     <h2 className="section-title">Perfect For</h2>
                     <div className="use-cases-grid">
                         <div className="use-case-item">
-                            <h3>Consulting Firms</h3>
-                            <p>Accelerate research and analysis for client projects</p>
+                            <h3>College Students</h3>
+                            <p>Master course materials faster with key concept extraction</p>
                         </div>
                         <div className="use-case-item">
-                            <h3>Business Analysts</h3>
-                            <p>Quick market insights and competitor research</p>
+                            <h3>Self-Learners</h3>
+                            <p>Process educational content and retain information better</p>
                         </div>
                         <div className="use-case-item">
-                            <h3>Knowledge Workers</h3>
-                            <p>Efficient information gathering and synthesis</p>
+                            <h3>Educators</h3>
+                            <p>Create focused learning materials from complex sources</p>
                         </div>
                         <div className="use-case-item">
-                            <h3>Students & Academics</h3>
-                            <p>Research assistance with proper citations</p>
+                            <h3>Lifelong Learners</h3>
+                            <p>Learn from videos and documents with structured guidance</p>
                         </div>
                     </div>
                 </section>
 
                 {/* Pricing Section */}
                 <section className="pricing-section">
-                    <h2 className="pricing-title">Professional Research Tools</h2>
+                    <h2 className="pricing-title">Accelerate Your Learning</h2>
                     <p className="pricing-description">
-                        Start with a 30-day free trial. Then just <strong>$15/month</strong> for unlimited research assistance.
-                        Perfect for professionals and teams.
+                        Start with a 30-day free trial. Then just <strong>$15/month</strong> for unlimited access to all learning tools.
+                        Perfect for students and continuous learners.
                     </p>
                     <Link to="/login" className="signin-link">
                         <button className="cta-button">Begin Free Trial</button>
@@ -102,7 +102,7 @@ const Home: React.FC = () => {
             {/* Footer */}
             <footer className="footer">
                 <p>&copy; 2025 OSAS INC. All rights reserved.</p>
-                <p className="footer-info">Empowering professionals with AI-driven research tools.</p>
+                <p className="footer-info">Empowering learners with AI-driven concept extraction and explanations.</p>
             </footer>
         </div>
     );
