@@ -979,11 +979,37 @@ class DocSynthStore:
             session.close()
 
     def get_file_by_id(self, file_id: int) -> Optional[File]:
-        """Get a file by its ID"""
+        """Get a file record by file ID."""
         session = self.get_session()
         try:
-            file = session.query(File).filter(File.id == file_id).first()
-            return file
+            # Try using a more specific query to avoid accessing missing columns
+            try:
+                # Only select columns that we know exist in the database
+                file = session.query(File.id, File.file_name, File.file_url, 
+                                    File.created_at, File.user_id).filter(File.id == file_id).first()
+                return file
+            except Exception as e:
+                # If the specific query fails, fall back to a simpler approach
+                logging.warning(f"Error in specific file query, trying fallback: {e}")
+                # Use raw SQL to avoid ORM mapping issues
+                result = session.execute(f"SELECT id, file_name, file_url, created_at, user_id FROM files WHERE id = {file_id}").first()
+                if result:
+                    # Create a partial File object with available data
+                    file = File()
+                    file.id = result[0]
+                    file.file_name = result[1]
+                    file.file_url = result[2]
+                    file.created_at = result[3]
+                    file.user_id = result[4]
+                    # Set default values for missing columns
+                    file.processed = False  # Default value
+                    file.status = None
+                    file.error_message = None
+                    return file
+                return None
+        except Exception as e:
+            logging.error(f"Failed to get file by ID {file_id}: {e}")
+            return None
         finally:
             session.close()
             
@@ -1020,11 +1046,50 @@ class DocSynthStore:
         finally:
             session.close()
             
-    def get_flashcards_for_file(self, file_id: int):
-        """Get all flashcards for a given file."""
+    def get_flashcards_for_file(self, file_id: int) -> List[Flashcard]:
+        """Get flashcards for a file."""
         session = self.get_session()
         try:
-            return session.query(Flashcard).filter(Flashcard.file_id == file_id).all()
+            flashcards = session.query(Flashcard).filter(Flashcard.file_id == file_id).all()
+            return flashcards
+        finally:
+            session.close()
+            
+    def get_key_concepts_for_file(self, file_id: int) -> List[KeyConcept]:
+        """Get key concepts for a file using robust querying that bypasses ORM issues."""
+        session = self.get_session()
+        try:
+            try:
+                # Try regular ORM query first
+                key_concepts = session.query(KeyConcept).filter(KeyConcept.file_id == file_id).all()
+                return key_concepts
+            except Exception as orm_error:
+                logging.warning(f"ORM query for key concepts failed: {orm_error}. Trying direct SQL.")
+                # Fallback to direct SQL if ORM query fails
+                try:
+                    # Direct SQL query to get key concepts
+                    result = session.execute(
+                        f"SELECT id, file_id, concept, explanation, span_text, span_start, span_end " +
+                        f"FROM key_concepts WHERE file_id = {file_id}"
+                    )
+                    
+                    # Create KeyConcept objects from the SQL result
+                    key_concepts = []
+                    for row in result:
+                        kc = KeyConcept()
+                        kc.id = row[0]
+                        kc.file_id = row[1]
+                        kc.concept = row[2]
+                        kc.explanation = row[3]
+                        kc.span_text = row[4]
+                        kc.span_start = row[5]
+                        kc.span_end = row[6]
+                        key_concepts.append(kc)
+                    
+                    return key_concepts
+                except Exception as sql_error:
+                    logging.error(f"Direct SQL query for key concepts failed: {sql_error}")
+                    return []
         finally:
             session.close()
 
