@@ -251,31 +251,92 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
         logging.error("DSPy Google LM not configured. Cannot generate key concepts.")
         return []
 
-    # Truncate document_text if it's too long for the model's context window
-    # This is a basic truncation; more sophisticated chunking might be needed for very large docs.
-    # DSPy's `dspy.Predict` should handle context limits, but good to be mindful.
-    # max_tokens_for_doc = MAX_TOKENS_CONTEXT - 1000 # Reserve some tokens for prompt and output
-    # if token_count(document_text) > max_tokens_for_doc:
-    #     # This is a placeholder for a more sophisticated truncation/chunking strategy
-    #     logging.warning(f"Document text is very long ({token_count(document_text)} tokens) and might be truncated.")
-        # document_text = truncate_text_to_tokens(document_text, max_tokens_for_doc) # Implement this if needed
-
-    try:
-        logging.info(f"Generating key concepts for {'video transcript' if is_video else 'document text'} (first 100 chars): {document_text[:100]}...")
+    # Handle long documents through chunking for more thorough extraction
+    max_chunk_size = 8000  # Characters per chunk (adjust based on token limits)
+    overlap = 2000  # Overlap between chunks to ensure concepts aren't split
+    
+    # If document is too long, process it in chunks
+    if len(document_text) > max_chunk_size:
+        logging.info(f"Document is long ({len(document_text)} chars), processing in chunks with {overlap} char overlap")
+        chunks = []
+        for i in range(0, len(document_text), max_chunk_size - overlap):
+            chunk = document_text[i:i + max_chunk_size]
+            chunks.append(chunk)
         
-        # Use different prompts for videos vs documents
+        # Process each chunk and collect concepts
+        all_concepts = []
+        for i, chunk in enumerate(chunks):
+            logging.info(f"Processing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+            chunk_concepts = _extract_key_concepts_from_chunk(chunk, language, comprehension_level, is_video, f"Chunk {i+1}/{len(chunks)}")
+            all_concepts.extend(chunk_concepts)
+        
+        # Deduplicate concepts - compare by concept/title similarity
+        deduplicated_concepts = _deduplicate_concepts(all_concepts)
+        
+        # Validate timestamps and page references
+        validated_concepts = _validate_references(deduplicated_concepts, document_text, is_video)
+        return validated_concepts
+    else:
+        # For shorter documents, process directly
+        concepts = _extract_key_concepts_from_chunk(document_text, language, comprehension_level, is_video)
+        return _validate_references(concepts, document_text, is_video)
+
+def _extract_key_concepts_from_chunk(document_chunk: str, language: str, comprehension_level: str, is_video: bool, chunk_info: str = "") -> List[dict]:
+    """Extract key concepts from a document chunk with enhanced accuracy."""
+    try:
+        logging.info(f"Extracting concepts from {chunk_info if chunk_info else 'document'} {'(video)' if is_video else '(text)'} (first 100 chars): {document_chunk[:100]}...")
+        
+        # Use different specialized prompts for videos vs documents
         if is_video:
-            # Customize the key concept extraction for videos to focus on timestamps
-            logging.info("Using video-specific key concept extraction method")
+            # Enhanced video-specific extraction with timestamp validation
             response = key_concept_extractor(
-                document_content=document_text,
+                document_content=document_chunk,
                 document_type="video transcript",
-                content_instruction="Focus on the main ideas and concepts presented in this video transcript. IMPORTANT: Each segment of the transcript starts with a timestamp in the format [MM:SS - MM:SS]. Extract these exact timestamps accurately for each concept. For each key concept, find the most relevant timestamp section(s) and include the exact start and end seconds in your output JSON."
+                content_instruction="""Extract the MOST IMPORTANT concepts from this video transcript segment. Be comprehensive and thorough.
+                
+                TIMESTAMP INSTRUCTIONS (CRITICAL):
+                1. Each transcript segment starts with a timestamp in format [MM:SS - MM:SS]
+                2. You MUST verify these timestamps exist in the transcript
+                3. Only use timestamps that actually appear in the transcript text
+                4. For each concept, include the exact start and end timestamps (in seconds) where this concept is discussed
+                5. If multiple timestamps discuss the same concept, include all relevant timestamp ranges
+                6. DO NOT FABRICATE TIMESTAMPS - only use ones present in the transcript
+                
+                FORMAT EACH CONCEPT AS:
+                {"concept": "Clear title of the concept", 
+                 "explanation": "Detailed explanation in simple terms", 
+                 "source_timestamp": "MM:SS - MM:SS", 
+                 "start_seconds": integer_start_seconds, 
+                 "end_seconds": integer_end_seconds}
+                
+                Be COMPREHENSIVE - extract ALL important concepts, even subtle ones.
+                """
             )
         else:
-            # Standard document processing
-            response = key_concept_extractor(document_content=document_text)  # Use default prompt
+            # Enhanced document processing with page number validation
+            response = key_concept_extractor(
+                document_content=document_chunk,
+                document_type="document",
+                content_instruction="""Extract ALL important concepts from this document thoroughly and completely.
+                
+                PAGE NUMBER INSTRUCTIONS (CRITICAL):
+                1. If page numbers exist in the document (format: "Page X"), reference them accurately
+                2. Only use page numbers that actually appear in the document text
+                3. For each concept, include the exact page number(s) where this concept is discussed
+                4. If a concept spans multiple pages, include all relevant page numbers
+                5. DO NOT FABRICATE PAGE NUMBERS - only use ones present in the document
+                
+                FORMAT EACH CONCEPT AS:
+                {"concept": "Clear title of the concept", 
+                 "explanation": "Detailed explanation in simple terms", 
+                 "source_page": "X-Y", 
+                 "pages": [X, Y, ...]} 
+                
+                Be COMPREHENSIVE - extract ALL important concepts, even subtle ones.
+                """
+            )
         
+        # Process the response
         if response and hasattr(response, 'key_concepts_json') and response.key_concepts_json:
             raw_json_output = response.key_concepts_json
             logging.debug(f"DSPy generated key_concepts_json (raw): {raw_json_output[:200]}...")
@@ -291,10 +352,17 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
             try:
                 parsed_concepts = json.loads(json_to_parse)
                 if isinstance(parsed_concepts, list):
+                    # Ensure each concept has required fields
+                    for concept in parsed_concepts:
+                        if "concept" not in concept or "explanation" not in concept:
+                            concept["concept"] = concept.get("concept", concept.get("title", "Unknown Concept"))
+                            concept["explanation"] = concept.get("explanation", "")
                     return parsed_concepts
+                elif isinstance(parsed_concepts, dict) and "concepts" in parsed_concepts:
+                    return parsed_concepts["concepts"]
                 else:
-                    logging.error(f"LLM returned JSON, but it's not a list: {type(parsed_concepts)}")
-                    return [] # Or attempt to wrap if it's a single dict meant to be a list
+                    logging.error(f"LLM returned JSON, but it's not a list or expected format: {type(parsed_concepts)}")
+                    return [] # Failed to extract properly formatted concepts
             except json.JSONDecodeError as je:
                 logging.error(f"Failed to parse JSON from LLM response: {je}")
                 logging.error(f"LLM Raw Output: {response.key_concepts_json}")
@@ -304,8 +372,125 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
             return []
 
     except Exception as e:
-        logging.error(f"Error generating key concepts with DSPy: {e}", exc_info=True)
-        return [] 
+        logging.error(f"Error extracting key concepts: {e}", exc_info=True)
+        return []
+
+def _deduplicate_concepts(concepts: List[dict]) -> List[dict]:
+    """Deduplicate concepts based on title/concept similarity."""
+    if not concepts:
+        return []
+    
+    # Use a simple approach of comparing lowercase concept titles
+    unique_concepts = []
+    seen_concepts = set()
+    
+    for concept in concepts:
+        concept_title = concept.get("concept", "").lower().strip()
+        # Skip if empty or too similar to existing concepts
+        if not concept_title or any(similar_enough(concept_title, seen) for seen in seen_concepts):
+            continue
+        
+        seen_concepts.add(concept_title)
+        unique_concepts.append(concept)
+    
+    return unique_concepts
+
+def similar_enough(str1: str, str2: str) -> bool:
+    """Check if two strings are similar enough to be considered duplicates.
+    Uses a simple approach based on Levenshtein distance ratio."""
+    # If either string contains the other entirely, consider them similar
+    if str1 in str2 or str2 in str1:
+        return True
+    
+    # Otherwise use edit distance ratio - adjust threshold as needed
+    if len(str1) > 5 and len(str2) > 5:
+        try:
+            from difflib import SequenceMatcher
+            similarity = SequenceMatcher(None, str1, str2).ratio()
+            return similarity > 0.8  # 80% similarity threshold
+        except:
+            # If difflib fails, fall back to simple comparison
+            return False
+    return False
+
+def _validate_references(concepts: List[dict], document_text: str, is_video: bool) -> List[dict]:
+    """Validate and correct timestamps or page references in the concepts."""
+    validated_concepts = []
+    
+    if is_video:
+        # Extract actual timestamps from document
+        all_timestamps = re.findall(r'\[(\d+:\d+)\s*-\s*(\d+:\d+)\]', document_text)
+        valid_timestamp_ranges = []  # List of (start_seconds, end_seconds) tuples
+        
+        for start_time, end_time in all_timestamps:
+            try:
+                start_mins, start_secs = map(int, start_time.split(':'))
+                end_mins, end_secs = map(int, end_time.split(':'))
+                
+                start_seconds = start_mins * 60 + start_secs
+                end_seconds = end_mins * 60 + end_secs
+                
+                valid_timestamp_ranges.append((start_seconds, end_seconds, f"{start_time} - {end_time}"))
+            except ValueError:
+                continue
+        
+        # Validate each concept's timestamps
+        for concept in concepts:
+            start_seconds = concept.get('start_seconds')
+            end_seconds = concept.get('end_seconds')
+            
+            # Check if timestamps are valid and exist in document
+            found_valid_timestamp = False
+            
+            for valid_start, valid_end, timestamp_str in valid_timestamp_ranges:
+                # If timestamps overlap with a valid range, use that range
+                if ((start_seconds is None) or 
+                    (valid_start <= start_seconds <= valid_end) or 
+                    (valid_start <= end_seconds <= valid_end) or
+                    (start_seconds <= valid_start and end_seconds >= valid_end)):
+                    
+                    # Update with validated timestamp info
+                    concept['start_seconds'] = valid_start
+                    concept['end_seconds'] = valid_end
+                    concept['source_timestamp'] = timestamp_str
+                    found_valid_timestamp = True
+                    break
+            
+            # If no valid timestamp found, use the first timestamp in document
+            if not found_valid_timestamp and valid_timestamp_ranges:
+                valid_start, valid_end, timestamp_str = valid_timestamp_ranges[0]
+                concept['start_seconds'] = valid_start
+                concept['end_seconds'] = valid_end
+                concept['source_timestamp'] = timestamp_str
+                logging.warning(f"Assigned default timestamp to concept: {concept['concept']}")
+            
+            validated_concepts.append(concept)
+    else:
+        # Extract actual page numbers from document
+        all_pages = re.findall(r'Page\s+(\d+)', document_text)
+        valid_pages = [int(page) for page in all_pages]
+        
+        # Validate each concept's page numbers
+        for concept in concepts:
+            pages = concept.get('pages', [])
+            source_page = concept.get('source_page', '')
+            
+            # Check if page numbers are valid and exist in document
+            valid_concept_pages = [p for p in pages if p in valid_pages]
+            
+            if not valid_concept_pages and valid_pages:
+                # If no valid pages found, use the first page in document
+                concept['pages'] = [valid_pages[0]]
+                concept['source_page'] = str(valid_pages[0])
+                logging.warning(f"Assigned default page to concept: {concept['concept']}")
+            elif valid_concept_pages:
+                # Update with only valid pages
+                concept['pages'] = valid_concept_pages
+                concept['source_page'] = '-'.join(map(str, valid_concept_pages))
+            
+            validated_concepts.append(concept)
+    
+    return validated_concepts 
 
 # --- Token Counter (Using tiktoken as approximation) ---
 # Note: For precise Gemini token counts, use genai.GenerativeModel(MODEL_NAME).count_tokens(text)
