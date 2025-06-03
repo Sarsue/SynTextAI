@@ -40,6 +40,7 @@ greenlet==3.0.3
 grpcio
 grpcio-status
 grpcio-tools
+google-generativeai
 faster-whisper==1.1.0
 flask
 firebase-admin

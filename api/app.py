@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +14,14 @@ load_dotenv()
 
 # Initialize FastAPI
 app = FastAPI(max_request_body_size= 2 * 1024 * 1024 * 1024)
+
+# Middleware to add COOP and COEP headers
+@app.middleware("http")
+async def add_coop_coep_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    # response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none" # or "require-corp"
+    return response
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,7 +31,7 @@ app.add_middleware(
 )
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Initialize Firebase and Redis
@@ -92,16 +100,24 @@ app.include_router(messages_router)
 app.include_router(subscriptions_router)
 app.include_router(users_router)
 
-# Serve static files (React app)
+# Define the build path for React app
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
-app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
-@app.get("/")
-async def serve_react_app():
+# Define a route to serve the index.html for SPA routing
+@app.get("/", response_class=HTMLResponse)
+@app.get("/app/{rest_of_path:path}", response_class=HTMLResponse)
+async def serve_spa_routes(rest_of_path: str = ""):
     index_path = os.path.join(build_path, "index.html")
     if not os.path.exists(index_path):
         raise HTTPException(status_code=404, detail="App not found. Build the App first.")
-    return FileResponse(index_path)
+    with open(index_path, "r") as f:
+        content = f.read()
+    return HTMLResponse(content=content)
+
+# Mount static files LAST - this ensures the above routes take precedence
+# Note: StaticFiles will only handle requests for files that exist
+app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
+
 
 @app.get("/health")
 async def health_check():

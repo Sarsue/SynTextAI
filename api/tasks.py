@@ -187,6 +187,9 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         try:
             from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
             import re
+            # Initialize variables that will be used in error handling
+            full_transcript_text = ""
+            transcription_successful = False
             # Extract video ID from URL
             yt_match = re.search(r'(?:v=|youtu.be/|embed/)([\w-]{11})', filename)
             video_id = yt_match.group(1) if yt_match else None
@@ -197,74 +200,90 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 target_lang_code = 'en'
 
             transcript_data = None
-            try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-                # Attempt 1: Requested language
-                try:
-                    logger.info(f"Attempting to fetch transcript in requested language: {language} (code: {target_lang_code}) for {filename}")
-                    transcript = transcript_list.find_transcript([target_lang_code])
-                    transcript_data = transcript.fetch()
-                    logger.info(f"Successfully fetched transcript in {language} ({target_lang_code})")
-                except NoTranscriptFound:
-                    logger.warning(f"Transcript for requested language '{language} ({target_lang_code})' not found for {filename}.")
-                    # If requested language was not English, try English as a fallback
-                    if target_lang_code != 'en':
-                        logger.info(f"Attempting fallback to English ('en') for {filename}")
-                        try:
-                            transcript = transcript_list.find_transcript(['en'])
-                            transcript_data = transcript.fetch()
-                            logger.info("Successfully fetched transcript in English ('en') as fallback.")
-                        except NoTranscriptFound:
-                            logger.warning(f"English ('en') transcript also not found as fallback for {filename}.")
-                            # transcript_data will remain None
-                    # If target_lang_code was 'en' and it failed, transcript_data remains None
-                
-                if not transcript_data:
-                    # This means either original NoTranscriptFound or 'en' fallback NoTranscriptFound
-                    raise NoTranscriptFound(video_id=video_id, language_codes=[target_lang_code, 'en'])
-
-            except (TranscriptsDisabled, NoTranscriptFound) as e:
-                logger.warning(f"No suitable transcript available (checked {target_lang_code} and possibly 'en') for YouTube video: {filename}. Details: {str(e)}")
-                # TODO: Consider updating file status in DB to 'no_transcript_available' or similar
-                return # Exit processing for this file
+            # First try YouTube API transcripts
+            transcript_data = None  # Initialize to None to avoid undefined reference
             
-            except Exception as e: # Catches other errors like the "no element found" XML parsing error
-                logger.error(f"Initial YouTube API transcript fetch failed for {filename}. Error: {e}", exc_info=True)
+            try:
+                # First attempt: direct fetch with requested language
+                logger.info(f"Attempting direct transcript fetch for {video_id} in language: {target_lang_code}")
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                transcript = transcript_list.find_transcript([target_lang_code])
+                transcript_data = transcript.fetch()
+                logger.info(f"Successfully fetched transcript in {language} ({target_lang_code})")
+            except Exception as direct_fetch_error:
+                logger.warning(f"Direct transcript fetch failed: {direct_fetch_error}")
+                
+                # Second attempt: try English if the requested language wasn't English
+                if target_lang_code != 'en':
+                    try:
+                        logger.info(f"Attempting fallback to English transcript for {filename}")
+                        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id) 
+                        transcript = transcript_list.find_transcript(['en'])
+                        transcript_data = transcript.fetch()
+                        logger.info("Successfully fetched transcript in English as fallback.")
+                    except Exception as english_fetch_error:
+                        logger.warning(f"English transcript fallback also failed: {english_fetch_error}")
+                        # Explicitly set transcript_data to None to ensure we know it failed
+                        transcript_data = None
+            
+            # If YouTube transcripts failed, try Whisper fallback
+            if not transcript_data:
                 logger.info(f"Attempting fallback to local Whisper transcription for {filename} (video_id: {video_id})")
                 
                 temp_audio_file_path = None
                 try:
+                    # Download YouTube audio
                     temp_audio_file_path = download_youtube_audio_segment(video_id, language_code_for_whisper=target_lang_code)
-                    if temp_audio_file_path:
-                        logger.info(f"Successfully downloaded audio to {temp_audio_file_path} for Whisper processing.")
-                        # Determine language for Whisper: use target_lang_code if specific, else None for auto-detect
-                        whisper_lang_code = target_lang_code if target_lang_code and target_lang_code != 'en' else None # Prefer specific lang unless it was default 'en'
-                        raw_whisper_segments, _ = await transcribe_audio_chunked(temp_audio_file_path, language=whisper_lang_code)
+                    if not temp_audio_file_path:
+                        logger.error(f"Failed to download audio for {filename}.")
+                        return  # Don't mark as processed so it can be retried
+                    
+                    logger.info(f"Successfully downloaded audio to {temp_audio_file_path} for Whisper processing.")
+                    
+                    # Determine language for Whisper: use target_lang_code if specific, else None for auto-detect
+                    whisper_lang_code = target_lang_code if target_lang_code and target_lang_code != 'en' else None
+                    
+                    # Add timeouts to prevent hanging indefinitely
+                    import asyncio
+                    try:
+                        raw_whisper_segments, _ = await asyncio.wait_for(
+                            transcribe_audio_chunked(temp_audio_file_path, language=whisper_lang_code),
+                            timeout=600  # 10 minute timeout
+                        )
+                        
                         if raw_whisper_segments:
                             transcript_data = adapt_whisper_segments_to_transcript_data(raw_whisper_segments)
-                            logger.info(f"Successfully transcribed YouTube audio locally using Whisper for {filename}.")
+                            logger.info(f"Successfully transcribed using Whisper with {len(raw_whisper_segments)} segments")
                         else:
                             logger.error(f"Whisper transcription returned no segments for {filename}.")
-                            return # Exit if Whisper also fails
-                    else:
-                        logger.error(f"Failed to download audio for Whisper fallback for {filename}.")
-                        return # Exit if download fails
-                except Exception as whisper_fallback_e:
-                    logger.error(f"Error during Whisper fallback for YouTube video {filename}: {whisper_fallback_e}", exc_info=True)
-                    return # Exit if Whisper fallback encounters an error
+                            return  # Don't mark as processed so it can be retried
+                            
+                    except asyncio.TimeoutError:
+                        logger.error(f"Whisper transcription timed out after 10 minutes for {filename}")
+                        return  # Don't mark as processed so it can be retried
+                        
+                    except Exception as whisper_error:
+                        logger.error(f"Error during Whisper transcription: {whisper_error}", exc_info=True)
+                        return  # Don't mark as processed so it can be retried
+                        
+                except Exception as whisper_fallback_error:
+                    logger.error(f"Error in Whisper fallback process: {whisper_fallback_error}", exc_info=True)
+                    return  # Don't mark as processed so it can be retried
+                    
                 finally:
+                    # Clean up temp files
                     if temp_audio_file_path and os.path.exists(temp_audio_file_path):
                         try:
                             os.remove(temp_audio_file_path)
                             logger.info(f"Cleaned up temporary audio file: {temp_audio_file_path}")
-                        except OSError as oe:
-                            logger.error(f"Error deleting temporary audio file {temp_audio_file_path}: {oe}")
-                
+                        except Exception as cleanup_error:
+                            logger.error(f"Error cleaning up temp file: {cleanup_error}")
+                            # Continue processing even if cleanup fails
+                            
                 if not transcript_data:
                     logger.error(f"Whisper fallback initiated but failed to produce transcript_data for {filename}.")
-                    # TODO: Consider updating file status in DB to 'transcript_fetch_error' or 'whisper_fallback_failed'
-                    return # Exit processing for this file
+                    return  # Don't mark as processed so it can be retried
 
             # Ensure transcript_data is not None before proceeding (should be handled by returns, but as a safeguard)
             if not transcript_data:
@@ -317,12 +336,26 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 # Decide if we should return or continue to key concept extraction
                 # For now, let's attempt key concepts even if chunk saving fails, as transcript is available
 
-            # --- Key Concept Extraction --- 
-            full_transcription_for_concepts = " ".join([
-                segment.get('content', '') 
-                for segment in processed_video_data 
-                if segment.get('content', '').strip()
-            ])
+            # --- Key Concept Extraction ---
+            # Format timestamps in the transcript to help LLM identify segments
+            def format_timestamp(seconds):
+                minutes, seconds = divmod(int(seconds), 60)
+                hours, minutes = divmod(minutes, 60)
+                if hours > 0:
+                    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                else:
+                    return f"{minutes:02d}:{seconds:02d}"
+            
+            # Add timestamps to each segment
+            full_transcription_for_concepts = ""
+            for segment in processed_video_data:
+                if segment.get('content', '').strip():
+                    start_time = segment.get('start_time', 0)
+                    end_time = segment.get('end_time', 0)
+                    timestamp_text = f"[{format_timestamp(start_time)} - {format_timestamp(end_time)}] "
+                    full_transcription_for_concepts += timestamp_text + segment.get('content', '') + "\n\n"
+            
+            logger.info(f"Prepared transcript with timestamps for LLM processing, first 500 chars: {full_transcription_for_concepts[:500]}...")
             
             logger.info(f"YouTube transcript length for key concepts: {len(full_transcription_for_concepts)} characters for file ID: {file_id}")
             
@@ -332,63 +365,190 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 store.update_file_processing_status(int(file_id), True) 
                 return
 
-            if full_transcription_for_concepts:
+            # Attempt to generate and store key concepts with robust error handling
+            try:
+                logger.info(f"Generating key concepts for YouTube video: {filename} (File ID: {file_id})")
+                
+                # Log sample of the transcript to help with debugging
+                transcript_sample = full_transcription_for_concepts[:500] + "..." if len(full_transcription_for_concepts) > 500 else full_transcription_for_concepts
+                logger.info(f"Transcript sample for key concept generation (File ID: {file_id}): {transcript_sample}")
+            except Exception as sample_error:
+                logger.error(f"Error preparing transcript sample: {sample_error}")
+                # Continue processing even if logging fails
+            
+            # Set a timeout for LLM generation to avoid indefinite hanging
+            import concurrent.futures
+            import threading
+            
+            key_concepts_list = None
+            
+            def generate_with_timeout():
                 try:
-                    logger.info(f"Generating key concepts for YouTube video: {filename} (File ID: {file_id})")
+                    logger.info(f"Starting LLM concept generation with timeout for file ID: {file_id}")
+                    result = generate_key_concepts_dspy(
+                        document_text=full_transcription_for_concepts,
+                        language=language,
+                        comprehension_level=comprehension_level,
+                        is_video=True  # Flag to indicate this is a video
+                    )
+                    return result
+                except Exception as e:
+                    logger.error(f"Error in LLM concept generation thread: {e}", exc_info=True)
+                    return None
+                
+                # Use a thread with timeout for LLM processing
+                try:
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(generate_with_timeout)
+                        try:
+                            # Set a reasonable timeout (5 minutes)
+                            key_concepts_list = future.result(timeout=300)
+                            if key_concepts_list:
+                                logger.info(f"LLM returned {len(key_concepts_list)} key concepts for video ID: {file_id}")
+                            else:
+                                logger.warning(f"LLM returned None or empty list for file ID: {file_id}")
+                                # Create a minimal set of default concepts to avoid total failure
+                                key_concepts_list = [
+                                    {"concept_title": "Main Topic", "concept_explanation": "The video discusses its main topic. Check the full video for details."}
+                                ]
+                        except concurrent.futures.TimeoutError:
+                            logger.error(f"LLM concept generation timed out after 5 minutes for file ID: {file_id}")
+                            # Create a minimal set of default concepts to provide some value
+                            key_concepts_list = [
+                                {"concept_title": "Video Content", "concept_explanation": "This concept could not be automatically extracted due to a timeout. Please view the video directly."}
+                            ]
+                except Exception as executor_error:
+                    logger.error(f"Error in thread executor: {executor_error}", exc_info=True)
+                    key_concepts_list = [
+                        {"concept_title": "Video Content", "concept_explanation": "Unable to analyze this video content due to a processing error."}
+                    ]
+                
+                # Proceed only if we have concepts
+                if key_concepts_list and len(key_concepts_list) > 0:
+                    # Use the file_id directly
+                    db_file_id = int(file_id)
                     
-                    try:
-                        # Log sample of the transcript to help with debugging
-                        transcript_sample = full_transcription_for_concepts[:500] + "..." if len(full_transcription_for_concepts) > 500 else full_transcription_for_concepts
-                        logger.info(f"Transcript sample for key concept generation (File ID: {file_id}): {transcript_sample}")
-                        
-                        # The generate_key_concepts_dspy function is synchronous, not async
-                        # Remove await and call it directly
-                        logger.info(f"Using video-specific key concept extraction method")
-                        key_concepts_list = generate_key_concepts_dspy(
-                            document_text=full_transcription_for_concepts,
-                            language=language,
-                            comprehension_level=comprehension_level,
-                            is_video=True  # Flag to indicate this is a video for better timestamp handling
-                        )
-                        
-                        logger.info(f"LLM returned {len(key_concepts_list) if key_concepts_list else 0} key concepts for YouTube video ID: {file_id}")
-                    except Exception as llm_error:
-                        logger.error(f"Error in LLM key concept generation for YouTube video {filename} (File ID: {file_id}): {llm_error}", exc_info=True)
-                        # Mark as processed to prevent infinite retry loop
-                        store.update_file_processing_status(int(file_id), True)
-                        return
-
-                    if key_concepts_list and len(key_concepts_list) > 0:
-                        # Fetch the file entry using file_id to ensure we have the correct DB object
-                        # This is important because update_file_with_chunks might create the file if it didn't exist,
-                        # and we need its actual ID for foreign key relations.
-                        # However, process_file_data is initiated with a file_id that should already exist from routes/files.py.
-                        # So, using the passed file_id directly should be fine if it's guaranteed to be valid.
-                        db_file_id = int(file_id) # Assuming file_id passed to process_file_data is the correct DB ID
-
-                        logger.info(f"Storing {len(key_concepts_list)} key concepts for file ID: {db_file_id}")
-                        for concept_data in key_concepts_list:
-                            store.add_key_concept(
+                    # The LLM should have extracted timestamps directly from the formatted transcript
+                    logger.info(f"Verifying timestamps in {len(key_concepts_list)} key concepts generated by LLM")
+                    
+                    # Log the timestamp information for verification
+                    for idx, concept in enumerate(key_concepts_list):
+                        start = concept.get('source_video_timestamp_start_seconds')
+                        end = concept.get('source_video_timestamp_end_seconds')
+                        if start is not None and end is not None:
+                            logger.info(f"Concept {idx+1}: '{concept.get('concept_title', '')[:30]}...' has timestamps {start}s - {end}s")
+                        else:
+                            logger.warning(f"Concept {idx+1}: '{concept.get('concept_title', '')[:30]}...' is missing timestamp information")
+                    
+                    # Store key concepts with robust error handling
+                    logger.info(f"Storing {len(key_concepts_list)} key concepts for file ID: {db_file_id}")
+                    key_concept_db_ids = []
+                    
+                    for idx, concept_data in enumerate(key_concepts_list):
+                        try:
+                            # Default values in case the LLM returns incomplete data
+                            concept_title = concept_data.get('concept_title', f"Concept {idx+1}")
+                            concept_explanation = concept_data.get('concept_explanation', "No explanation provided")
+                            
+                            # Extract timestamp information
+                            timestamp_start = concept_data.get('source_video_timestamp_start_seconds')
+                            timestamp_end = concept_data.get('source_video_timestamp_end_seconds')
+                            
+                            # Store the concept
+                            concept_id = store.add_key_concept(
                                 file_id=db_file_id,
-                                concept_title=concept_data.get("concept_title"),
-                                concept_explanation=concept_data.get("concept_explanation"),
-                                source_page_number=concept_data.get("source_page_number"), # Will be None for videos
-                                source_video_timestamp_start_seconds=concept_data.get("source_video_timestamp_start_seconds"),
-                                source_video_timestamp_end_seconds=concept_data.get("source_video_timestamp_end_seconds")
-                                # display_order=concept_data.get("display_order") # Add if/when available
+                                concept_title=concept_title,
+                                concept_explanation=concept_explanation,
+                                source_page_number=concept_data.get("source_page_number"),
+                                source_video_timestamp_start_seconds=timestamp_start,
+                                source_video_timestamp_end_seconds=timestamp_end
+                                # display_order=concept_data.get("display_order")
                             )
-                        logger.info(f"Successfully stored key concepts for file ID: {db_file_id}")
+                            
+                            # Track the concept ID for later use
+                            concept_data["id"] = concept_id
+                            key_concept_db_ids.append(concept_id)
+                            
+                            logger.info(f"Stored concept {idx+1}/{len(key_concepts_list)}: '{concept_title[:30]}...'")
+                        except Exception as concept_store_error:
+                            logger.error(f"Error storing concept {idx+1}/{len(key_concepts_list)}: {concept_store_error}", exc_info=True)
+                            # Continue to next concept rather than failing completely
+                            continue
+                    
+                    if key_concept_db_ids:
+                        logger.info(f"Successfully stored {len(key_concept_db_ids)} key concepts with IDs: {key_concept_db_ids}")
+                        
+                        # --- Flashcard & Quiz Generation ---
+                        try:
+                            from flashcard_quiz_utils import (
+                                generate_flashcard_from_key_concept,
+                                generate_mcq_from_key_concepts,
+                                generate_true_false_from_key_concepts
+                            )
+                            
+                            # Process flashcards and quizzes only if we have concepts
+                            for concept_data in key_concepts_list:
+                                try:
+                                    # Flashcard generation with error handling
+                                    flashcard = generate_flashcard_from_key_concept(concept_data)
+                                    store.add_flashcard(
+                                        file_id=db_file_id,
+                                        key_concept_id=concept_data["id"],
+                                        question=flashcard["question"],
+                                        answer=flashcard["answer"]
+                                    )
+                                    
+                                    # MCQ generation with error handling
+                                    mcq = generate_mcq_from_key_concepts(concept_data, key_concepts_list)
+                                    store.add_quiz_question(
+                                        file_id=db_file_id,
+                                        key_concept_id=concept_data["id"],
+                                        question=mcq["question"],
+                                        question_type="MCQ",
+                                        correct_answer=mcq["correct_answer"],
+                                        distractors=mcq["distractors"]
+                                    )
+                                    
+                                    # True/False generation with error handling
+                                    tf = generate_true_false_from_key_concepts(concept_data, key_concepts_list)
+                                    store.add_quiz_question(
+                                        file_id=db_file_id,
+                                        key_concept_id=concept_data["id"],
+                                        question=tf["question"],
+                                        question_type="TF",
+                                        correct_answer=tf["correct_answer"],
+                                        distractors=tf["distractors"]
+                                    )
+                                    
+                                    logger.info(f"Generated learning materials for concept: {concept_data.get('concept_title', '')[:30]}...")
+                                except Exception as learning_material_error:
+                                    logger.error(f"Error generating learning materials for concept {concept_data.get('concept_title', '')[:30]}...: {learning_material_error}", exc_info=True)
+                                    # Continue to next concept without failing the whole process
+                                    continue
+                                    
+                            logger.info(f"Completed flashcard and quiz generation for file ID: {db_file_id}")
+                        except Exception as materials_error:
+                            logger.error(f"Error in flashcard/quiz generation process: {materials_error}", exc_info=True)
+                            # Continue processing - the file is still processed, just without some learning materials
                     else:
                         logger.info(f"No key concepts generated for file ID: {file_id}")
                 except Exception as kc_error:
                     logger.error(f"Error during key concept generation or storage for {filename} (File ID: {file_id}): {kc_error}", exc_info=True)
+                    # Still mark as processed to prevent infinite retries
+                    store.update_file_processing_status(int(file_id), True, status="warning",
+                                                  error_message=f"Error during key concept generation: {str(kc_error)[:100]}")
             else:
                 logger.info(f"Skipping key concept generation for {filename} (File ID: {file_id}) as full transcription is empty.")
-
+                # Mark as processed since there's nothing to process
+                store.update_file_processing_status(int(file_id), True)
+            
+            # Mark processing as complete regardless of outcome
             logger.info(f"Finished processing YouTube video: {filename}")
             return
         except Exception as e:
-            logger.error(f"Error processing YouTube link {filename}: {e}")
+            # Catch-all exception handler for YouTube processing
+            logger.error(f"Error processing YouTube link {filename}: {e}", exc_info=True)
+            # Don't mark as processed so we can retry
             return
     # --- END YOUTUBE HANDLING ---
     file_path = None # Initialize file_path to None

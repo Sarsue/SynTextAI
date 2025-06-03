@@ -145,6 +145,88 @@ async def delete_file(
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+# Endpoint: Get all flashcards for a file
+@files_router.get("/{file_id}/flashcards", response_model=List[Dict])
+async def get_flashcards_for_file(
+    file_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+        file = store.get_file_by_id(file_id)
+        if not file or file.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+        flashcards = store.get_flashcards_for_file(file_id)
+        # Convert SQLAlchemy objects to dicts for frontend
+        flashcards_out = []
+        
+        for f in flashcards:
+            # Make sure none of the fields are None/null to avoid UI issues
+            flashcard_data = {
+                "id": f.id,
+                "file_id": f.file_id,
+                "key_concept_id": f.key_concept_id,
+                "question": f.question if f.question else "",
+                "answer": f.answer if f.answer else "",
+                "is_custom": f.is_custom if f.is_custom is not None else False
+            }
+            flashcards_out.append(flashcard_data)
+        return flashcards_out
+    except Exception as e:
+        logger.error(f"Error fetching flashcards for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Endpoint: Get all quiz questions for a file
+@files_router.get("/{file_id}/quizzes", response_model=List[Dict])
+async def get_quizzes_for_file(
+    file_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+        file = store.get_file_by_id(file_id)
+        if not file or file.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+        quizzes = store.get_quiz_questions_for_file(file_id)
+        quizzes_out = []
+        for q in quizzes:
+            # Ensure distractors is properly serialized JSON
+            if q.distractors is None:
+                distractors = []
+            elif isinstance(q.distractors, list):
+                distractors = q.distractors
+            else:
+                # Handle string or other unexpected formats
+                try:
+                    # If it's a string representation of JSON, parse it
+                    if isinstance(q.distractors, str):
+                        import json
+                        distractors = json.loads(q.distractors)
+                    else:
+                        # Default to empty list if we can't parse
+                        distractors = []
+                except Exception as e:
+                    logger.error(f"Error parsing distractors: {e}")
+                    distractors = []
+            
+            quizzes_out.append({
+                "id": q.id,
+                "file_id": q.file_id,
+                "key_concept_id": q.key_concept_id,
+                "question": q.question,
+                "question_type": q.question_type,
+                "correct_answer": q.correct_answer,
+                "distractors": distractors
+            })
+        return quizzes_out
+    except Exception as e:
+        logger.error(f"Error fetching quizzes for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Route to re-extract a file (retry processing)
 @files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
 async def reextract_file(

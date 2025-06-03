@@ -7,6 +7,7 @@ import requests
 import tiktoken
 import json
 import re
+import numpy as np
 from sentence_transformers import SentenceTransformer
 import time
 import google.generativeai as genai
@@ -148,6 +149,92 @@ def generate_summary_dspy(text_to_summarize: str, language: str = "English", com
         # Return an error message or None, depending on how caller handles it
         return "Error: Could not generate summary."
 
+def map_concept_to_segments(concept: dict, segments: List[dict], min_segments: int = 1, max_segments: int = 3) -> dict:
+    """
+    Maps a key concept to the most relevant video transcript segments based on semantic similarity.
+    
+    Args:
+        concept: Dictionary containing key concept information (at minimum 'concept_title' and 'concept_explanation')
+        segments: List of transcript segments, each with 'content', 'start_time', and 'end_time'
+        min_segments: Minimum number of segments to match (default: 1)
+        max_segments: Maximum number of segments to match (default: 3)
+    
+    Returns:
+        The same concept dict with added timestamp information:
+        - source_video_timestamp_start_seconds: Start time from earliest matching segment
+        - source_video_timestamp_end_seconds: End time from latest matching segment
+        - confidence_score: How confident we are in this mapping (0.0-1.0)
+    """
+    if not concept or not segments or len(segments) == 0:
+        logging.warning("Cannot map concept to segments: empty input")
+        return concept
+    
+    # Create a combined representation of the concept
+    concept_text = f"{concept.get('concept_title', '')} {concept.get('concept_explanation', '')}".strip()
+    if not concept_text:
+        logging.warning("Empty concept text, cannot map to segments")
+        return concept
+    
+    try:
+        # Get embeddings for the concept
+        concept_embedding = get_text_embeddings([concept_text])[0]
+        
+        # Get embeddings for all segments if not already present
+        segment_texts = [segment.get('content', '') for segment in segments]
+        segment_embeddings = get_text_embeddings_in_batches(segment_texts) if segment_texts else []
+        
+        # Calculate similarity scores
+        similarities = []
+        for i, seg_embedding in enumerate(segment_embeddings):
+            if seg_embedding is not None and concept_embedding is not None:
+                # Calculate cosine similarity
+                similarity = np.dot(concept_embedding, seg_embedding) / (
+                    np.linalg.norm(concept_embedding) * np.linalg.norm(seg_embedding))
+                similarities.append((i, similarity))
+        
+        # Sort segments by similarity score (highest first)
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        
+        # Select top segments (between min_segments and max_segments)
+        num_segments_to_use = min(max(min_segments, len(similarities) // 10), max_segments)
+        best_segments = similarities[:num_segments_to_use] if num_segments_to_use > 0 else []
+        
+        if best_segments:
+            # Get segment indices in chronological order
+            sorted_indices = sorted([idx for idx, _ in best_segments])
+            
+            # Get the start time from the earliest segment and end time from the latest
+            start_time = segments[sorted_indices[0]].get('start_time', 0)
+            end_time = segments[sorted_indices[-1]].get('end_time', 0)
+            
+            # Add a small buffer to end time if it's the same as start time
+            if end_time <= start_time:
+                end_time = start_time + 10  # Add 10 seconds as minimum duration
+                
+            # Calculate average confidence from selected segments
+            avg_confidence = sum([score for _, score in best_segments]) / len(best_segments)
+            
+            # Add timestamp information to the concept
+            concept['source_video_timestamp_start_seconds'] = start_time
+            concept['source_video_timestamp_end_seconds'] = end_time
+            concept['confidence_score'] = float(avg_confidence)
+            
+            logging.info(f"Mapped concept '{concept.get('concept_title', '')[0:30]}...' to timestamps: "
+                        f"{start_time:.2f}s - {end_time:.2f}s (confidence: {avg_confidence:.3f})")
+        else:
+            logging.warning("Could not find matching segments for concept")
+            # Set default values
+            concept['source_video_timestamp_start_seconds'] = 0
+            concept['source_video_timestamp_end_seconds'] = 0
+            concept['confidence_score'] = 0.0
+    
+    except Exception as e:
+        logging.error(f"Error mapping concept to segments: {e}", exc_info=True)
+        # Leave concept unchanged
+    
+    return concept
+
+
 def generate_key_concepts_dspy(document_text: str, language: str = "English", comprehension_level: str = "Beginner", is_video: bool = False) -> List[dict]:
     """Generates key concepts with explanations and source links from document text using DSPy.
     
@@ -183,7 +270,7 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
             response = key_concept_extractor(
                 document_content=document_text,
                 document_type="video transcript",
-                content_instruction="Focus on the main ideas and concepts presented in this video transcript. Include specific timestamps where possible."
+                content_instruction="Focus on the main ideas and concepts presented in this video transcript. IMPORTANT: Each segment of the transcript starts with a timestamp in the format [MM:SS - MM:SS]. Extract these exact timestamps accurately for each concept. For each key concept, find the most relevant timestamp section(s) and include the exact start and end seconds in your output JSON."
             )
         else:
             # Standard document processing

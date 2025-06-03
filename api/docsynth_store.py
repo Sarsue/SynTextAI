@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime, Float
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime, Float, Boolean
 from sqlalchemy.orm import declarative_base, relationship,  mapped_column, Mapped
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
@@ -97,12 +97,17 @@ class File(Base):
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    processed = Column(Boolean, default=False)
+    status = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
     
     # Relationship to chunks
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
     key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
+    flashcards = relationship("Flashcard", back_populates="file", cascade="all, delete-orphan")
+    quiz_questions = relationship("QuizQuestion", back_populates="file", cascade="all, delete-orphan")
 
 
 class Segment(Base):
@@ -162,9 +167,41 @@ class KeyConcept(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Relationships for flashcards and quiz questions
+    flashcards = relationship("Flashcard", back_populates="key_concept", cascade="all, delete-orphan")
+    quiz_questions = relationship("QuizQuestion", back_populates="key_concept", cascade="all, delete-orphan")
+
     def __repr__(self):
         return f"<KeyConcept(id={self.id}, file_id={self.file_id}, title='{self.concept_title[:30]}...')>"
 
+
+class Flashcard(Base):
+    __tablename__ = "flashcards"
+    id = Column(Integer, primary_key=True)
+    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'), nullable=False)
+    key_concept_id = Column(Integer, ForeignKey('key_concepts.id', ondelete='CASCADE'), nullable=False)
+    question = Column(String, nullable=False)
+    answer = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_custom = Column(Boolean, default=False)  # True if user-created/edited
+
+    # Relationships
+    file = relationship('File', back_populates='flashcards')
+    key_concept = relationship('KeyConcept', back_populates='flashcards')
+
+class QuizQuestion(Base):
+    __tablename__ = "quiz_questions"
+    id = Column(Integer, primary_key=True)
+    file_id = Column(Integer, ForeignKey('files.id', ondelete='CASCADE'), nullable=False)
+    key_concept_id = Column(Integer, ForeignKey('key_concepts.id', ondelete='CASCADE'), nullable=True)
+    question = Column(String, nullable=False)
+    question_type = Column(String, nullable=False)  # 'MCQ' or 'TF'
+    correct_answer = Column(String, nullable=False)
+    distractors = Column(JSON, nullable=True)  # List of wrong answers for MCQ
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    file = relationship('File', back_populates='quiz_questions')
+    key_concept = relationship('KeyConcept', back_populates='quiz_questions')
 
 class DocSynthStore:
     def __init__(self, database_url):
@@ -896,6 +933,51 @@ class DocSynthStore:
         finally:
             session.close()
 
+    def add_flashcard(self, file_id: int, key_concept_id: int, question: str, answer: str, is_custom: bool = False) -> int:
+        """Adds a new flashcard linked to a file and key concept."""
+        session = self.get_session()
+        try:
+            new_flashcard = Flashcard(
+                file_id=file_id,
+                key_concept_id=key_concept_id,
+                question=question,
+                answer=answer,
+                is_custom=is_custom
+            )
+            session.add(new_flashcard)
+            session.commit()
+            session.refresh(new_flashcard)
+            return new_flashcard.id
+        except Exception as e:
+            session.rollback()
+            logging.error(f"Error adding flashcard for file_id {file_id}, key_concept_id {key_concept_id}: {e}", exc_info=True)
+            raise
+        finally:
+            session.close()
+
+    def add_quiz_question(self, file_id: int, key_concept_id: Optional[int], question: str, question_type: str, correct_answer: str, distractors: Optional[list] = None) -> int:
+        """Adds a new quiz question (MCQ or TF) linked to a file and optionally a key concept."""
+        session = self.get_session()
+        try:
+            new_quiz = QuizQuestion(
+                file_id=file_id,
+                key_concept_id=key_concept_id,
+                question=question,
+                question_type=question_type,
+                correct_answer=correct_answer,
+                distractors=distractors
+            )
+            session.add(new_quiz)
+            session.commit()
+            session.refresh(new_quiz)
+            return new_quiz.id
+        except Exception as e:
+            session.rollback()
+            logging.error(f"Error adding quiz question for file_id {file_id}, key_concept_id {key_concept_id}: {e}", exc_info=True)
+            raise
+        finally:
+            session.close()
+
     def get_file_by_id(self, file_id: int) -> Optional[File]:
         """Get a file by its ID"""
         session = self.get_session()
@@ -938,12 +1020,30 @@ class DocSynthStore:
         finally:
             session.close()
             
-    def update_file_processing_status(self, file_id: int, processed: bool) -> bool:
+    def get_flashcards_for_file(self, file_id: int):
+        """Get all flashcards for a given file."""
+        session = self.get_session()
+        try:
+            return session.query(Flashcard).filter(Flashcard.file_id == file_id).all()
+        finally:
+            session.close()
+
+    def get_quiz_questions_for_file(self, file_id: int):
+        """Get all quiz questions for a given file."""
+        session = self.get_session()
+        try:
+            return session.query(QuizQuestion).filter(QuizQuestion.file_id == file_id).all()
+        finally:
+            session.close()
+
+    def update_file_processing_status(self, file_id: int, processed: bool, status: str = None, error_message: str = None) -> bool:
         """Update the processing status of a file
         
         Args:
             file_id: ID of the file to update
             processed: New processing status (True if processed, False if needs processing)
+            status: Optional status string (e.g., 'success', 'failed', 'warning')
+            error_message: Optional error message when processing failed
             
         Returns:
             bool: True if successful, False otherwise
@@ -956,8 +1056,25 @@ class DocSynthStore:
                 return False
                 
             file.processed = processed
+            
+            # Store additional status information if provided
+            if status:
+                # Add status attribute if it doesn't exist yet in the database
+                # This is safe since SQLAlchemy will ignore setting attributes that don't exist in the model
+                file.status = status
+                
+            # Store error message if provided
+            if error_message:
+                # Add error_message attribute if it doesn't exist yet
+                file.error_message = error_message
+                
             session.commit()
-            logging.info(f"Updated processing status for file ID {file_id} to {processed}")
+            log_msg = f"Updated processing status for file ID {file_id} to {processed}"
+            if status:
+                log_msg += f", status: {status}"
+            if error_message:
+                log_msg += f", error: {error_message[:50]}{'...' if len(error_message) > 50 else ''}"
+            logging.info(log_msg)
             return True
         except Exception as e:
             session.rollback()

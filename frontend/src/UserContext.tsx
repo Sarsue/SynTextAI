@@ -90,7 +90,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         try {
             if (user) {
                 const idToken = await user.getIdToken();
-                const response = await fetch('api/v1/subscriptions/status', {
+                const response = await fetch('/api/v1/subscriptions/status', {
                     method: 'GET',
                     headers: {
                         Authorization: `Bearer ${idToken}`,
