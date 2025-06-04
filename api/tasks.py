@@ -178,20 +178,27 @@ def adapt_whisper_segments_to_transcript_data(whisper_segments: list) -> list:
 async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, language: str = "English", comprehension_level: str = "Beginner"):
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate key concepts, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
-    # --- YOUTUBE LINK HANDLING ---
-    if is_youtube or (filename.startswith('http') and ('youtube.com' in filename or 'youtu.be' in filename)):
-        logger.info(f"Processing YouTube link: {filename} using the YouTubeProcessor module")
-        # Use the new modular YouTube processor
-        from .processors.youtube_processor import YouTubeProcessor
-        from .docsynth_store import DocSynthStore
-        
+    
+    from .docsynth_store import DocSynthStore
+    from .processors.factory import FileProcessingFactory
+    
+    # Initialize the document store and processor factory
+    store = DocSynthStore()
+    factory = FileProcessingFactory(store)
+    
+    # Get the appropriate processor for this file
+    processor = factory.get_processor(filename)
+    
+    # Log which processor was selected (or if falling back to legacy)
+    if processor:
+        logger.info(f"Using {processor.__class__.__name__} for file: {filename}")
+    else:
+        logger.info(f"No specialized processor available for file: {filename}, will use legacy processing")
+    
+    if processor:
         try:
-            # Initialize YouTube processor with store
-            store = DocSynthStore()
-            youtube_processor = YouTubeProcessor(store)
-            
-            # Process the YouTube video
-            result = await youtube_processor.process(
+            # Process the file using the selected processor
+            result = await processor.process(
                 user_id=user_id,
                 file_id=file_id,
                 filename=filename,
@@ -202,255 +209,254 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             )
             
             if not result.get("success", False):
-                logger.error(f"YouTube processing failed: {result.get('error', 'Unknown error')}")
+                logger.error(f"Processing failed: {result.get('error', 'Unknown error')}")
                 store.update_file_status(int(file_id), "error", result.get('error', 'Processing failed')[:200])
                 return  # Exit without marking as processed so it can be retried
                 
-            logger.info(f"YouTube processing completed successfully for file_id: {file_id}")
-            # File status is already updated in the processor
+            logger.info(f"Processing completed successfully for file_id: {file_id}")
             return
         except Exception as e:
-            logger.error(f"Error in YouTube processing: {e}", exc_info=True)
-            store = DocSynthStore()
+            logger.error(f"Error in file processing: {e}", exc_info=True)
             store.update_file_status(int(file_id), "error", str(e)[:200])
             return
+    
+    # If we get here, either no processor was found or we need to fall back to legacy processing
+    logger.warning(f"No specialized processor found for {filename}, falling back to legacy processing")
+    
+    # Legacy processing code follows - only executed when no processor is available from the factory
+    # Format timestamps in the transcript to help LLM identify segments
+    def format_timestamp(seconds):
+        minutes, seconds = divmod(int(seconds), 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        else:
+            return f"{minutes:02d}:{seconds:02d}"
+    
+    # Add timestamps to each segment
+    full_transcription_for_concepts = ""
+    for segment in processed_video_data:
+        if segment.get('content', '').strip():
+            start_time = segment.get('start_time', 0)
+            end_time = segment.get('end_time', 0)
+            timestamp_text = f"[{format_timestamp(start_time)} - {format_timestamp(end_time)}] "
+            full_transcription_for_concepts += timestamp_text + segment.get('content', '') + "\n\n"
+    
+    logger.info(f"Prepared transcript with timestamps for LLM processing, first 500 chars: {full_transcription_for_concepts[:500]}...")
+    
+    logger.info(f"YouTube transcript length for key concepts: {len(full_transcription_for_concepts)} characters for file ID: {file_id}")
+    
+    if not full_transcription_for_concepts or len(full_transcription_for_concepts.strip()) < 50:
+        logger.error(f"YouTube transcript too short or empty for key concept extraction. File ID: {file_id}")
+        # Still mark the file as processed to prevent infinite retry loop
+        store.update_file_processing_status(int(file_id), True) 
+        return
 
-            # --- Key Concept Extraction ---
-            # Format timestamps in the transcript to help LLM identify segments
-            def format_timestamp(seconds):
-                minutes, seconds = divmod(int(seconds), 60)
-                hours, minutes = divmod(minutes, 60)
-                if hours > 0:
-                    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    # Attempt to generate and store key concepts with robust error handling
+    try:
+        logger.info(f"Generating key concepts for YouTube video: {filename} (File ID: {file_id})")
+        
+        # Log sample of the transcript to help with debugging
+        transcript_sample = full_transcription_for_concepts[:500] + "..." if len(full_transcription_for_concepts) > 500 else full_transcription_for_concepts
+        logger.info(f"Transcript sample for key concept generation (File ID: {file_id}): {transcript_sample}")
+        
+        # Set a timeout for LLM generation to avoid indefinite hanging
+        import concurrent.futures
+    except Exception as sample_error:
+        logger.error(f"Error preparing transcript sample: {sample_error}")
+        # Continue processing even if logging fails
+    
+    import threading
+    
+    key_concepts_list = None
+    
+    def generate_with_timeout():
+        try:
+            logger.info(f"Starting LLM concept generation with timeout for file ID: {file_id}")
+            result = generate_key_concepts_dspy(
+                document_text=full_transcription_for_concepts,
+                language=language,
+                comprehension_level=comprehension_level,
+                is_video=True  # Flag to indicate this is a video
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error in LLM concept generation thread: {e}", exc_info=True)
+            return None
+    
+    # Use a thread with timeout for LLM processing
+    try:
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(generate_with_timeout)
+            try:
+                # Set a reasonable timeout (5 minutes)
+                key_concepts_list = future.result(timeout=300)
+                if key_concepts_list:
+                    logger.info(f"LLM returned {len(key_concepts_list)} key concepts for video ID: {file_id}")
                 else:
-                    return f"{minutes:02d}:{seconds:02d}"
-            
-            # Add timestamps to each segment
-            full_transcription_for_concepts = ""
-            for segment in processed_video_data:
-                if segment.get('content', '').strip():
-                    start_time = segment.get('start_time', 0)
-                    end_time = segment.get('end_time', 0)
-                    timestamp_text = f"[{format_timestamp(start_time)} - {format_timestamp(end_time)}] "
-                    full_transcription_for_concepts += timestamp_text + segment.get('content', '') + "\n\n"
-            
-            logger.info(f"Prepared transcript with timestamps for LLM processing, first 500 chars: {full_transcription_for_concepts[:500]}...")
-            
-            logger.info(f"YouTube transcript length for key concepts: {len(full_transcription_for_concepts)} characters for file ID: {file_id}")
-            
-            if not full_transcription_for_concepts or len(full_transcription_for_concepts.strip()) < 50:
-                logger.error(f"YouTube transcript too short or empty for key concept extraction. File ID: {file_id}")
-                # Still mark the file as processed to prevent infinite retry loop
-                store.update_file_processing_status(int(file_id), True) 
-                return
-
-            # Attempt to generate and store key concepts with robust error handling
-            try:
-                logger.info(f"Generating key concepts for YouTube video: {filename} (File ID: {file_id})")
-                
-                # Log sample of the transcript to help with debugging
-                transcript_sample = full_transcription_for_concepts[:500] + "..." if len(full_transcription_for_concepts) > 500 else full_transcription_for_concepts
-                logger.info(f"Transcript sample for key concept generation (File ID: {file_id}): {transcript_sample}")
-            except Exception as sample_error:
-                logger.error(f"Error preparing transcript sample: {sample_error}")
-                # Continue processing even if logging fails
-            
-            # Set a timeout for LLM generation to avoid indefinite hanging
-            import concurrent.futures
-            import threading
-            
-            key_concepts_list = None
-            
-            def generate_with_timeout():
-                try:
-                    logger.info(f"Starting LLM concept generation with timeout for file ID: {file_id}")
-                    result = generate_key_concepts_dspy(
-                        document_text=full_transcription_for_concepts,
-                        language=language,
-                        comprehension_level=comprehension_level,
-                        is_video=True  # Flag to indicate this is a video
-                    )
-                    return result
-                except Exception as e:
-                    logger.error(f"Error in LLM concept generation thread: {e}", exc_info=True)
-                    return None
-            
-            # Use a thread with timeout for LLM processing
-            try:
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(generate_with_timeout)
-                    try:
-                        # Set a reasonable timeout (5 minutes)
-                        key_concepts_list = future.result(timeout=300)
-                        if key_concepts_list:
-                            logger.info(f"LLM returned {len(key_concepts_list)} key concepts for video ID: {file_id}")
-                        else:
-                            logger.warning(f"LLM returned None or empty list for file ID: {file_id}")
-                            # Create a minimal set of default concepts to avoid total failure
-                            key_concepts_list = [
-                                {"concept_title": "Main Topic", "concept_explanation": "The video discusses its main topic. Check the full video for details."}
-                            ]
-                    except concurrent.futures.TimeoutError:
-                        logger.error(f"LLM concept generation timed out after 5 minutes for file ID: {file_id}")
-                        # Create a minimal set of default concepts to provide some value
-                        key_concepts_list = [
-                            {"concept_title": "Video Content", "concept_explanation": "This concept could not be automatically extracted due to a timeout. Please view the video directly."}
-                        ]
-            except Exception as executor_error:
-                logger.error(f"Error in thread executor: {executor_error}", exc_info=True)
+                    logger.warning(f"LLM returned None or empty list for file ID: {file_id}")
+                    # Create a minimal set of default concepts to avoid total failure
+                    key_concepts_list = [
+                        {"concept_title": "Main Topic", "concept_explanation": "The video discusses its main topic. Check the full video for details."}
+                    ]
+            except concurrent.futures.TimeoutError:
+                logger.error(f"LLM concept generation timed out after 5 minutes for file ID: {file_id}")
+                # Create a minimal set of default concepts to provide some value
                 key_concepts_list = [
-                    {"concept_title": "Video Content", "concept_explanation": "Unable to analyze this video content due to a processing error."}
+                    {"concept_title": "Video Content", "concept_explanation": "This concept could not be automatically extracted due to a timeout. Please view the video directly."}
                 ]
+    except Exception as executor_error:
+        logger.error(f"Error in thread executor: {executor_error}", exc_info=True)
+        key_concepts_list = [
+            {"concept_title": "Video Content", "concept_explanation": "Unable to analyze this video content due to a processing error."}
+        ]
+    
+    # Try to process the key concepts with proper error handling
+    try:
+        # Proceed only if we have concepts
+        if key_concepts_list and len(key_concepts_list) > 0:
+            # Use the file_id directly
+            db_file_id = int(file_id)
             
-            # Proceed only if we have concepts
-            if key_concepts_list and len(key_concepts_list) > 0:
-                # Use the file_id directly
-                db_file_id = int(file_id)
-                
-                # The LLM should have extracted timestamps directly from the formatted transcript
-                logger.info(f"Verifying timestamps in {len(key_concepts_list)} key concepts generated by LLM")
-                
-                # Log the timestamp information for verification
-                for idx, concept in enumerate(key_concepts_list):
-                    start = concept.get('source_video_timestamp_start_seconds')
-                    end = concept.get('source_video_timestamp_end_seconds')
-                    if start is not None and end is not None:
-                        logger.info(f"Concept {idx+1}: '{concept.get('concept_title', '')[:30]}...' has timestamps {start}s - {end}s")
-                    else:
-                        logger.warning(f"Concept {idx+1}: '{concept.get('concept_title', '')[:30]}...' is missing timestamp information")
-                
-                # Store key concepts with robust error handling
-                logger.info(f"Storing {len(key_concepts_list)} key concepts for file ID: {db_file_id}")
-                key_concept_db_ids = []
-                
-                for idx, concept_data in enumerate(key_concepts_list):
-                    try:
-                        # Default values in case the LLM returns incomplete data
-                        concept_title = concept_data.get('concept_title', f"Concept {idx+1}")
-                        concept_explanation = concept_data.get('concept_explanation', "No explanation provided")
-                        
-                        # Extract timestamp information
-                        timestamp_start = concept_data.get('source_video_timestamp_start_seconds')
-                        timestamp_end = concept_data.get('source_video_timestamp_end_seconds')
-                        
-                        # Store the concept
-                        concept_id = store.add_key_concept(
-                            file_id=db_file_id,
-                            concept_title=concept_title,
-                            concept_explanation=concept_explanation,
-                            source_page_number=concept_data.get("source_page_number"),
-                            source_video_timestamp_start_seconds=timestamp_start,
-                            source_video_timestamp_end_seconds=timestamp_end
-                            # display_order=concept_data.get("display_order")
-                        )
-                        
-                        # Track the concept ID for later use
-                        concept_data["id"] = concept_id
-                        key_concept_db_ids.append(concept_id)
-                        
-                        logger.info(f"Stored concept {idx+1}/{len(key_concepts_list)}: '{concept_title[:30]}...'")
-                    except Exception as concept_store_error:
-                        logger.error(f"Error storing concept {idx+1}/{len(key_concepts_list)}: {concept_store_error}", exc_info=True)
-                        # Continue to next concept rather than failing completely
-                        continue
-                
-                if key_concept_db_ids:
-                    logger.info(f"Successfully stored {len(key_concept_db_ids)} key concepts with IDs: {key_concept_db_ids}")
+            # The LLM should have extracted timestamps directly from the formatted transcript
+            logger.info(f"Verifying timestamps in {len(key_concepts_list)} key concepts generated by LLM")
+            
+            # Log the timestamp information for verification
+            for idx, concept in enumerate(key_concepts_list):
+                start = concept.get('source_video_timestamp_start_seconds')
+                end = concept.get('source_video_timestamp_end_seconds')
+                if start is not None and end is not None:
+                    logger.info(f"Concept {idx+1}: '{concept.get('concept_title', '')[:30]}...' has timestamps {start}s - {end}s")
+                else:
+                    logger.warning(f"Concept {idx+1}: '{concept.get('concept_title', '')[:30]}...' is missing timestamp information")
+            
+            # Store key concepts with robust error handling
+            logger.info(f"Storing {len(key_concepts_list)} key concepts for file ID: {db_file_id}")
+            key_concept_db_ids = []
+            
+            for idx, concept_data in enumerate(key_concepts_list):
+                try:
+                    # Default values in case the LLM returns incomplete data
+                    concept_title = concept_data.get('concept_title', f"Concept {idx+1}")
+                    concept_explanation = concept_data.get('concept_explanation', "No explanation provided")
                     
-                    # --- Flashcard & Quiz Generation ---
-                    try:
-                        # Import required utility functions
-                        from flashcard_quiz_utils import (
-                            generate_flashcard_from_key_concept,
-                            generate_mcq_from_key_concepts,
-                            generate_true_false_from_key_concepts
-                        )
-                        
-                        # Process each concept
-                        for concept_data in key_concepts_list:
-                            # Skip concepts without an ID
-                            if not concept_data.get("id"):
-                                logger.warning(f"Skipping concept without ID: {concept_data.get('concept_title', 'Unknown')[:30]}")
-                                continue
-                                
-                            # Generate learning materials for this concept with separate error handling for each type
-                            concept_title = concept_data.get('concept_title', 'Unknown')[:30]
-                            
-                            # Generate flashcard with error handling
-                            try:
-                                flashcard = generate_flashcard_from_key_concept(concept_data)
-                                store.add_flashcard(
-                                    file_id=db_file_id,
-                                    key_concept_id=concept_data["id"],
-                                    question=flashcard["question"],
-                                    answer=flashcard["answer"]
-                                )
-                                logger.info(f"Generated flashcard for concept: {concept_title}")
-                            except Exception as flash_error:
-                                logger.error(f"Error generating flashcard: {str(flash_error)[:100]}")
-                            
-                            # Generate MCQ with error handling
-                            try:
-                                mcq = generate_mcq_from_key_concepts(concept_data, key_concepts_list)
-                                store.add_quiz_question(
-                                    file_id=db_file_id,
-                                    key_concept_id=concept_data["id"],
-                                    question=mcq["question"],
-                                    question_type="MCQ",
-                                    correct_answer=mcq["correct_answer"],
-                                    distractors=mcq["distractors"],
-                                    is_custom=False
-                                )
-                                logger.info(f"Generated MCQ for concept: {concept_title}")
-                            except Exception as mcq_error:
-                                logger.error(f"Error generating MCQ question: {str(mcq_error)[:100]}")
-                            
-                            # Generate T/F question with error handling
-                            try:
-                                tf = generate_true_false_from_key_concepts(concept_data, key_concepts_list)
-                                store.add_quiz_question(
-                                    file_id=db_file_id,
-                                    key_concept_id=concept_data["id"],
-                                    question=tf["question"],
-                                    question_type="TF",
-                                    correct_answer=tf["correct_answer"],
-                                    distractors=tf["distractors"],
-                                    is_custom=False
-                                )
-                                logger.info(f"Generated T/F question for concept: {concept_title}")
-                            except Exception as tf_error:
-                                logger.error(f"Error generating T/F question: {str(tf_error)[:100]}")
-                        
-                        logger.info(f"Completed flashcard and quiz generation for file ID: {db_file_id}")
-                    except Exception as materials_error:
-                        logger.error(f"Error in flashcard/quiz generation process: {materials_error}", exc_info=True)
+                    # Extract timestamp information
+                    timestamp_start = concept_data.get('source_video_timestamp_start_seconds')
+                    timestamp_end = concept_data.get('source_video_timestamp_end_seconds')
+                    
+                    # Store the concept
+                    concept_id = store.add_key_concept(
+                        file_id=db_file_id,
+                        concept_title=concept_title,
+                        concept_explanation=concept_explanation,
+                        source_page_number=concept_data.get("source_page_number"),
+                        source_video_timestamp_start_seconds=timestamp_start,
+                        source_video_timestamp_end_seconds=timestamp_end
+                        # display_order=concept_data.get("display_order")
+                    )
+                    
+                    # Track the concept ID for later use
+                    concept_data["id"] = concept_id
+                    key_concept_db_ids.append(concept_id)
+                    
+                    logger.info(f"Stored concept {idx+1}/{len(key_concepts_list)}: '{concept_title[:30]}...'")
+                except Exception as concept_store_error:
+                    logger.error(f"Error storing concept {idx+1}/{len(key_concepts_list)}: {concept_store_error}", exc_info=True)
+                    # Continue to next concept rather than failing completely
+                    continue
+            
+            if key_concept_db_ids:
+                logger.info(f"Successfully stored {len(key_concept_db_ids)} key concepts with IDs: {key_concept_db_ids}")
                 
+                # --- Flashcard & Quiz Generation ---
+                try:
+                    # Import required utility functions
+                    from flashcard_quiz_utils import (
+                        generate_flashcard_from_key_concept,
+                        generate_mcq_from_key_concepts,
+                        generate_true_false_from_key_concepts
+                    )
+                    
+                    # Process each concept
+                    for concept_data in key_concepts_list:
+                        # Skip concepts without an ID
+                        if not concept_data.get("id"):
+                            logger.warning(f"Skipping concept without ID: {concept_data.get('concept_title', 'Unknown')[:30]}")
+                            continue
+                            
+                        # Generate learning materials for this concept with separate error handling for each type
+                        concept_title = concept_data.get('concept_title', 'Unknown')[:30]
+                        
+                        # Generate flashcard with error handling
+                        try:
+                            flashcard = generate_flashcard_from_key_concept(concept_data)
+                            store.add_flashcard(
+                                file_id=db_file_id,
+                                key_concept_id=concept_data["id"],
+                                question=flashcard["question"],
+                                answer=flashcard["answer"]
+                            )
+                            logger.info(f"Generated flashcard for concept: {concept_title}")
+                        except Exception as flash_error:
+                            logger.error(f"Error generating flashcard: {str(flash_error)[:100]}")
+                        
+                        # Generate MCQ with error handling
+                        try:
+                            mcq = generate_mcq_from_key_concepts(concept_data, key_concepts_list)
+                            store.add_quiz_question(
+                                file_id=db_file_id,
+                                key_concept_id=concept_data["id"],
+                                question=mcq["question"],
+                                question_type="MCQ",
+                                correct_answer=mcq["correct_answer"],
+                                distractors=mcq["distractors"],
+                                is_custom=False
+                            )
+                            logger.info(f"Generated MCQ for concept: {concept_title}")
+                        except Exception as mcq_error:
+                            logger.error(f"Error generating MCQ question: {str(mcq_error)[:100]}")
+                        
+                        # Generate T/F question with error handling
+                        try:
+                            tf = generate_true_false_from_key_concepts(concept_data, key_concepts_list)
+                            store.add_quiz_question(
+                                file_id=db_file_id,
+                                key_concept_id=concept_data["id"],
+                                question=tf["question"],
+                                question_type="TF",
+                                correct_answer=tf["correct_answer"],
+                                distractors=tf["distractors"],
+                                is_custom=False
+                            )
+                            logger.info(f"Generated T/F question for concept: {concept_title}")
+                        except Exception as tf_error:
+                            logger.error(f"Error generating T/F question: {str(tf_error)[:100]}")
+                    
+                    logger.info(f"Completed flashcard and quiz generation for file ID: {db_file_id}")
+                except Exception as materials_error:
+                    logger.error(f"Error in flashcard/quiz generation process: {materials_error}", exc_info=True)
+            
             # Handle case where key concepts were attempted but none were generated/valid
             if key_concepts_list is not None and not key_concepts_list:
                 logger.info(f"No key concepts generated for file ID: {file_id} despite successful processing")
                 # Mark file as processed since we attempted key concept generation
                 store.update_file_processing_status(int(file_id), True)
-            
-        except Exception as kc_error:  # This matches the try at line 368
-            logger.error(f"Error during key concept generation or storage for {filename} (File ID: {file_id}): {kc_error}", exc_info=True)
-            # Still mark as processed to prevent infinite retries
-            store.update_file_processing_status(int(file_id), True, status="warning",
-                                        error_message=f"Error during key concept generation: {str(kc_error)[:100]}")
-            
-            # Check for empty transcription - only if we haven't already handled it in the try-except above
-            if not full_transcription:  # Changed from 'else' to proper conditional check
-                logger.info(f"Skipping key concept generation for {filename} (File ID: {file_id}) as full transcription is empty.")
-                # Mark as processed since there's nothing to process
-                store.update_file_processing_status(int(file_id), True)
-            
-            # Mark processing as complete regardless of outcome
-            logger.info(f"Finished processing YouTube video: {filename}")
-            return
-        except Exception as e:
-            # Catch-all exception handler for YouTube processing
-            logger.error(f"Error processing YouTube link {filename}: {e}", exc_info=True)
-            # Don't mark as processed so we can retry
-            return
+    
+    except Exception as kc_error:  # Outer try-except for all key concept processing
+        logger.error(f"Error during key concept generation or storage for {filename} (File ID: {file_id}): {kc_error}", exc_info=True)
+        # Still mark as processed to prevent infinite retries
+        store.update_file_processing_status(int(file_id), True, status="warning",
+                                    error_message=f"Error during key concept generation: {str(kc_error)[:100]}")
+        
+        # Check for empty transcription - only if we haven't already handled it in the try-except above
+        if not full_transcription:  # Changed from 'else' to proper conditional check
+            logger.info(f"Skipping key concept generation for {filename} (File ID: {file_id}) as full transcription is empty.")
+            # Mark as processed since there's nothing to process
+            store.update_file_processing_status(int(file_id), True)
+        
+        # Mark processing as complete regardless of outcome
+        logger.info(f"Finished processing YouTube video: {filename}")
+        return
     # --- END YOUTUBE HANDLING ---
     file_path = None # Initialize file_path to None
     # Wrap entire process in a try-except block to catch errors
