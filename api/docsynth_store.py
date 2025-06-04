@@ -740,32 +740,52 @@ class DocSynthStore:
         """
         try:
             session = self.get_session()
+            
+            # Use selective column query to avoid schema mismatches
+            try:
+                # Attempt to fetch only the necessary columns we know exist
+                file_info = session.query(
+                    File.id,
+                    File.file_name,
+                    File.user_id
+                ).filter(File.user_id == user_id, File.id == file_id).first()
+                
+                if not file_info:
+                    raise ValueError(f"File with ID {file_id} not found for user ID {user_id}.")
+                    
+                file_name = file_info.file_name
+                file_id = file_info.id
+                
+            except Exception as e:
+                # Fall back to raw SQL if ORM approach fails
+                try:
+                    result = session.execute(text(
+                        "SELECT id, file_name FROM files WHERE user_id = :user_id AND id = :file_id"
+                    ), {"user_id": user_id, "file_id": file_id})
+                    file_data = result.fetchone()
+                    
+                    if not file_data:
+                        raise ValueError(f"File with ID {file_id} not found for user ID {user_id}.")
+                        
+                    file_name = file_data[1]
+                    file_id = file_data[0]
+                except Exception as nested_e:
+                    raise ValueError(f"Failed to retrieve file: {str(nested_e)}")
 
-            # Fetch the file by user_id and file_id
-            file = session.query(File).filter(File.user_id == user_id, File.id == file_id).first()
+            # Delete associated chunks (including embeddings) - using direct SQL to avoid schema issues
+            session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
 
-            if file:
-                # Log file name before deletion
-                file_name = file.file_name
+            # Delete associated segments - using direct SQL to avoid schema issues
+            session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
 
-                # Delete associated chunks (including embeddings)
-                session.query(Chunk).filter(Chunk.file_id == file.id).delete()
-
-                # Delete associated segments
-                session.query(Segment).filter(Segment.file_id == file.id).delete()
-
-                # Delete the file record
-                session.delete(file)
-                session.commit()
-
-                #logger.info(f"Deleted file '{file_name}', its chunks, and segments for user {user_id}.")
-                return {'file_name': file_name, 'file_id': file_id}
-            else:
-                raise ValueError(f"File with ID {file_id} not found for user ID {user_id}.")
+            # Delete the file record - using direct SQL to avoid schema issues
+            session.execute(text("DELETE FROM files WHERE id = :file_id"), {"file_id": file_id})
+            
+            session.commit()
+            return {'file_name': file_name, 'file_id': file_id}
 
         except Exception as e:
             session.rollback()  # Rollback in case of error
-            #logger.error(f"Error deleting file, its chunks, and segments: {e}")
             raise  # Re-raise the exception for further handling
         finally:
             session.close()
