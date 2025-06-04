@@ -156,7 +156,7 @@ async def get_flashcards_for_file(
         user_id = user_data["user_id"]
         store = request.app.state.store
         file = store.get_file_by_id(file_id)
-        if not file or file.user_id != user_id:
+        if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
         flashcards = store.get_flashcards_for_file(file_id)
         # Convert SQLAlchemy objects to dicts for frontend
@@ -179,6 +179,58 @@ async def get_flashcards_for_file(
         logger.error(f"Error fetching flashcards for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Endpoint: Add a flashcard for a file
+class FlashcardCreate(BaseModel):
+    question: str
+    answer: str
+    key_concept_id: Optional[int] = None
+    is_custom: bool = True
+
+@files_router.post("/{file_id}/flashcards")
+async def add_flashcard_for_file(
+    file_id: int,
+    flashcard: FlashcardCreate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+        
+        # Verify file exists and belongs to user
+        file = store.get_file_by_id(file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        # Add the flashcard
+        flashcard_id = store.add_flashcard(
+            file_id=file_id,
+            question=flashcard.question,
+            answer=flashcard.answer,
+            key_concept_id=flashcard.key_concept_id,
+            is_custom=flashcard.is_custom
+        )
+        
+        if not flashcard_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create flashcard")
+            
+        # Return the created flashcard
+        return {
+            "id": flashcard_id,
+            "file_id": file_id,
+            "key_concept_id": flashcard.key_concept_id,
+            "question": flashcard.question,
+            "answer": flashcard.answer,
+            "is_custom": flashcard.is_custom
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error adding flashcard for file {file_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
 # Endpoint: Get all quiz questions for a file
 @files_router.get("/{file_id}/quizzes")
 async def get_quizzes_for_file(
@@ -190,9 +242,10 @@ async def get_quizzes_for_file(
         user_id = user_data["user_id"]
         store = request.app.state.store
         file = store.get_file_by_id(file_id)
-        if not file or file.user_id != user_id:
+        if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
         quizzes = store.get_quiz_questions_for_file(file_id)
+        logger.info(f"Raw quizzes data from repo for file {file_id}: {quizzes}")
         quizzes_out = []
         for q in quizzes:
             # Ensure distractors is properly serialized JSON
@@ -218,16 +271,81 @@ async def get_quizzes_for_file(
                 "id": q.id,
                 "file_id": q.file_id,
                 "key_concept_id": q.key_concept_id,
-                "question": q.question if q.question else "",
-                "question_type": q.question_type if q.question_type else "unknown",
+                "question_text": q.question,  # Frontend expects this field
+                "question": q.question,
+                "question_type": q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
                 "correct_answer": q.correct_answer if q.correct_answer else "",
-                "distractors": distractors
+                "distractors": distractors,
+                "explanation": "",  # Empty string instead of None for frontend compatibility
+                "difficulty": "medium",  # Default value expected by frontend
+                "is_custom": False  # Default for system-generated questions
             })
         # Wrap the quizzes in an object with a named property as expected by the frontend
         return {"quizzes": quizzes_out}
     except Exception as e:
         logger.error(f"Error fetching quizzes for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Endpoint: Add a quiz question for a file
+class QuizQuestionCreate(BaseModel):
+    question: str
+    question_type: str = "MCQ"  # Default to MCQ if not specified
+    correct_answer: str
+    distractors: List[str]
+    key_concept_id: Optional[int] = None
+    is_custom: bool = True
+
+@files_router.post("/{file_id}/quizzes")
+async def add_quiz_question_for_file(
+    file_id: int,
+    quiz_question: QuizQuestionCreate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+        
+        # Verify file exists and belongs to user
+        file = store.get_file_by_id(file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        # Add the quiz question
+        quiz_id = store.add_quiz_question(
+            file_id=file_id,
+            question=quiz_question.question,
+            question_type=quiz_question.question_type,
+            correct_answer=quiz_question.correct_answer,
+            distractors=quiz_question.distractors,
+            key_concept_id=quiz_question.key_concept_id,
+            is_custom=quiz_question.is_custom
+        )
+        
+        if not quiz_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create quiz question")
+            
+        # Return the created quiz question with new field names
+        return {
+            "id": quiz_id,
+            "file_id": file_id,
+            "question": quiz_question.question,
+            "question_type": quiz_question.question_type,
+            "correct_answer": quiz_question.correct_answer,
+            "distractors": quiz_question.distractors,
+            "key_concept_id": quiz_question.key_concept_id,
+            "is_custom": quiz_question.is_custom,
+            # Include these for frontend compatibility
+            "explanation": None,
+            "difficulty": None
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error adding quiz question for file {file_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Route to re-extract a file (retry processing)
 @files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
@@ -316,6 +434,7 @@ async def get_key_concepts_for_file(
         try:
             # Get key concepts directly with a robust query
             key_concepts = store.get_key_concepts_for_file(file_id)
+            logger.info(f"Raw key_concepts data from repo: {key_concepts}")
             
             # Explicitly convert SQLAlchemy KeyConcept objects to KeyConceptResponse Pydantic models.
             # Handle any potential errors during conversion
@@ -330,11 +449,13 @@ async def get_key_concepts_for_file(
                         key_concept_responses.append(KeyConceptResponse(
                             id=kc.id,
                             file_id=kc.file_id,
-                            concept=kc.concept if hasattr(kc, 'concept') else "",
-                            explanation=kc.explanation if hasattr(kc, 'explanation') else "",
-                            span_text=kc.span_text if hasattr(kc, 'span_text') else "",
-                            span_start=kc.span_start if hasattr(kc, 'span_start') else 0,
-                            span_end=kc.span_end if hasattr(kc, 'span_end') else 0
+                            concept_title=kc.concept_title if hasattr(kc, 'concept_title') else "",
+                            concept_explanation=kc.concept_explanation if hasattr(kc, 'concept_explanation') else "",
+                            display_order=kc.display_order if hasattr(kc, 'display_order') else 1,
+                            source_page_number=kc.source_page_number if hasattr(kc, 'source_page_number') else None,
+                            source_video_timestamp_start_seconds=kc.source_video_timestamp_start_seconds if hasattr(kc, 'source_video_timestamp_start_seconds') else None,
+                            source_video_timestamp_end_seconds=kc.source_video_timestamp_end_seconds if hasattr(kc, 'source_video_timestamp_end_seconds') else None,
+                            created_at=kc.created_at if hasattr(kc, 'created_at') else datetime.now()
                         ))
                     except:
                         # Skip this key concept if we can't convert it

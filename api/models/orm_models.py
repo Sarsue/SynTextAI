@@ -2,7 +2,7 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, Table, UniqueConstraint, TIMESTAMP
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, Table, UniqueConstraint, TIMESTAMP, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -71,6 +71,8 @@ class File(Base):
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
     key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
+    flashcards = relationship("Flashcard", back_populates="file", cascade="all, delete-orphan")
+    quiz_questions = relationship("QuizQuestion", back_populates="file", cascade="all, delete-orphan")
 
 class Segment(Base):
     __tablename__ = "segments"
@@ -109,8 +111,6 @@ class Chunk(Base):
     def __repr__(self):
         return f"<Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:50]}...)>"
 
-# Other models like Flashcard and QuizQuestion are removed because they're not in the original schema
-
 class KeyConcept(Base):
     __tablename__ = "key_concepts"
 
@@ -127,6 +127,9 @@ class KeyConcept(Base):
     source_video_timestamp_end_seconds = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    flashcards = relationship("Flashcard", back_populates="key_concept", cascade="all, delete-orphan")
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def __repr__(self):
@@ -156,3 +159,35 @@ class Message(Base):
     # Relationships
     user = relationship("User", back_populates="messages")
     chat_history = relationship("ChatHistory", back_populates="messages")
+
+
+class Flashcard(Base):
+    __tablename__ = "flashcards"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
+    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
+    question = Column(String)
+    answer = Column(String)
+    is_custom = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    file = relationship("File", back_populates="flashcards")
+    key_concept = relationship("KeyConcept", back_populates="flashcards")
+
+
+class QuizQuestion(Base):
+    __tablename__ = "quiz_questions"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
+    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
+    question = Column(String, nullable=False)
+    question_type = Column(String, nullable=False)
+    correct_answer = Column(String, nullable=False)
+    distractors = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
+    
+    # Relationships
+    file = relationship("File", back_populates="quiz_questions")

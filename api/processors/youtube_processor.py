@@ -458,13 +458,19 @@ class YouTubeProcessor(FileProcessor):
             if mcqs:
                 logger.info(f"Generated {len(mcqs)} MCQs from key concepts")
                 for mcq in mcqs:
+                    # Extract the correct answer and distractors from options
+                    options = mcq.get('options', [])
+                    answer = mcq.get('answer', '')
+                    
+                    # Format data for the updated method signature
                     self.store.add_quiz_question(
                         file_id=int(file_id),
                         question=mcq.get('question', ''),
-                        options=mcq.get('options', []),
-                        answer=mcq.get('answer', ''),
-                        explanation=mcq.get('explanation', ''),
-                        question_type="mcq"
+                        question_type="MCQ",  # Consistent capitalization
+                        correct_answer=answer,
+                        distractors=[opt for opt in options if opt != answer],
+                        key_concept_id=None,
+                        is_custom=False
                     )
                 results["mcqs"] = len(mcqs)
         except (asyncio.TimeoutError, Exception) as e:
@@ -480,13 +486,15 @@ class YouTubeProcessor(FileProcessor):
             if tf_questions:
                 logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
                 for tf in tf_questions:
+                    # Create a properly formatted True/False question
                     self.store.add_quiz_question(
                         file_id=int(file_id),
                         question=tf.get('statement', ''),
-                        options=["True", "False"],
-                        answer="True" if tf.get('is_true', False) else "False",
-                        explanation=tf.get('explanation', ''),
-                        question_type="true_false"
+                        question_type="TF",  # Consistent type identifier
+                        correct_answer="True" if tf.get('is_true', False) else "False",
+                        distractors=[],  # T/F questions don't need additional distractors
+                        key_concept_id=None,
+                        is_custom=False
                     )
                 results["true_false"] = len(tf_questions)
         except (asyncio.TimeoutError, Exception) as e:

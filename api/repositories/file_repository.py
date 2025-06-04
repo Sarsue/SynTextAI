@@ -12,9 +12,8 @@ from .base_repository import BaseRepository
 from .domain_models import File, Segment, Chunk
 
 # Import ORM models from the new models module
-from models import File as FileORM
+from models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
 from models import Segment as SegmentORM
-from models import Chunk as ChunkORM
 
 logger = logging.getLogger(__name__)
 
@@ -140,19 +139,36 @@ class FileRepository(BaseRepository):
         """
         session = self.get_session()
         try:
-            files = session.query(FileORM).filter(
-                FileORM.user_id == user_id
-            ).order_by(FileORM.created_at.desc()).all()
+            from sqlalchemy import func
+            
+            # Fetch files with chunk count in a single query (more efficient)
+            files = session.query(
+                FileORM.id, 
+                FileORM.file_name, 
+                FileORM.file_url,
+                FileORM.created_at,
+                func.count(ChunkORM.id).label('chunk_count')
+            ).outerjoin(ChunkORM, ChunkORM.file_id == FileORM.id)\
+            .filter(FileORM.user_id == user_id)\
+            .group_by(FileORM.id, FileORM.file_name, FileORM.file_url, FileORM.created_at)\
+            .order_by(FileORM.created_at.desc())\
+            .all()
             
             result = []
             for file in files:
+                # Align with original implementation (processed = has chunks)
+                is_processed = file[4] > 0  # chunk_count > 0
+                
                 file_dict = {
-                    "id": file.id,
-                    "file_name": file.file_name,
-                    "file_url": file.file_url,
-                    "created_at": file.created_at.isoformat() if file.created_at else None
-                    # status and error_message removed - don't exist in database schema
+                    "id": file[0],                 # FileORM.id
+                    "file_name": file[1],         # FileORM.file_name - keep for backend compatibility
+                    "name": file[1],              # Match original field name for frontend
+                    "file_url": file[2],          # FileORM.file_url - keep for backend compatibility
+                    "publicUrl": file[2],         # Match original field name for frontend
+                    "processed": is_processed,     # Using the original definition (has chunks)
+                    "created_at": file[3].isoformat() if file[3] else None  # FileORM.created_at
                 }
+                
                 result.append(file_dict)
             
             return result

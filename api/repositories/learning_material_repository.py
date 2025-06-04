@@ -3,14 +3,17 @@ Repository for managing learning materials like key concepts, flashcards, and qu
 """
 from typing import Optional, List, Dict, Any
 import logging
+from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from .base_repository import BaseRepository
-from .domain_models import KeyConcept
+from .domain_models import KeyConcept, Flashcard, QuizQuestion
 
 # Import ORM models from the new models module
 from models import KeyConcept as KeyConceptORM
+from models import Flashcard as FlashcardORM
+from models import QuizQuestion as QuizQuestionORM
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,9 @@ logger = logging.getLogger(__name__)
 class LearningMaterialRepository(BaseRepository):
     """Repository for learning material operations."""
     
+    def __repr__(self):
+        return f"<LearningMaterialRepository({self.database_url})>"
+        
     def add_key_concept(
         self,
         file_id: int,
@@ -74,81 +80,226 @@ class LearningMaterialRepository(BaseRepository):
     
     # Quiz question functionality removed as it no longer exists in the DB schema
     
-    def get_key_concepts_for_file(self, file_id: int) -> List[Dict[str, Any]]:
-        """Get key concepts for a file using robust querying.
+    def get_key_concepts_for_file(self, file_id: int) -> List[KeyConcept]:
+        """Get key concepts for a file using ORM.
         
         Args:
             file_id: ID of the file
             
         Returns:
-            List[Dict]: List of key concepts
+            A list of KeyConcept domain model objects
         """
         session = self.get_session()
+        key_concepts = []
+        
         try:
             try:
-                # Try regular ORM query first
+                # Use ORM query with correct field names
+                logger.debug(f"Fetching key concepts for file_id {file_id} using ORM")
                 concepts_orm = session.query(KeyConceptORM).filter(
                     KeyConceptORM.file_id == file_id
                 ).all()
                 
-                result = []
+                # Convert ORM models to domain models
                 for concept in concepts_orm:
-                    result.append({
-                        'id': concept.id,
-                        'file_id': concept.file_id,
-                        'concept': concept.concept,
-                        'explanation': concept.explanation,
-                        'span_text': concept.span_text,
-                        'span_start': concept.span_start,
-                        'span_end': concept.span_end,
-                        'source_page_number': concept.source_page_number,
-                        'source_video_timestamp_start_seconds': concept.source_video_timestamp_start_seconds,
-                        'source_video_timestamp_end_seconds': concept.source_video_timestamp_end_seconds
-                    })
+                    kc = KeyConcept(
+                        id=concept.id,
+                        file_id=concept.file_id,
+                        concept_title=concept.concept_title,
+                        concept_explanation=concept.concept_explanation,
+                        display_order=getattr(concept, 'display_order', 1),
+                        source_page_number=getattr(concept, 'source_page_number', None),
+                        source_video_timestamp_start_seconds=getattr(concept, 'source_video_timestamp_start_seconds', None),
+                        source_video_timestamp_end_seconds=getattr(concept, 'source_video_timestamp_end_seconds', None),
+                        created_at=concept.created_at
+                    )
+                    key_concepts.append(kc)
                 
-                return result
+                logger.debug(f"Found {len(key_concepts)} key concepts for file_id {file_id} using ORM")
+                return key_concepts
                 
-            except Exception as orm_error:
-                logger.warning(f"ORM query for key concepts failed: {orm_error}. Trying direct SQL.")
-                
-                # Fallback to direct SQL if ORM query fails
-                try:
-                    # Direct SQL query to get key concepts
-                    result = session.execute(text(
-                        "SELECT id, file_id, concept, explanation, span_text, span_start, span_end, "
-                        "source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds "
-                        f"FROM key_concepts WHERE file_id = {file_id}"
-                    ))
+            except Exception as e:
+                logger.error(f"ORM query for key concepts failed: {e}")
+                raise
                     
-                    # Create dictionaries from the SQL result
-                    key_concepts = []
-                    for row in result:
-                        kc = {
-                            'id': row[0],
-                            'file_id': row[1],
-                            'concept': row[2],
-                            'explanation': row[3],
-                            'span_text': row[4],
-                            'span_start': row[5],
-                            'span_end': row[6],
-                            'source_page_number': row[7],
-                            'source_video_timestamp_start_seconds': row[8],
-                            'source_video_timestamp_end_seconds': row[9]
-                        }
-                        key_concepts.append(kc)
-                    
-                    return key_concepts
-                    
-                except Exception as sql_error:
-                    logger.error(f"Direct SQL query for key concepts failed: {sql_error}")
-                    return []
-                    
-        except Exception as e:
-            logger.error(f"Error getting key concepts: {e}", exc_info=True)
-            return []
         finally:
             session.close()
     
-    # Flashcard retrieval functionality removed as it no longer exists in the DB schema
+    # Flashcard methods
+    def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, is_custom: bool = False) -> Optional[int]:
+        """Add a new flashcard.
+        
+        Args:
+            file_id: ID of the file associated with this flashcard
+            question: Question text
+            answer: Answer text
+            key_concept_id: Optional ID of the associated key concept
+            is_custom: Whether this is a custom flashcard (vs AI-generated)
+            
+        Returns:
+            int: The ID of the newly created flashcard, or None if creation failed
+        """
+        session = self.get_session()
+        try:
+            new_flashcard = FlashcardORM(
+                file_id=file_id,
+                key_concept_id=key_concept_id,
+                question=question,
+                answer=answer,
+                is_custom=is_custom
+            )
+            session.add(new_flashcard)
+            session.commit()
+            logger.info(f"Added flashcard for file {file_id}")
+            return new_flashcard.id
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error adding flashcard: {e}", exc_info=True)
+            return None
+        finally:
+            session.close()
     
-    # Quiz question retrieval functionality removed as it no longer exists in the DB schema
+    def get_flashcards_for_file(self, file_id: int) -> List[Flashcard]:
+        """Get flashcards for a file by ID.
+        
+        Args:
+            file_id: The ID of the file
+            
+        Returns:
+            A list of Flashcard objects
+        """
+        if not isinstance(file_id, int):
+            raise ValueError(f"file_id must be an integer, got {type(file_id)}")
+
+        session = self.get_session()
+        flashcards = []
+        
+        try:
+            try:
+                # Use ORM query
+                logger.debug(f"Fetching flashcards for file_id {file_id} using ORM")
+                flashcards_orm = session.query(FlashcardORM).filter(
+                    FlashcardORM.file_id == file_id
+                ).all()
+                
+                # Convert to domain models
+                for fc_orm in flashcards_orm:
+                    fc = Flashcard(
+                        id=fc_orm.id,
+                        file_id=fc_orm.file_id,
+                        key_concept_id=getattr(fc_orm, 'key_concept_id', None),
+                        question=fc_orm.question,
+                        answer=fc_orm.answer,
+                        is_custom=getattr(fc_orm, 'is_custom', False),
+                        created_at=fc_orm.created_at
+                    )
+                    flashcards.append(fc)
+                
+                logger.debug(f"Found {len(flashcards)} flashcards for file_id {file_id} using ORM")
+            except Exception as e:
+                logger.error(f"ORM query for flashcards failed: {e}")
+                raise
+
+            return flashcards
+        finally:
+            session.close()
+            
+    # Quiz questions methods
+    def add_quiz_question(
+        self, 
+        file_id: int,
+        question: str,
+        question_type: str,
+        correct_answer: str,
+        distractors: List[str],
+        key_concept_id: Optional[int] = None,
+        is_custom: bool = False
+    ) -> Optional[int]:
+        """Add a new quiz question.
+        
+        Args:
+            file_id: ID of the file associated with this quiz question
+            question: Question text
+            question_type: Type of question (MCQ, TF, etc.)
+            correct_answer: The correct answer
+            distractors: List of incorrect answer choices
+            key_concept_id: Optional ID of associated key concept
+            is_custom: Whether this is a custom question (vs AI-generated)
+            
+        Returns:
+            int: The ID of the newly created quiz question, or None if creation failed
+        """
+        session = self.get_session()
+        try:
+            new_quiz = QuizQuestionORM(
+                file_id=file_id,
+                question=question,  # Updated field name
+                question_type=question_type,  # Added required field
+                correct_answer=correct_answer,
+                distractors=distractors,
+                key_concept_id=key_concept_id,  # Added field
+                # Note: explanation and difficulty fields removed as they don't exist in DB
+            )
+            session.add(new_quiz)
+            session.commit()
+            logger.info(f"Added quiz question for file {file_id}")
+            return new_quiz.id
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error adding quiz question: {e}", exc_info=True)
+            return None
+        finally:
+            session.close()
+    
+    def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestion]:
+        """Get quiz questions for a file by ID
+
+        Args:
+            file_id: The ID of the file
+
+        Returns:
+            A list of QuizQuestion objects
+        """
+        if not isinstance(file_id, int):
+            raise ValueError(f"file_id must be an integer, got {type(file_id)}")
+
+        session = self.get_session()
+        quizzes = []
+
+        # Using SQLAlchemy ORM for safer and more maintainable queries
+        try:
+            try:
+                logger.debug(f"Fetching quiz questions for file_id {file_id} using ORM")
+                quizzes_orm = session.query(QuizQuestionORM).filter(
+                    QuizQuestionORM.file_id == file_id
+                ).all()
+                
+                for q_orm in quizzes_orm:
+                    # Set default question_type if not in DB
+                    question_type = getattr(q_orm, 'question_type', 'MCQ')
+                    
+                    # Make sure all fields expected by frontend are present
+                    q = QuizQuestion(
+                        id=q_orm.id,
+                        file_id=q_orm.file_id,
+                        key_concept_id=getattr(q_orm, 'key_concept_id', None),
+                        question=q_orm.question,
+                        question_type=question_type,
+                        correct_answer=q_orm.correct_answer,
+                        distractors=q_orm.distractors if q_orm.distractors else [],
+                        created_at=q_orm.created_at,
+                        # Fields needed by frontend even if not in DB
+                        explanation=None,
+                        difficulty="medium", # Default value expected by frontend
+                        is_custom=False
+                    )
+                    quizzes.append(q)
+                
+                logger.debug(f"Found {len(quizzes)} quiz questions for file_id {file_id} using ORM")
+            except Exception as e:
+                logger.error(f"ORM query for quiz questions failed: {e}")
+                raise
+
+            return quizzes
+        finally:
+            session.close()

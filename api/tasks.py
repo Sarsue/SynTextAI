@@ -2,12 +2,9 @@ import logging
 import os
 import tempfile
 from contextlib import contextmanager
-from text_extractor import extract_data
+import asyncio
 from faster_whisper import WhisperModel
 import yt_dlp
-import os
-import tempfile
-import asyncio # Ensure asyncio is imported
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from repositories.repository_manager import RepositoryManager
 from llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
@@ -401,7 +398,8 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                                     question=mcq["question"],
                                     question_type="MCQ",
                                     correct_answer=mcq["correct_answer"],
-                                    distractors=mcq["distractors"]
+                                    distractors=mcq["distractors"],
+                                    is_custom=False
                                 )
                                 logger.info(f"Generated MCQ for concept: {concept_title}")
                             except Exception as mcq_error:
@@ -416,7 +414,8 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                                     question=tf["question"],
                                     question_type="TF",
                                     correct_answer=tf["correct_answer"],
-                                    distractors=tf["distractors"]
+                                    distractors=tf["distractors"],
+                                    is_custom=False
                                 )
                                 logger.info(f"Generated T/F question for concept: {concept_title}")
                             except Exception as tf_error:
@@ -456,8 +455,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     file_path = None # Initialize file_path to None
     # Wrap entire process in a try-except block to catch errors
     try: # Main try block starts here
-        # Use the global store instance, remove the re-initialization below
-        # store = DocSynthStore() # REMOVE THIS LINE 
+        # Use the global store instance
         # Create a temporary file path and download inside the 'with' block
         with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
             file_path = temp_file.name
@@ -591,90 +589,53 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 logger.warning("No processed video data with chunks generated, skipping storage update.")
 
         elif ext == "pdf":
-            logger.info("Extracting text from PDF...")
-            # Use pdf_extracter to get page-based data
-            from pdf_extracter import extract_text_with_page_numbers 
-            page_data = extract_text_with_page_numbers(file_data)
-            logger.info(f"PDF extraction complete. Pages: {len(page_data)}")
+            logger.info("Processing PDF document...")
+            from processors.pdf_processor import PDFProcessor
+            
+            # Initialize the PDF Processor
+            pdf_processor = PDFProcessor(store)
+            
+            # Process the PDF using the dedicated processor
+            result = await pdf_processor.process(
+                file_data=file_data,
+                file_id=int(file_id),
+                user_id=int(user_id),
+                filename=filename
+            )
+            
+            if not result.get('success', False):
+                logger.error(f"PDF processing failed: {result.get('error', 'unknown error')}")
+                return False
+                
+            logger.info(f"PDF processing complete. Pages: {result.get('page_count', 0)}, Chunks: {result.get('chunk_count', 0)}")
+            
+            # PDF processor already handled chunk addition and key concept generation
+            # No need for any further processing for PDFs
 
-            # --- Prepare data structure with embeddings for storage ---+
-            processed_page_data = []
-            logger.info(f"Chunking content for {len(page_data)} PDF pages...") # Consistency
-            for page_item in page_data:
-                try:
-                    page_content = page_item['content']
-                    page_num = page_item['page_num']
-                    if page_content:
-                        # Chunk the page content
-                        text_chunks = chunk_text(page_content)
-                        non_empty_chunks = [chunk['content'] for chunk in text_chunks if chunk['content'].strip()]
-                        page_chunks_with_embeddings = []
-
-                        if non_empty_chunks:
-                            # Generate embeddings for all non-empty chunks in batch
-                            chunk_embeddings = get_text_embeddings_in_batches(non_empty_chunks)
-
-                            # Ensure we got the same number of embeddings as chunks
-                            if len(chunk_embeddings) == len(non_empty_chunks):
-                                for i, chunk_content in enumerate(non_empty_chunks):
-                                    page_chunks_with_embeddings.append({
-                                        'embedding': chunk_embeddings[i],
-                                        'content': chunk_content # Optional: store chunk content too
-                                    })
-                            else:
-                                logger.error(f"Mismatch between chunk count ({len(non_empty_chunks)}) and embedding count ({len(chunk_embeddings)}) for page {page_num}")
-                                # Decide how to handle mismatch: skip page, store without embeddings, etc.?
-                                # For now, let's log error and proceed without embeddings for this page
-                                page_chunks_with_embeddings = [] # Clear potentially partial data
-
-                        # Structure data as expected by update_file_with_chunks
-                        structured_item = {
-                            'page_num': page_num,
-                            'content': page_content, # Keep full page content for Segment record
-                            'chunks': page_chunks_with_embeddings # List of chunk dicts
-                        }
-                        processed_page_data.append(structured_item)
-                    else:
-                        logger.warning(f"Skipping chunking/embedding for empty page {page_num}")
-                except Exception as embed_error:
-                    logger.error(f"Error chunking/embedding page {page_item.get('page_num', 'N/A')}: {embed_error}", exc_info=True)
-            logger.info("Finished chunking and generating PDF page embeddings.")
-
-            # --- Generate and Save Key Concepts for PDF ---
-            all_text_content = " ".join([page.get('content', '') for page in page_data if page.get('content', '').strip()])
-            if all_text_content:
-                logger.info(f"Attempting to generate key concepts for PDF: {filename}")
-                try:
-                    key_concepts = generate_key_concepts_dspy(
-                        document_text=all_text_content
-                    )
-                    if key_concepts:
-                        for i_kc, concept in enumerate(key_concepts):
-                            store.add_key_concept(
-                                file_id=int(file_id),
-                                concept_title=concept.get("concept_title"),
-                                concept_explanation=concept.get("concept_explanation"),
-                                display_order=i_kc + 1,
-                                source_page_number=concept.get("source_page_number"),
-                                source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
-                                source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
-                            )
-                        logger.info(f"Saved {len(key_concepts)} key concepts for PDF: {filename}")
-                    else:
-                        logger.warning(f"No key concepts generated or returned empty for PDF: {filename}.")
-                except Exception as kc_err:
-                    logger.error(f"Error during key concept generation/saving for PDF {filename}: {kc_err}", exc_info=True)
-            else:
-                logger.warning(f"No content found to generate key concepts for PDF file: {filename}")
-            # -----------------------------------------
-
-            # Save the segmented PDF data with embeddings
-            if processed_page_data:
-                store.update_file_with_chunks(user_id=int(user_id), filename=filename, file_type="pdf", extracted_data=processed_page_data)
-                logger.info("Processed and stored PDF segments.")
-            else:
-                logger.warning("No processed PDF data with chunks generated, skipping storage update.")
-
+        elif ext in ["txt", "jpg", "jpeg", "png", "gif"]:
+            logger.info(f"Processing {ext} file...")
+            from processors.text_processor import TextProcessor
+            
+            # Initialize the Text Processor
+            text_processor = TextProcessor(store)
+            
+            # Process the file using the dedicated processor
+            result = await text_processor.process(
+                file_data=file_data,
+                file_id=int(file_id),
+                user_id=int(user_id),
+                filename=filename
+            )
+            
+            if not result.get('success', False):
+                logger.error(f"Text/image processing failed: {result.get('error', 'unknown error')}")
+                return False
+                
+            logger.info(f"Processing complete. File type: {result.get('file_type', 'unknown')}, Chunks: {result.get('chunk_count', 0)}")
+            
+            # Text processor already handled chunk addition and key concept generation
+            # No need for any further processing
+                
         else:
             logger.warning(f"Unsupported file type: {ext}")
 

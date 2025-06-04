@@ -192,33 +192,88 @@ class KeyConcept:
         self,
         id: Optional[int] = None,
         file_id: Optional[int] = None,
-        concept: str = "",
-        explanation: str = "",
-        span_text: Optional[str] = None,
-        span_start: Optional[int] = None,
-        span_end: Optional[int] = None,
+        concept_title: str = "",
+        concept_explanation: str = "",
+        display_order: Optional[int] = None,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
+        source_video_timestamp_end_seconds: Optional[int] = None,
+        created_at: Optional[datetime] = None
     ):
         self.id = id
         self.file_id = file_id
-        self.concept = concept
-        self.explanation = explanation
-        self.span_text = span_text
-        self.span_start = span_start
-        self.span_end = span_end
+        self.concept_title = concept_title
+        self.concept_explanation = concept_explanation
+        self.display_order = display_order or 1
         self.source_page_number = source_page_number
         self.source_video_timestamp_start_seconds = source_video_timestamp_start_seconds
         self.source_video_timestamp_end_seconds = source_video_timestamp_end_seconds
+        self.created_at = created_at or datetime.now()
         self.flashcards = []
         self.quiz_questions = []
     
     def __repr__(self) -> str:
-        return f"KeyConcept(id={self.id}, concept='{self.concept}')"
+        return f"KeyConcept(id={self.id}, concept_title='{self.concept_title}')"
 
 
-# Flashcard domain model removed as it's no longer in the DB schema
+class Flashcard:
+    """Domain model for a flashcard."""
+    
+    def __init__(
+        self,
+        id: Optional[int] = None,
+        file_id: int = None,
+        key_concept_id: Optional[int] = None,
+        question: str = None,
+        answer: str = None,
+        is_custom: bool = False,
+        created_at: Optional[datetime] = None
+    ):
+        self.id = id
+        self.file_id = file_id
+        self.key_concept_id = key_concept_id
+        self.question = question
+        self.answer = answer
+        self.is_custom = is_custom
+        self.created_at = created_at
+    
+    def __repr__(self) -> str:
+        return f"Flashcard(id={self.id}, question='{self.question[:20]}...')"
 
 
-# QuizQuestion domain model removed as it's no longer in the DB schema
+class QuizQuestion:
+    """Domain model for a quiz question."""
+    
+    def __init__(
+        self,
+        id: Optional[int] = None,
+        file_id: int = None,
+        key_concept_id: Optional[int] = None,
+        question: str = None,
+        question_type: str = None, 
+        correct_answer: str = None,
+        distractors: List[str] = None,
+        created_at: Optional[datetime] = None,
+        # These fields don't exist in DB but kept as None for frontend compatibility
+        explanation: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        is_custom: bool = False
+    ):
+        self.id = id
+        self.file_id = file_id
+        self.key_concept_id = key_concept_id
+        self.question = question
+        self.question_type = question_type
+        # Alias for backwards compatibility with frontend
+        self.question_text = question
+        self.correct_answer = correct_answer
+        self.distractors = distractors if distractors is not None else []
+        self.created_at = created_at
+        
+        # Fields that don't exist in DB but kept for frontend compatibility
+        self.explanation = None
+        self.difficulty = None
+        self.is_custom = False
+    
+    def __repr__(self) -> str:
+        return f"QuizQuestion(id={self.id}, question='{self.question_text[:20]}...')"

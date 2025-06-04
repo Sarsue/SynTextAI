@@ -56,9 +56,9 @@ async def subscription_status(
 ):
     try:
         user_id = user_data["user_id"]
-        subscription = store.get_subscription(user_id)
+        subscription_data = store.get_subscription(user_id)
         
-        if not subscription:
+        if not subscription_data:
             return {
                 'subscription_status': 'none',
                 'card_last4': None,
@@ -68,14 +68,17 @@ async def subscription_status(
                 'trial_end': None
             }
         
+        # Unpack the tuple (Subscription, CardDetails)
+        subscription, card_details = subscription_data
+        
         # Prepare subscription data to return
         response = {
-            'subscription_status': subscription["status"],
-            'card_last4': subscription["card_last4"],
-            'card_brand': subscription["card_brand"],
-            'card_exp_month': subscription["exp_month"],
-            'card_exp_year': subscription["exp_year"],
-            'trial_end': subscription["trial_end"]  
+            'subscription_status': subscription.status,
+            'card_last4': card_details.card_last4 if card_details else None,
+            'card_brand': card_details.card_type if card_details else None,
+            'card_exp_month': card_details.exp_month if card_details else None,
+            'card_exp_year': card_details.exp_year if card_details else None,
+            'trial_end': subscription.trial_end
         }
         
         return response
