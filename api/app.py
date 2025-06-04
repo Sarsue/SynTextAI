@@ -3,7 +3,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from websocket_manager import websocket_manager
-from docsynth_store import DocSynthStore
+from repositories.repository_manager import RepositoryManager
 from dotenv import load_dotenv
 from firebase_setup import initialize_firebase
 import os
@@ -50,7 +50,7 @@ DATABASE_URL = (
     f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
 )
 
-store = DocSynthStore(database_url=DATABASE_URL)
+store = RepositoryManager(database_url=DATABASE_URL)
 app.state.store = store
 
 # Dependency to get the store

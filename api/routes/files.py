@@ -4,7 +4,7 @@ from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from typing import Dict, List, Optional
-from docsynth_store import DocSynthStore
+from repositories.repository_manager import RepositoryManager
 from pydantic import BaseModel, Field
 from llm_service import prompt_llm
 from datetime import datetime
@@ -21,7 +21,7 @@ def get_store(request: Request):
     return request.app.state.store
 
 # Helper function to authenticate user and retrieve user ID
-async def authenticate_user(request: Request, store: DocSynthStore = Depends(get_store)):
+async def authenticate_user(request: Request, store: RepositoryManager = Depends(get_store)):
     try:
         token = request.headers.get('Authorization')
         if not token:

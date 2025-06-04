@@ -9,7 +9,7 @@ import os
 import tempfile
 import asyncio # Ensure asyncio is imported
 from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
-from docsynth_store import DocSynthStore
+from repositories.repository_manager import RepositoryManager
 from llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
 from syntext_agent import SyntextAgent
 import stripe
@@ -71,7 +71,7 @@ DATABASE_URL = (
     f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
 )
 
-store = DocSynthStore(database_url=DATABASE_URL)
+store = RepositoryManager(database_url=DATABASE_URL)
 syntext = SyntextAgent()
 
 # Model is only loaded when needed to save memory
@@ -183,158 +183,40 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
     # --- YOUTUBE LINK HANDLING ---
     if is_youtube or (filename.startswith('http') and ('youtube.com' in filename or 'youtu.be' in filename)):
-        logger.info(f"Processing YouTube link: {filename}")
+        logger.info(f"Processing YouTube link: {filename} using the YouTubeProcessor module")
+        # Use the new modular YouTube processor
+        from .processors.youtube_processor import YouTubeProcessor
+        from .docsynth_store import DocSynthStore
+        
         try:
-            from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-            import re
-            # Initialize variables that will be used in error handling
-            full_transcript_text = ""
-            transcription_successful = False
-            # Extract video ID from URL
-            yt_match = re.search(r'(?:v=|youtu.be/|embed/)([\w-]{11})', filename)
-            video_id = yt_match.group(1) if yt_match else None
-            if not video_id:
-                logger.error(f"Could not extract video ID from YouTube URL: {filename}")
-            target_lang_code = LANGUAGE_CODE_MAP.get(language.lower(), language.lower()) # Use mapped code or original if not in map (e.g. 'en')
-            if not target_lang_code: # Handle empty language string if it occurs
-                target_lang_code = 'en'
-
-            transcript_data = None
-
-            # First try YouTube API transcripts
-            transcript_data = None  # Initialize to None to avoid undefined reference
+            # Initialize YouTube processor with store
+            store = DocSynthStore()
+            youtube_processor = YouTubeProcessor(store)
             
-            try:
-                # First attempt: direct fetch with requested language
-                logger.info(f"Attempting direct transcript fetch for {video_id} in language: {target_lang_code}")
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                transcript = transcript_list.find_transcript([target_lang_code])
-                transcript_data = transcript.fetch()
-                logger.info(f"Successfully fetched transcript in {language} ({target_lang_code})")
-            except Exception as direct_fetch_error:
-                logger.warning(f"Direct transcript fetch failed: {direct_fetch_error}")
-                
-                # Second attempt: try English if the requested language wasn't English
-                if target_lang_code != 'en':
-                    try:
-                        logger.info(f"Attempting fallback to English transcript for {filename}")
-                        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id) 
-                        transcript = transcript_list.find_transcript(['en'])
-                        transcript_data = transcript.fetch()
-                        logger.info("Successfully fetched transcript in English as fallback.")
-                    except Exception as english_fetch_error:
-                        logger.warning(f"English transcript fallback also failed: {english_fetch_error}")
-                        # Explicitly set transcript_data to None to ensure we know it failed
-                        transcript_data = None
+            # Process the YouTube video
+            result = await youtube_processor.process(
+                user_id=user_id,
+                file_id=file_id,
+                filename=filename,
+                file_url=file_url,
+                user_gc_id=user_gc_id,
+                language=language,
+                comprehension_level=comprehension_level
+            )
             
-            # If YouTube transcripts failed, try Whisper fallback
-            if not transcript_data:
-                logger.info(f"Attempting fallback to local Whisper transcription for {filename} (video_id: {video_id})")
+            if not result.get("success", False):
+                logger.error(f"YouTube processing failed: {result.get('error', 'Unknown error')}")
+                store.update_file_status(int(file_id), "error", result.get('error', 'Processing failed')[:200])
+                return  # Exit without marking as processed so it can be retried
                 
-                temp_audio_file_path = None
-                try:
-                    # Download YouTube audio
-                    temp_audio_file_path = download_youtube_audio_segment(video_id, language_code_for_whisper=target_lang_code)
-                    if not temp_audio_file_path:
-                        logger.error(f"Failed to download audio for {filename}.")
-                        return  # Don't mark as processed so it can be retried
-                    
-                    logger.info(f"Successfully downloaded audio to {temp_audio_file_path} for Whisper processing.")
-                    
-                    # Determine language for Whisper: use target_lang_code if specific, else None for auto-detect
-                    whisper_lang_code = target_lang_code if target_lang_code and target_lang_code != 'en' else None
-                    
-                    # Add timeouts to prevent hanging indefinitely
-                    import asyncio
-                    try:
-                        raw_whisper_segments, _ = await asyncio.wait_for(
-                            transcribe_audio_chunked(temp_audio_file_path, language=whisper_lang_code),
-                            timeout=600  # 10 minute timeout
-                        )
-                        
-                        if raw_whisper_segments:
-                            transcript_data = adapt_whisper_segments_to_transcript_data(raw_whisper_segments)
-                            logger.info(f"Successfully transcribed using Whisper with {len(raw_whisper_segments)} segments")
-                        else:
-                            logger.error(f"Whisper transcription returned no segments for {filename}.")
-                            return  # Don't mark as processed so it can be retried
-                            
-                    except asyncio.TimeoutError:
-                        logger.error(f"Whisper transcription timed out after 10 minutes for {filename}")
-                        return  # Don't mark as processed so it can be retried
-                        
-                    except Exception as whisper_error:
-                        logger.error(f"Error during Whisper transcription: {whisper_error}", exc_info=True)
-                        return  # Don't mark as processed so it can be retried
-                        
-                except Exception as whisper_fallback_error:
-                    logger.error(f"Error in Whisper fallback process: {whisper_fallback_error}", exc_info=True)
-                    return  # Don't mark as processed so it can be retried
-                    
-                finally:
-                    # Clean up temp files
-                    if temp_audio_file_path and os.path.exists(temp_audio_file_path):
-                        try:
-                            os.remove(temp_audio_file_path)
-                            logger.info(f"Cleaned up temporary audio file: {temp_audio_file_path}")
-                        except Exception as cleanup_error:
-                            logger.error(f"Error cleaning up temp file: {cleanup_error}")
-                            # Continue processing even if cleanup fails
-                            
-                if not transcript_data:
-                    logger.error(f"Whisper fallback initiated but failed to produce transcript_data for {filename}.")
-                    return  # Don't mark as processed so it can be retried
-
-            # Ensure transcript_data is not None before proceeding (should be handled by returns, but as a safeguard)
-            if not transcript_data:
-                 logger.error(f"Reached post-transcript fetching block but transcript_data is unexpectedly None for {filename}. This should not happen.")
-                 return
-            # Process transcript into segments
-            processed_video_data = []
-            all_small_chunks = [] # List to hold tuples of (segment_index, chunk_text)
-            segment_chunk_map = {} # Map segment index to its list of small chunk texts
-            for entry in transcript_data:
-                segment = {
-                    'start_time': entry.start,
-                    'end_time': entry.start + entry.duration,
-                    'content': entry.text,
-                    'duration': entry.duration
-                }
-                processed_video_data.append(segment)
-                all_small_chunks.append((len(processed_video_data)-1, entry.text))
-                segment_chunk_map[len(processed_video_data)-1] = [entry.text]
-            # --- Chunk, embed, explain, summarize (reuse video logic) ---
-            # Generate embeddings for all small chunks across the video in one batch
-            logger.info(f"Generating embeddings for {len(all_small_chunks)} small chunks across video...")
-            all_small_chunk_texts = [text for _, text in all_small_chunks]
-            all_embeddings = []
-            if all_small_chunk_texts:
-                all_embeddings = get_text_embeddings_in_batches(all_small_chunk_texts)
-            embedding_dict = {all_small_chunks[i][1]: all_embeddings[i] for i in range(len(all_small_chunks))} if len(all_embeddings) == len(all_small_chunks) else {}
-            # Attach embeddings to segments
-            for i, segment in enumerate(processed_video_data):
-                segment_chunks = segment_chunk_map.get(i, [])
-                segment['chunks'] = []
-                for small_chunk_text in segment_chunks:
-                    embedding = embedding_dict.get(small_chunk_text) # Look up embedding
-                    segment['chunks'].append({
-                        'embedding': embedding,
-                        'content': small_chunk_text
-                    })
-            # Save segments and their embedded chunks
-            logger.info(f"Storing segments and chunks for YouTube video: {filename} (File ID: {file_id})")
-            try:
-                store.update_file_with_chunks(
-                    user_id=int(user_id), 
-                    filename=filename, # DocSynthStore.update_file_with_chunks uses filename to find/create File record
-                    file_type="video", 
-                    extracted_data=processed_video_data
-                )
-                logger.info(f"Successfully stored segments and chunks for file ID: {file_id}")
-            except Exception as e_chunk_save:
-                logger.error(f"Error storing segments/chunks for YouTube video {filename} (File ID: {file_id}): {e_chunk_save}", exc_info=True)
-                # Decide if we should return or continue to key concept extraction
-                # For now, let's attempt key concepts even if chunk saving fails, as transcript is available
+            logger.info(f"YouTube processing completed successfully for file_id: {file_id}")
+            # File status is already updated in the processor
+            return
+        except Exception as e:
+            logger.error(f"Error in YouTube processing: {e}", exc_info=True)
+            store = DocSynthStore()
+            store.update_file_status(int(file_id), "error", str(e)[:200])
+            return
 
             # --- Key Concept Extraction ---
             # Format timestamps in the transcript to help LLM identify segments

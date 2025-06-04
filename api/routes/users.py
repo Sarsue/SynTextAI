@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
 from utils import decode_firebase_token
-from docsynth_store import DocSynthStore
+from repositories.repository_manager import RepositoryManager
 import logging
 
 # Set up logging
@@ -18,7 +18,7 @@ def get_store(request: Request):
     return request.app.state.store
 
 # Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
+async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
     if not authorization or not authorization.startswith("Bearer "):
         logger.error("Invalid or missing Authorization token")
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -53,7 +53,7 @@ async def get_firebase_user_info_from_token(authorization: str = Header(None)):
 @users_router.post("", status_code=201) # This is the POST /api/v1/users endpoint
 async def create_user( # Function name remains 'create_user'
     user_info: Dict = Depends(get_firebase_user_info_from_token), # Use the new dependency
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     email = user_info.get('email')
     # Firebase tokens usually include 'name', but ensure a fallback or check if it's essential
@@ -105,7 +105,7 @@ async def create_user( # Function name remains 'create_user'
 async def delete_user(
     background_tasks: BackgroundTasks,
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
