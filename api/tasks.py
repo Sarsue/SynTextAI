@@ -858,6 +858,15 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             # Combine all retrieved results
             all_results = vector_results + additional_results
             
+            # Log file types being retrieved to verify all file types work with RAG
+            file_types = {}
+            for result in all_results:
+                if 'file_name' in result:
+                    file_ext = result['file_name'].split('.')[-1].lower() if '.' in result['file_name'] else 'unknown'
+                    file_types[file_ext] = file_types.get(file_ext, 0) + 1
+            if file_types:
+                logger.info(f"Retrieved content from file types: {file_types}")
+                
             # Deduplicate results by segment ID
             seen_ids = set()
             unique_results = []

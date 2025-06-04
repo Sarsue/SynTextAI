@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, TIMESTAMP, DateTime, Float, Boolean
 from sqlalchemy.orm import declarative_base, relationship,  mapped_column, Mapped
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.types import JSON
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.exc import IntegrityError
@@ -772,19 +772,47 @@ class DocSynthStore:
                 except Exception as nested_e:
                     raise ValueError(f"Failed to retrieve file: {str(nested_e)}")
 
-            # Delete associated chunks (including embeddings) - using direct SQL to avoid schema issues
-            session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
+            # Try using the ORM to leverage cascade delete
+            try:
+                # First get the file object
+                file_obj = session.query(File).filter(File.id == file_id, File.user_id == user_id).first()
+                if file_obj:
+                    # Delete the file - this should cascade to all related objects
+                    session.delete(file_obj)
+                    logger.info(f"Successfully deleted file ID {file_id} with ORM cascade")
+                else:
+                    # If ORM approach fails, fall back to direct SQL
+                    logger.warning(f"Could not find file with ID {file_id} for user {user_id} using ORM, falling back to SQL")
+                    # Delete associated chunks (including embeddings)
+                    session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
+                    # Delete associated segments
+                    session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
+                    # Delete the file record
+                    session.execute(text("DELETE FROM files WHERE id = :file_id AND user_id = :user_id"), 
+                                  {"file_id": file_id, "user_id": user_id})
+            except Exception as orm_error:
+                logger.warning(f"Error using ORM cascade delete: {orm_error}. Falling back to SQL approach.")
+                
+                # Delete cascade manually via SQL as fallback
+                # Delete associated flashcards, quizzes and key concepts
+                session.execute(text("DELETE FROM flashcards WHERE key_concept_id IN (SELECT id FROM key_concepts WHERE file_id = :file_id)"), {"file_id": file_id})
+                session.execute(text("DELETE FROM quiz_questions WHERE key_concept_id IN (SELECT id FROM key_concepts WHERE file_id = :file_id)"), {"file_id": file_id})
+                session.execute(text("DELETE FROM key_concepts WHERE file_id = :file_id"), {"file_id": file_id})
+                
+                # Delete associated chunks and segments
+                session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
+                session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
+                
+                # Finally delete the file
+                session.execute(text("DELETE FROM files WHERE id = :file_id AND user_id = :user_id"), 
+                              {"file_id": file_id, "user_id": user_id})
 
-            # Delete associated segments - using direct SQL to avoid schema issues
-            session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
-
-            # Delete the file record - using direct SQL to avoid schema issues
-            session.execute(text("DELETE FROM files WHERE id = :file_id"), {"file_id": file_id})
-            
-            session.commit()
-            return {'file_name': file_name, 'file_id': file_id}
-
-        except Exception as e:
+            except Exception as e:
+                session.rollback()  # Rollback in case of error
+                raise  # Re-raise the exception for further handling
+            else:
+                session.commit()
+                return {'file_name': file_name, 'file_id': file_id}
             session.rollback()  # Rollback in case of error
             raise  # Re-raise the exception for further handling
         finally:
