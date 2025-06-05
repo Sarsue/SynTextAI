@@ -57,10 +57,10 @@ class UnitOfWork:
                 logger.error(f"Error during commit: {e}", exc_info=True)
                 # Re-raise the exception to make sure caller knows it failed
                 raise
-        finally:
-            # Always close the session
-            self.session.close()
-            
+                
+        # Always close the session, regardless of outcome
+        self.session.close()
+
     def execute_with_result(self, operation_func: Callable[[Any], T]) -> Optional[T]:
         """
         Execute an operation with the session and return its result.

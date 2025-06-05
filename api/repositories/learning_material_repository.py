@@ -52,29 +52,27 @@ class LearningMaterialRepository(BaseRepository):
         Returns:
             int: The ID of the newly created concept, or None if creation failed
         """
-        session = self.get_session()
-        try:
-            new_concept = KeyConceptORM(
-                file_id=file_id,
-                concept=concept_title,
-                explanation=concept_explanation,
-                span_text=source_text,
-                span_start=source_start,
-                span_end=source_end,
-                source_page_number=source_page_number,
-                source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
-                source_video_timestamp_end_seconds=source_video_timestamp_end_seconds
-            )
-            session.add(new_concept)
-            session.commit()
-            logger.info(f"Added key concept '{concept_title}' for file {file_id}")
-            return new_concept.id
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error adding key concept: {e}", exc_info=True)
-            return None
-        finally:
-            session.close()
+        with self.get_unit_of_work() as uow:
+            try:
+                new_concept = KeyConceptORM(
+                    file_id=file_id,
+                    concept=concept_title,
+                    explanation=concept_explanation,
+                    span_text=source_text,
+                    span_start=source_start,
+                    span_end=source_end,
+                    source_page_number=source_page_number,
+                    source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
+                    source_video_timestamp_end_seconds=source_video_timestamp_end_seconds
+                )
+                uow.session.add(new_concept)
+                # Commit handled by UnitOfWork
+                logger.info(f"Added key concept '{concept_title}' for file {file_id}")
+                return new_concept.id
+            except Exception as e:
+                # Rollback handled by UnitOfWork
+                logger.error(f"Error adding key concept: {e}", exc_info=True)
+                return None
     
     # Flashcard functionality removed as it no longer exists in the DB schema
     
@@ -89,14 +87,13 @@ class LearningMaterialRepository(BaseRepository):
         Returns:
             A list of KeyConcept domain model objects
         """
-        session = self.get_session()
-        key_concepts = []
-        
-        try:
+        with self.get_unit_of_work() as uow:
+            key_concepts = []
+            
             try:
                 # Use ORM query with correct field names
                 logger.debug(f"Fetching key concepts for file_id {file_id} using ORM")
-                concepts_orm = session.query(KeyConceptORM).filter(
+                concepts_orm = uow.session.query(KeyConceptORM).filter(
                     KeyConceptORM.file_id == file_id
                 ).all()
                 
@@ -105,8 +102,8 @@ class LearningMaterialRepository(BaseRepository):
                     kc = KeyConcept(
                         id=concept.id,
                         file_id=concept.file_id,
-                        concept_title=concept.concept_title,
-                        concept_explanation=concept.concept_explanation,
+                        concept_title=concept.concept,  # Note: field name in ORM is 'concept'
+                        concept_explanation=concept.explanation,  # Note: field name in ORM is 'explanation'
                         display_order=getattr(concept, 'display_order', 1),
                         source_page_number=getattr(concept, 'source_page_number', None),
                         source_video_timestamp_start_seconds=getattr(concept, 'source_video_timestamp_start_seconds', None),
@@ -121,9 +118,6 @@ class LearningMaterialRepository(BaseRepository):
             except Exception as e:
                 logger.error(f"ORM query for key concepts failed: {e}")
                 raise
-                    
-        finally:
-            session.close()
     
     # Flashcard methods
     def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, is_custom: bool = False) -> Optional[int]:
@@ -139,25 +133,23 @@ class LearningMaterialRepository(BaseRepository):
         Returns:
             int: The ID of the newly created flashcard, or None if creation failed
         """
-        session = self.get_session()
-        try:
-            new_flashcard = FlashcardORM(
-                file_id=file_id,
-                key_concept_id=key_concept_id,
-                question=question,
-                answer=answer,
-                is_custom=is_custom
-            )
-            session.add(new_flashcard)
-            session.commit()
-            logger.info(f"Added flashcard for file {file_id}")
-            return new_flashcard.id
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error adding flashcard: {e}", exc_info=True)
-            return None
-        finally:
-            session.close()
+        with self.get_unit_of_work() as uow:
+            try:
+                new_flashcard = FlashcardORM(
+                    file_id=file_id,
+                    key_concept_id=key_concept_id,
+                    question=question,
+                    answer=answer,
+                    is_custom=is_custom
+                )
+                uow.session.add(new_flashcard)
+                # Commit handled by UnitOfWork
+                logger.info(f"Added flashcard for file {file_id}")
+                return new_flashcard.id
+            except Exception as e:
+                # Rollback handled by UnitOfWork
+                logger.error(f"Error adding flashcard: {e}", exc_info=True)
+                return None
     
     def get_flashcards_for_file(self, file_id: int) -> List[Flashcard]:
         """Get flashcards for a file by ID.
@@ -171,14 +163,13 @@ class LearningMaterialRepository(BaseRepository):
         if not isinstance(file_id, int):
             raise ValueError(f"file_id must be an integer, got {type(file_id)}")
 
-        session = self.get_session()
-        flashcards = []
-        
-        try:
+        with self.get_unit_of_work() as uow:
+            flashcards = []
+            
             try:
                 # Use ORM query
                 logger.debug(f"Fetching flashcards for file_id {file_id} using ORM")
-                flashcards_orm = session.query(FlashcardORM).filter(
+                flashcards_orm = uow.session.query(FlashcardORM).filter(
                     FlashcardORM.file_id == file_id
                 ).all()
                 
@@ -201,8 +192,6 @@ class LearningMaterialRepository(BaseRepository):
                 raise
 
             return flashcards
-        finally:
-            session.close()
             
     # Quiz questions methods
     def add_quiz_question(
@@ -229,27 +218,25 @@ class LearningMaterialRepository(BaseRepository):
         Returns:
             int: The ID of the newly created quiz question, or None if creation failed
         """
-        session = self.get_session()
-        try:
-            new_quiz = QuizQuestionORM(
-                file_id=file_id,
-                question=question,  # Updated field name
-                question_type=question_type,  # Added required field
-                correct_answer=correct_answer,
-                distractors=distractors,
-                key_concept_id=key_concept_id,  # Added field
-                # Note: explanation and difficulty fields removed as they don't exist in DB
-            )
-            session.add(new_quiz)
-            session.commit()
-            logger.info(f"Added quiz question for file {file_id}")
-            return new_quiz.id
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error adding quiz question: {e}", exc_info=True)
-            return None
-        finally:
-            session.close()
+        with self.get_unit_of_work() as uow:
+            try:
+                new_quiz = QuizQuestionORM(
+                    file_id=file_id,
+                    question=question,  # Updated field name
+                    question_type=question_type,  # Added required field
+                    correct_answer=correct_answer,
+                    distractors=distractors,
+                    key_concept_id=key_concept_id,  # Added field
+                    # Note: explanation and difficulty fields removed as they don't exist in DB
+                )
+                uow.session.add(new_quiz)
+                # Commit handled by UnitOfWork
+                logger.info(f"Added quiz question for file {file_id}")
+                return new_quiz.id
+            except Exception as e:
+                # Rollback handled by UnitOfWork
+                logger.error(f"Error adding quiz question: {e}", exc_info=True)
+                return None
     
     def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestion]:
         """Get quiz questions for a file by ID
@@ -263,14 +250,13 @@ class LearningMaterialRepository(BaseRepository):
         if not isinstance(file_id, int):
             raise ValueError(f"file_id must be an integer, got {type(file_id)}")
 
-        session = self.get_session()
-        quizzes = []
+        with self.get_unit_of_work() as uow:
+            quizzes = []
 
-        # Using SQLAlchemy ORM for safer and more maintainable queries
-        try:
+            # Using SQLAlchemy ORM for safer and more maintainable queries
             try:
                 logger.debug(f"Fetching quiz questions for file_id {file_id} using ORM")
-                quizzes_orm = session.query(QuizQuestionORM).filter(
+                quizzes_orm = uow.session.query(QuizQuestionORM).filter(
                     QuizQuestionORM.file_id == file_id
                 ).all()
                 
@@ -301,5 +287,3 @@ class LearningMaterialRepository(BaseRepository):
                 raise
 
             return quizzes
-        finally:
-            session.close()

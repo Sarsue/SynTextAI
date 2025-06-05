@@ -32,24 +32,23 @@ class FileRepository(BaseRepository):
         Returns:
             int: The ID of the newly created file, or None if creation failed
         """
-        session = self.get_session()
-        try:
-            new_file = FileORM(
-                user_id=user_id,
-                file_name=file_name,
-                file_url=file_url
-                # status column removed as it doesn't exist in the database schema
-            )
-            session.add(new_file)
-            session.commit()
-            logger.info(f"Added new file {file_name} (ID: {new_file.id}) for user {user_id}")
-            return new_file.id
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error adding file: {e}", exc_info=True)
-            return None
-        finally:
-            session.close()
+        with self.get_unit_of_work() as uow:
+            try:
+                new_file = FileORM(
+                    user_id=user_id,
+                    file_name=file_name,
+                    file_url=file_url
+                    # status column removed as it doesn't exist in the database schema
+                )
+                uow.session.add(new_file)
+                # No need for commit - handled by UnitOfWork
+                logger.info(f"Added new file {file_name} (ID: {new_file.id}) for user {user_id}")
+                return new_file.id
+            except Exception as e:
+                # No need for rollback - handled by UnitOfWork
+                logger.error(f"Error adding file: {e}", exc_info=True)
+                return None
+            # No need for finally/close - handled by UnitOfWork
     
     def update_file_with_chunks(self, user_id: int, filename: str, file_type: str, extracted_data: List[Dict]) -> bool:
         """Store processed file data with embeddings, segments, and metadata.
@@ -63,70 +62,65 @@ class FileRepository(BaseRepository):
         Returns:
             bool: True if successful, False otherwise
         """
-        session = self.get_session()
-        try:
-            # Get or create the file record
-            file = session.query(FileORM).filter(
-                FileORM.user_id == user_id,
-                FileORM.file_name == filename
-            ).first()
-            
-            if not file:
-                file = FileORM(
-                    user_id=user_id,
-                    file_name=filename,
-                    file_url=""  # URL might be added later
-                    # status column removed as it doesn't exist in the database schema
-                )
-                session.add(file)
-                session.flush()  # To get the ID
-            
-            # Process segments and chunks
-            for segment_data in extracted_data:
-                # Create segment
-                segment = SegmentORM(
-                    file_id=file.id,
-                    content=segment_data.get('content', ''),
-                    page_number=segment_data.get('page_number')
-                )
+        with self.get_unit_of_work() as uow:
+            try:
+                # Get or create the file record
+                file = uow.session.query(FileORM).filter(
+                    FileORM.user_id == user_id,
+                    FileORM.file_name == filename
+                ).first()
                 
-                # Handle metadata - could be start/end times for video, etc.
-                meta_data = {}
-                for key in segment_data:
-                    if key not in ['content', 'page_number', 'chunks']:
-                        meta_data[key] = segment_data[key]
+                if not file:
+                    file = FileORM(
+                        user_id=user_id,
+                        file_name=filename,
+                        file_url=""  # URL might be added later
+                        # status column removed as it doesn't exist in the database schema
+                    )
+                    uow.session.add(file)
+                    uow.session.flush()  # To get the ID
                 
-                if meta_data:
-                    segment.meta_data = meta_data
+                # Process segments and chunks
+                for segment_data in extracted_data:
+                    # Create segment
+                    segment = SegmentORM(
+                        file_id=file.id,
+                        content=segment_data.get('content', ''),
+                        page_number=segment_data.get('page_number')
+                    )
+                    
+                    # Handle metadata - could be start/end times for video, etc.
+                    meta_data = {}
+                    for key in segment_data:
+                        if key not in ['content', 'page_number', 'chunks']:
+                            meta_data[key] = segment_data[key]
+                    
+                    if meta_data:
+                        segment.meta_data = meta_data
+                    
+                    uow.session.add(segment)
+                    uow.session.flush()  # To get the segment ID
+                    
+                    # Process chunks within this segment
+                    if 'chunks' in segment_data:
+                        for chunk_data in segment_data['chunks']:
+                            chunk = ChunkORM(
+                                segment_id=segment.id,
+                                content=chunk_data.get('content', ''),
+                                embedding=chunk_data.get('embedding')
+                            )
+                            uow.session.add(chunk)
                 
-                session.add(segment)
-                session.flush()  # To get the segment ID
-                
-                # Process chunks within this segment
-                if 'chunks' in segment_data:
-                    for chunk_data in segment_data['chunks']:
-                        chunk = ChunkORM(
-                            file_id=file.id,
-                            segment_id=segment.id,
-                            content=chunk_data['content'],
-                            embedding=chunk_data.get('embedding'),
-                            file_type=file_type
-                        )
-                        session.add(chunk)
-            
-            # Status update removed - status column doesn't exist in database schema
-            # file.status = "processed"
-            file.file_type = file_type
-            
-            session.commit()
-            logger.info(f"Successfully stored processed data for file: {filename}")
-            return True
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error storing processed data: {e}", exc_info=True)
-            return False
-        finally:
-            session.close()
+                # Commit handled by UnitOfWork
+                return True
+            except IntegrityError as e:
+                # Rollback handled by UnitOfWork
+                logger.error(f"Integrity error updating file with chunks: {e}", exc_info=True)
+                return False
+            except Exception as e:
+                # Rollback handled by UnitOfWork
+                logger.error(f"Error updating file with chunks: {e}", exc_info=True)
+                return False
     
     def get_files_for_user(self, user_id: int) -> List[Dict[str, Any]]:
         """Get all files for a user.
@@ -137,46 +131,44 @@ class FileRepository(BaseRepository):
         Returns:
             List[Dict]: List of file records with metadata
         """
-        session = self.get_session()
-        try:
-            from sqlalchemy import func
-            
-            # Fetch files with chunk count in a single query (more efficient)
-            files = session.query(
-                FileORM.id, 
-                FileORM.file_name, 
-                FileORM.file_url,
-                FileORM.created_at,
-                func.count(ChunkORM.id).label('chunk_count')
-            ).outerjoin(ChunkORM, ChunkORM.file_id == FileORM.id)\
-            .filter(FileORM.user_id == user_id)\
-            .group_by(FileORM.id, FileORM.file_name, FileORM.file_url, FileORM.created_at)\
-            .order_by(FileORM.created_at.desc())\
-            .all()
-            
-            result = []
-            for file in files:
-                # Align with original implementation (processed = has chunks)
-                is_processed = file[4] > 0  # chunk_count > 0
+        with self.get_unit_of_work() as uow:
+            try:
+                from sqlalchemy import func
                 
-                file_dict = {
-                    "id": file[0],                 # FileORM.id
-                    "file_name": file[1],         # FileORM.file_name - keep for backend compatibility
-                    "name": file[1],              # Match original field name for frontend
-                    "file_url": file[2],          # FileORM.file_url - keep for backend compatibility
-                    "publicUrl": file[2],         # Match original field name for frontend
-                    "processed": is_processed,     # Using the original definition (has chunks)
-                    "created_at": file[3].isoformat() if file[3] else None  # FileORM.created_at
-                }
+                # Fetch files with chunk count in a single query (more efficient)
+                files = uow.session.query(
+                    FileORM.id, 
+                    FileORM.file_name, 
+                    FileORM.file_url,
+                    FileORM.created_at,
+                    func.count(ChunkORM.id).label('chunk_count')
+                ).outerjoin(ChunkORM, ChunkORM.file_id == FileORM.id)\
+                .filter(FileORM.user_id == user_id)\
+                .group_by(FileORM.id, FileORM.file_name, FileORM.file_url, FileORM.created_at)\
+                .order_by(FileORM.created_at.desc())\
+                .all()
                 
-                result.append(file_dict)
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error getting files for user {user_id}: {e}", exc_info=True)
-            return []
-        finally:
-            session.close()
+                result = []
+                for file in files:
+                    # Align with original implementation (processed = has chunks)
+                    is_processed = file[4] > 0  # chunk_count > 0
+                    
+                    file_dict = {
+                        "id": file[0],                 # FileORM.id
+                        "file_name": file[1],         # FileORM.file_name - keep for backend compatibility
+                        "name": file[1],              # Match original field name for frontend
+                        "file_url": file[2],          # FileORM.file_url - keep for backend compatibility
+                        "publicUrl": file[2],         # Match original field name for frontend
+                        "processed": is_processed,     # Using the original definition (has chunks)
+                        "created_at": file[3].isoformat() if file[3] else None  # FileORM.created_at
+                    }
+                    
+                    result.append(file_dict)
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error getting files for user {user_id}: {e}", exc_info=True)
+                return []
     
     def delete_file_entry(self, user_id: int, file_id: int) -> bool:
         """Delete a file and all associated data.
@@ -188,54 +180,54 @@ class FileRepository(BaseRepository):
         Returns:
             bool: True if deletion was successful, False otherwise
         """
-        session = self.get_session()
-        try:
-            # Check if the file exists and belongs to the specified user
-            file_obj = session.query(FileORM).filter(
-                FileORM.id == file_id,
-                FileORM.user_id == user_id
-            ).first()
+        # First attempt: use ORM cascade deletion with unit of work
+        with self.get_unit_of_work() as uow:
+            try:
+                # Check if the file exists and belongs to the specified user
+                file_obj = uow.session.query(FileORM).filter(
+                    FileORM.id == file_id,
+                    FileORM.user_id == user_id
+                ).first()
+                
+                if not file_obj:
+                    logger.warning(f"File {file_id} not found or not owned by user {user_id}")
+                    return False
+                
+                # Delete the file (cascade should handle related entities)
+                uow.session.delete(file_obj)
+                # Commit handled by UnitOfWork
+                logger.info(f"Successfully deleted file {file_id} for user {user_id} with cascade")
+                return True
             
-            if not file_obj:
-                logger.warning(f"File {file_id} not found or not owned by user {user_id}")
-                return False
-            
-            # Delete the file (cascade should handle related entities)
-            session.delete(file_obj)
-            session.commit()
-            logger.info(f"Successfully deleted file {file_id} for user {user_id} with cascade")
-            return True
-            
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error deleting file {file_id}: {e}", exc_info=True)
-            
-            # Fallback to direct SQL deletion if ORM cascade fails
+            except Exception as e:
+                # Rollback handled by UnitOfWork
+                logger.error(f"Error deleting file {file_id}: {e}", exc_info=True)
+        
+        # Fallback: If ORM deletion failed, try SQL deletion with a new unit of work
+        with self.get_unit_of_work() as uow:
             try:
                 # Start with associated entities and work our way up
                 # Delete flashcards
-                session.execute(text(f"DELETE FROM flashcards WHERE file_id = {file_id}"))
+                uow.session.execute(text(f"DELETE FROM flashcards WHERE file_id = {file_id}"))
                 # Delete quiz questions
-                session.execute(text(f"DELETE FROM quiz_questions WHERE file_id = {file_id}"))
+                uow.session.execute(text(f"DELETE FROM quiz_questions WHERE file_id = {file_id}"))
                 # Delete key concepts
-                session.execute(text(f"DELETE FROM key_concepts WHERE file_id = {file_id}"))
+                uow.session.execute(text(f"DELETE FROM key_concepts WHERE file_id = {file_id}"))
                 # Delete chunks
-                session.execute(text(f"DELETE FROM chunks WHERE file_id = {file_id}"))
+                uow.session.execute(text(f"DELETE FROM chunks WHERE file_id = {file_id}"))
                 # Delete segments
-                session.execute(text(f"DELETE FROM segments WHERE file_id = {file_id}"))
+                uow.session.execute(text(f"DELETE FROM segments WHERE file_id = {file_id}"))
                 # Finally delete the file
-                session.execute(text(f"DELETE FROM files WHERE id = {file_id} AND user_id = {user_id}"))
+                uow.session.execute(text(f"DELETE FROM files WHERE id = {file_id} AND user_id = {user_id}"))
                 
-                session.commit()
+                # Commit handled by UnitOfWork
                 logger.info(f"Successfully deleted file {file_id} for user {user_id} using manual SQL deletion")
                 return True
                 
             except Exception as sql_error:
-                session.rollback()
+                # Rollback handled by UnitOfWork
                 logger.error(f"SQL fallback error deleting file {file_id}: {sql_error}", exc_info=True)
                 return False
-        finally:
-            session.close()
     
     def query_chunks_by_embedding(
         self,
@@ -255,54 +247,52 @@ class FileRepository(BaseRepository):
         Returns:
             List[Dict]: List of segments with similarity scores
         """
-        session = self.get_session()
-        try:
-            # Get all chunks for the user's files
-            files = session.query(FileORM).filter(FileORM.user_id == user_id).all()
-            if not files:
+        with self.get_unit_of_work() as uow:
+            try:
+                # Get all chunks for the user's files
+                files = uow.session.query(FileORM).filter(FileORM.user_id == user_id).all()
+                if not files:
+                    return []
+                    
+                file_ids = [file.id for file in files]
+                
+                # Get all chunks with embeddings
+                chunks = uow.session.query(ChunkORM).filter(
+                    ChunkORM.file_id.in_(file_ids),
+                    ChunkORM.embedding != None
+                ).all()
+                
+                if not chunks:
+                    return []
+                    
+                # Calculate similarity scores
+                results = []
+                query_embedding_np = np.array(query_embedding)
+                
+                for chunk in chunks:
+                    chunk_embedding = np.array(chunk.embedding)
+                    
+                    if similarity_type.lower() == 'cosine':
+                        similarity = 1 - cosine(query_embedding_np, chunk_embedding)
+                    else:
+                        # Default to L2 (euclidean) distance
+                        distance = euclidean(query_embedding_np, chunk_embedding)
+                        similarity = 1 / (1 + distance)  # Transform distance to similarity [0,1]
+                    
+                    results.append({
+                        'chunk_id': chunk.id,
+                        'file_id': chunk.file_id,
+                        'content': chunk.content,
+                        'similarity': float(similarity)  # Convert from numpy to Python float
+                    })
+                    
+                # Sort by similarity and get top_k results
+                results.sort(key=lambda x: x['similarity'], reverse=True)
+                return results[:top_k]
+                
+            except Exception as e:
+                logger.error(f"Error querying chunks by embedding: {e}", exc_info=True)
                 return []
-                
-            file_ids = [file.id for file in files]
-            
-            # Get all chunks with embeddings
-            chunks = session.query(ChunkORM).filter(
-                ChunkORM.file_id.in_(file_ids),
-                ChunkORM.embedding != None
-            ).all()
-            
-            if not chunks:
-                return []
-                
-            # Calculate similarity scores
-            results = []
-            query_embedding_np = np.array(query_embedding)
-            
-            for chunk in chunks:
-                chunk_embedding = np.array(chunk.embedding)
-                
-                if similarity_type.lower() == 'cosine':
-                    similarity = 1 - cosine(query_embedding_np, chunk_embedding)
-                else:
-                    # Default to L2 (euclidean) distance
-                    distance = euclidean(query_embedding_np, chunk_embedding)
-                    similarity = 1 / (1 + distance)  # Transform distance to similarity [0,1]
-                
-                results.append({
-                    'chunk_id': chunk.id,
-                    'file_id': chunk.file_id,
-                    'content': chunk.content,
-                    'similarity': float(similarity)  # Convert from numpy to Python float
-                })
-                
-            # Sort by similarity and get top_k results
-            results.sort(key=lambda x: x['similarity'], reverse=True)
-            return results[:top_k]
-            
-        except Exception as e:
-            logger.error(f"Error querying chunks by embedding: {e}", exc_info=True)
-            return []
-        finally:
-            session.close()
     
     def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:
         """Get all segment contents for a specific page of a file.
@@ -314,32 +304,30 @@ class FileRepository(BaseRepository):
         Returns:
             List[Dict]: List of segments
         """
-        session = self.get_session()
-        try:
-            segments = session.query(SegmentORM).filter(
-                SegmentORM.file_id == file_id,
-                SegmentORM.page_number == page_number
-            ).all()
-            
-            result = []
-            for segment in segments:
-                meta = {}
-                if segment.meta_data:
-                    meta = segment.meta_data
+        with self.get_unit_of_work() as uow:
+            try:
+                segments = uow.session.query(SegmentORM).filter(
+                    SegmentORM.file_id == file_id,
+                    SegmentORM.page_number == page_number
+                ).all()
                 
-                result.append({
-                    'id': segment.id,
-                    'content': segment.content,
-                    'page_number': segment.page_number,
-                    'meta_data': meta
-                })
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error getting segments for page: {e}", exc_info=True)
-            return []
-        finally:
-            session.close()
+                result = []
+                for segment in segments:
+                    meta = {}
+                    if segment.meta_data:
+                        meta = segment.meta_data
+                    
+                    result.append({
+                        'id': segment.id,
+                        'content': segment.content,
+                        'page_number': segment.page_number,
+                        'meta_data': meta
+                    })
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error getting segments for page: {e}", exc_info=True)
+                return []
     
     def get_segments_for_time_range(
         self, 
@@ -357,48 +345,46 @@ class FileRepository(BaseRepository):
         Returns:
             List[Dict]: List of segments within the time range
         """
-        session = self.get_session()
-        try:
-            # Build base query
-            query = session.query(SegmentORM).filter(SegmentORM.file_id == file_id)
-            
-            # Apply filter for time range
-            if end_time:
-                # Get segments that overlap with the time range
-                # A segment overlaps if:
-                # - Its start time is before the end time of the range AND
-                # - Its end time is after the start time of the range
-                query = query.filter(
-                    SegmentORM.meta_data['start_time'].astext.cast(float) <= end_time,
-                    SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
-                )
-            else:
-                # Just find closest segment to the given time point
-                query = query.filter(
-                    SegmentORM.meta_data['start_time'].astext.cast(float) <= start_time,
-                    SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
-                )
-            
-            segments = query.all()
-            result = []
-            
-            for segment in segments:
-                meta = {}
-                if segment.meta_data:
-                    meta = segment.meta_data
+        with self.get_unit_of_work() as uow:
+            try:
+                # Build base query
+                query = uow.session.query(SegmentORM).filter(SegmentORM.file_id == file_id)
                 
-                result.append({
-                    'id': segment.id,
-                    'content': segment.content,
-                    'meta_data': meta
-                })
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error getting segments for time range: {e}", exc_info=True)
-            return []
-        finally:
-            session.close()
+                # Apply filter for time range
+                if end_time:
+                    # Get segments that overlap with the time range
+                    # A segment overlaps if:
+                    # - Its start time is before the end time of the range AND
+                    # - Its end time is after the start time of the range
+                    query = query.filter(
+                        SegmentORM.meta_data['start_time'].astext.cast(float) <= end_time,
+                        SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
+                    )
+                else:
+                    # Just find closest segment to the given time point
+                    query = query.filter(
+                        SegmentORM.meta_data['start_time'].astext.cast(float) <= start_time,
+                        SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
+                    )
+                
+                segments = query.all()
+                result = []
+                
+                for segment in segments:
+                    meta = {}
+                    if segment.meta_data:
+                        meta = segment.meta_data
+                    
+                    result.append({
+                        'id': segment.id,
+                        'content': segment.content,
+                        'meta_data': meta
+                    })
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error getting segments for time range: {e}", exc_info=True)
+                return []
     
     def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get a file record by ID.
@@ -409,25 +395,23 @@ class FileRepository(BaseRepository):
         Returns:
             Dict: File record if found, None otherwise
         """
-        session = self.get_session()
-        try:
-            file = session.query(FileORM).filter(FileORM.id == file_id).first()
-            if not file:
+        with self.get_unit_of_work() as uow:
+            try:
+                file = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
+                if not file:
+                    return None
+                    
+                return {
+                    'id': file.id,
+                    'user_id': file.user_id,
+                    'file_name': file.file_name,
+                    'file_url': file.file_url,
+                    'created_at': file.created_at.isoformat() if file.created_at else None
+                    # status and error_message fields removed - don't exist in database schema
+                }
+            except Exception as e:
+                logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
                 return None
-                
-            return {
-                'id': file.id,
-                'user_id': file.user_id,
-                'file_name': file.file_name,
-                'file_url': file.file_url,
-                'created_at': file.created_at.isoformat() if file.created_at else None
-                # status and error_message fields removed - don't exist in database schema
-            }
-        except Exception as e:
-            logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
-            return None
-        finally:
-            session.close()
     
     def get_file_by_name(self, user_id: int, filename: str) -> Optional[Dict[str, Any]]:
         """Get a file record by user ID and filename.
@@ -439,29 +423,27 @@ class FileRepository(BaseRepository):
         Returns:
             Dict: File record if found, None otherwise
         """
-        session = self.get_session()
-        try:
-            file = session.query(FileORM).filter(
-                FileORM.user_id == user_id,
-                FileORM.file_name == filename
-            ).first()
-            
-            if not file:
-                return None
+        with self.get_unit_of_work() as uow:
+            try:
+                file = uow.session.query(FileORM).filter(
+                    FileORM.user_id == user_id,
+                    FileORM.file_name == filename
+                ).first()
                 
-            return {
-                'id': file.id,
-                'user_id': file.user_id,
-                'file_name': file.file_name,
-                'file_url': file.file_url,
-                'created_at': file.created_at.isoformat() if file.created_at else None
-                # status and error_message fields removed - don't exist in database schema
-            }
-        except Exception as e:
-            logger.error(f"Error getting file by name: {e}", exc_info=True)
-            return None
-        finally:
-            session.close()
+                if not file:
+                    return None
+                    
+                return {
+                    'id': file.id,
+                    'user_id': file.user_id,
+                    'file_name': file.file_name,
+                    'file_url': file.file_url,
+                    'created_at': file.created_at.isoformat() if file.created_at else None
+                    # status and error_message fields removed - don't exist in database schema
+                }
+            except Exception as e:
+                logger.error(f"Error getting file by name: {e}", exc_info=True)
+                return None
     
     def update_file_status(self, file_id: int, status: str = None, error_message: str = None) -> bool:
         """Update the status of a file.
