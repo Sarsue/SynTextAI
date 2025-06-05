@@ -126,6 +126,17 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const data: KeyConcept[] = responseData.key_concepts;
             console.log(`Parsed ${data.length} key concepts for file ID: ${fileId}`);
             
+            // Debug logging to inspect the structure of key concepts
+            if (data.length > 0) {
+                console.log('First key concept complete structure:', data[0]);
+                console.log('Key concept field values check:', {
+                    hasConceptTitle: data.some(kc => kc.concept_title && kc.concept_title.length > 0),
+                    conceptTitles: data.map(kc => kc.concept_title),
+                    hasConceptExplanation: data.some(kc => kc.concept_explanation && kc.concept_explanation.length > 0),
+                    conceptExplanations: data.map(kc => kc.concept_explanation?.substring(0, 20))
+                });
+            }
+            
             if (data.length === 0) {
                 console.warn(`No key concepts found for file ID: ${fileId}, type: ${fileType}`);
             }

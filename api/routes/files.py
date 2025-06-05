@@ -159,20 +159,25 @@ async def get_flashcards_for_file(
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
         flashcards = store.get_flashcards_for_file(file_id)
-        # Convert SQLAlchemy objects to dicts for frontend
+        # Convert domain objects to dicts for frontend
         flashcards_out = []
         
         for f in flashcards:
-            # Make sure none of the fields are None/null to avoid UI issues
-            flashcard_data = {
-                "id": f.id,
-                "file_id": f.file_id,
-                "key_concept_id": f.key_concept_id,
-                "question": f.question if f.question else "",
-                "answer": f.answer if f.answer else "",
-                "is_custom": f.is_custom if f.is_custom is not None else False
-            }
-            flashcards_out.append(flashcard_data)
+            try:
+                # Make sure none of the fields are None/null to avoid UI issues
+                flashcard_data = {
+                    "id": f.id,
+                    "file_id": f.file_id,
+                    "key_concept_id": getattr(f, 'key_concept_id', None),
+                    "question": f.question if hasattr(f, 'question') and f.question else "",
+                    "answer": f.answer if hasattr(f, 'answer') and f.answer else "",
+                    "is_custom": f.is_custom if hasattr(f, 'is_custom') and f.is_custom is not None else False,
+                    "created_at": f.created_at.isoformat() if hasattr(f, 'created_at') and f.created_at else None
+                }
+                flashcards_out.append(flashcard_data)
+            except Exception as e:
+                logger.error(f"Error converting flashcard to dict: {e}")
+                # Skip this flashcard if conversion fails
         # Wrap the flashcards in an object with a named property as expected by the frontend
         return {"flashcards": flashcards_out}
     except Exception as e:
@@ -248,38 +253,42 @@ async def get_quizzes_for_file(
         logger.info(f"Raw quizzes data from repo for file {file_id}: {quizzes}")
         quizzes_out = []
         for q in quizzes:
-            # Ensure distractors is properly serialized JSON
-            if q.distractors is None:
-                distractors = []
-            elif isinstance(q.distractors, list):
-                distractors = q.distractors
-            else:
-                # Handle string or other unexpected formats
-                try:
-                    # If it's a string representation of JSON, parse it
-                    if isinstance(q.distractors, str):
-                        import json
-                        distractors = json.loads(q.distractors)
-                    else:
-                        # Default to empty list if we can't parse
-                        distractors = []
-                except Exception as e:
-                    logger.error(f"Error parsing distractors: {e}")
+            try:
+                # Ensure distractors is properly serialized JSON
+                if not hasattr(q, 'distractors') or q.distractors is None:
                     distractors = []
-            
-            quizzes_out.append({
-                "id": q.id,
-                "file_id": q.file_id,
-                "key_concept_id": q.key_concept_id,
-                "question_text": q.question,  # Frontend expects this field
-                "question": q.question,
-                "question_type": q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
-                "correct_answer": q.correct_answer if q.correct_answer else "",
-                "distractors": distractors,
-                "explanation": "",  # Empty string instead of None for frontend compatibility
-                "difficulty": "medium",  # Default value expected by frontend
-                "is_custom": False  # Default for system-generated questions
-            })
+                elif isinstance(q.distractors, list):
+                    distractors = q.distractors
+                else:
+                    # Handle string or other unexpected formats
+                    try:
+                        # If it's a string representation of JSON, parse it
+                        if isinstance(q.distractors, str):
+                            import json
+                            distractors = json.loads(q.distractors)
+                        else:
+                            # Default to empty list if we can't parse
+                            distractors = []
+                    except Exception as e:
+                        logger.error(f"Error parsing distractors: {e}")
+                        distractors = []
+                
+                quizzes_out.append({
+                    "id": q.id,
+                    "file_id": q.file_id,
+                    "key_concept_id": getattr(q, 'key_concept_id', None),
+                    "question_text": q.question,  # Frontend expects this field
+                    "question": q.question,
+                    "question_type": q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
+                    "correct_answer": q.correct_answer if hasattr(q, 'correct_answer') and q.correct_answer else "",
+                    "distractors": distractors,
+                    "explanation": getattr(q, 'explanation', ""),  # Empty string instead of None for frontend compatibility
+                    "difficulty": getattr(q, 'difficulty', "medium"),  # Default value expected by frontend
+                    "is_custom": getattr(q, 'is_custom', False)  # Default for system-generated questions
+                })
+            except Exception as e:
+                logger.error(f"Error converting quiz question to dict: {e}")
+                # Skip this quiz question if conversion fails
         # Wrap the quizzes in an object with a named property as expected by the frontend
         return {"quizzes": quizzes_out}
     except Exception as e:
@@ -436,29 +445,50 @@ async def get_key_concepts_for_file(
             key_concepts = store.get_key_concepts_for_file(file_id)
             logger.info(f"Raw key_concepts data from repo: {key_concepts}")
             
-            # Explicitly convert SQLAlchemy KeyConcept objects to KeyConceptResponse Pydantic models.
+            # Explicitly convert KeyConcept objects to KeyConceptResponse Pydantic models.
             # Handle any potential errors during conversion
             key_concept_responses = []
             for kc in key_concepts:
                 try:
-                    key_concept_responses.append(KeyConceptResponse.from_orm(kc))
+                    # Log the values for debugging
+                    logger.info(f"KeyConcept attributes: id={kc.id}, concept_title={kc.concept_title!r}, concept_explanation={kc.concept_explanation!r}")
+                    
+                    # Try direct attribute access first (for domain objects)
+                    key_concept_response = KeyConceptResponse(
+                        id=kc.id,
+                        file_id=kc.file_id,
+                        concept_title=kc.concept_title,
+                        concept_explanation=kc.concept_explanation,
+                        display_order=getattr(kc, 'display_order', 1),
+                        source_page_number=getattr(kc, 'source_page_number', None),
+                        source_video_timestamp_start_seconds=getattr(kc, 'source_video_timestamp_start_seconds', None),
+                        source_video_timestamp_end_seconds=getattr(kc, 'source_video_timestamp_end_seconds', None),
+                        created_at=kc.created_at if hasattr(kc, 'created_at') else datetime.now()
+                    )
+                    
+                    key_concept_responses.append(key_concept_response)
                 except Exception as orm_error:
                     logger.warning(f"Error converting key concept to response model: {orm_error}")
-                    # Try manual conversion with defaults
                     try:
-                        key_concept_responses.append(KeyConceptResponse(
-                            id=kc.id,
-                            file_id=kc.file_id,
-                            concept_title=kc.concept_title if hasattr(kc, 'concept_title') else "",
-                            concept_explanation=kc.concept_explanation if hasattr(kc, 'concept_explanation') else "",
-                            display_order=kc.display_order if hasattr(kc, 'display_order') else 1,
-                            source_page_number=kc.source_page_number if hasattr(kc, 'source_page_number') else None,
-                            source_video_timestamp_start_seconds=kc.source_video_timestamp_start_seconds if hasattr(kc, 'source_video_timestamp_start_seconds') else None,
-                            source_video_timestamp_end_seconds=kc.source_video_timestamp_end_seconds if hasattr(kc, 'source_video_timestamp_end_seconds') else None,
-                            created_at=kc.created_at if hasattr(kc, 'created_at') else datetime.now()
-                        ))
-                    except:
+                        # As a fallback, try dictionary access (for dict return types)
+                        if isinstance(kc, dict):
+                            key_concept_responses.append(KeyConceptResponse(
+                                id=kc.get('id'),
+                                file_id=kc.get('file_id'),
+                                concept_title=kc.get('concept_title', ''),
+                                concept_explanation=kc.get('concept_explanation', ''),
+                                display_order=kc.get('display_order', 1),
+                                source_page_number=kc.get('source_page_number'),
+                                source_video_timestamp_start_seconds=kc.get('source_video_timestamp_start_seconds'),
+                                source_video_timestamp_end_seconds=kc.get('source_video_timestamp_end_seconds'),
+                                created_at=datetime.fromisoformat(kc.get('created_at')) if kc.get('created_at') else datetime.now()
+                            ))
+                        else:
+                            # Skip this key concept if we can't convert it
+                            logger.error(f"Failed to convert key concept: {kc}")
+                    except Exception as e:
                         # Skip this key concept if we can't convert it
+                        logger.error(f"Failed to convert key concept with error: {e}")
                         pass
             
             return KeyConceptsFileResponse(key_concepts=key_concept_responses)

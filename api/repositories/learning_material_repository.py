@@ -1,19 +1,15 @@
 """
 Repository for managing learning materials like key concepts, flashcards, and quizzes.
 """
-from typing import Optional, List, Dict, Any
-import logging
+from typing import List, Optional, Dict, Any
 from datetime import datetime
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+import logging
 
-from .base_repository import BaseRepository
-from .domain_models import KeyConcept, Flashcard, QuizQuestion
+from sqlalchemy.orm import Session
 
-# Import ORM models from the new models module
-from models import KeyConcept as KeyConceptORM
-from models import Flashcard as FlashcardORM
-from models import QuizQuestion as QuizQuestionORM
+from models import Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
+from repositories.domain_models import KeyConcept, Flashcard, QuizQuestion
+from repositories.base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +98,13 @@ class LearningMaterialRepository(BaseRepository):
                     kc = KeyConcept(
                         id=concept.id,
                         file_id=concept.file_id,
-                        concept_title=concept.concept,  # Note: field name in ORM is 'concept'
-                        concept_explanation=concept.explanation,  # Note: field name in ORM is 'explanation'
+                        concept_title=getattr(concept, 'concept_title', ''),  # Using correct field name
+                        concept_explanation=getattr(concept, 'concept_explanation', ''),  # Using correct field name
                         display_order=getattr(concept, 'display_order', 1),
                         source_page_number=getattr(concept, 'source_page_number', None),
                         source_video_timestamp_start_seconds=getattr(concept, 'source_video_timestamp_start_seconds', None),
                         source_video_timestamp_end_seconds=getattr(concept, 'source_video_timestamp_end_seconds', None),
-                        created_at=concept.created_at
+                        created_at=concept.created_at if hasattr(concept, 'created_at') else datetime.now()
                     )
                     key_concepts.append(kc)
                 
@@ -182,7 +178,7 @@ class LearningMaterialRepository(BaseRepository):
                         question=fc_orm.question,
                         answer=fc_orm.answer,
                         is_custom=getattr(fc_orm, 'is_custom', False),
-                        created_at=fc_orm.created_at
+                        created_at=fc_orm.created_at if hasattr(fc_orm, 'created_at') else datetime.now()
                     )
                     flashcards.append(fc)
                 
@@ -239,7 +235,7 @@ class LearningMaterialRepository(BaseRepository):
                 return None
     
     def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestion]:
-        """Get quiz questions for a file by ID
+        """Get quiz questions for a file by ID.
 
         Args:
             file_id: The ID of the file
@@ -273,7 +269,7 @@ class LearningMaterialRepository(BaseRepository):
                         question_type=question_type,
                         correct_answer=q_orm.correct_answer,
                         distractors=q_orm.distractors if q_orm.distractors else [],
-                        created_at=q_orm.created_at,
+                        created_at=q_orm.created_at if hasattr(q_orm, 'created_at') else datetime.now(),
                         # Fields needed by frontend even if not in DB
                         explanation=None,
                         difficulty="medium", # Default value expected by frontend
