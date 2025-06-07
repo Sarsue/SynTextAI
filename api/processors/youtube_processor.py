@@ -355,30 +355,44 @@ class YouTubeProcessor(FileProcessor):
         
         logger.info(f"Storing {len(segments)} segments and their chunks for file_id: {file_id}")
         
-        # Store segments and chunks
+        # Format data for file repository update - following the expected structure
+        extracted_data = []
+        
         for segment in segments:
-            segment_id = await self.store.add_segment_async(
-                file_id=int(file_id), 
-                start_time=segment['start_time'],
-                end_time=segment['end_time'],
-                content=segment['content'],
-                duration=segment['duration']
-            )
+            # Create segment data with chunks
+            segment_data = {
+                'content': segment['content'],
+                'start_time': segment['start_time'],
+                'end_time': segment['end_time'],
+                'duration': segment['duration'],
+                'chunks': []
+            }
             
-            # Store chunks for this segment
+            # Add chunk data for this segment
             for chunk in segment.get('chunks', []):
                 if 'embedding' not in chunk or not chunk['embedding']:
-                    logger.warning(f"Missing embedding for chunk in file_id: {file_id}, segment_id: {segment_id}")
+                    logger.warning(f"Missing embedding for chunk in file_id: {file_id}")
                     continue
+                    
+                segment_data['chunks'].append({
+                    'content': chunk['content'],
+                    'embedding': chunk['embedding']
+                })
                 
-                await self.store.add_chunk_async(
-                    file_id=int(file_id),
-                    segment_id=segment_id,
-                    content=chunk['content'],
-                    embedding=chunk['embedding']
-                )
-                
-        logger.info(f"Successfully stored all segments and chunks for file_id: {file_id}")
+            extracted_data.append(segment_data)
+        
+        # Store using the proper repository method that matches the PDF processor
+        success = await self.store.update_file_with_chunks_async(
+            user_id=int(user_id),
+            filename=filename,
+            file_type="youtube",
+            extracted_data=extracted_data
+        )
+        
+        if success:
+            logger.info(f"Successfully stored all segments and chunks for file_id: {file_id}")
+        else:
+            logger.error(f"Failed to store segments and chunks for file_id: {file_id}")
     
     async def generate_key_concepts(self, processed_content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
         """
@@ -443,12 +457,22 @@ class YouTubeProcessor(FileProcessor):
         results = {"flashcards": 0, "mcqs": 0, "true_false": 0}
         
         # Store key concepts
+        concept_ids = []
         for concept in key_concepts:
-            await self.store.add_key_concept_async(
+            # Extract concept information (handle different formats)
+            concept_title = concept.get('concept_title', concept.get('concept', ''))
+            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            
+            # Add key concept and store the returned ID
+            concept_id = await self.store.add_key_concept_async(
                 file_id=int(file_id),
-                concept_title=concept.get('concept', ''),
-                concept_explanation=concept.get('explanation', '')
+                concept_title=concept_title,
+                concept_explanation=concept_explanation,
+                source_video_timestamp_start_seconds=concept.get('source_video_timestamp_start_seconds'),
+                source_video_timestamp_end_seconds=concept.get('source_video_timestamp_end_seconds')
             )
+            if concept_id:
+                concept_ids.append(concept_id)
         
         # Generate flashcards with timeout
         try:
@@ -460,13 +484,21 @@ class YouTubeProcessor(FileProcessor):
             if flashcards:
                 logger.info(f"Generated {len(flashcards)} flashcards from key concepts")
                 for card in flashcards:
-                    await self.store.add_flashcard_async(
-                        file_id=int(file_id),
-                        key_concept_id=None,  # Not linked to a specific concept
-                        question=card.get('front', ''),
-                        answer=card.get('back', ''),
-                        is_custom=False
-                    )
+                    try:
+                        # Use the first concept ID if available, otherwise None
+                        # Ensure we're passing an integer or None, never an empty list
+                        key_concept_id = concept_ids[0] if concept_ids else None
+                        
+                        # Fix parameter order to match repository implementation
+                        await self.store.add_flashcard_async(
+                            file_id=int(file_id),
+                            question=card.get('front', ''),
+                            answer=card.get('back', ''),
+                            key_concept_id=None if key_concept_id is None else int(key_concept_id),
+                            is_custom=False
+                        )
+                    except Exception as e:
+                        self._log_error(f"Error adding flashcard: {e}", e)
                 results["flashcards"] = len(flashcards)
         except (asyncio.TimeoutError, Exception) as e:
             self._log_error("Error generating flashcards", e)
@@ -486,14 +518,22 @@ class YouTubeProcessor(FileProcessor):
                     answer = mcq.get('answer', '')
                     
                     # Format data for the updated method signature
-                    await self.store.add_quiz_question_async(
-                        file_id=int(file_id),
-                        key_concept_id=None,
-                        question=mcq.get('question', ''),
-                        question_type="MCQ",  # Consistent capitalization
-                        correct_answer=answer,
-                        distractors=[opt for opt in options if opt != answer]
-                    )
+                    try:
+                        # Use the first concept ID if available, otherwise None
+                        # Ensure we're passing an integer or None, never an empty list
+                        key_concept_id = concept_ids[0] if concept_ids else None
+                        
+                        # Fix parameter order to match repository implementation
+                        await self.store.add_quiz_question_async(
+                            file_id=int(file_id),
+                            question=mcq.get('question', ''),
+                            question_type="MCQ",  # Consistent capitalization
+                            correct_answer=answer,
+                            distractors=[opt for opt in options if opt != answer],
+                            key_concept_id=None if key_concept_id is None else int(key_concept_id)  # Pass as keyword arg
+                        )
+                    except Exception as e:
+                        self._log_error(f"Error adding MCQ question: {e}", e)
                 results["mcqs"] = len(mcqs)
         except (asyncio.TimeoutError, Exception) as e:
             self._log_error("Error generating MCQs", e)
@@ -509,14 +549,23 @@ class YouTubeProcessor(FileProcessor):
                 logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
                 for tf in tf_questions:
                     # Create a properly formatted True/False question
-                    await self.store.add_quiz_question_async(
-                        file_id=int(file_id),
-                        key_concept_id=None,
-                        question=tf.get('statement', ''),
-                        question_type="TF",  # Consistent type identifier
-                        correct_answer="True" if tf.get('is_true', False) else "False",
-                        distractors=[]  # T/F questions don't need additional distractors
-                    )
+                    try:
+                        # Use the first concept ID if available, otherwise None
+                        # Ensure we're passing an integer or None, never an empty list
+                        key_concept_id = concept_ids[0] if concept_ids else None
+                        
+                        # Make sure the key_concept_id is an integer or None
+                        # This prevents empty list being passed when concept_ids is empty
+                        await self.store.add_quiz_question_async(
+                            file_id=int(file_id),
+                            question=tf.get('statement', ''),
+                            question_type="TF",  # Consistent type identifier
+                            correct_answer="True" if tf.get('is_true', False) else "False",
+                            distractors=None,  # T/F questions don't need distractors, use None instead of empty list
+                            key_concept_id=None if key_concept_id is None else int(key_concept_id)  # Pass as keyword arg
+                        )
+                    except Exception as e:
+                        self._log_error(f"Error adding True/False question: {e}", e)
                 results["true_false"] = len(tf_questions)
         except (asyncio.TimeoutError, Exception) as e:
             self._log_error("Error generating True/False questions", e)

@@ -120,8 +120,8 @@ class PDFProcessor(FileProcessor):
                 if key_concepts and isinstance(key_concepts, list):
                     # Add key concepts to database
                     for concept in key_concepts:
-                        # Not using await since add_key_concept is a synchronous method
-                        self.store.add_key_concept(
+                        # Using async method now
+                        await self.store.add_key_concept_async(
                             file_id=file_id,
                             concept_title=concept.get("concept_title", ""),
                             concept_explanation=concept.get("concept_explanation", ""),
@@ -346,14 +346,17 @@ class PDFProcessor(FileProcessor):
             if flashcards:
                 logger.info(f"Generated {len(flashcards)} flashcards from key concepts")
                 for card in flashcards:
-                    # Not using await since add_flashcard is a synchronous method
-                    self.store.add_flashcard(
-                        file_id=file_id_int,
-                        question=card.get('front', ''),
-                        answer=card.get('back', ''),
-                        key_concept_id=None,
-                        is_custom=False
-                    )
+                    # Using async method now
+                    try:
+                        await self.store.add_flashcard_async(
+                            file_id=file_id_int,
+                            question=card.get('front', ''),
+                            answer=card.get('back', ''),
+                            key_concept_id=None,
+                            is_custom=False
+                        )
+                    except Exception as e:
+                        logger.error(f"Error adding flashcard: {e}")
                 results["flashcards"] = len(flashcards)
         except (asyncio.TimeoutError, Exception) as e:
             logger.error(f"Error generating flashcards: {e}")
@@ -372,16 +375,18 @@ class PDFProcessor(FileProcessor):
                     options = mcq.get('options', [])
                     answer = mcq.get('answer', '')
                     
-                    # Not using await since add_quiz_question is a synchronous method
-                    self.store.add_quiz_question(
-                        file_id=file_id_int,
-                        question=mcq.get('question', ''),
-                        question_type="MCQ",
-                        correct_answer=answer,
-                        distractors=[opt for opt in options if opt != answer],
-                        key_concept_id=None,
-                        is_custom=False
-                    )
+                    # Using async method now
+                    try:
+                        await self.store.add_quiz_question_async(
+                            file_id=file_id_int,
+                            question=mcq.get('question', ''),
+                            question_type="MCQ",
+                            correct_answer=answer,
+                            distractors=[opt for opt in options if opt != answer],
+                            key_concept_id=None
+                        )
+                    except Exception as e:
+                        logger.error(f"Error adding MCQ: {e}")
                 results["mcqs"] = len(mcqs)
         except (asyncio.TimeoutError, Exception) as e:
             logger.error(f"Error generating MCQs: {e}")
@@ -397,16 +402,18 @@ class PDFProcessor(FileProcessor):
                 logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
                 for tf in tf_questions:
                     # Create a properly formatted True/False question
-                    # Not using await since add_quiz_question is a synchronous method
-                    self.store.add_quiz_question(
-                        file_id=file_id_int,
-                        question=tf.get('statement', ''),
-                        question_type="TF",
-                        correct_answer="True" if tf.get('is_true', False) else "False",
-                        distractors=[],  # T/F questions don't need additional distractors
-                        key_concept_id=None,
-                        is_custom=False
-                    )
+                    # Using async method now
+                    try:
+                        await self.store.add_quiz_question_async(
+                            file_id=file_id_int,
+                            question=tf.get('statement', ''),
+                            question_type="TF",
+                            correct_answer="True" if tf.get('is_true', False) else "False",
+                            distractors=[],  # T/F questions don't need additional distractors
+                            key_concept_id=None
+                        )
+                    except Exception as e:
+                        logger.error(f"Error adding True/False question: {e}")
                 results["true_false"] = len(tf_questions)
         except (asyncio.TimeoutError, Exception) as e:
             logger.error(f"Error generating True/False questions: {e}")
