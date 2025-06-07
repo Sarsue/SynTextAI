@@ -80,7 +80,8 @@ class PDFProcessor(FileProcessor):
         # Update the database with chunks and embeddings
         if processed_data and "chunks" in processed_data:
             logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
-            success = await self.store.update_file_with_chunks(
+            # Not using await since update_file_with_chunks is a synchronous method
+            success = self.store.update_file_with_chunks(
                 user_id=user_id,
                 filename=filename,
                 file_type="pdf",
@@ -103,7 +104,8 @@ class PDFProcessor(FileProcessor):
                 if key_concepts and isinstance(key_concepts, list):
                     # Add key concepts to database
                     for concept in key_concepts:
-                        await self.store.add_key_concept(
+                        # Not using await since add_key_concept is a synchronous method
+                        self.store.add_key_concept(
                             file_id=file_id,
                             concept_title=concept.get("concept_title", ""),
                             concept_explanation=concept.get("concept_explanation", ""),
@@ -275,16 +277,114 @@ class PDFProcessor(FileProcessor):
     
     async def generate_learning_materials(self, file_id: str, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Generate learning materials from key concepts.
+        Generate flashcards, MCQs, and T/F questions from key concepts.
         
         Args:
             file_id: File ID
             key_concepts: List of key concepts
             
         Returns:
-            Dict containing generated learning materials
+            Dict with counts of generated materials
         """
-        # This could be implemented to generate flashcards, quizzes, etc.
-        # For now, we'll just return a placeholder
-        return {"success": True, "materials": [], "message": "Learning material generation not implemented yet"}
+        try:
+            # Import needed functions from tasks module
+            from ..tasks import (
+                generate_flashcards_from_key_concepts,
+                generate_mcq_from_key_concepts,
+                generate_true_false_from_key_concepts
+            )
+        except ImportError as e:
+            logger.error(f"Error importing learning material generators: {e}")
+            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
+        
+        if not key_concepts:
+            logger.warning(f"No key concepts available to generate learning materials for file_id: {file_id}")
+            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
+        
+        results = {"flashcards": 0, "mcqs": 0, "true_false": 0}
+        
+        # Convert file_id to integer as repository methods expect int
+        try:
+            file_id_int = int(file_id)
+        except ValueError:
+            logger.error(f"Invalid file_id: {file_id}, cannot convert to integer")
+            return results
+        
+        # Generate flashcards with timeout
+        try:
+            import asyncio
+            flashcards = await asyncio.wait_for(
+                generate_flashcards_from_key_concepts(key_concepts), 
+                timeout=180  # 3 minutes timeout
+            )
+            
+            if flashcards:
+                logger.info(f"Generated {len(flashcards)} flashcards from key concepts")
+                for card in flashcards:
+                    # Not using await since add_flashcard is a synchronous method
+                    self.store.add_flashcard(
+                        file_id=file_id_int,
+                        question=card.get('front', ''),
+                        answer=card.get('back', ''),
+                        key_concept_id=None,
+                        is_custom=False
+                    )
+                results["flashcards"] = len(flashcards)
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.error(f"Error generating flashcards: {e}")
+        
+        # Generate MCQs with timeout
+        try:
+            mcqs = await asyncio.wait_for(
+                generate_mcq_from_key_concepts(key_concepts),
+                timeout=180  # 3 minutes timeout
+            )
+            
+            if mcqs:
+                logger.info(f"Generated {len(mcqs)} MCQs from key concepts")
+                for mcq in mcqs:
+                    # Extract the correct answer and distractors from options
+                    options = mcq.get('options', [])
+                    answer = mcq.get('answer', '')
+                    
+                    # Not using await since add_quiz_question is a synchronous method
+                    self.store.add_quiz_question(
+                        file_id=file_id_int,
+                        question=mcq.get('question', ''),
+                        question_type="MCQ",
+                        correct_answer=answer,
+                        distractors=[opt for opt in options if opt != answer],
+                        key_concept_id=None,
+                        is_custom=False
+                    )
+                results["mcqs"] = len(mcqs)
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.error(f"Error generating MCQs: {e}")
+        
+        # Generate True/False questions with timeout
+        try:
+            tf_questions = await asyncio.wait_for(
+                generate_true_false_from_key_concepts(key_concepts),
+                timeout=180  # 3 minutes timeout
+            )
+            
+            if tf_questions:
+                logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
+                for tf in tf_questions:
+                    # Create a properly formatted True/False question
+                    # Not using await since add_quiz_question is a synchronous method
+                    self.store.add_quiz_question(
+                        file_id=file_id_int,
+                        question=tf.get('statement', ''),
+                        question_type="TF",
+                        correct_answer="True" if tf.get('is_true', False) else "False",
+                        distractors=[],  # T/F questions don't need additional distractors
+                        key_concept_id=None,
+                        is_custom=False
+                    )
+                results["true_false"] = len(tf_questions)
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.error(f"Error generating True/False questions: {e}")
+        
+        return results
 
