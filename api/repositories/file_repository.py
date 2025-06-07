@@ -41,7 +41,9 @@ class FileRepository(BaseRepository):
                     # status column removed as it doesn't exist in the database schema
                 )
                 uow.session.add(new_file)
-                # No need for commit - handled by UnitOfWork
+                # Flush the session to get the ID assigned by the database
+                uow.session.flush()
+                # Now we can access the ID
                 logger.info(f"Added new file {file_name} (ID: {new_file.id}) for user {user_id}")
                 return new_file.id
             except Exception as e:

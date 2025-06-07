@@ -56,7 +56,7 @@ async def save_file(
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
-        from tasks import process_file_data  # Ensure this import is correct
+        from tasks import process_file_data  # Using relative import path
         import re
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
@@ -75,9 +75,14 @@ async def save_file(
             if not url or not youtube_regex.match(url):
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             # Store YouTube file entry (type: 'youtube')
-            file_info = store.add_file(user_id, url, url)  # Just store as a file with url as name and publicUrl
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], url, url, True, language=language, comprehension_level=comprehension_level)  # True = is_youtube
-            logger.info(f"Enqueued Task for processing YouTube link: {url}")
+            file_id = store.add_file(user_id, url, url)  # Just store as a file with url as name and publicUrl
+            if not file_id:
+                logger.error(f"Failed to add YouTube URL {url} to database")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save YouTube information")
+                
+            # Use FastAPI's background_tasks for YouTube processing
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_id, url, url, True, language=language, comprehension_level=comprehension_level)  # True = is_youtube
+            logger.info(f"Enqueued Task for processing YouTube link: {url} with ID {file_id}")
             return {"message": "YouTube video processing queued."}
 
         # --- Handle regular file upload as before ---
@@ -95,10 +100,15 @@ async def save_file(
                 logger.error(f"Failed to upload {file.filename} to GCS")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="File upload failed")
 
-            # Capture the returned file info, including the ID
-            file_info = store.add_file(user_id, file.filename, file_url)
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_info['id'], file.filename, file_info['file_url'], language=language, comprehension_level=comprehension_level)
-            logger.info(f"Enqueued Task for processing {file.filename}")
+            # add_file returns just the file ID, not a dictionary
+            file_id = store.add_file(user_id, file.filename, file_url)
+            if not file_id:
+                logger.error(f"Failed to add file {file.filename} to database")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save file information")
+                
+            # Use FastAPI's background_tasks
+            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_id, file.filename, file_url, language=language, comprehension_level=comprehension_level)
+            logger.info(f"Enqueued Task for processing {file.filename} with ID {file_id}")
 
         return {"message": "File processing queued."}
 
@@ -135,11 +145,19 @@ async def delete_file(
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
         store = request.app.state.store
-        file_info = store.delete_file_entry(user_id, file_id)
-        if not file_info:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        
+        # First, get the file name before deleting it
+        file = store.get_file_by_id(file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        # Now delete the file entry
+        success = store.delete_file_entry(user_id, file_id)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File deletion failed")
 
-        delete_from_gcs(user_gc_id, file_info['file_name'])
+        # Delete from GCS using the file name we got earlier
+        delete_from_gcs(user_gc_id, file['file_name'])
         return None
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
@@ -373,27 +391,27 @@ async def reextract_file(
 
         # Get file information
         file_info = store.get_file_by_id(file_id)
-        if not file_info or file_info.user_id != user_id:
+        if not file_info or file_info.get('user_id') != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
         # Reset processing status to mark it for reprocessing
         store.update_file_processing_status(file_id, False)
         
         # Check if it's a YouTube file
-        is_youtube = 'youtube' in file_info.file_name.lower()
+        is_youtube = 'youtube' in file_info.get('file_name', '').lower()
         
-        # Restart processing task
+        # Restart processing task using background_tasks
         background_tasks.add_task(
             process_file_data, 
             user_gc_id, 
             user_id, 
             file_id, 
-            file_info.file_name,
-            file_info.file_url,
+            file_info.get('file_name', ''),
+            file_info.get('file_url', ''),
             is_youtube
         )
         
-        logger.info(f"Restarted processing for file ID: {file_id}, name: {file_info.file_name}")
+        logger.info(f"Restarted processing for file ID: {file_id}, name: {file_info.get('file_name', '')}")
         return {"message": "File processing restarted successfully"}
         
     except Exception as e:

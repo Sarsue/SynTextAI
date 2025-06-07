@@ -81,10 +81,10 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         // This ensures the delete button is accessible for all file types including YouTube
         setExpandedFile(file.id);
         
-        // If file is not processed, trigger automatic reprocessing
-        if (!file.processed) {
-            retryProcessingFile(file);
-        }
+        // Temporarily disabled automatic reprocessing
+        // if (!file.processed) {
+        //     retryProcessingFile(file);
+        // }
     };
 
     const handleDeleteClick = (file: UploadedFile) => {
@@ -145,14 +145,14 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         // Log for debugging
         console.log(`Toggling file details for ID: ${fileId}, new state: ${newExpandedFileId ? 'expanded' : 'collapsed'}`);
         
-        // If expanding a file that's not processed, trigger auto-reprocessing
-        if (newExpandedFileId !== null) {
-            const file = files.find((f: UploadedFile) => f.id === newExpandedFileId);
-            console.log('Found file for expanding:', file);
-            if (file && !file.processed) {
-                retryProcessingFile(file);
-            }
-        }
+        // Temporarily disabled automatic reprocessing
+        // if (newExpandedFileId !== null) {
+        //     const file = files.find((f: UploadedFile) => f.id === newExpandedFileId);
+        //     console.log('Found file for expanding:', file);
+        //     if (file && !file.processed) {
+        //         retryProcessingFile(file);
+        //     }
+        // }
     };
 
     return (

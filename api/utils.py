@@ -65,8 +65,10 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
     try:
         logger.debug(f"Uploading file {filename} to GCS for user {user_gc_id}...")
 
-        # Initialize GCS client
-        client = storage.Client()
+        # Initialize GCS client with explicit credentials file path
+        credentials_path = '/app/api/config/credentials.json'
+        logger.info(f"Using GCS credentials from {credentials_path}")
+        client = storage.Client.from_service_account_json(credentials_path)
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
 
@@ -123,7 +125,9 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
 def download_from_gcs(user_gc_id, filename):
     try:
         logger.debug(f"Downloading file {filename} from GCS for user {user_gc_id}...")
-        client = storage.Client()
+        # Use explicit credentials file path instead of default credentials
+        credentials_path = "/app/api/config/credentials.json"
+        client = storage.Client.from_service_account_json(credentials_path)
         bucket = client.get_bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
         if not blob.exists():
@@ -139,7 +143,9 @@ def download_from_gcs(user_gc_id, filename):
 def delete_from_gcs(user_gc_id, filename):
     try:
         logger.debug(f"Deleting file {filename} from GCS for user {user_gc_id}...")
-        client = storage.Client()
+        # Use explicit credentials file path instead of default credentials
+        credentials_path = "/app/api/config/credentials.json"
+        client = storage.Client.from_service_account_json(credentials_path)
         bucket = client.get_bucket(bucket_name)
         blob = bucket.blob(f"{user_gc_id}/{filename}")
         if not blob.exists():

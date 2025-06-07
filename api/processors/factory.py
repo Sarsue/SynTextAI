@@ -5,10 +5,11 @@ import os
 import logging
 from typing import Optional, Dict, Any, Type
 
-from .base_processor import FileProcessor
-from .youtube_processor import YouTubeProcessor
-from .pdf_processor import PDFProcessor
-from ..repositories.repository_manager import RepositoryManager
+# Use absolute imports instead of relative imports
+from api.processors.base_processor import FileProcessor
+from api.processors.youtube_processor import YouTubeProcessor
+from api.processors.pdf_processor import PDFProcessor
+from api.repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 

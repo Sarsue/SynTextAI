@@ -6,10 +6,11 @@ import os
 from typing import Dict, List, Any, Optional, Tuple
 from io import BytesIO
 
-from .base_processor import FileProcessor
-from ..repositories.repository_manager import RepositoryManager
-from ..utils import chunk_text
-from ..llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
+# Use absolute imports instead of relative imports
+from api.processors.base_processor import FileProcessor
+from api.repositories.repository_manager import RepositoryManager
+from api.utils import chunk_text
+from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
 
 # Import PDF extraction tools
 from pdfminer.high_level import extract_text
@@ -57,7 +58,11 @@ class PDFProcessor(FileProcessor):
         Returns:
             Dictionary containing processing results
         """
-        logger.info(f"Processing PDF file: {filename} (ID: {file_id}, User: {user_id})")
+        # Extract additional parameters
+        language = kwargs.get('language', 'English')
+        comprehension_level = kwargs.get('comprehension_level', 'Beginner')
+        
+        logger.info(f"Processing PDF file: {filename} (ID: {file_id}, User: {user_id}, Language: {language}, Level: {comprehension_level})")
         
         # Extract text from PDF with page numbers
         page_data = self.extract_text_with_page_numbers(file_data)
@@ -68,14 +73,20 @@ class PDFProcessor(FileProcessor):
             return {"success": False, "error": "Failed to extract content from PDF"}
             
         # Process extracted pages and generate embeddings
+        logger.info(f"Starting page processing and embedding generation for file {filename}")
         processed_data = await self.process_pages(page_data)
+        logger.info(f"Completed processing pages: generated {len(processed_data.get('chunks', []))} chunks")
         
         # Update the database with chunks and embeddings
         if processed_data and "chunks" in processed_data:
-            success = await self.store.add_chunks_for_file(
-                file_id=file_id,
-                chunks=processed_data["chunks"]
+            logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
+            success = await self.store.update_file_with_chunks(
+                user_id=user_id,
+                filename=filename,
+                file_type="pdf",
+                extracted_data=processed_data["chunks"]
             )
+            logger.info(f"Database update with chunks {'successful' if success else 'failed'} for file {file_id}")
             
             if not success:
                 logger.error(f"Failed to store chunks for file {file_id}")
@@ -86,19 +97,19 @@ class PDFProcessor(FileProcessor):
                                if isinstance(chunk, dict) and "content" in chunk])
             
             try:
-                # Generate key concepts using dspy or alternative method
-                key_concepts = await generate_key_concepts_dspy(content)
+                # Generate key concepts using dspy or alternative method (synchronous call)
+                key_concepts = generate_key_concepts_dspy(content, language, comprehension_level)
                 
                 if key_concepts and isinstance(key_concepts, list):
                     # Add key concepts to database
                     for concept in key_concepts:
                         await self.store.add_key_concept(
                             file_id=file_id,
-                            concept=concept.get("concept", ""),
-                            explanation=concept.get("explanation", ""),
-                            span_text=concept.get("span_text", ""),
-                            span_start=concept.get("span_start", 0),
-                            span_end=concept.get("span_end", 0)
+                            concept_title=concept.get("concept_title", ""),
+                            concept_explanation=concept.get("concept_explanation", ""),
+                            source_page_number=concept.get("source_page_number"),
+                            source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
+                            source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
                         )
                     logger.info(f"Added {len(key_concepts)} key concepts for file {file_id}")
                 else:
@@ -200,3 +211,80 @@ class PDFProcessor(FileProcessor):
         except Exception as e:
             logger.error(f"Error extracting text from PDF: {e}")
             return []
+    
+    async def extract_content(self, **kwargs) -> Dict[str, Any]:
+        """
+        Extract raw content from the PDF file.
+        
+        Args:
+            **kwargs: Must include 'file_data' as bytes
+            
+        Returns:
+            Dict containing extracted page content
+        """
+        file_data = kwargs.get('file_data')
+        if not file_data:
+            raise ValueError("Missing required 'file_data' parameter")
+            
+        page_data = self.extract_text_with_page_numbers(file_data)
+        return {"pages": page_data}
+    
+    async def generate_embeddings(self, content: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate embeddings for the extracted PDF content.
+        
+        Args:
+            content: Dictionary containing pages with extracted content
+            
+        Returns:
+            Dict containing content with embeddings
+        """
+        pages = content.get("pages", [])
+        processed_data = await self.process_pages(pages)
+        return processed_data
+    
+    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
+        """
+        Generate key concepts from the PDF content.
+        
+        Args:
+            content: Processed content with chunks
+            **kwargs: Additional parameters including file_id
+            
+        Returns:
+            List of key concepts
+        """
+        file_id = kwargs.get('file_id')
+        if not file_id:
+            raise ValueError("Missing required 'file_id' parameter")
+            
+        # Extract text from all chunks for key concept generation
+        chunks = content.get("chunks", [])
+        full_text = " ".join([chunk.get("content", "") for chunk in chunks if chunk.get("content")])
+        
+        if not full_text.strip():
+            logger.warning(f"No content available for key concept generation for file ID {file_id}")
+            return []
+            
+        try:
+            key_concepts = generate_key_concepts_dspy(document_text=full_text)
+            return key_concepts
+        except Exception as e:
+            self._log_error(f"Error generating key concepts for file {file_id}", e)
+            return []
+    
+    async def generate_learning_materials(self, file_id: str, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Generate learning materials from key concepts.
+        
+        Args:
+            file_id: File ID
+            key_concepts: List of key concepts
+            
+        Returns:
+            Dict containing generated learning materials
+        """
+        # This could be implemented to generate flashcards, quizzes, etc.
+        # For now, we'll just return a placeholder
+        return {"success": True, "materials": [], "message": "Learning material generation not implemented yet"}
+

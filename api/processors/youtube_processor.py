@@ -7,8 +7,9 @@ import os
 import re
 from typing import Dict, List, Any, Optional, Tuple
 
-from .base_processor import FileProcessor
-from ..repositories.repository_manager import RepositoryManager
+# Use absolute imports instead of relative imports
+from api.processors.base_processor import FileProcessor
+from api.repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
