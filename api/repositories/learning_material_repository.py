@@ -25,12 +25,10 @@ class LearningMaterialRepository(BaseRepository):
         file_id: int,
         concept_title: str,
         concept_explanation: str,
-        source_text: Optional[str] = None,
-        source_start: Optional[int] = None,
-        source_end: Optional[int] = None,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
+        source_video_timestamp_end_seconds: Optional[int] = None,
+        display_order: Optional[int] = 0
     ) -> Optional[int]:
         """Add a new key concept associated with a file.
         
@@ -38,12 +36,10 @@ class LearningMaterialRepository(BaseRepository):
             file_id: ID of the file this concept belongs to
             concept_title: Title/name of the concept
             concept_explanation: Detailed explanation of the concept
-            source_text: Text span from which the concept was derived
-            source_start: Start position of the text span
-            source_end: End position of the text span
             source_page_number: Page number for PDF sources
             source_video_timestamp_start_seconds: Start timestamp for video sources
             source_video_timestamp_end_seconds: End timestamp for video sources
+            display_order: Optional ordering for display purposes
             
         Returns:
             int: The ID of the newly created concept, or None if creation failed
@@ -52,14 +48,12 @@ class LearningMaterialRepository(BaseRepository):
             try:
                 new_concept = KeyConceptORM(
                     file_id=file_id,
-                    concept=concept_title,
-                    explanation=concept_explanation,
-                    span_text=source_text,
-                    span_start=source_start,
-                    span_end=source_end,
+                    concept_title=concept_title,
+                    concept_explanation=concept_explanation,
                     source_page_number=source_page_number,
                     source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
-                    source_video_timestamp_end_seconds=source_video_timestamp_end_seconds
+                    source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
+                    display_order=display_order
                 )
                 uow.session.add(new_concept)
                 # Commit handled by UnitOfWork

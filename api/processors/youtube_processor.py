@@ -455,13 +455,19 @@ class YouTubeProcessor(FileProcessor):
             return {"flashcards": 0, "mcqs": 0, "true_false": 0}
         
         results = {"flashcards": 0, "mcqs": 0, "true_false": 0}
-        
-        # Store key concepts
-        concept_ids = []
+        total_flashcards = 0
+        total_mcqs = 0
+        total_tf_questions = 0
+    
+        # Process each concept individually to maintain proper relationships
         for concept in key_concepts:
             # Extract concept information (handle different formats)
             concept_title = concept.get('concept_title', concept.get('concept', ''))
             concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            
+            if not concept_title or not concept_explanation:
+                logger.warning(f"Skipping concept with missing title or explanation: {concept}")
+                continue
             
             # Add key concept and store the returned ID
             concept_id = await self.store.add_key_concept_async(
@@ -471,105 +477,101 @@ class YouTubeProcessor(FileProcessor):
                 source_video_timestamp_start_seconds=concept.get('source_video_timestamp_start_seconds'),
                 source_video_timestamp_end_seconds=concept.get('source_video_timestamp_end_seconds')
             )
-            if concept_id:
-                concept_ids.append(concept_id)
-        
-        # Generate flashcards with timeout
-        try:
-            flashcards = await asyncio.wait_for(
-                generate_flashcards_from_key_concepts(key_concepts), 
-                timeout=180  # 3 minutes timeout
-            )
             
-            if flashcards:
-                logger.info(f"Generated {len(flashcards)} flashcards from key concepts")
-                for card in flashcards:
-                    try:
-                        # Use the first concept ID if available, otherwise None
-                        # Ensure we're passing an integer or None, never an empty list
-                        key_concept_id = concept_ids[0] if concept_ids else None
-                        
-                        # Fix parameter order to match repository implementation
-                        await self.store.add_flashcard_async(
-                            file_id=int(file_id),
-                            question=card.get('front', ''),
-                            answer=card.get('back', ''),
-                            key_concept_id=None if key_concept_id is None else int(key_concept_id),
-                            is_custom=False
-                        )
-                    except Exception as e:
-                        self._log_error(f"Error adding flashcard: {e}", e)
-                results["flashcards"] = len(flashcards)
-        except (asyncio.TimeoutError, Exception) as e:
-            self._log_error("Error generating flashcards", e)
-        
-        # Generate MCQs with timeout
-        try:
-            mcqs = await asyncio.wait_for(
-                generate_mcq_from_key_concepts(key_concepts),
-                timeout=180  # 3 minutes timeout
-            )
+            if not concept_id:
+                logger.warning(f"Failed to store key concept: {concept_title}")
+                continue
+                
+            # Generate materials for just this concept
+            single_concept = [concept]
             
-            if mcqs:
-                logger.info(f"Generated {len(mcqs)} MCQs from key concepts")
-                for mcq in mcqs:
-                    # Extract the correct answer and distractors from options
-                    options = mcq.get('options', [])
-                    answer = mcq.get('answer', '')
-                    
-                    # Format data for the updated method signature
-                    try:
-                        # Use the first concept ID if available, otherwise None
-                        # Ensure we're passing an integer or None, never an empty list
-                        key_concept_id = concept_ids[0] if concept_ids else None
-                        
-                        # Fix parameter order to match repository implementation
-                        await self.store.add_quiz_question_async(
-                            file_id=int(file_id),
-                            question=mcq.get('question', ''),
-                            question_type="MCQ",  # Consistent capitalization
-                            correct_answer=answer,
-                            distractors=[opt for opt in options if opt != answer],
-                            key_concept_id=None if key_concept_id is None else int(key_concept_id)  # Pass as keyword arg
-                        )
-                    except Exception as e:
-                        self._log_error(f"Error adding MCQ question: {e}", e)
-                results["mcqs"] = len(mcqs)
-        except (asyncio.TimeoutError, Exception) as e:
-            self._log_error("Error generating MCQs", e)
+            # 1. Generate flashcards for this specific concept
+            try:
+                flashcards = await asyncio.wait_for(
+                    generate_flashcards_from_key_concepts(single_concept), 
+                    timeout=60  # 1 minute timeout per concept
+                )
+                
+                if flashcards:
+                    logger.info(f"Generated {len(flashcards)} flashcards for concept: {concept_title}")
+                    for card in flashcards:
+                        try:
+                            # Store with this specific concept's ID
+                            await self.store.add_flashcard_async(
+                                file_id=int(file_id),
+                                question=card.get('front', ''),
+                                answer=card.get('back', ''),
+                                key_concept_id=int(concept_id),  # Use this specific concept's ID
+                                is_custom=False
+                            )
+                            total_flashcards += 1
+                        except Exception as e:
+                            self._log_error(f"Error adding flashcard: {e}", e)
+            except (asyncio.TimeoutError, Exception) as e:
+                self._log_error(f"Error generating flashcards for concept {concept_title}", e)
         
-        # Generate True/False questions with timeout
-        try:
-            tf_questions = await asyncio.wait_for(
-                generate_true_false_from_key_concepts(key_concepts),
-                timeout=180  # 3 minutes timeout
-            )
-            
-            if tf_questions:
-                logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
-                for tf in tf_questions:
-                    # Create a properly formatted True/False question
-                    try:
-                        # Use the first concept ID if available, otherwise None
-                        # Ensure we're passing an integer or None, never an empty list
-                        key_concept_id = concept_ids[0] if concept_ids else None
-                        
-                        # Make sure the key_concept_id is an integer or None
-                        # This prevents empty list being passed when concept_ids is empty
-                        await self.store.add_quiz_question_async(
-                            file_id=int(file_id),
-                            question=tf.get('statement', ''),
-                            question_type="TF",  # Consistent type identifier
-                            correct_answer="True" if tf.get('is_true', False) else "False",
-                            distractors=None,  # T/F questions don't need distractors, use None instead of empty list
-                            key_concept_id=None if key_concept_id is None else int(key_concept_id)  # Pass as keyword arg
-                        )
-                    except Exception as e:
-                        self._log_error(f"Error adding True/False question: {e}", e)
-                results["true_false"] = len(tf_questions)
-        except (asyncio.TimeoutError, Exception) as e:
-            self._log_error("Error generating True/False questions", e)
+            # 2. Generate MCQs for this specific concept
+            try:
+                mcqs = await asyncio.wait_for(
+                    generate_mcq_from_key_concepts(single_concept),
+                    timeout=60  # 1 minute timeout per concept
+                )
+                
+                if mcqs:
+                    logger.info(f"Generated {len(mcqs)} MCQs for concept: {concept_title}")
+                    for mcq in mcqs:
+                        try:
+                            # Extract the correct answer and distractors from options
+                            options = mcq.get('options', [])
+                            answer = mcq.get('answer', '')
+                            
+                            # Store with this specific concept's ID
+                            await self.store.add_quiz_question_async(
+                                file_id=int(file_id),
+                                question=mcq.get('question', ''),
+                                question_type="MCQ",  # Consistent capitalization
+                                correct_answer=answer,
+                                distractors=[opt for opt in options if opt != answer],
+                                key_concept_id=int(concept_id)  # Use this specific concept's ID
+                            )
+                            total_mcqs += 1
+                        except Exception as e:
+                            self._log_error(f"Error adding MCQ question: {e}", e)
+            except (asyncio.TimeoutError, Exception) as e:
+                self._log_error(f"Error generating MCQs for concept {concept_title}", e)
         
+            # 3. Generate True/False questions for this specific concept
+            try:
+                tf_questions = await asyncio.wait_for(
+                    generate_true_false_from_key_concepts(single_concept),
+                    timeout=60  # 1 minute timeout per concept
+                )
+                
+                if tf_questions:
+                    logger.info(f"Generated {len(tf_questions)} True/False questions for concept: {concept_title}")
+                    for tf in tf_questions:
+                        try:
+                            # Store with this specific concept's ID
+                            await self.store.add_quiz_question_async(
+                                file_id=int(file_id),
+                                question=tf.get('statement', ''),
+                                question_type="TrueFalse",  # Consistent capitalization
+                                correct_answer="True" if tf.get('is_true', False) else "False",
+                                distractors=[],  # No distractors for True/False questions
+                                key_concept_id=int(concept_id)  # Use this specific concept's ID
+                            )
+                            total_tf_questions += 1
+                        except Exception as e:
+                            self._log_error(f"Error adding True/False question: {e}", e)
+            except (asyncio.TimeoutError, Exception) as e:
+                self._log_error(f"Error generating True/False questions for concept {concept_title}", e)
+        
+        # Update results with totals
+        results["flashcards"] = total_flashcards
+        results["mcqs"] = total_mcqs
+        results["true_false"] = total_tf_questions
+        
+        logger.info(f"Successfully created {total_flashcards} flashcards, {total_mcqs} MCQs, and {total_tf_questions} True/False questions")
         return results
         
     def _log_error(self, message: str, error: Exception) -> None:

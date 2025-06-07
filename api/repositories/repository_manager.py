@@ -545,12 +545,10 @@ class RepositoryManager:
         file_id: int,
         concept_title: str,
         concept_explanation: str,
-        source_text: Optional[str] = None,
-        source_start: Optional[int] = None,
-        source_end: Optional[int] = None,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
+        source_video_timestamp_end_seconds: Optional[int] = None,
+        display_order: Optional[int] = 0
     ) -> Optional[int]:
         """Async wrapper for add_key_concept."""
         try:
@@ -562,12 +560,10 @@ class RepositoryManager:
                         file_id,
                         concept_title,
                         concept_explanation,
-                        source_text,
-                        source_start,
-                        source_end,
                         source_page_number,
                         source_video_timestamp_start_seconds,
-                        source_video_timestamp_end_seconds
+                        source_video_timestamp_end_seconds,
+                        display_order
                     )
                 )
                 return result
