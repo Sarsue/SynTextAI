@@ -520,24 +520,24 @@ class RepositoryManager:
         file_id: int,
         concept_title: str,
         concept_explanation: str,
-        source_text: Optional[str] = None,
-        source_start: Optional[int] = None,
-        source_end: Optional[int] = None,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
+        source_video_timestamp_end_seconds: Optional[int] = None,
+        display_order: Optional[int] = 0
     ) -> Optional[int]:
-        """Add a new key concept associated with a file."""
+        """Add a new key concept associated with a file.
+        
+        Parameter order must match LearningMaterialRepository.add_key_concept:
+        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds, display_order)
+        """
         return self.learning_material_repo.add_key_concept(
             file_id,
             concept_title,
             concept_explanation,
-            source_text,
-            source_start,
-            source_end,
             source_page_number,
             source_video_timestamp_start_seconds,
-            source_video_timestamp_end_seconds
+            source_video_timestamp_end_seconds,
+            display_order
         )
         
     async def add_key_concept_async(
@@ -550,7 +550,11 @@ class RepositoryManager:
         source_video_timestamp_end_seconds: Optional[int] = None,
         display_order: Optional[int] = 0
     ) -> Optional[int]:
-        """Async wrapper for add_key_concept."""
+        """Async wrapper for add_key_concept.
+        
+        Parameter order must match LearningMaterialRepository.add_key_concept:
+        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds, display_order)
+        """
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
@@ -574,29 +578,33 @@ class RepositoryManager:
     def add_flashcard(
         self, 
         file_id: int, 
-        key_concept_id: int, 
         question: str, 
         answer: str, 
+        key_concept_id: Optional[int] = None, 
         is_custom: bool = False
     ) -> Optional[int]:
-        """Add a new flashcard linked to a file and key concept."""
+        """Add a new flashcard linked to a file and optionally a key concept."""
         return self.learning_material_repo.add_flashcard(
             file_id, 
-            key_concept_id, 
             question, 
             answer, 
+            key_concept_id, 
             is_custom
         )
         
     async def add_flashcard_async(
         self, 
         file_id: int, 
-        key_concept_id: int, 
         question: str, 
         answer: str, 
+        key_concept_id: Optional[int] = None, 
         is_custom: bool = False
     ) -> Optional[int]:
-        """Async wrapper for add_flashcard."""
+        """Async wrapper for add_flashcard.
+        
+        Order of parameters must match LearningMaterialRepository.add_flashcard:
+        (file_id, question, answer, key_concept_id, is_custom)
+        """
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
@@ -604,9 +612,9 @@ class RepositoryManager:
                     pool,
                     lambda: self.add_flashcard(
                         file_id, 
-                        key_concept_id, 
                         question, 
                         answer, 
+                        key_concept_id, 
                         is_custom
                     )
                 )
@@ -627,23 +635,28 @@ class RepositoryManager:
         """Add a new quiz question linked to a file and optionally a key concept."""
         return self.learning_material_repo.add_quiz_question(
             file_id, 
-            key_concept_id, 
             question, 
             question_type, 
             correct_answer, 
-            distractors
+            distractors,
+            key_concept_id
         )
         
     async def add_quiz_question_async(
         self, 
         file_id: int, 
-        key_concept_id: Optional[int], 
         question: str, 
         question_type: str, 
         correct_answer: str, 
-        distractors: Optional[List[str]] = None
+        distractors: Optional[List[str]] = None,
+        key_concept_id: Optional[int] = None,
+        is_custom: bool = False
     ) -> Optional[int]:
-        """Async wrapper for add_quiz_question."""
+        """Async wrapper for add_quiz_question.
+        
+        Order of parameters must match LearningMaterialRepository.add_quiz_question:
+        (file_id, question, question_type, correct_answer, distractors, key_concept_id, is_custom)
+        """
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
@@ -651,11 +664,11 @@ class RepositoryManager:
                     pool,
                     lambda: self.add_quiz_question(
                         file_id, 
-                        key_concept_id, 
                         question, 
                         question_type, 
                         correct_answer, 
-                        distractors
+                        distractors,
+                        key_concept_id
                     )
                 )
                 return result

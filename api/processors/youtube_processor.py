@@ -458,7 +458,7 @@ class YouTubeProcessor(FileProcessor):
         total_flashcards = 0
         total_mcqs = 0
         total_tf_questions = 0
-    
+
         # Process each concept individually to maintain proper relationships
         for concept in key_concepts:
             # Extract concept information (handle different formats)
@@ -497,6 +497,7 @@ class YouTubeProcessor(FileProcessor):
                     for card in flashcards:
                         try:
                             # Store with this specific concept's ID
+                            # Parameter order: file_id, question, answer, key_concept_id, is_custom
                             await self.store.add_flashcard_async(
                                 file_id=int(file_id),
                                 question=card.get('front', ''),
@@ -509,7 +510,7 @@ class YouTubeProcessor(FileProcessor):
                             self._log_error(f"Error adding flashcard: {e}", e)
             except (asyncio.TimeoutError, Exception) as e:
                 self._log_error(f"Error generating flashcards for concept {concept_title}", e)
-        
+            
             # 2. Generate MCQs for this specific concept
             try:
                 mcqs = await asyncio.wait_for(
@@ -526,6 +527,7 @@ class YouTubeProcessor(FileProcessor):
                             answer = mcq.get('answer', '')
                             
                             # Store with this specific concept's ID
+                            # Parameter order: file_id, question, question_type, correct_answer, distractors, key_concept_id
                             await self.store.add_quiz_question_async(
                                 file_id=int(file_id),
                                 question=mcq.get('question', ''),
@@ -539,7 +541,7 @@ class YouTubeProcessor(FileProcessor):
                             self._log_error(f"Error adding MCQ question: {e}", e)
             except (asyncio.TimeoutError, Exception) as e:
                 self._log_error(f"Error generating MCQs for concept {concept_title}", e)
-        
+
             # 3. Generate True/False questions for this specific concept
             try:
                 tf_questions = await asyncio.wait_for(
@@ -552,6 +554,7 @@ class YouTubeProcessor(FileProcessor):
                     for tf in tf_questions:
                         try:
                             # Store with this specific concept's ID
+                            # Parameter order: file_id, question, question_type, correct_answer, distractors, key_concept_id
                             await self.store.add_quiz_question_async(
                                 file_id=int(file_id),
                                 question=tf.get('statement', ''),
@@ -578,7 +581,7 @@ class YouTubeProcessor(FileProcessor):
         """
         Helper method to log errors with consistent formatting.
         
-        Args:
+{{ ... }}
             message: Error message context
             error: Exception object
         """
