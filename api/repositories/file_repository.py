@@ -3,9 +3,11 @@ Repository for file-related database operations.
 """
 from typing import Optional, List, Dict, Any, Tuple
 import logging
-from sqlalchemy import text
+from sqlalchemy import text, select
 from sqlalchemy.exc import IntegrityError
 import numpy as np
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from scipy.spatial.distance import cosine, euclidean
 
 from .base_repository import BaseRepository
@@ -52,7 +54,7 @@ class FileRepository(BaseRepository):
                 return None
             # No need for finally/close - handled by UnitOfWork
     
-    def update_file_with_chunks(self, user_id: int, filename: str, file_type: str, extracted_data: List[Dict]) -> bool:
+    async def update_file_with_chunks(self, user_id: int, filename: str, file_type: str, extracted_data: List[Dict]) -> bool:
         """Store processed file data with embeddings, segments, and metadata.
         
         Args:
@@ -64,6 +66,25 @@ class FileRepository(BaseRepository):
         Returns:
             bool: True if successful, False otherwise
         """
+        # We'll use run_in_executor to make a synchronous operation asynchronous
+        # This prevents blocking the event loop while database operations are in progress
+        try:
+            # Create a ThreadPoolExecutor to handle the synchronous database operations
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                # Run the synchronous database operation in a separate thread
+                result = await loop.run_in_executor(
+                    pool,
+                    self._sync_update_file_with_chunks,
+                    user_id, filename, file_type, extracted_data
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for update_file_with_chunks: {e}", exc_info=True)
+            return False
+            
+    def _sync_update_file_with_chunks(self, user_id: int, filename: str, file_type: str, extracted_data: List[Dict]) -> bool:
+        """Synchronous implementation of update_file_with_chunks."""
         with self.get_unit_of_work() as uow:
             try:
                 # Get or create the file record
@@ -77,7 +98,6 @@ class FileRepository(BaseRepository):
                         user_id=user_id,
                         file_name=filename,
                         file_url=""  # URL might be added later
-                        # status column removed as it doesn't exist in the database schema
                     )
                     uow.session.add(file)
                     uow.session.flush()  # To get the ID

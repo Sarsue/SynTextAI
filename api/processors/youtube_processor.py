@@ -104,14 +104,34 @@ class YouTubeProcessor(FileProcessor):
                 await self.generate_learning_materials(file_id, key_concepts)
             
             # Update status
-            self.store.update_file_status(int(file_id), "processed")
-            
-            return {"success": True, "file_id": file_id, "key_concepts": len(key_concepts) if key_concepts else 0}
+            await self.store.update_file_status_async(int(file_id), "processed")
+        
+            # Get segment and chunk counts for consistent return structure
+            segment_count = len(processed_content.get('processed_segments', []))
+            chunk_count = sum(len(segment.get('chunks', [])) for segment in processed_content.get('processed_segments', []))
+        
+            return {
+                "success": True,
+                "file_id": file_id,
+                "metadata": {
+                    "segment_count": segment_count,
+                    "chunk_count": chunk_count,
+                    "key_concepts_count": len(key_concepts) if key_concepts else 0,
+                    "processor_type": "youtube"
+                }
+            }
             
         except Exception as e:
             self._log_error(f"Error processing YouTube video {filename}", e)
-            self.store.update_file_status(int(file_id), "error", str(e)[:200])
-            return {"success": False, "error": str(e)}
+            await self.store.update_file_status_async(int(file_id), "error", str(e)[:200])
+            return {
+                "success": False,
+                "file_id": file_id,
+                "error": str(e),
+                "metadata": {
+                    "processor_type": "youtube"
+                }
+            }
     
     async def extract_content(self, **kwargs) -> Dict[str, Any]:
         """
@@ -337,7 +357,7 @@ class YouTubeProcessor(FileProcessor):
         
         # Store segments and chunks
         for segment in segments:
-            segment_id = self.store.add_segment(
+            segment_id = await self.store.add_segment_async(
                 file_id=int(file_id), 
                 start_time=segment['start_time'],
                 end_time=segment['end_time'],
@@ -351,7 +371,7 @@ class YouTubeProcessor(FileProcessor):
                     logger.warning(f"Missing embedding for chunk in file_id: {file_id}, segment_id: {segment_id}")
                     continue
                 
-                self.store.add_chunk(
+                await self.store.add_chunk_async(
                     file_id=int(file_id),
                     segment_id=segment_id,
                     content=chunk['content'],
@@ -424,10 +444,10 @@ class YouTubeProcessor(FileProcessor):
         
         # Store key concepts
         for concept in key_concepts:
-            self.store.add_key_concept(
+            await self.store.add_key_concept_async(
                 file_id=int(file_id),
-                concept=concept.get('concept', ''),
-                explanation=concept.get('explanation', '')
+                concept_title=concept.get('concept', ''),
+                concept_explanation=concept.get('explanation', '')
             )
         
         # Generate flashcards with timeout
@@ -440,10 +460,12 @@ class YouTubeProcessor(FileProcessor):
             if flashcards:
                 logger.info(f"Generated {len(flashcards)} flashcards from key concepts")
                 for card in flashcards:
-                    self.store.add_flashcard(
+                    await self.store.add_flashcard_async(
                         file_id=int(file_id),
-                        front=card.get('front', ''),
-                        back=card.get('back', '')
+                        key_concept_id=None,  # Not linked to a specific concept
+                        question=card.get('front', ''),
+                        answer=card.get('back', ''),
+                        is_custom=False
                     )
                 results["flashcards"] = len(flashcards)
         except (asyncio.TimeoutError, Exception) as e:
@@ -464,14 +486,13 @@ class YouTubeProcessor(FileProcessor):
                     answer = mcq.get('answer', '')
                     
                     # Format data for the updated method signature
-                    self.store.add_quiz_question(
+                    await self.store.add_quiz_question_async(
                         file_id=int(file_id),
+                        key_concept_id=None,
                         question=mcq.get('question', ''),
                         question_type="MCQ",  # Consistent capitalization
                         correct_answer=answer,
-                        distractors=[opt for opt in options if opt != answer],
-                        key_concept_id=None,
-                        is_custom=False
+                        distractors=[opt for opt in options if opt != answer]
                     )
                 results["mcqs"] = len(mcqs)
         except (asyncio.TimeoutError, Exception) as e:
@@ -488,14 +509,13 @@ class YouTubeProcessor(FileProcessor):
                 logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
                 for tf in tf_questions:
                     # Create a properly formatted True/False question
-                    self.store.add_quiz_question(
+                    await self.store.add_quiz_question_async(
                         file_id=int(file_id),
+                        key_concept_id=None,
                         question=tf.get('statement', ''),
                         question_type="TF",  # Consistent type identifier
                         correct_answer="True" if tf.get('is_true', False) else "False",
-                        distractors=[],  # T/F questions don't need additional distractors
-                        key_concept_id=None,
-                        is_custom=False
+                        distractors=[]  # T/F questions don't need additional distractors
                     )
                 results["true_false"] = len(tf_questions)
         except (asyncio.TimeoutError, Exception) as e:

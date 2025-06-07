@@ -3,6 +3,7 @@ PDF processor module - Handles extraction and processing of PDF documents.
 """
 import logging
 import os
+import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 from io import BytesIO
 
@@ -70,7 +71,14 @@ class PDFProcessor(FileProcessor):
         
         if not page_data:
             logger.error(f"Failed to extract content from PDF: {filename}")
-            return {"success": False, "error": "Failed to extract content from PDF"}
+            return {
+                "success": False,
+                "file_id": file_id,
+                "error": "Failed to extract content from PDF",
+                "metadata": {
+                    "processor_type": "pdf"
+                }
+            }
             
         # Process extracted pages and generate embeddings
         logger.info(f"Starting page processing and embedding generation for file {filename}")
@@ -80,8 +88,8 @@ class PDFProcessor(FileProcessor):
         # Update the database with chunks and embeddings
         if processed_data and "chunks" in processed_data:
             logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
-            # Not using await since update_file_with_chunks is a synchronous method
-            success = self.store.update_file_with_chunks(
+            # Now properly awaiting the async method
+            success = await self.store.update_file_with_chunks(
                 user_id=user_id,
                 filename=filename,
                 file_type="pdf",
@@ -91,7 +99,15 @@ class PDFProcessor(FileProcessor):
             
             if not success:
                 logger.error(f"Failed to store chunks for file {file_id}")
-                return {"success": False, "error": "Failed to store chunks"}
+                return {
+                    "success": False,
+                    "file_id": file_id,
+                    "error": "Failed to store chunks",
+                    "metadata": {
+                        "processor_type": "pdf",
+                        "page_count": len(page_data)
+                    }
+                }
                 
             # Generate key concepts
             content = " ".join([chunk.get("content", "") for chunk in processed_data["chunks"] 
@@ -114,6 +130,11 @@ class PDFProcessor(FileProcessor):
                             source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
                         )
                     logger.info(f"Added {len(key_concepts)} key concepts for file {file_id}")
+                    
+                    # Generate learning materials (flashcards, MCQs, true/false questions)
+                    if key_concepts:
+                        logger.info(f"Generating learning materials for file_id {file_id}")
+                        await self.generate_learning_materials(file_id, key_concepts)
                 else:
                     logger.warning(f"No valid key concepts generated for file {file_id}")
             except Exception as e:
@@ -122,8 +143,13 @@ class PDFProcessor(FileProcessor):
         
         return {
             "success": True,
-            "page_count": len(page_data),
-            "chunk_count": len(processed_data.get("chunks", [])) if processed_data else 0
+            "file_id": file_id,
+            "metadata": {
+                "page_count": len(page_data),
+                "chunk_count": len(processed_data.get("chunks", [])) if processed_data else 0,
+                "key_concepts_count": len(key_concepts) if 'key_concepts' in locals() and key_concepts else 0,
+                "processor_type": "pdf"
+            }
         }
     
     async def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
@@ -312,7 +338,6 @@ class PDFProcessor(FileProcessor):
         
         # Generate flashcards with timeout
         try:
-            import asyncio
             flashcards = await asyncio.wait_for(
                 generate_flashcards_from_key_concepts(key_concepts), 
                 timeout=180  # 3 minutes timeout
@@ -388,3 +413,6 @@ class PDFProcessor(FileProcessor):
         
         return results
 
+    def _log_error(self, message: str, error: Exception) -> None:
+        """Log an error with consistent format."""
+        logging.error(f"{message}: {str(error)[:200]}", exc_info=True)

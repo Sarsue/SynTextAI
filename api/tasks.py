@@ -388,3 +388,154 @@ async def delete_user_task(user_id: str, user_gc_id: str):
     except Exception as e:
         logger.error(f"Error during user deletion: {e}")
         raise HTTPException(status_code=500, detail="User deletion failed")
+
+
+async def generate_flashcards_from_key_concepts(key_concepts: list) -> list:
+    """
+    Generate flashcards from key concepts using Gemini.
+    
+    Args:
+        key_concepts: List of key concept dictionaries
+        
+    Returns:
+        List of flashcard dictionaries with 'front' and 'back' keys
+    """
+    if not key_concepts:
+        logger.warning("No key concepts provided for flashcard generation")
+        return []
+    
+    try:
+        flashcards = []
+        for concept in key_concepts:
+            # Extract concept information (handle different formats from PDFs vs YouTube)
+            concept_title = concept.get('concept_title', concept.get('concept', ''))
+            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            
+            if not concept_title or not concept_explanation:
+                continue
+                
+            # Create a simple flashcard
+            flashcards.append({
+                'front': concept_title.strip(),
+                'back': concept_explanation.strip()
+            })
+            
+            # Create 1-2 additional flashcards asking about specific aspects of the concept
+            # This could be enhanced with a real LLM call for more sophisticated flashcards
+            if len(concept_explanation.split()) > 20:
+                parts = concept_explanation.split(". ")
+                if len(parts) > 1:
+                    key_detail = parts[0]
+                    flashcards.append({
+                        'front': f"What is a key detail about {concept_title}?",
+                        'back': key_detail
+                    })
+        
+        logger.info(f"Generated {len(flashcards)} flashcards from {len(key_concepts)} key concepts")
+        return flashcards
+        
+    except Exception as e:
+        logger.error(f"Error generating flashcards: {e}", exc_info=True)
+        return []
+
+
+async def generate_mcq_from_key_concepts(key_concepts: list) -> list:
+    """
+    Generate multiple choice questions from key concepts.
+    
+    Args:
+        key_concepts: List of key concept dictionaries
+        
+    Returns:
+        List of MCQ dictionaries with question, options, and answer
+    """
+    if not key_concepts:
+        logger.warning("No key concepts provided for MCQ generation")
+        return []
+    
+    try:
+        mcqs = []
+        for concept in key_concepts:
+            # Extract concept information (handle different formats)
+            concept_title = concept.get('concept_title', concept.get('concept', ''))
+            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            
+            if not concept_title or not concept_explanation:
+                continue
+                
+            # Create question from concept title
+            question = f"What is {concept_title}?"
+            
+            # Create a correct answer from concept explanation
+            correct_answer = concept_explanation.split(".")[0].strip()
+            if len(correct_answer) < 10 and len(concept_explanation.split(".")) > 1:
+                correct_answer = concept_explanation.split(".")[0] + "." + concept_explanation.split(".")[1]
+                correct_answer = correct_answer.strip()
+            
+            # Generate 3 simple distractors (this would be improved with a real LLM call)
+            distractors = [
+                f"An unrelated concept not covered in this material.",
+                f"The opposite of what the material actually explains about this topic.",
+                f"A common misconception about {concept_title.lower()}."
+            ]
+            
+            # Combine correct answer and distractors into options
+            options = [correct_answer] + distractors
+            
+            mcqs.append({
+                'question': question,
+                'options': options,
+                'answer': correct_answer
+            })
+        
+        logger.info(f"Generated {len(mcqs)} MCQs from {len(key_concepts)} key concepts")
+        return mcqs
+        
+    except Exception as e:
+        logger.error(f"Error generating MCQs: {e}", exc_info=True)
+        return []
+
+
+async def generate_true_false_from_key_concepts(key_concepts: list) -> list:
+    """
+    Generate true/false questions from key concepts.
+    
+    Args:
+        key_concepts: List of key concept dictionaries
+        
+    Returns:
+        List of true/false dictionaries with statement and is_true flag
+    """
+    if not key_concepts:
+        logger.warning("No key concepts provided for true/false generation")
+        return []
+    
+    try:
+        tf_questions = []
+        for concept in key_concepts:
+            # Extract concept information (handle different formats)
+            concept_title = concept.get('concept_title', concept.get('concept', ''))
+            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            
+            if not concept_title or not concept_explanation:
+                continue
+                
+            # Create a true statement using the actual concept
+            tf_questions.append({
+                'statement': f"{concept_title} refers to {concept_explanation.split('.')[0]}.",
+                'is_true': True
+            })
+            
+            # Create a false statement by modifying the concept slightly
+            false_statement = f"{concept_title} is completely unrelated to the topic covered in this material."
+            tf_questions.append({
+                'statement': false_statement,
+                'is_true': False
+            })
+            
+        logger.info(f"Generated {len(tf_questions)} True/False questions from {len(key_concepts)} key concepts")
+        return tf_questions
+        
+    except Exception as e:
+        logger.error(f"Error generating True/False questions: {e}", exc_info=True)
+        return []

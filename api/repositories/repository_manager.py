@@ -6,6 +6,8 @@ with the original DocSynthStore interface while maintaining separation of concer
 """
 from typing import Optional, List, Dict, Any, Tuple
 import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from .user_repository import UserRepository
 from .chat_repository import ChatRepository
@@ -116,9 +118,37 @@ class RepositoryManager:
         """Add a new chat history for a user."""
         return self.chat_repo.add_chat_history(title, user_id)
     
+    async def add_chat_history_async(self, title: str, user_id: int) -> Optional[int]:
+        """Async wrapper for add_chat_history."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_chat_history(title, user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_chat_history: {e}", exc_info=True)
+            return None
+    
     def get_latest_chat_history_id(self, user_id: int) -> Optional[int]:
         """Get the ID of the most recent chat history for a user."""
         return self.chat_repo.get_latest_chat_history_id(user_id)
+    
+    async def get_latest_chat_history_id_async(self, user_id: int) -> Optional[int]:
+        """Async wrapper for get_latest_chat_history_id."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_latest_chat_history_id(user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_latest_chat_history_id: {e}", exc_info=True)
+            return None
     
     def add_message(
         self, 
@@ -130,30 +160,134 @@ class RepositoryManager:
         """Add a new message to a chat history."""
         return self.chat_repo.add_message(content, sender, user_id, chat_history_id)
     
+    async def add_message_async(
+        self, 
+        content: str, 
+        sender: str, 
+        user_id: int, 
+        chat_history_id: Optional[int] = None
+    ) -> Optional[int]:
+        """Async wrapper for add_message."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_message(content, sender, user_id, chat_history_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_message: {e}", exc_info=True)
+            return None
+    
     def get_all_user_chat_histories(self, user_id: int) -> List[Dict[str, Any]]:
         """Get all chat histories for a user with latest messages."""
         return self.chat_repo.get_all_user_chat_histories(user_id)
+    
+    async def get_all_user_chat_histories_async(self, user_id: int) -> List[Dict[str, Any]]:
+        """Async wrapper for get_all_user_chat_histories."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_all_user_chat_histories(user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_all_user_chat_histories: {e}", exc_info=True)
+            return []
     
     def get_messages_for_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, Any]]:
         """Get all messages for a specific chat history."""
         return self.chat_repo.get_messages_for_chat_history(chat_history_id, user_id)
     
+    async def get_messages_for_chat_history_async(self, chat_history_id: int, user_id: int) -> List[Dict[str, Any]]:
+        """Async wrapper for get_messages_for_chat_history."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_messages_for_chat_history(chat_history_id, user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_messages_for_chat_history: {e}", exc_info=True)
+            return []
+    
     def delete_chat_history(self, user_id: int, history_id: int) -> bool:
         """Delete a chat history and all associated messages."""
         return self.chat_repo.delete_chat_history(user_id, history_id)
+    
+    async def delete_chat_history_async(self, user_id: int, history_id: int) -> bool:
+        """Async wrapper for delete_chat_history."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.delete_chat_history(user_id, history_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for delete_chat_history: {e}", exc_info=True)
+            return False
     
     def delete_all_user_histories(self, user_id: int) -> bool:
         """Delete all chat histories for a user."""
         return self.chat_repo.delete_all_user_histories(user_id)
     
+    async def delete_all_user_histories_async(self, user_id: int) -> bool:
+        """Async wrapper for delete_all_user_histories."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.delete_all_user_histories(user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for delete_all_user_histories: {e}", exc_info=True)
+            return False
+    
     def format_user_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, str]]:
         """Format chat history in a way suitable for LLM context."""
         return self.chat_repo.format_user_chat_history(chat_history_id, user_id)
+    
+    async def format_user_chat_history_async(self, chat_history_id: int, user_id: int) -> List[Dict[str, str]]:
+        """Async wrapper for format_user_chat_history."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.format_user_chat_history(chat_history_id, user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for format_user_chat_history: {e}", exc_info=True)
+            return []
     
     # File operations
     def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
         """Add a new file to the database."""
         return self.file_repo.add_file(user_id, file_name, file_url)
+    
+    async def add_file_async(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
+        """Async wrapper for add_file."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_file(user_id, file_name, file_url)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_file: {e}", exc_info=True)
+            return None
     
     def update_file_with_chunks(
         self, 
@@ -165,13 +299,61 @@ class RepositoryManager:
         """Store processed file data with embeddings, segments, and metadata."""
         return self.file_repo.update_file_with_chunks(user_id, filename, file_type, extracted_data)
     
+    async def update_file_with_chunks_async(
+        self, 
+        user_id: int, 
+        filename: str, 
+        file_type: str, 
+        extracted_data: List[Dict]
+    ) -> bool:
+        """Async wrapper for update_file_with_chunks."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.update_file_with_chunks(user_id, filename, file_type, extracted_data)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for update_file_with_chunks: {e}", exc_info=True)
+            return False
+    
     def get_files_for_user(self, user_id: int) -> List[Dict[str, Any]]:
         """Get all files for a user."""
         return self.file_repo.get_files_for_user(user_id)
     
+    async def get_files_for_user_async(self, user_id: int) -> List[Dict[str, Any]]:
+        """Async wrapper for get_files_for_user."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_files_for_user(user_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_files_for_user: {e}", exc_info=True)
+            return []
+    
     def delete_file_entry(self, user_id: int, file_id: int) -> bool:
         """Delete a file and all associated data."""
         return self.file_repo.delete_file_entry(user_id, file_id)
+    
+    async def delete_file_entry_async(self, user_id: int, file_id: int) -> bool:
+        """Async wrapper for delete_file_entry."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.delete_file_entry(user_id, file_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for delete_file_entry: {e}", exc_info=True)
+            return False
     
     def query_chunks_by_embedding(
         self,
@@ -188,9 +370,43 @@ class RepositoryManager:
             similarity_type
         )
     
+    async def query_chunks_by_embedding_async(
+        self,
+        user_id: int, 
+        query_embedding: List[float], 
+        top_k: int = 5, 
+        similarity_type: str = 'l2'
+    ) -> List[Dict[str, Any]]:
+        """Async wrapper for query_chunks_by_embedding."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.query_chunks_by_embedding(user_id, query_embedding, top_k, similarity_type)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for query_chunks_by_embedding: {e}", exc_info=True)
+            return []
+    
     def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:
         """Get all segment contents for a specific page of a file."""
         return self.file_repo.get_segments_for_page(file_id, page_number)
+    
+    async def get_segments_for_page_async(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:
+        """Async wrapper for get_segments_for_page."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_segments_for_page(file_id, page_number)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_segments_for_page: {e}", exc_info=True)
+            return []
     
     def get_segments_for_time_range(
         self, 
@@ -201,13 +417,60 @@ class RepositoryManager:
         """Get segment contents for a specific time range of a video file."""
         return self.file_repo.get_segments_for_time_range(file_id, start_time, end_time)
     
+    async def get_segments_for_time_range_async(
+        self, 
+        file_id: int, 
+        start_time: float, 
+        end_time: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """Async wrapper for get_segments_for_time_range."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_segments_for_time_range(file_id, start_time, end_time)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_segments_for_time_range: {e}", exc_info=True)
+            return []
+    
     def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get a file record by ID."""
         return self.file_repo.get_file_by_id(file_id)
     
+    async def get_file_by_id_async(self, file_id: int) -> Optional[Dict[str, Any]]:
+        """Async wrapper for get_file_by_id."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_file_by_id(file_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_file_by_id: {e}", exc_info=True)
+            return None
+    
     def get_file_by_name(self, user_id: int, filename: str) -> Optional[Dict[str, Any]]:
         """Get a file record by user ID and filename."""
         return self.file_repo.get_file_by_name(user_id, filename)
+    
+    async def get_file_by_name_async(self, user_id: int, filename: str) -> Optional[Dict[str, Any]]:
+        """Async wrapper for get_file_by_name."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_file_by_name(user_id, filename)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_file_by_name: {e}", exc_info=True)
+            return None
     
     def update_file_status(
         self, 
@@ -217,6 +480,26 @@ class RepositoryManager:
     ) -> bool:
         """Update the status of a file."""
         return self.file_repo.update_file_status(file_id, status, error_message)
+        
+    async def update_file_status_async(
+        self, 
+        file_id: int, 
+        status: str = None, 
+        error_message: str = None
+    ) -> bool:
+        """Async wrapper for update_file_status."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    self.update_file_status,
+                    file_id, status, error_message
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for update_file_status: {e}", exc_info=True)
+            return False
     
     # For backward compatibility with the old method name
     def update_file_processing_status(
@@ -256,6 +539,41 @@ class RepositoryManager:
             source_video_timestamp_start_seconds,
             source_video_timestamp_end_seconds
         )
+        
+    async def add_key_concept_async(
+        self,
+        file_id: int,
+        concept_title: str,
+        concept_explanation: str,
+        source_text: Optional[str] = None,
+        source_start: Optional[int] = None,
+        source_end: Optional[int] = None,
+        source_page_number: Optional[int] = None,
+        source_video_timestamp_start_seconds: Optional[int] = None,
+        source_video_timestamp_end_seconds: Optional[int] = None
+    ) -> Optional[int]:
+        """Async wrapper for add_key_concept."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_key_concept(
+                        file_id,
+                        concept_title,
+                        concept_explanation,
+                        source_text,
+                        source_start,
+                        source_end,
+                        source_page_number,
+                        source_video_timestamp_start_seconds,
+                        source_video_timestamp_end_seconds
+                    )
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_key_concept: {e}", exc_info=True)
+            return None
     
     def add_flashcard(
         self, 
@@ -273,6 +591,33 @@ class RepositoryManager:
             answer, 
             is_custom
         )
+        
+    async def add_flashcard_async(
+        self, 
+        file_id: int, 
+        key_concept_id: int, 
+        question: str, 
+        answer: str, 
+        is_custom: bool = False
+    ) -> Optional[int]:
+        """Async wrapper for add_flashcard."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_flashcard(
+                        file_id, 
+                        key_concept_id, 
+                        question, 
+                        answer, 
+                        is_custom
+                    )
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_flashcard: {e}", exc_info=True)
+            return None
     
     def add_quiz_question(
         self, 
@@ -292,6 +637,35 @@ class RepositoryManager:
             correct_answer, 
             distractors
         )
+        
+    async def add_quiz_question_async(
+        self, 
+        file_id: int, 
+        key_concept_id: Optional[int], 
+        question: str, 
+        question_type: str, 
+        correct_answer: str, 
+        distractors: Optional[List[str]] = None
+    ) -> Optional[int]:
+        """Async wrapper for add_quiz_question."""
+        try:
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_quiz_question(
+                        file_id, 
+                        key_concept_id, 
+                        question, 
+                        question_type, 
+                        correct_answer, 
+                        distractors
+                    )
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_quiz_question: {e}", exc_info=True)
+            return None
     
     def get_key_concepts_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get key concepts for a file."""
