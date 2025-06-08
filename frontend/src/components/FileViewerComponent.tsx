@@ -262,11 +262,22 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             onError(`Unsupported file type or could not determine type for: ${file.name}`);
         }
         
-        // Only fetch key concepts if user is logged in and file ID exists
+        // Only fetch data if user is logged in, file ID exists, and file is not yet processed
         if (user && fileId) {
-            fetchKeyConcepts();
-            fetchFlashcards();
-            fetchQuizzes();
+            // If the file is processed, we only need to fetch data once
+            // If not processed, we continue polling for data
+            if (!file.processed) {
+                console.log(`File ${fileId} is not yet processed. Fetching data...`);
+                fetchKeyConcepts();
+                fetchFlashcards();
+                fetchQuizzes();
+            } else {
+                console.log(`File ${fileId} is already processed. Fetching data once...`);
+                // Only fetch if we haven't loaded the data yet
+                if (keyConcepts.length === 0) fetchKeyConcepts();
+                if (flashcards.length === 0) fetchFlashcards();
+                if (quizzes.length === 0) fetchQuizzes();
+            }
         }
     }, [fileUrl, file.name, onError, file.processed, user, fileId]); 
 
@@ -390,6 +401,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     };
 
     const renderFileContent = () => {
+        // Handle loading and unprocessed states
         if (!fileType) {
             return <div className="loading-indicator">Loading file...</div>;
         }
@@ -399,6 +411,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return <div className="processing-indicator">File is being processed. Key concepts will appear when ready.</div>;
         }
 
+        // Handle different file types with a single return statement using conditional rendering
         if (fileType === 'youtube') { 
             let videoId = '';
             const url = file.publicUrl || ''; 
@@ -419,42 +432,39 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                     />
                 </div>
             );
-        }
-
-        switch (fileType) {
-            case 'pdf':
-                return (
-                    <div className="pdf-container file-content-area">
-                        <iframe
-                            ref={pdfViewerRef}
-                            src={fileUrl}
-                            className="pdf-viewer"
-                            title={`PDF Viewer - ${file.name}`}
-                        />
-                    </div>
-                );
-            case 'video':
-                return (
-                    <div className="video-container file-content-area">
-                        <video
-                            ref={videoPlayerRef}
-                            src={fileUrl}
-                            className="video-player"
-                            controls
-                            onTimeUpdate={() => { /* Can potentially update state here if needed */ }}
-                        >
-                            Your browser does not support the video tag.
-                        </video>
-                    </div>
-                );
-            case 'image':
-                return (
-                    <div className="image-container file-content-area">
-                        <img src={fileUrl} alt={file.name} className="image-viewer" />
-                    </div>
-                );
-            default:
-                return <div className="error-message">Unsupported file type: {fileType}</div>;
+        } else if (fileType === 'pdf') {
+            return (
+                <div className="pdf-container file-content-area">
+                    <iframe
+                        ref={pdfViewerRef}
+                        src={fileUrl}
+                        className="pdf-viewer"
+                        title={`PDF Viewer - ${file.name}`}
+                    />
+                </div>
+            );
+        } else if (fileType === 'video') {
+            return (
+                <div className="video-container file-content-area">
+                    <video
+                        ref={videoPlayerRef}
+                        src={fileUrl}
+                        className="video-player"
+                        controls
+                        onTimeUpdate={() => { /* Can potentially update state here if needed */ }}
+                    >
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+            );
+        } else if (fileType === 'image') {
+            return (
+                <div className="image-container file-content-area">
+                    <img src={fileUrl} alt={file.name} className="image-viewer" />
+                </div>
+            );
+        } else {
+            return <div className="error-message">Unsupported file type: {fileType}</div>;
         }
     };
 

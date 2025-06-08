@@ -478,8 +478,15 @@ class RepositoryManager:
         status: str = None, 
         error_message: str = None
     ) -> bool:
-        """Update the status of a file."""
-        return self.file_repo.update_file_status(file_id, status, error_message)
+        """Update the status of a file (deprecated - columns don't exist)."""
+        # Log that we're skipping the status update because the columns don't exist
+        log_msg = f"Status update for file ID {file_id} skipped (columns don't exist in schema)"
+        if status:
+            log_msg += f", status would have been: {status}"
+        if error_message:
+            log_msg += f", error would have been: {error_message[:50]}{'...' if len(error_message) > 50 else ''}"
+        logger.info(log_msg)
+        return True
         
     async def update_file_status_async(
         self, 
@@ -509,10 +516,17 @@ class RepositoryManager:
         status: str = None, 
         error_message: str = None
     ) -> bool:
-        """Update the processing status of a file (backward compatibility)."""
-        # Convert processed bool to status string
+        """Update the processing status of a file (deprecated - columns don't exist)."""
+        # Convert processed bool to status string for logging purposes
         status_value = status or ("processed" if processed else "pending")
-        return self.file_repo.update_file_status(file_id, status_value, error_message)
+        
+        # Log that we're skipping the status update because the columns don't exist
+        log_msg = f"Processing status update for file ID {file_id} skipped (columns don't exist in schema)"
+        log_msg += f", processed flag: {processed}, status would have been: {status_value}"
+        if error_message:
+            log_msg += f", error would have been: {error_message[:50]}{'...' if len(error_message) > 50 else ''}"
+        logger.info(log_msg)
+        return True
     
     # Learning material operations
     def add_key_concept(

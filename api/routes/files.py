@@ -129,6 +129,8 @@ async def retrieve_files(
         user_id = user_data["user_id"]
         store = request.app.state.store
         files = store.get_files_for_user(user_id)
+        # The processing status is already calculated in the FileRepository.get_files_for_user method
+        # based on whether the file has key concepts
         return files
     except Exception as e:
         logger.error(f"Error retrieving files: {e}")
@@ -198,10 +200,8 @@ async def get_flashcards_for_file(
                 except Exception as e:
                     logger.error(f"Error formatting flashcard: {e}")
         
-        return result
-        
         # Wrap the flashcards in an object with a named property as expected by the frontend
-        return {"flashcards": flashcards_out}
+        return {"flashcards": result}
     except Exception as e:
         logger.error(f"Error fetching flashcards for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

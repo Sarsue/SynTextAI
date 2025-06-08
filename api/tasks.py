@@ -182,8 +182,8 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
     
     try:
-        # Update status to processing
-        store.update_file_status(int(file_id), "processing", "File is being processed")
+        # Note: File processing status is now inferred from the presence of chunks/concepts rather than explicit status fields
+        logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
         
         # Fix import issues by doing a direct import with the correct sys.path
         import sys
@@ -211,8 +211,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         else:
             # No processor available for this file type
             logger.error(f"No processor available for file type: {filename}")
-            store.update_file_status(int(file_id), "error", "Unsupported file type. Please upload a supported format.")
-            store.update_file_processing_status(int(file_id), True)  # Mark as processed to prevent retries
+            # Note: Status is inferred rather than explicitly stored
             return
         
         # Process the file using the selected processor
@@ -223,7 +222,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             
             if file_data is None:
                 logger.error(f"Failed to download file {filename} from GCS")
-                store.update_file_status(int(file_id), "error", "Failed to download file from storage")
+                # Note: Status is inferred rather than explicitly stored
                 return
                 
             logger.info(f"Successfully downloaded file {filename}, size: {len(file_data)} bytes")
@@ -241,26 +240,20 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             )
             
             if not result.get("success", False):
-                logger.error(f"Processing failed: {result.get('error', 'Unknown error')}")
-                store.update_file_status(int(file_id), "error", result.get('error', 'Processing failed')[:200])
-                return  # Exit without marking as processed so it can be retried
+                logger.error(f"Processing failed for file ID {file_id}: {result.get('error', 'Unknown error')}")
+                # Note: Status is inferred rather than explicitly stored
+                return  # Exit so processing can be retried
                 
             logger.info(f"Processing completed successfully for file_id: {file_id}")
-            # Update file status to processed
-            store.update_file_processing_status(int(file_id), True)
+            # Success is now inferred from the presence of chunks and key concepts
             return
             
         except Exception as e:
             logger.error(f"Error in file processing: {e}", exc_info=True)
-            store.update_file_status(int(file_id), "error", str(e)[:200])
             return
             
     except Exception as e:
         logger.error(f"Fatal error in file processing pipeline: {e}", exc_info=True)
-        try:
-            store.update_file_status(int(file_id), "error", f"System error: {str(e)[:150]}")
-        except Exception:
-            pass  # If we can't update the status, we've already logged the error
     
     # We've either had a fatal error or processing has completed
     return
@@ -539,3 +532,69 @@ async def generate_true_false_from_key_concepts(key_concepts: list) -> list:
     except Exception as e:
         logger.error(f"Error generating True/False questions: {e}", exc_info=True)
         return []
+
+
+# New adapter functions to bridge the gap between the processor and the existing functions
+
+async def generate_flashcards_from_concept(concept_title: str, concept_explanation: str) -> list:
+    """
+    Generate flashcards for a single concept.
+    
+    Args:
+        concept_title: Title of the concept
+        concept_explanation: Explanation of the concept
+        
+    Returns:
+        List of flashcard items
+    """
+    logger.info(f"Generating flashcards for concept: '{concept_title[:30]}...'")
+    
+    # Create a single concept in the format expected by the original function
+    concept = [{"concept_title": concept_title, "concept_explanation": concept_explanation}]
+    
+    # Directly await the async function since we're in an async context
+    flashcards = await generate_flashcards_from_key_concepts(concept)
+    logger.info(f"Generated {len(flashcards)} flashcards for concept '{concept_title[:30]}...'")
+    return flashcards
+
+async def generate_mcqs_from_concept(concept_title: str, concept_explanation: str) -> list:
+    """
+    Generate multiple choice questions for a single concept.
+    
+    Args:
+        concept_title: Title of the concept
+        concept_explanation: Explanation of the concept
+        
+    Returns:
+        List of MCQ items
+    """
+    logger.info(f"Generating MCQs for concept: '{concept_title[:30]}...'")
+    
+    # Create a single concept in the format expected by the original function
+    concept = [{"concept_title": concept_title, "concept_explanation": concept_explanation}]
+    
+    # Directly await the async function since we're in an async context
+    mcqs = await generate_mcq_from_key_concepts(concept)
+    logger.info(f"Generated {len(mcqs)} MCQs for concept '{concept_title[:30]}...'")
+    return mcqs
+
+async def generate_true_false_from_concept(concept_title: str, concept_explanation: str) -> list:
+    """
+    Generate true/false questions for a single concept.
+    
+    Args:
+        concept_title: Title of the concept
+        concept_explanation: Explanation of the concept
+        
+    Returns:
+        List of true/false questions
+    """
+    logger.info(f"Generating True/False questions for concept: '{concept_title[:30]}...'")
+    
+    # Create a single concept in the format expected by the original function
+    concept = [{"concept_title": concept_title, "concept_explanation": concept_explanation}]
+    
+    # Directly await the async function since we're in an async context
+    tf_questions = await generate_true_false_from_key_concepts(concept)
+    logger.info(f"Generated {len(tf_questions)} True/False questions for concept '{concept_title[:30]}...'")
+    return tf_questions

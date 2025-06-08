@@ -6,12 +6,22 @@ import os
 import asyncio
 from typing import Dict, List, Any, Optional, Tuple
 from io import BytesIO
+import tempfile
+import base64
+import json
+from datetime import datetime
+import hashlib
+
+import fitz  # PyMuPDF
+import numpy as np
+import re
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.utils import chunk_text
 from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
+from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 
 # Import PDF extraction tools
 from pdfminer.high_level import extract_text
@@ -114,14 +124,42 @@ class PDFProcessor(FileProcessor):
                                if isinstance(chunk, dict) and "content" in chunk])
             
             try:
-                # Generate key concepts using dspy or alternative method (synchronous call)
+                # Generate key concepts using dspy - it now handles both chunking and format standardization
                 key_concepts = generate_key_concepts_dspy(content, language, comprehension_level)
                 
+                # Add detailed logging of all concepts
                 if key_concepts and isinstance(key_concepts, list):
-                    # Add key concepts to database
-                    for concept in key_concepts:
-                        # Using async method now
-                        await self.store.add_key_concept_async(
+                    logger.info(f"Extracted {len(key_concepts)} key concepts from document")
+                    for i, concept in enumerate(key_concepts):
+                        title = concept.get('concept_title', 'MISSING')
+                        explanation = concept.get('concept_explanation', 'MISSING')
+                        logger.debug(f"Raw concept {i+1}: title='{title[:100]}', explanation='{explanation[:100]}...'")
+                else:
+                    logger.warning(f"No key concepts were extracted from the document content")
+                    return {
+                        "success": False,
+                        "file_id": file_id,
+                        "error": "Failed to extract key concepts",
+                        "metadata": {
+                            "processor_type": "pdf",
+                            "page_count": len(page_data)
+                        }
+                    }
+                    
+                if key_concepts and isinstance(key_concepts, list):
+                    logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
+                    concepts_processed = 0
+                    
+                    # Process one concept at a time - save concept, then generate and save its learning materials
+                    for i, concept in enumerate(key_concepts):
+                        title = concept.get("concept_title", "")
+                        explanation = concept.get("concept_explanation", "")
+                        logger.info(f"Processing concept {i+1}/{len(key_concepts)}: '{title[:50]}...'")
+                        logger.debug(f"Concept details - title: '{title}', explanation: '{explanation[:100]}...'")
+                        
+                        # 1. Save the concept to get its ID
+                        logger.debug(f"Attempting to save concept to database: '{title[:50]}...'")
+                        concept_id = await self.store.add_key_concept_async(
                             file_id=file_id,
                             concept_title=concept.get("concept_title", ""),
                             concept_explanation=concept.get("concept_explanation", ""),
@@ -129,27 +167,33 @@ class PDFProcessor(FileProcessor):
                             source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
                             source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
                         )
-                    logger.info(f"Added {len(key_concepts)} key concepts for file {file_id}")
-                    
-                    # Generate learning materials (flashcards, MCQs, true/false questions)
-                    if key_concepts:
-                        # Fetch key concepts with IDs from database to ensure proper foreign key references
-                        db_key_concepts = self.store.get_key_concepts_for_file(file_id)
                         
-                        if db_key_concepts:
-                            # Format key concepts as expected by generate_learning_materials
-                            formatted_concepts = []
-                            for concept in db_key_concepts:
-                                formatted_concepts.append({
-                                    "concept_title": concept.concept_title, 
-                                    "concept_explanation": concept.concept_explanation,
-                                    "id": concept.id  # This is the crucial database ID we need
-                                })
-                                
-                            logger.info(f"Generating learning materials with {len(formatted_concepts)} key concepts for file_id {file_id}")
-                            await self.generate_learning_materials(file_id, formatted_concepts)
+                        if concept_id is not None:
+                            logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
+                            logger.debug(f"Successfully saved concept with ID {concept_id} to database")
+                            
+                            # 2. Generate and save learning materials for this concept
+                            concept_with_id = {
+                                "concept_title": concept.get("concept_title", ""), 
+                                "concept_explanation": concept.get("concept_explanation", ""),
+                                "id": concept_id
+                            }
+                            
+                            logger.debug(f"Preparing to generate learning materials for concept ID {concept_id}")
+                            logger.debug(f"Concept with ID data: {concept_with_id}")
+                            
+                            # Generate flashcards and quizzes immediately for this concept
+                            result = await self.generate_learning_materials_for_concept(file_id, concept_with_id)
+                            
+                            if result:
+                                concepts_processed += 1
+                                logger.info(f"Successfully generated learning materials for concept '{title[:30]}...'")
+                            else:
+                                logger.error(f"Failed to generate learning materials for concept '{title[:30]}...'")
                         else:
-                            logger.error(f"Failed to retrieve key concepts from database for file {file_id}")
+                            logger.error(f"Failed to save concept '{title[:30]}...' to database for file {file_id}")
+                    
+                    logger.info(f"Completed processing {concepts_processed}/{len(key_concepts)} key concepts for file {file_id}")
 
                 else:
                     logger.warning(f"No valid key concepts generated for file {file_id}")
@@ -317,155 +361,46 @@ class PDFProcessor(FileProcessor):
             self._log_error(f"Error generating key concepts for file {file_id}", e)
             return []
     
-    async def generate_learning_materials(self, file_id: str, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def generate_learning_materials(self, file_id: int, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Generate flashcards, MCQs, and T/F questions from key concepts.
         
         Args:
             file_id: File ID
-            key_concepts: List of key concepts
+            key_concepts: List of key concepts that have already been stored in the database with their IDs
             
         Returns:
-            Dict with counts of generated materials
+            Dict: Summary of concept processing results
         """
-        try:
-            # Import needed functions from tasks module
-            from ..tasks import (
-                generate_flashcards_from_key_concepts,
-                generate_mcq_from_key_concepts,
-                generate_true_false_from_key_concepts
-            )
-        except ImportError as e:
-            logger.error(f"Error importing learning material generators: {e}")
-            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
-        
         if not key_concepts:
-            logger.warning(f"No key concepts available to generate learning materials for file_id: {file_id}")
-            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
+            logger.warning(f"No key concepts provided to generate learning materials for file {file_id}")
+            return {"concepts_processed": 0, "concepts_successful": 0, "concepts_failed": 0}
+            
+        logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
         
-        # Convert file_id to integer as repository methods expect int
-        try:
-            file_id_int = int(file_id)
-        except ValueError:
-            logger.error(f"Invalid file_id: {file_id}, cannot convert to integer")
-            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
-        
-        # Track results
-        total_flashcards = 0
-        total_mcqs = 0
-        total_tf_questions = 0
-        concept_data = {}
-        
-        # Process each concept individually like YouTube processor does
+        # Process each concept and track success/failure
+        concept_results = []
         for concept in key_concepts:
-            concept_title = concept.get('concept_title', concept.get('concept', ''))
-            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            result = await self.generate_learning_materials_for_concept(file_id, concept)
+            concept_results.append(result)
             
-            if not concept_title or not concept_explanation:
-                logger.warning(f"Skipping key concept with missing title or explanation: {concept}")
-                continue
-            
-            # Store the key concept to get its ID first
-            concept_id = await self.store.add_key_concept_async(
-                file_id=file_id_int,
-                concept_title=concept_title,
-                concept_explanation=concept_explanation,
-                # PDF concepts don't have timestamps like videos do
-                source_video_timestamp_start_seconds=None,
-                source_video_timestamp_end_seconds=None
-            )
-            
-            if concept_id is None:
-                logger.error(f"Failed to store key concept '{concept_title}', skipping its learning materials")
-                continue
-                
-            # Add this concept ID to our map for retrieval later
-            concept_data[concept_title] = {
-                "id": concept_id,
-                "explanation": concept_explanation
-            }
-            
-            # Now generate flashcards for this specific concept
-            try:
-                # Generate flashcards for this concept
-                concept_cards = await generate_flashcards_from_key_concepts([concept])
-                
-                if concept_cards:
-                    for card in concept_cards:
-                        try:
-                            await self.store.add_flashcard_async(
-                                file_id=file_id_int,
-                                question=card.get('front', ''),
-                                answer=card.get('back', ''),
-                                key_concept_id=int(concept_id),  # Use this concept's ID
-                                is_custom=False
-                            )
-                            total_flashcards += 1
-                        except Exception as e:
-                            logger.error(f"Error adding flashcard: {e}")
-            except Exception as e:
-                logger.error(f"Error generating flashcards for concept '{concept_title}': {e}")
-            
-            # Generate MCQs for this specific concept
-            try:
-                # Generate MCQs for this concept
-                concept_mcqs = await generate_mcq_from_key_concepts([concept])
-                
-                if concept_mcqs:
-                    for mcq in concept_mcqs:
-                        options = mcq.get('options', [])
-                        answer = mcq.get('answer', '')
-                        
-                        try:
-                            await self.store.add_quiz_question_async(
-                                file_id=file_id_int,
-                                question=mcq.get('question', ''),
-                                question_type="MCQ",
-                                correct_answer=answer,
-                                distractors=[opt for opt in options if opt != answer],
-                                key_concept_id=int(concept_id)  # Use this concept's ID
-                            )
-                            total_mcqs += 1
-                        except Exception as e:
-                            logger.error(f"Error adding MCQ: {e}")
-            except Exception as e:
-                logger.error(f"Error generating MCQs for concept '{concept_title}': {e}")
-            
-            # Generate True/False questions for this specific concept
-            try:
-                # Generate TF questions for this concept
-                concept_tf = await generate_true_false_from_key_concepts([concept])
-                
-                if concept_tf:
-                    for tf in concept_tf:
-                        # Validate the T/F question data
-                        statement = tf.get('statement', '')
-                        is_true = tf.get('is_true')
-                        
-                        if not statement or is_true is None:
-                            logger.warning(f"Skipping T/F question with missing data: {tf}")
-                            continue
-                        
-                        try:
-                            await self.store.add_quiz_question_async(
-                                file_id=file_id_int,
-                                question=statement,
-                                question_type="TrueFalse",
-                                correct_answer="True" if is_true else "False",
-                                distractors=[],
-                                key_concept_id=int(concept_id)  # Use this concept's ID
-                            )
-                            total_tf_questions += 1
-                        except Exception as e:
-                            logger.error(f"Error adding True/False question: {e}")
-            except Exception as e:
-                logger.error(f"Error generating True/False questions for concept '{concept_title}': {e}")
+        # Use the shared utility to log summary and return results
+        return await log_concept_processing_summary(concept_results, file_id)
+    
+    async def generate_learning_materials_for_concept(self, file_id: int, concept: Dict[str, Any]) -> bool:
+        """
+        Generate and save learning materials for a single key concept.
+        Delegates to the shared utility function.
         
-        return {
-            "flashcards": total_flashcards,
-            "mcqs": total_mcqs,
-            "true_false": total_tf_questions
-        }
+        Args:
+            file_id: ID of the file
+            concept: A single key concept with ID
+            
+        Returns:
+            bool: Success status
+        """
+        # Use the shared utility function and pass in our store
+        return await generate_learning_materials_for_concept(self.store, file_id, concept)
 
     def _log_error(self, message: str, error: Exception) -> None:
         """Log an error with consistent format."""

@@ -275,11 +275,18 @@ def generate_key_concepts_dspy(document_text: str, language: str = "English", co
         
         # Validate timestamps and page references
         validated_concepts = _validate_references(deduplicated_concepts, document_text, is_video)
-        return validated_concepts
+        
+        # Standardize the output format to use consistent field names
+        standardized_concepts = _standardize_concept_format(validated_concepts, is_video)
+        return standardized_concepts
     else:
         # For shorter documents, process directly
         concepts = _extract_key_concepts_from_chunk(document_text, language, comprehension_level, is_video)
-        return _validate_references(concepts, document_text, is_video)
+        validated_concepts = _validate_references(concepts, document_text, is_video)
+        
+        # Standardize the output format to use consistent field names
+        standardized_concepts = _standardize_concept_format(validated_concepts, is_video)
+        return standardized_concepts
 
 def _extract_key_concepts_from_chunk(document_chunk: str, language: str, comprehension_level: str, is_video: bool, chunk_info: str = "") -> List[dict]:
     """Extract key concepts from a document chunk with enhanced accuracy."""
@@ -402,16 +409,85 @@ def similar_enough(str1: str, str2: str) -> bool:
     if str1 in str2 or str2 in str1:
         return True
     
-    # Otherwise use edit distance ratio - adjust threshold as needed
-    if len(str1) > 5 and len(str2) > 5:
-        try:
-            from difflib import SequenceMatcher
-            similarity = SequenceMatcher(None, str1, str2).ratio()
-            return similarity > 0.8  # 80% similarity threshold
-        except:
-            # If difflib fails, fall back to simple comparison
-            return False
-    return False
+    # Otherwise use Levenshtein distance ratio
+    ratio = fuzz.ratio(str1.lower(), str2.lower())
+    return ratio > 80  # Adjust threshold as needed
+
+
+def _standardize_concept_format(concepts: List[dict], is_video: bool = False) -> List[dict]:
+    """Standardize concept format to use consistent field names across the application.
+    
+    This centralizes the format conversion from DSPy output format to application format,
+    ensuring all concepts have consistent field names regardless of where they were processed.
+    
+    Args:
+        concepts: List of concept dictionaries, potentially in different formats
+        is_video: Whether the concepts are from a video (affects timestamp fields)
+        
+    Returns:
+        List of concepts with standardized field names
+    """
+    if not concepts:
+        return []
+        
+    standardized_concepts = []
+    for concept in concepts:
+        # Skip empty concepts
+        if not concept:
+            continue
+            
+        # Create a new standardized concept
+        standardized = {}
+        
+        # Handle concept title (DSPy uses 'concept', we use 'concept_title')
+        if 'concept' in concept:
+            standardized['concept_title'] = concept['concept']
+        elif 'concept_title' in concept:
+            standardized['concept_title'] = concept['concept_title']
+        else:
+            standardized['concept_title'] = concept.get('title', 'Untitled Concept')
+            
+        # Handle explanation (DSPy uses 'explanation', we use 'concept_explanation')
+        if 'explanation' in concept:
+            standardized['concept_explanation'] = concept['explanation']
+        elif 'concept_explanation' in concept:
+            standardized['concept_explanation'] = concept['concept_explanation']
+        else:
+            standardized['concept_explanation'] = concept.get('description', '')
+            
+        # Handle video-specific fields
+        if is_video:
+            # Handle timestamp fields
+            if 'start_seconds' in concept:
+                standardized['source_video_timestamp_start_seconds'] = concept['start_seconds']
+            elif 'source_video_timestamp_start_seconds' in concept:
+                standardized['source_video_timestamp_start_seconds'] = concept['source_video_timestamp_start_seconds']
+                
+            if 'end_seconds' in concept:
+                standardized['source_video_timestamp_end_seconds'] = concept['end_seconds']
+            elif 'source_video_timestamp_end_seconds' in concept:
+                standardized['source_video_timestamp_end_seconds'] = concept['source_video_timestamp_end_seconds']
+                
+            # Handle source timestamp text
+            if 'source_timestamp' in concept:
+                standardized['source_video_timestamp'] = concept['source_timestamp']
+            elif 'source_video_timestamp' in concept:
+                standardized['source_video_timestamp'] = concept['source_video_timestamp']
+        # Handle document-specific fields
+        else:
+            # Handle page number fields
+            if 'source_page' in concept:
+                standardized['source_page_number'] = concept['source_page']
+            elif 'pages' in concept and concept['pages']:
+                standardized['source_page_number'] = str(concept['pages'][0])
+            elif 'source_page_number' in concept:
+                standardized['source_page_number'] = concept['source_page_number']
+                
+        # Add the standardized concept to our results
+        standardized_concepts.append(standardized)
+        
+    logging.info(f"Standardized {len(standardized_concepts)} concepts to application format")
+    return standardized_concepts
 
 def _validate_references(concepts: List[dict], document_text: str, is_video: bool) -> List[dict]:
     """Validate and correct timestamps or page references in the concepts."""

@@ -40,7 +40,6 @@ class FileRepository(BaseRepository):
                     user_id=user_id,
                     file_name=file_name,
                     file_url=file_url
-                    # status column removed as it doesn't exist in the database schema
                 )
                 uow.session.add(new_file)
                 # Flush the session to get the ID assigned by the database
@@ -157,14 +156,16 @@ class FileRepository(BaseRepository):
             try:
                 from sqlalchemy import func
                 
-                # Fetch files with chunk count in a single query (more efficient)
+                # Fetch files with chunk count and key concepts count in a single query (more efficient)
                 files = uow.session.query(
                     FileORM.id, 
                     FileORM.file_name, 
                     FileORM.file_url,
                     FileORM.created_at,
-                    func.count(ChunkORM.id).label('chunk_count')
+                    func.count(ChunkORM.id).label('chunk_count'),
+                    func.count(KeyConceptORM.id).label('key_concepts_count')
                 ).outerjoin(ChunkORM, ChunkORM.file_id == FileORM.id)\
+                .outerjoin(KeyConceptORM, KeyConceptORM.file_id == FileORM.id)\
                 .filter(FileORM.user_id == user_id)\
                 .group_by(FileORM.id, FileORM.file_name, FileORM.file_url, FileORM.created_at)\
                 .order_by(FileORM.created_at.desc())\
@@ -172,8 +173,8 @@ class FileRepository(BaseRepository):
                 
                 result = []
                 for file in files:
-                    # Align with original implementation (processed = has chunks)
-                    is_processed = file[4] > 0  # chunk_count > 0
+                    # A file is considered fully processed only when it has key concepts
+                    is_processed = file[5] > 0  # key_concepts_count > 0
                     
                     file_dict = {
                         "id": file[0],                 # FileORM.id
@@ -429,7 +430,6 @@ class FileRepository(BaseRepository):
                     'file_name': file.file_name,
                     'file_url': file.file_url,
                     'created_at': file.created_at.isoformat() if file.created_at else None
-                    # status and error_message fields removed - don't exist in database schema
                 }
             except Exception as e:
                 logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
@@ -461,34 +461,7 @@ class FileRepository(BaseRepository):
                     'file_name': file.file_name,
                     'file_url': file.file_url,
                     'created_at': file.created_at.isoformat() if file.created_at else None
-                    # status and error_message fields removed - don't exist in database schema
                 }
             except Exception as e:
                 logger.error(f"Error getting file by name: {e}", exc_info=True)
                 return None
-    
-    def update_file_status(self, file_id: int, status: str = None, error_message: str = None) -> bool:
-        """Update the status of a file.
-        
-        Args:
-            file_id: ID of the file to update
-            status: New status value (e.g., 'success', 'failed', 'warning')
-            error_message: Optional error message when processing failed
-            
-        Returns:
-            bool: True if successful, False otherwise
-            
-        Note:
-            This method is maintained for API compatibility but no longer updates status fields
-            as they don't exist in the database schema.
-        """
-        # Log that we're skipping the status update because the columns don't exist
-        log_msg = f"Status update for file ID {file_id} skipped (columns don't exist in schema)"
-        if status:
-            log_msg += f", status would have been: {status}"
-        if error_message:
-            log_msg += f", error would have been: {error_message[:50]}{'...' if len(error_message) > 50 else ''}"
-        logger.info(log_msg)
-        
-        # Return true to avoid breaking any code that expects this to work
-        return True

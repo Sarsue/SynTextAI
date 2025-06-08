@@ -38,13 +38,14 @@ class LearningMaterialRepository(BaseRepository):
             source_page_number: Page number for PDF sources
             source_video_timestamp_start_seconds: Start timestamp for video sources
             source_video_timestamp_end_seconds: End timestamp for video sources
-    
-            
+
+        
         Returns:
             int: The ID of the newly created concept, or None if creation failed
         """
         with self.get_unit_of_work() as uow:
             try:
+                logger.debug(f"Creating key concept: title='{concept_title[:50]}...', file_id={file_id}")
                 new_concept = KeyConceptORM(
                     file_id=file_id,
                     concept_title=concept_title,
@@ -52,15 +53,19 @@ class LearningMaterialRepository(BaseRepository):
                     source_page_number=source_page_number,
                     source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
                     source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
-    
                 )
                 uow.session.add(new_concept)
-                # Commit handled by UnitOfWork
-                logger.info(f"Added key concept '{concept_title}' for file {file_id}")
-                return new_concept.id
+                uow.session.flush()  # Make sure we have an ID before continuing
+                concept_id = new_concept.id
+                
+                # Explicitly commit to ensure transaction completion
+                uow.session.commit()
+                logger.info(f"Successfully added key concept '{concept_title[:50]}...' for file {file_id}, id={concept_id}")
+                return concept_id
             except Exception as e:
-                # Rollback handled by UnitOfWork
-                logger.error(f"Error adding key concept: {e}", exc_info=True)
+                # Explicitly rollback on error
+                uow.session.rollback()
+                logger.error(f"Error adding key concept '{concept_title[:50]}...': {e}", exc_info=True)
                 return None
     
     # Flashcard functionality removed as it no longer exists in the DB schema

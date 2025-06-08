@@ -19,8 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    pass
+    # Remove display_order column from key_concepts table
+    op.drop_column('key_concepts', 'display_order')
 
 
 def downgrade() -> None:
-    pass
+    # Add display_order column back if needed
+    op.add_column('key_concepts', sa.Column('display_order', sa.Integer(), nullable=True, server_default='0'))

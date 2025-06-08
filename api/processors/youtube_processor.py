@@ -10,6 +10,7 @@ from typing import Dict, List, Any, Optional, Tuple
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
+from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 
 logger = logging.getLogger(__name__)
 
@@ -99,44 +100,78 @@ class YouTubeProcessor(FileProcessor):
                 comprehension_level=comprehension_level
             )
             
-            # Step 5: Store key concepts in the database
-            if key_concepts:
-                logger.info(f"Storing {len(key_concepts)} key concepts for file ID {file_id}")
-                # Store each key concept in the database
-                for concept in key_concepts:
-                    await self.store.add_key_concept_async(
+            # Log all extracted concepts
+            if key_concepts and isinstance(key_concepts, list):
+                logger.info(f"Extracted {len(key_concepts)} key concepts from video")
+                for i, concept in enumerate(key_concepts):
+                    title = concept.get('concept_title', '')
+                    logger.debug(f"Processed concept {i+1}: title='{title[:50]}...' ")
+            else:
+                logger.warning(f"No key concepts were extracted from the video content")
+                return {
+                    "success": False,
+                    "file_id": file_id,
+                    "error": "Failed to extract key concepts",
+                    "metadata": {
+                        "processor_type": "youtube",
+                        "duration_seconds": video_info.get('duration_seconds', 0) if video_info else 0
+                    }
+                }
+                    
+            # Step 5: Process each key concept individually - save it and generate its learning materials
+            concepts_processed = 0
+            if key_concepts and isinstance(key_concepts, list):
+                logger.info(f"Processing {len(key_concepts)} key concepts for file ID {file_id}")
+                
+                for i, concept in enumerate(key_concepts):
+                    title = concept.get("concept_title", "")
+                    explanation = concept.get("concept_explanation", "")
+                    logger.info(f"Processing concept {i+1}/{len(key_concepts)}: '{title[:50]}...'")
+                    logger.debug(f"Full concept data: title='{title}', explanation='{explanation[:100]}...'")
+                    
+                    # Log before saving to database
+                    logger.debug(f"Saving concept to database: '{title[:30]}...'")
+                    
+                    # Save the concept to get its ID
+                    concept_id = await self.store.add_key_concept_async(
                         file_id=file_id,
-                        concept_title=concept.get("concept_title", ""),
-                        concept_explanation=concept.get("concept_explanation", ""),
+                        concept_title=title,
+                        concept_explanation=explanation,
                         source_page_number=concept.get("source_page_number"),
                         source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
                         source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
                     )
-                
-                # Step 6: Fetch stored key concepts with database IDs
-                db_key_concepts = self.store.get_key_concepts_for_file(file_id)
-                
-                if db_key_concepts:
-                    # Format key concepts as expected by generate_learning_materials
-                    formatted_concepts = []
-                    for concept in db_key_concepts:
-                        formatted_concepts.append({
-                            "concept_title": concept.concept_title, 
-                            "concept_explanation": concept.concept_explanation,
-                            "id": concept.id  # This is the crucial database ID we need
-                        })
                     
-                    # Step 7: Generate learning materials using key concepts with IDs
-                    logger.info(f"Generating learning materials with {len(formatted_concepts)} key concepts for file_id {file_id}")
-                    await self.generate_learning_materials(file_id, formatted_concepts)
-                else:
-                    logger.error(f"Failed to retrieve key concepts from database for file {file_id}")
+                    if concept_id is not None:
+                        logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
+                        logger.debug(f"Successfully saved concept to database with ID {concept_id}")
+                        
+                        # Generate and save learning materials for this concept immediately
+                        concept_with_id = {
+                            "concept_title": concept.get("concept_title", ""), 
+                            "concept_explanation": concept.get("concept_explanation", ""),
+                            "id": concept_id
+                        }
+                        
+                        # Generate learning materials for this specific concept right away
+                        logger.debug(f"Starting learning material generation for concept ID {concept_id}")
+                        result = await self.generate_learning_materials_for_concept(file_id, concept_with_id)
+                        
+                        if result:
+                            concepts_processed += 1
+                            logger.info(f"Successfully generated learning materials for concept '{title[:30]}...'")
+                        else:
+                            logger.error(f"Failed to generate learning materials for concept '{title[:30]}...'")
+                    else:
+                        logger.error(f"Failed to save concept '{title[:30]}...' to database for file {file_id}")
+                
+                logger.info(f"Completed processing {concepts_processed}/{len(key_concepts)} key concepts for file {file_id}")
             else:
                 logger.warning(f"No key concepts generated for YouTube file {file_id}")
 
             
-            # Update status
-            await self.store.update_file_status_async(int(file_id), "processed")
+            logger.info(f"YouTube processing completed successfully: {filename}")
+            # Note: Status is now inferred from the presence of chunks and key concepts
         
             # Get segment and chunk counts for consistent return structure
             segment_count = len(processed_content.get('processed_segments', []))
@@ -155,7 +190,7 @@ class YouTubeProcessor(FileProcessor):
             
         except Exception as e:
             self._log_error(f"Error processing YouTube video {filename}", e)
-            await self.store.update_file_status_async(int(file_id), "error", str(e)[:200])
+            # Note: Status is now inferred from the presence of chunks and key concepts
             return {
                 "success": False,
                 "file_id": file_id,
@@ -465,170 +500,51 @@ class YouTubeProcessor(FileProcessor):
             self._log_error("Error generating key concepts", e)
             return []
     
+    async def generate_learning_materials_for_concept(self, file_id: str, concept: Dict[str, Any]) -> bool:
+        """
+        Generate and save learning materials for a single key concept.
+        Delegates to the shared utility function.
+        
+        Args:
+            file_id: ID of the file (as string in YouTube processor)
+            concept: A single key concept with database ID
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            # Convert file_id to int since the shared utility expects an integer
+            return await generate_learning_materials_for_concept(self.store, int(file_id), concept)
+        except Exception as e:
+            logger.error(f"Error generating learning materials: {e}", exc_info=True)
+            return False
+            
     async def generate_learning_materials(self, file_id: str, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Generate flashcards, MCQs, and T/F questions from key concepts.
         
         Args:
             file_id: File ID
-            key_concepts: List of key concepts
+            key_concepts: List of key concepts that have already been stored in the database with their IDs
             
         Returns:
-            Dict with counts of generated materials
+            Dict: Summary of concept processing results
         """
-        from ..tasks import (
-            generate_flashcards_from_key_concepts, 
-            generate_mcq_from_key_concepts,
-            generate_true_false_from_key_concepts
-        )
-        
         if not key_concepts:
-            logger.warning(f"No key concepts available to generate learning materials for file_id: {file_id}")
-            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
+            logger.warning(f"No key concepts provided to generate learning materials for file {file_id}")
+            return {"concepts_processed": 0, "concepts_successful": 0, "concepts_failed": 0}
+            
+        logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
         
-        results = {"flashcards": 0, "mcqs": 0, "true_false": 0}
-        total_flashcards = 0
-        total_mcqs = 0
-        total_tf_questions = 0
-
-        # Process each concept individually to maintain proper relationships
+        # Process each concept and track success/failure
+        concept_results = []
         for concept in key_concepts:
-            # Extract concept information (handle different formats)
-            concept_title = concept.get('concept_title', concept.get('concept', ''))
-            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            result = await self.generate_learning_materials_for_concept(file_id, concept)
+            concept_results.append(result)
             
-            if not concept_title or not concept_explanation:
-                logger.warning(f"Skipping concept with missing title or explanation: {concept}")
-                continue
-            
-            # First check if this concept already exists in the database
-            existing_concepts = await self.store.get_key_concepts_for_file_async(int(file_id))
-            concept_id = None
-            
-            # Look for matching concept by title
-            for existing_concept in existing_concepts:
-                if existing_concept.get('concept_title') == concept_title:
-                    concept_id = existing_concept.get('id')
-                    logger.info(f"Found existing key concept '{concept_title}' with ID {concept_id}")
-                    break
-                    
-            # Only add if it doesn't exist yet
-            if concept_id is None:
-                concept_id = await self.store.add_key_concept_async(
-                    file_id=int(file_id),
-                    concept_title=concept_title,
-                    concept_explanation=concept_explanation,
-                    source_video_timestamp_start_seconds=concept.get('source_video_timestamp_start_seconds'),
-                    source_video_timestamp_end_seconds=concept.get('source_video_timestamp_end_seconds')
-                )
-                
-            # Skip generating materials if concept storage failed
-            if concept_id is None:
-                logger.error(f"Failed to store key concept '{concept_title}', skipping its learning materials")
-                continue
-                
-            # Generate materials for just this concept
-            single_concept = [concept]
-            
-            # 1. Generate flashcards for this specific concept
-            try:
-                flashcards = await asyncio.wait_for(
-                    generate_flashcards_from_key_concepts(single_concept), 
-                    timeout=60  # 1 minute timeout per concept
-                )
-                
-                if flashcards:
-                    logger.info(f"Generated {len(flashcards)} flashcards for concept: {concept_title}")
-                    for card in flashcards:
-                        try:
-                            # Store with this specific concept's ID
-                            # Parameter order: file_id, question, answer, key_concept_id, is_custom
-                            await self.store.add_flashcard_async(
-                                file_id=int(file_id),
-                                question=card.get('front', ''),
-                                answer=card.get('back', ''),
-                                key_concept_id=int(concept_id),  # Use this specific concept's ID
-                                is_custom=False
-                            )
-                            total_flashcards += 1
-                        except Exception as e:
-                            self._log_error(f"Error adding flashcard: {e}", e)
-            except (asyncio.TimeoutError, Exception) as e:
-                self._log_error(f"Error generating flashcards for concept {concept_title}", e)
-            
-            # 2. Generate MCQs for this specific concept
-            try:
-                mcqs = await asyncio.wait_for(
-                    generate_mcq_from_key_concepts(single_concept),
-                    timeout=60  # 1 minute timeout per concept
-                )
-                
-                if mcqs:
-                    logger.info(f"Generated {len(mcqs)} MCQs for concept: {concept_title}")
-                    for mcq in mcqs:
-                        try:
-                            # Extract the correct answer and distractors from options
-                            options = mcq.get('options', [])
-                            answer = mcq.get('answer', '')
-                            
-                            # Store with this specific concept's ID
-                            # Parameter order: file_id, question, question_type, correct_answer, distractors, key_concept_id
-                            await self.store.add_quiz_question_async(
-                                file_id=int(file_id),
-                                question=mcq.get('question', ''),
-                                question_type="MCQ",  # Consistent capitalization
-                                correct_answer=answer,
-                                distractors=[opt for opt in options if opt != answer],
-                                key_concept_id=int(concept_id)  # Use this specific concept's ID
-                            )
-                            total_mcqs += 1
-                        except Exception as e:
-                            self._log_error(f"Error adding MCQ question: {e}", e)
-            except (asyncio.TimeoutError, Exception) as e:
-                self._log_error(f"Error generating MCQs for concept {concept_title}", e)
-
-            # 3. Generate True/False questions for this specific concept
-            try:
-                tf_questions = await asyncio.wait_for(
-                    generate_true_false_from_key_concepts(single_concept),
-                    timeout=60  # 1 minute timeout per concept
-                )
-                
-                if tf_questions:
-                    logger.info(f"Generated {len(tf_questions)} True/False questions for concept: {concept_title}")
-                    for tf in tf_questions:
-                        try:
-                            # Validate the T/F question data structure
-                            statement = tf.get('statement', '')
-                            is_true = tf.get('is_true')
-                            
-                            if not statement or is_true is None:
-                                logger.warning(f"Skipping T/F question with missing data: {tf}")
-                                continue
-                                
-                            # Store with this specific concept's ID
-                            # Using named parameters to avoid order mistakes
-                            await self.store.add_quiz_question_async(
-                                file_id=int(file_id),
-                                question=statement,
-                                question_type="TrueFalse",
-                                correct_answer="True" if is_true else "False",
-                                distractors=[],  # No distractors for True/False questions
-                                key_concept_id=int(concept_id)  # Ensure concept_id is an integer
-                            )
-                            total_tf_questions += 1
-                        except Exception as e:
-                            self._log_error(f"Error adding True/False question: {e}", e)
-            except (asyncio.TimeoutError, Exception) as e:
-                self._log_error(f"Error generating True/False questions for concept {concept_title}", e)
-        
-        # Update results with totals
-        results["flashcards"] = total_flashcards
-        results["mcqs"] = total_mcqs
-        results["true_false"] = total_tf_questions
-        
-        logger.info(f"Successfully created {total_flashcards} flashcards, {total_mcqs} MCQs, and {total_tf_questions} True/False questions")
-        return results
+        # Use the shared utility to log summary and return results
+        # Convert file_id to int for the utility function
+        return await log_concept_processing_summary(concept_results, int(file_id))
         
     def _log_error(self, message: str, error: Exception) -> None:
         """
