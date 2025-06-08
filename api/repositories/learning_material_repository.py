@@ -27,8 +27,7 @@ class LearningMaterialRepository(BaseRepository):
         concept_explanation: str,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None,
-        display_order: Optional[int] = 0
+        source_video_timestamp_end_seconds: Optional[int] = None
     ) -> Optional[int]:
         """Add a new key concept associated with a file.
         
@@ -39,7 +38,7 @@ class LearningMaterialRepository(BaseRepository):
             source_page_number: Page number for PDF sources
             source_video_timestamp_start_seconds: Start timestamp for video sources
             source_video_timestamp_end_seconds: End timestamp for video sources
-            display_order: Optional ordering for display purposes
+    
             
         Returns:
             int: The ID of the newly created concept, or None if creation failed
@@ -53,7 +52,7 @@ class LearningMaterialRepository(BaseRepository):
                     source_page_number=source_page_number,
                     source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
                     source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
-                    display_order=display_order
+    
                 )
                 uow.session.add(new_concept)
                 # Commit handled by UnitOfWork
@@ -94,7 +93,7 @@ class LearningMaterialRepository(BaseRepository):
                         file_id=concept.file_id,
                         concept_title=getattr(concept, 'concept_title', ''),  # Using correct field name
                         concept_explanation=getattr(concept, 'concept_explanation', ''),  # Using correct field name
-                        display_order=getattr(concept, 'display_order', 1),
+
                         source_page_number=getattr(concept, 'source_page_number', None),
                         source_video_timestamp_start_seconds=getattr(concept, 'source_video_timestamp_start_seconds', None),
                         source_video_timestamp_end_seconds=getattr(concept, 'source_video_timestamp_end_seconds', None),

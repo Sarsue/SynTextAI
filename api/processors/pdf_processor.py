@@ -133,8 +133,24 @@ class PDFProcessor(FileProcessor):
                     
                     # Generate learning materials (flashcards, MCQs, true/false questions)
                     if key_concepts:
-                        logger.info(f"Generating learning materials for file_id {file_id}")
-                        await self.generate_learning_materials(file_id, key_concepts)
+                        # Fetch key concepts with IDs from database to ensure proper foreign key references
+                        db_key_concepts = self.store.get_key_concepts_for_file(file_id)
+                        
+                        if db_key_concepts:
+                            # Format key concepts as expected by generate_learning_materials
+                            formatted_concepts = []
+                            for concept in db_key_concepts:
+                                formatted_concepts.append({
+                                    "concept_title": concept.concept_title, 
+                                    "concept_explanation": concept.concept_explanation,
+                                    "id": concept.id  # This is the crucial database ID we need
+                                })
+                                
+                            logger.info(f"Generating learning materials with {len(formatted_concepts)} key concepts for file_id {file_id}")
+                            await self.generate_learning_materials(file_id, formatted_concepts)
+                        else:
+                            logger.error(f"Failed to retrieve key concepts from database for file {file_id}")
+
                 else:
                     logger.warning(f"No valid key concepts generated for file {file_id}")
             except Exception as e:
@@ -327,98 +343,129 @@ class PDFProcessor(FileProcessor):
             logger.warning(f"No key concepts available to generate learning materials for file_id: {file_id}")
             return {"flashcards": 0, "mcqs": 0, "true_false": 0}
         
-        results = {"flashcards": 0, "mcqs": 0, "true_false": 0}
-        
         # Convert file_id to integer as repository methods expect int
         try:
             file_id_int = int(file_id)
         except ValueError:
             logger.error(f"Invalid file_id: {file_id}, cannot convert to integer")
-            return results
+            return {"flashcards": 0, "mcqs": 0, "true_false": 0}
         
-        # Generate flashcards with timeout
-        try:
-            flashcards = await asyncio.wait_for(
-                generate_flashcards_from_key_concepts(key_concepts), 
-                timeout=180  # 3 minutes timeout
+        # Track results
+        total_flashcards = 0
+        total_mcqs = 0
+        total_tf_questions = 0
+        concept_data = {}
+        
+        # Process each concept individually like YouTube processor does
+        for concept in key_concepts:
+            concept_title = concept.get('concept_title', concept.get('concept', ''))
+            concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+            
+            if not concept_title or not concept_explanation:
+                logger.warning(f"Skipping key concept with missing title or explanation: {concept}")
+                continue
+            
+            # Store the key concept to get its ID first
+            concept_id = await self.store.add_key_concept_async(
+                file_id=file_id_int,
+                concept_title=concept_title,
+                concept_explanation=concept_explanation,
+                # PDF concepts don't have timestamps like videos do
+                source_video_timestamp_start_seconds=None,
+                source_video_timestamp_end_seconds=None
             )
             
-            if flashcards:
-                logger.info(f"Generated {len(flashcards)} flashcards from key concepts")
-                for card in flashcards:
-                    # Using async method now
-                    try:
-                        await self.store.add_flashcard_async(
-                            file_id=file_id_int,
-                            question=card.get('front', ''),
-                            answer=card.get('back', ''),
-                            key_concept_id=None,
-                            is_custom=False
-                        )
-                    except Exception as e:
-                        logger.error(f"Error adding flashcard: {e}")
-                results["flashcards"] = len(flashcards)
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.error(f"Error generating flashcards: {e}")
-        
-        # Generate MCQs with timeout
-        try:
-            mcqs = await asyncio.wait_for(
-                generate_mcq_from_key_concepts(key_concepts),
-                timeout=180  # 3 minutes timeout
-            )
+            if concept_id is None:
+                logger.error(f"Failed to store key concept '{concept_title}', skipping its learning materials")
+                continue
+                
+            # Add this concept ID to our map for retrieval later
+            concept_data[concept_title] = {
+                "id": concept_id,
+                "explanation": concept_explanation
+            }
             
-            if mcqs:
-                logger.info(f"Generated {len(mcqs)} MCQs from key concepts")
-                for mcq in mcqs:
-                    # Extract the correct answer and distractors from options
-                    options = mcq.get('options', [])
-                    answer = mcq.get('answer', '')
-                    
-                    # Using async method now
-                    try:
-                        await self.store.add_quiz_question_async(
-                            file_id=file_id_int,
-                            question=mcq.get('question', ''),
-                            question_type="MCQ",
-                            correct_answer=answer,
-                            distractors=[opt for opt in options if opt != answer],
-                            key_concept_id=None
-                        )
-                    except Exception as e:
-                        logger.error(f"Error adding MCQ: {e}")
-                results["mcqs"] = len(mcqs)
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.error(f"Error generating MCQs: {e}")
-        
-        # Generate True/False questions with timeout
-        try:
-            tf_questions = await asyncio.wait_for(
-                generate_true_false_from_key_concepts(key_concepts),
-                timeout=180  # 3 minutes timeout
-            )
+            # Now generate flashcards for this specific concept
+            try:
+                # Generate flashcards for this concept
+                concept_cards = await generate_flashcards_from_key_concepts([concept])
+                
+                if concept_cards:
+                    for card in concept_cards:
+                        try:
+                            await self.store.add_flashcard_async(
+                                file_id=file_id_int,
+                                question=card.get('front', ''),
+                                answer=card.get('back', ''),
+                                key_concept_id=int(concept_id),  # Use this concept's ID
+                                is_custom=False
+                            )
+                            total_flashcards += 1
+                        except Exception as e:
+                            logger.error(f"Error adding flashcard: {e}")
+            except Exception as e:
+                logger.error(f"Error generating flashcards for concept '{concept_title}': {e}")
             
-            if tf_questions:
-                logger.info(f"Generated {len(tf_questions)} True/False questions from key concepts")
-                for tf in tf_questions:
-                    # Create a properly formatted True/False question
-                    # Using async method now
-                    try:
-                        await self.store.add_quiz_question_async(
-                            file_id=file_id_int,
-                            question=tf.get('statement', ''),
-                            question_type="TF",
-                            correct_answer="True" if tf.get('is_true', False) else "False",
-                            distractors=[],  # T/F questions don't need additional distractors
-                            key_concept_id=None
-                        )
-                    except Exception as e:
-                        logger.error(f"Error adding True/False question: {e}")
-                results["true_false"] = len(tf_questions)
-        except (asyncio.TimeoutError, Exception) as e:
-            logger.error(f"Error generating True/False questions: {e}")
+            # Generate MCQs for this specific concept
+            try:
+                # Generate MCQs for this concept
+                concept_mcqs = await generate_mcq_from_key_concepts([concept])
+                
+                if concept_mcqs:
+                    for mcq in concept_mcqs:
+                        options = mcq.get('options', [])
+                        answer = mcq.get('answer', '')
+                        
+                        try:
+                            await self.store.add_quiz_question_async(
+                                file_id=file_id_int,
+                                question=mcq.get('question', ''),
+                                question_type="MCQ",
+                                correct_answer=answer,
+                                distractors=[opt for opt in options if opt != answer],
+                                key_concept_id=int(concept_id)  # Use this concept's ID
+                            )
+                            total_mcqs += 1
+                        except Exception as e:
+                            logger.error(f"Error adding MCQ: {e}")
+            except Exception as e:
+                logger.error(f"Error generating MCQs for concept '{concept_title}': {e}")
+            
+            # Generate True/False questions for this specific concept
+            try:
+                # Generate TF questions for this concept
+                concept_tf = await generate_true_false_from_key_concepts([concept])
+                
+                if concept_tf:
+                    for tf in concept_tf:
+                        # Validate the T/F question data
+                        statement = tf.get('statement', '')
+                        is_true = tf.get('is_true')
+                        
+                        if not statement or is_true is None:
+                            logger.warning(f"Skipping T/F question with missing data: {tf}")
+                            continue
+                        
+                        try:
+                            await self.store.add_quiz_question_async(
+                                file_id=file_id_int,
+                                question=statement,
+                                question_type="TrueFalse",
+                                correct_answer="True" if is_true else "False",
+                                distractors=[],
+                                key_concept_id=int(concept_id)  # Use this concept's ID
+                            )
+                            total_tf_questions += 1
+                        except Exception as e:
+                            logger.error(f"Error adding True/False question: {e}")
+            except Exception as e:
+                logger.error(f"Error generating True/False questions for concept '{concept_title}': {e}")
         
-        return results
+        return {
+            "flashcards": total_flashcards,
+            "mcqs": total_mcqs,
+            "true_false": total_tf_questions
+        }
 
     def _log_error(self, message: str, error: Exception) -> None:
         """Log an error with consistent format."""

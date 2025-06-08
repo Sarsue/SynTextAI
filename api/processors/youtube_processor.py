@@ -99,9 +99,41 @@ class YouTubeProcessor(FileProcessor):
                 comprehension_level=comprehension_level
             )
             
-            # Step 5: Generate learning materials
+            # Step 5: Store key concepts in the database
             if key_concepts:
-                await self.generate_learning_materials(file_id, key_concepts)
+                logger.info(f"Storing {len(key_concepts)} key concepts for file ID {file_id}")
+                # Store each key concept in the database
+                for concept in key_concepts:
+                    await self.store.add_key_concept_async(
+                        file_id=file_id,
+                        concept_title=concept.get("concept_title", ""),
+                        concept_explanation=concept.get("concept_explanation", ""),
+                        source_page_number=concept.get("source_page_number"),
+                        source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
+                        source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                    )
+                
+                # Step 6: Fetch stored key concepts with database IDs
+                db_key_concepts = self.store.get_key_concepts_for_file(file_id)
+                
+                if db_key_concepts:
+                    # Format key concepts as expected by generate_learning_materials
+                    formatted_concepts = []
+                    for concept in db_key_concepts:
+                        formatted_concepts.append({
+                            "concept_title": concept.concept_title, 
+                            "concept_explanation": concept.concept_explanation,
+                            "id": concept.id  # This is the crucial database ID we need
+                        })
+                    
+                    # Step 7: Generate learning materials using key concepts with IDs
+                    logger.info(f"Generating learning materials with {len(formatted_concepts)} key concepts for file_id {file_id}")
+                    await self.generate_learning_materials(file_id, formatted_concepts)
+                else:
+                    logger.error(f"Failed to retrieve key concepts from database for file {file_id}")
+            else:
+                logger.warning(f"No key concepts generated for YouTube file {file_id}")
+
             
             # Update status
             await self.store.update_file_status_async(int(file_id), "processed")
@@ -469,17 +501,30 @@ class YouTubeProcessor(FileProcessor):
                 logger.warning(f"Skipping concept with missing title or explanation: {concept}")
                 continue
             
-            # Add key concept and store the returned ID
-            concept_id = await self.store.add_key_concept_async(
-                file_id=int(file_id),
-                concept_title=concept_title,
-                concept_explanation=concept_explanation,
-                source_video_timestamp_start_seconds=concept.get('source_video_timestamp_start_seconds'),
-                source_video_timestamp_end_seconds=concept.get('source_video_timestamp_end_seconds')
-            )
+            # First check if this concept already exists in the database
+            existing_concepts = await self.store.get_key_concepts_for_file_async(int(file_id))
+            concept_id = None
             
-            if not concept_id:
-                logger.warning(f"Failed to store key concept: {concept_title}")
+            # Look for matching concept by title
+            for existing_concept in existing_concepts:
+                if existing_concept.get('concept_title') == concept_title:
+                    concept_id = existing_concept.get('id')
+                    logger.info(f"Found existing key concept '{concept_title}' with ID {concept_id}")
+                    break
+                    
+            # Only add if it doesn't exist yet
+            if concept_id is None:
+                concept_id = await self.store.add_key_concept_async(
+                    file_id=int(file_id),
+                    concept_title=concept_title,
+                    concept_explanation=concept_explanation,
+                    source_video_timestamp_start_seconds=concept.get('source_video_timestamp_start_seconds'),
+                    source_video_timestamp_end_seconds=concept.get('source_video_timestamp_end_seconds')
+                )
+                
+            # Skip generating materials if concept storage failed
+            if concept_id is None:
+                logger.error(f"Failed to store key concept '{concept_title}', skipping its learning materials")
                 continue
                 
             # Generate materials for just this concept
@@ -553,15 +598,23 @@ class YouTubeProcessor(FileProcessor):
                     logger.info(f"Generated {len(tf_questions)} True/False questions for concept: {concept_title}")
                     for tf in tf_questions:
                         try:
+                            # Validate the T/F question data structure
+                            statement = tf.get('statement', '')
+                            is_true = tf.get('is_true')
+                            
+                            if not statement or is_true is None:
+                                logger.warning(f"Skipping T/F question with missing data: {tf}")
+                                continue
+                                
                             # Store with this specific concept's ID
-                            # Parameter order: file_id, question, question_type, correct_answer, distractors, key_concept_id
+                            # Using named parameters to avoid order mistakes
                             await self.store.add_quiz_question_async(
                                 file_id=int(file_id),
-                                question=tf.get('statement', ''),
-                                question_type="TrueFalse",  # Consistent capitalization
-                                correct_answer="True" if tf.get('is_true', False) else "False",
+                                question=statement,
+                                question_type="TrueFalse",
+                                correct_answer="True" if is_true else "False",
                                 distractors=[],  # No distractors for True/False questions
-                                key_concept_id=int(concept_id)  # Use this specific concept's ID
+                                key_concept_id=int(concept_id)  # Ensure concept_id is an integer
                             )
                             total_tf_questions += 1
                         except Exception as e:

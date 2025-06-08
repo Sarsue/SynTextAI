@@ -120,7 +120,7 @@ class KeyConcept(Base):
     concept_title = Column(String, nullable=False)
     concept_explanation = Column(Text, nullable=False)
     
-    display_order = Column(Integer, nullable=True, default=0) 
+
 
     source_page_number = Column(Integer, nullable=True) 
     source_video_timestamp_start_seconds = Column(Integer, nullable=True)

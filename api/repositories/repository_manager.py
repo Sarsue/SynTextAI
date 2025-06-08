@@ -522,13 +522,12 @@ class RepositoryManager:
         concept_explanation: str,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None,
-        display_order: Optional[int] = 0
+        source_video_timestamp_end_seconds: Optional[int] = None
     ) -> Optional[int]:
         """Add a new key concept associated with a file.
         
         Parameter order must match LearningMaterialRepository.add_key_concept:
-        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds, display_order)
+        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds)
         """
         return self.learning_material_repo.add_key_concept(
             file_id,
@@ -536,8 +535,7 @@ class RepositoryManager:
             concept_explanation,
             source_page_number,
             source_video_timestamp_start_seconds,
-            source_video_timestamp_end_seconds,
-            display_order
+            source_video_timestamp_end_seconds
         )
         
     async def add_key_concept_async(
@@ -547,13 +545,12 @@ class RepositoryManager:
         concept_explanation: str,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None,
-        display_order: Optional[int] = 0
+        source_video_timestamp_end_seconds: Optional[int] = None
     ) -> Optional[int]:
         """Async wrapper for add_key_concept.
         
         Parameter order must match LearningMaterialRepository.add_key_concept:
-        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds, display_order)
+        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds)
         """
         try:
             loop = asyncio.get_event_loop()
@@ -566,8 +563,7 @@ class RepositoryManager:
                         concept_explanation,
                         source_page_number,
                         source_video_timestamp_start_seconds,
-                        source_video_timestamp_end_seconds,
-                        display_order
+                        source_video_timestamp_end_seconds
                     )
                 )
                 return result
@@ -654,21 +650,44 @@ class RepositoryManager:
     ) -> Optional[int]:
         """Async wrapper for add_quiz_question.
         
-        Order of parameters must match LearningMaterialRepository.add_quiz_question:
-        (file_id, question, question_type, correct_answer, distractors, key_concept_id, is_custom)
+        IMPORTANT: The parameter order here doesn't match the underlying method.
+        We need to re-map the parameters in the correct order when calling add_quiz_question.
         """
         try:
+            # Validate parameter types to catch common errors
+            if not isinstance(file_id, int) and file_id is not None:
+                try:
+                    file_id = int(file_id)  # Try to convert to int if possible
+                except (ValueError, TypeError):
+                    logger.error(f"Invalid file_id: {file_id}, must be an integer")
+                    return None
+            
+            # Most critical validation: key_concept_id must be an integer or None
+            if key_concept_id is not None:
+                if not isinstance(key_concept_id, int):
+                    if isinstance(key_concept_id, str) and key_concept_id.isdigit():
+                        # Convert string numeric ID to int
+                        key_concept_id = int(key_concept_id)
+                    else:
+                        # This is the critical error we're seeing - reject invalid types
+                        logger.error(f"Invalid key_concept_id: {key_concept_id}, must be an integer or None")
+                        return None
+            
+            # Ensure that question_type is a valid string            
+            if question_type not in ["MCQ", "TrueFalse"]:
+                logger.warning(f"Unusual question_type: {question_type}, expected 'MCQ' or 'TrueFalse'")
+            
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
                 result = await loop.run_in_executor(
                     pool,
                     lambda: self.add_quiz_question(
-                        file_id, 
-                        question, 
-                        question_type, 
-                        correct_answer, 
-                        distractors,
-                        key_concept_id
+                        file_id,
+                        key_concept_id,  # This is the 2nd param in add_quiz_question 
+                        question,        # This is the 3rd param in add_quiz_question
+                        question_type,   # This is the 4th param in add_quiz_question
+                        correct_answer,  # This is the 5th param in add_quiz_question
+                        distractors      # This is the 6th param in add_quiz_question
                     )
                 )
                 return result
@@ -680,6 +699,36 @@ class RepositoryManager:
         """Get key concepts for a file."""
         return self.learning_material_repo.get_key_concepts_for_file(file_id)
     
+    async def get_key_concepts_for_file_async(self, file_id: int) -> List[Dict[str, Any]]:
+        """Async wrapper for get_key_concepts_for_file.
+        
+        Args:
+            file_id: ID of the file to get key concepts for
+            
+        Returns:
+            List of key concept dictionaries
+        """
+        try:
+            # Validate parameter types
+            if isinstance(file_id, str):
+                try:
+                    file_id = int(file_id)
+                except ValueError:
+                    logger.error(f"Invalid file_id: {file_id}, must be convertible to int")
+                    return []
+            
+            # Use run_in_executor to make the synchronous DB operation non-blocking
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.get_key_concepts_for_file(file_id)
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for get_key_concepts_for_file: {e}", exc_info=True)
+            return []
+    
     def get_flashcards_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get flashcards for a file."""
         return self.learning_material_repo.get_flashcards_for_file(file_id)
@@ -687,3 +736,53 @@ class RepositoryManager:
     def get_quiz_questions_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get all quiz questions for a file."""
         return self.learning_material_repo.get_quiz_questions_for_file(file_id)
+        
+    def add_key_concept(self, file_id: int, concept_title: str, concept_explanation: str, **kwargs) -> Optional[int]:
+        """Add a new key concept for a file."""
+        return self.learning_material_repo.add_key_concept(
+            file_id=file_id,
+            concept_title=concept_title,
+            concept_explanation=concept_explanation,
+            source_page_number=kwargs.get('source_page_number'),
+            source_video_timestamp_start_seconds=kwargs.get('source_video_timestamp_start_seconds'),
+            source_video_timestamp_end_seconds=kwargs.get('source_video_timestamp_end_seconds'),
+
+        )
+    
+    async def add_key_concept_async(self, file_id: int, concept_title: str, concept_explanation: str, **kwargs) -> Optional[int]:
+        """Async wrapper for add_key_concept.
+        
+        Args:
+            file_id: ID of the file this concept belongs to
+            concept_title: Title/name of the concept
+            concept_explanation: Detailed explanation of the concept
+            **kwargs: Additional parameters like source_page_number, timestamps, etc.
+            
+        Returns:
+            int: The ID of the newly created concept, or None if creation failed
+        """
+        try:
+            # Validate parameter types
+            if isinstance(file_id, str):
+                try:
+                    file_id = int(file_id)
+                except ValueError:
+                    logger.error(f"Invalid file_id: {file_id}, must be convertible to int")
+                    return None
+            
+            # Use run_in_executor to make the synchronous DB operation non-blocking
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(
+                    pool,
+                    lambda: self.add_key_concept(
+                        file_id=file_id,
+                        concept_title=concept_title,
+                        concept_explanation=concept_explanation,
+                        **kwargs
+                    )
+                )
+                return result
+        except Exception as e:
+            logger.error(f"Error in async wrapper for add_key_concept: {e}", exc_info=True)
+            return None

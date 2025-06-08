@@ -3,7 +3,12 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 from dotenv import load_dotenv
-from docsynth_store import Base
+import sys
+import os
+
+# Add parent directory to Python path so we can import the models
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from models.orm_models import Base
 load_dotenv()
 # Alembic Config object
 config = context.config

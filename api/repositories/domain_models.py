@@ -194,7 +194,7 @@ class KeyConcept:
         file_id: Optional[int] = None,
         concept_title: str = "",
         concept_explanation: str = "",
-        display_order: Optional[int] = None,
+    
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
         source_video_timestamp_end_seconds: Optional[int] = None,
@@ -204,7 +204,7 @@ class KeyConcept:
         self.file_id = file_id
         self.concept_title = concept_title
         self.concept_explanation = concept_explanation
-        self.display_order = display_order or 1
+    
         self.source_page_number = source_page_number
         self.source_video_timestamp_start_seconds = source_video_timestamp_start_seconds
         self.source_video_timestamp_end_seconds = source_video_timestamp_end_seconds

@@ -176,26 +176,30 @@ async def get_flashcards_for_file(
         file = store.get_file_by_id(file_id)
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        # Simply retrieve existing flashcards - no generation on request
         flashcards = store.get_flashcards_for_file(file_id)
-        # Convert domain objects to dicts for frontend
-        flashcards_out = []
+        logger.info(f"Retrieved {len(flashcards) if flashcards else 0} flashcards for file {file_id}")
         
-        for f in flashcards:
-            try:
-                # Make sure none of the fields are None/null to avoid UI issues
-                flashcard_data = {
-                    "id": f.id,
-                    "file_id": f.file_id,
-                    "key_concept_id": getattr(f, 'key_concept_id', None),
-                    "question": f.question if hasattr(f, 'question') and f.question else "",
-                    "answer": f.answer if hasattr(f, 'answer') and f.answer else "",
-                    "is_custom": f.is_custom if hasattr(f, 'is_custom') and f.is_custom is not None else False,
-                    "created_at": f.created_at.isoformat() if hasattr(f, 'created_at') and f.created_at else None
-                }
-                flashcards_out.append(flashcard_data)
-            except Exception as e:
-                logger.error(f"Error converting flashcard to dict: {e}")
-                # Skip this flashcard if conversion fails
+        # Format the flashcards for API response
+        result = []
+        if flashcards:
+            for card in flashcards:
+                try:
+                    result.append({
+                        "id": card.id,
+                        "file_id": card.file_id,
+                        "question": card.question,
+                        "answer": card.answer,
+                        "key_concept_id": card.key_concept_id,
+                        "is_custom": card.is_custom if hasattr(card, 'is_custom') else False,
+                        "created_at": card.created_at.isoformat() if hasattr(card, 'created_at') else None
+                    })
+                except Exception as e:
+                    logger.error(f"Error formatting flashcard: {e}")
+        
+        return result
+        
         # Wrap the flashcards in an object with a named property as expected by the frontend
         return {"flashcards": flashcards_out}
     except Exception as e:
@@ -267,7 +271,11 @@ async def get_quizzes_for_file(
         file = store.get_file_by_id(file_id)
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        # Simply retrieve existing quizzes - no generation on request
         quizzes = store.get_quiz_questions_for_file(file_id)
+        logger.info(f"Retrieved {len(quizzes) if quizzes else 0} quizzes for file {file_id}")
+        
         logger.info(f"Raw quizzes data from repo for file {file_id}: {quizzes}")
         quizzes_out = []
         for q in quizzes:
@@ -424,7 +432,7 @@ class KeyConceptResponse(BaseModel):
     file_id: int
     concept_title: Optional[str] = None
     concept_explanation: Optional[str] = None
-    display_order: Optional[int] = None
+
     source_page_number: Optional[int] = None
     source_video_timestamp_start_seconds: Optional[int] = None
     source_video_timestamp_end_seconds: Optional[int] = None
@@ -477,7 +485,7 @@ async def get_key_concepts_for_file(
                         file_id=kc.file_id,
                         concept_title=kc.concept_title,
                         concept_explanation=kc.concept_explanation,
-                        display_order=getattr(kc, 'display_order', 1),
+
                         source_page_number=getattr(kc, 'source_page_number', None),
                         source_video_timestamp_start_seconds=getattr(kc, 'source_video_timestamp_start_seconds', None),
                         source_video_timestamp_end_seconds=getattr(kc, 'source_video_timestamp_end_seconds', None),
@@ -495,7 +503,7 @@ async def get_key_concepts_for_file(
                                 file_id=kc.get('file_id'),
                                 concept_title=kc.get('concept_title', ''),
                                 concept_explanation=kc.get('concept_explanation', ''),
-                                display_order=kc.get('display_order', 1),
+
                                 source_page_number=kc.get('source_page_number'),
                                 source_video_timestamp_start_seconds=kc.get('source_video_timestamp_start_seconds'),
                                 source_video_timestamp_end_seconds=kc.get('source_video_timestamp_end_seconds'),
