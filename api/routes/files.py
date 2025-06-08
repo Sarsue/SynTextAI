@@ -3,9 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TypeVar, Generic, Any
 from repositories.repository_manager import RepositoryManager
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from llm_service import prompt_llm
 from datetime import datetime
 
@@ -15,6 +15,25 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI router
 files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
+
+# Define a standardized API response model
+T = TypeVar('T')
+class StandardResponse(BaseModel, Generic[T]):
+    """Standardized API response format for all endpoints"""
+    status: str = "success"
+    data: T
+    count: Optional[int] = None
+    message: Optional[str] = None
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "status": "success",
+                "data": {},
+                "count": 0,
+                "message": "Data retrieved successfully"
+            }
+        }
 
 # Dependency to get the store
 def get_store(request: Request):
@@ -165,8 +184,26 @@ async def delete_file(
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+# Define a Flashcard response model for better type safety
+class FlashcardResponse(BaseModel):
+    id: int
+    file_id: int
+    question: str
+    answer: str
+    key_concept_id: Optional[int] = None
+    is_custom: bool = False
+    created_at: Optional[str] = None
+
+class FlashcardsListResponse(BaseModel):
+    flashcards: List[FlashcardResponse]
+
 # Endpoint: Get all flashcards for a file
-@files_router.get("/{file_id}/flashcards")
+@files_router.get(
+    "/{file_id}/flashcards", 
+    response_model=StandardResponse[FlashcardsListResponse],
+    summary="Get Flashcards for File",
+    description="Retrieves all flashcards generated for a specific file."
+)
 async def get_flashcards_for_file(
     file_id: int,
     request: Request,
@@ -188,23 +225,35 @@ async def get_flashcards_for_file(
         if flashcards:
             for card in flashcards:
                 try:
-                    result.append({
-                        "id": card.id,
-                        "file_id": card.file_id,
-                        "question": card.question,
-                        "answer": card.answer,
-                        "key_concept_id": card.key_concept_id,
-                        "is_custom": card.is_custom if hasattr(card, 'is_custom') else False,
-                        "created_at": card.created_at.isoformat() if hasattr(card, 'created_at') else None
-                    })
+                    result.append(FlashcardResponse(
+                        id=card.id,
+                        file_id=card.file_id,
+                        question=card.question,
+                        answer=card.answer,
+                        key_concept_id=card.key_concept_id,
+                        is_custom=card.is_custom if hasattr(card, 'is_custom') else False,
+                        created_at=card.created_at.isoformat() if hasattr(card, 'created_at') else None
+                    ))
                 except Exception as e:
                     logger.error(f"Error formatting flashcard: {e}")
         
-        # Wrap the flashcards in an object with a named property as expected by the frontend
-        return {"flashcards": result}
+        # Return standardized response
+        response_data = FlashcardsListResponse(flashcards=result)
+        return StandardResponse(
+            status="success",
+            data=response_data,
+            count=len(result),
+            message="Flashcards retrieved successfully"
+        )
     except Exception as e:
         logger.error(f"Error fetching flashcards for file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error response with empty data instead of raising exception
+        return StandardResponse(
+            status="error",
+            data=FlashcardsListResponse(flashcards=[]),
+            count=0,
+            message=f"Error retrieving flashcards: {str(e)[:100]}"
+        )
 
 # Endpoint: Add a flashcard for a file
 class FlashcardCreate(BaseModel):
@@ -213,7 +262,12 @@ class FlashcardCreate(BaseModel):
     key_concept_id: Optional[int] = None
     is_custom: bool = True
 
-@files_router.post("/{file_id}/flashcards")
+@files_router.post(
+    "/{file_id}/flashcards",
+    response_model=StandardResponse[FlashcardResponse],
+    summary="Add Flashcard for File",
+    description="Creates a new flashcard for the specified file."
+)
 async def add_flashcard_for_file(
     file_id: int,
     flashcard: FlashcardCreate,
@@ -239,27 +293,80 @@ async def add_flashcard_for_file(
         )
         
         if not flashcard_id:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create flashcard")
+            return StandardResponse(
+                status="error",
+                data=FlashcardResponse(
+                    id=0,
+                    file_id=file_id,
+                    question=flashcard.question,
+                    answer=flashcard.answer,
+                    key_concept_id=flashcard.key_concept_id,
+                    is_custom=flashcard.is_custom
+                ),
+                count=0,
+                message="Failed to create flashcard"
+            )
             
-        # Return the created flashcard
-        return {
-            "id": flashcard_id,
-            "file_id": file_id,
-            "key_concept_id": flashcard.key_concept_id,
-            "question": flashcard.question,
-            "answer": flashcard.answer,
-            "is_custom": flashcard.is_custom
-        }
+        # Return the created flashcard in standardized response format
+        created_flashcard = FlashcardResponse(
+            id=flashcard_id,
+            file_id=file_id,
+            key_concept_id=flashcard.key_concept_id,
+            question=flashcard.question,
+            answer=flashcard.answer,
+            is_custom=flashcard.is_custom
+        )
+        
+        return StandardResponse(
+            status="success",
+            data=created_flashcard,
+            count=1,
+            message="Flashcard created successfully"
+        )
         
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
         logger.error(f"Error adding flashcard for file {file_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        return StandardResponse(
+            status="error",
+            data=FlashcardResponse(
+                id=0,
+                file_id=file_id,
+                question=flashcard.question,
+                answer=flashcard.answer,
+                key_concept_id=flashcard.key_concept_id,
+                is_custom=flashcard.is_custom
+            ),
+            count=0,
+            message=f"Error creating flashcard: {str(e)[:100]}"
+        )
+
+# Define Quiz Question Response model for better type safety
+class QuizQuestionResponse(BaseModel):
+    id: int
+    file_id: int
+    key_concept_id: Optional[int] = None
+    question_text: str  # Frontend expects this field
+    question: str
+    question_type: str = "MCQ"
+    correct_answer: str = ""
+    distractors: List[str] = []
+    explanation: str = ""  # Empty string instead of None for frontend compatibility
+    difficulty: str = "medium"  # Default value expected by frontend
+    is_custom: bool = False  # Default for system-generated questions
+
+class QuizzesListResponse(BaseModel):
+    quizzes: List[QuizQuestionResponse]
 
 # Endpoint: Get all quiz questions for a file
-@files_router.get("/{file_id}/quizzes")
+@files_router.get(
+    "/{file_id}/quizzes",
+    response_model=StandardResponse[QuizzesListResponse],
+    summary="Get Quiz Questions for File",
+    description="Retrieves all quiz questions generated for a specific file."
+)
 async def get_quizzes_for_file(
     file_id: int,
     request: Request,
@@ -299,27 +406,40 @@ async def get_quizzes_for_file(
                         logger.error(f"Error parsing distractors: {e}")
                         distractors = []
                 
-                quizzes_out.append({
-                    "id": q.id,
-                    "file_id": q.file_id,
-                    "key_concept_id": getattr(q, 'key_concept_id', None),
-                    "question_text": q.question,  # Frontend expects this field
-                    "question": q.question,
-                    "question_type": q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
-                    "correct_answer": q.correct_answer if hasattr(q, 'correct_answer') and q.correct_answer else "",
-                    "distractors": distractors,
-                    "explanation": getattr(q, 'explanation', ""),  # Empty string instead of None for frontend compatibility
-                    "difficulty": getattr(q, 'difficulty', "medium"),  # Default value expected by frontend
-                    "is_custom": getattr(q, 'is_custom', False)  # Default for system-generated questions
-                })
+                quizzes_out.append(QuizQuestionResponse(
+                    id=q.id,
+                    file_id=q.file_id,
+                    key_concept_id=getattr(q, 'key_concept_id', None),
+                    question_text=q.question,  # Frontend expects this field
+                    question=q.question,
+                    question_type=q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
+                    correct_answer=q.correct_answer if hasattr(q, 'correct_answer') and q.correct_answer else "",
+                    distractors=distractors,
+                    explanation=getattr(q, 'explanation', ""),  # Empty string instead of None for frontend compatibility
+                    difficulty=getattr(q, 'difficulty', "medium"),  # Default value expected by frontend
+                    is_custom=getattr(q, 'is_custom', False)  # Default for system-generated questions
+                ))
             except Exception as e:
                 logger.error(f"Error converting quiz question to dict: {e}")
                 # Skip this quiz question if conversion fails
-        # Wrap the quizzes in an object with a named property as expected by the frontend
-        return {"quizzes": quizzes_out}
+                
+        # Return standardized response
+        response_data = QuizzesListResponse(quizzes=quizzes_out)
+        return StandardResponse(
+            status="success",
+            data=response_data,
+            count=len(quizzes_out),
+            message="Quiz questions retrieved successfully"
+        )
     except Exception as e:
         logger.error(f"Error fetching quizzes for file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error response with empty data instead of raising exception
+        return StandardResponse(
+            status="error",
+            data=QuizzesListResponse(quizzes=[]),
+            count=0,
+            message=f"Error retrieving quiz questions: {str(e)[:100]}"
+        )
 
 # Endpoint: Add a quiz question for a file
 class QuizQuestionCreate(BaseModel):
@@ -330,7 +450,12 @@ class QuizQuestionCreate(BaseModel):
     key_concept_id: Optional[int] = None
     is_custom: bool = True
 
-@files_router.post("/{file_id}/quizzes")
+@files_router.post(
+    "/{file_id}/quizzes",
+    response_model=StandardResponse[QuizQuestionResponse],
+    summary="Add Quiz Question for File",
+    description="Creates a new quiz question for the specified file."
+)
 async def add_quiz_question_for_file(
     file_id: int,
     quiz_question: QuizQuestionCreate,
@@ -358,29 +483,71 @@ async def add_quiz_question_for_file(
         )
         
         if not quiz_id:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create quiz question")
+            return StandardResponse(
+                status="error",
+                data=QuizQuestionResponse(
+                    id=0,
+                    file_id=file_id,
+                    question=quiz_question.question,
+                    question_text=quiz_question.question,
+                    question_type=quiz_question.question_type,
+                    correct_answer=quiz_question.correct_answer,
+                    distractors=quiz_question.distractors,
+                    key_concept_id=quiz_question.key_concept_id,
+                    is_custom=quiz_question.is_custom,
+                    explanation="",
+                    difficulty="medium"
+                ),
+                count=0,
+                message="Failed to create quiz question"
+            )
             
-        # Return the created quiz question with new field names
-        return {
-            "id": quiz_id,
-            "file_id": file_id,
-            "question": quiz_question.question,
-            "question_type": quiz_question.question_type,
-            "correct_answer": quiz_question.correct_answer,
-            "distractors": quiz_question.distractors,
-            "key_concept_id": quiz_question.key_concept_id,
-            "is_custom": quiz_question.is_custom,
-            # Include these for frontend compatibility
-            "explanation": None,
-            "difficulty": None
-        }
+        # Return the created quiz question in standardized format
+        created_quiz = QuizQuestionResponse(
+            id=quiz_id,
+            file_id=file_id,
+            question=quiz_question.question,
+            question_text=quiz_question.question,  # Frontend expects this field
+            question_type=quiz_question.question_type,
+            correct_answer=quiz_question.correct_answer,
+            distractors=quiz_question.distractors,
+            key_concept_id=quiz_question.key_concept_id,
+            is_custom=quiz_question.is_custom,
+            # Include these for frontend compatibility with default values
+            explanation="",
+            difficulty="medium"
+        )
+        
+        return StandardResponse(
+            status="success",
+            data=created_quiz,
+            count=1,
+            message="Quiz question created successfully"
+        )
         
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
         logger.error(f"Error adding quiz question for file {file_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        return StandardResponse(
+            status="error",
+            data=QuizQuestionResponse(
+                id=0,
+                file_id=file_id,
+                question=quiz_question.question,
+                question_text=quiz_question.question,
+                question_type=quiz_question.question_type,
+                correct_answer=quiz_question.correct_answer,
+                distractors=quiz_question.distractors,
+                key_concept_id=quiz_question.key_concept_id,
+                is_custom=quiz_question.is_custom,
+                explanation="",
+                difficulty="medium"
+            ),
+            count=0,
+            message=f"Error creating quiz question: {str(e)[:100]}"
+        )
 
 # Route to re-extract a file (retry processing)
 @files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
@@ -445,7 +612,12 @@ class KeyConceptsFileResponse(BaseModel):
     key_concepts: List[KeyConceptResponse]
 
 # Route to get key concepts for a file
-@files_router.get("/{file_id}/key_concepts", response_model=KeyConceptsFileResponse, summary="Get Key Concepts for File", description="Retrieves all key concepts extracted for a specific file.")
+@files_router.get(
+    "/{file_id}/key_concepts", 
+    response_model=StandardResponse[KeyConceptsFileResponse],
+    summary="Get Key Concepts for File", 
+    description="Retrieves all key concepts extracted for a specific file."
+)
 async def get_key_concepts_for_file(
     file_id: int,
     request: Request,
@@ -517,12 +689,28 @@ async def get_key_concepts_for_file(
                         logger.error(f"Failed to convert key concept with error: {e}")
                         pass
             
-            return KeyConceptsFileResponse(key_concepts=key_concept_responses)
+            response_data = KeyConceptsFileResponse(key_concepts=key_concept_responses)
+            return StandardResponse(
+                status="success",
+                data=response_data,
+                count=len(key_concept_responses),
+                message="Key concepts retrieved successfully"
+            )
         except Exception as kc_error:
             logger.error(f"Error retrieving key concepts: {kc_error}")
-            # Return empty list instead of error
-            return KeyConceptsFileResponse(key_concepts=[])
+            # Return empty list with error status
+            return StandardResponse(
+                status="error",
+                data=KeyConceptsFileResponse(key_concepts=[]),
+                count=0,
+                message=f"Error retrieving key concepts: {str(kc_error)[:100]}"
+            )
     except Exception as e:
         logger.error(f"Error in key concepts endpoint for file {file_id}: {e}", exc_info=True)
-        # Return empty response instead of error
-        return KeyConceptsFileResponse(key_concepts=[])
+        # Return empty response with error status
+        return StandardResponse(
+            status="error",
+            data=KeyConceptsFileResponse(key_concepts=[]),
+            count=0,
+            message=f"Error processing request: {str(e)[:100]}"
+        )

@@ -49,6 +49,7 @@ flask-sse==1.0.0
 pdfminer.six
 Pillow
 pytesseract
+PyMuPDF==1.23.7
 psycopg2-binary==2.9.9
 gunicorn
 gpt4all

@@ -118,13 +118,15 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const responseData = await response.json();
             console.log(`Key concepts API response data:`, responseData);
             
-            if (!responseData || !Array.isArray(responseData.key_concepts)) {
+            // Handle the standardized response format
+            if (!responseData || responseData.status !== 'success' || !responseData.data || !Array.isArray(responseData.data.key_concepts)) {
                 console.error("API response structure incorrect for key concepts:", responseData);
-                throw new Error('API returned malformed data structure for key concepts');
+                const errorMessage = responseData.message || 'API returned malformed data structure for key concepts';
+                throw new Error(errorMessage);
             }
 
-            const data: KeyConcept[] = responseData.key_concepts;
-            console.log(`Parsed ${data.length} key concepts for file ID: ${fileId}`);
+            const data: KeyConcept[] = responseData.data.key_concepts;
+            console.log(`Parsed ${data.length} key concepts for file ID: ${fileId} (total count: ${responseData.count})`);
             
             // Debug logging to inspect the structure of key concepts
             if (data.length > 0) {
@@ -178,13 +180,15 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const responseData = await response.json();
             console.log(`Flashcards API response data:`, responseData);
             
-            if (!responseData || !Array.isArray(responseData.flashcards)) {
+            // Handle the standardized response format
+            if (!responseData || responseData.status !== 'success' || !responseData.data || !Array.isArray(responseData.data.flashcards)) {
                 console.error("API response structure incorrect for flashcards:", responseData);
-                throw new Error('API returned malformed data structure for flashcards');
+                const errorMessage = responseData.message || 'API returned malformed data structure for flashcards';
+                throw new Error(errorMessage);
             }
 
-            const data: Flashcard[] = responseData.flashcards;
-            console.log(`Parsed ${data.length} flashcards for file ID: ${fileId}`);
+            const data: Flashcard[] = responseData.data.flashcards;
+            console.log(`Parsed ${data.length} flashcards for file ID: ${fileId} (total count: ${responseData.count})`);
             
             if (data.length === 0) {
                 console.warn(`No flashcards found for file ID: ${fileId}`);
@@ -226,13 +230,15 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const responseData = await response.json();
             console.log(`Quizzes API response data:`, responseData);
             
-            if (!responseData || !Array.isArray(responseData.quizzes)) {
+            // Handle the standardized response format
+            if (!responseData || responseData.status !== 'success' || !responseData.data || !Array.isArray(responseData.data.quizzes)) {
                 console.error("API response structure incorrect for quizzes:", responseData);
-                throw new Error('API returned malformed data structure for quizzes');
+                const errorMessage = responseData.message || 'API returned malformed data structure for quizzes';
+                throw new Error(errorMessage);
             }
 
-            const data: QuizQuestion[] = responseData.quizzes;
-            console.log(`Parsed ${data.length} quizzes for file ID: ${fileId}`);
+            const data: QuizQuestion[] = responseData.data.quizzes;
+            console.log(`Parsed ${data.length} quizzes for file ID: ${fileId} (total count: ${responseData.count})`);
             
             if (data.length === 0) {
                 console.warn(`No quizzes found for file ID: ${fileId}`);
