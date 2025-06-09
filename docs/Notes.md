@@ -52,7 +52,6 @@ technical
 AI papers e.g Attention is All you need (good domain for LLM to be evaluated)
 
 Deployment
-CI/CD automation
 github actions for master branch to deploy the changes to current production environment.
 
 BUILD docker build --no-cache -t syntextaiapp .
@@ -62,14 +61,6 @@ RUN docker run --rm -p 3000:3000 --env-file .env --memory 2g syntextaiapp
 TAG docker tag syntextaiapp:latest osasdeeon/syntextai:latest
 
 PUSH docker push osasdeeon/syntextai:latest
-
-APP PLATFORM CONNECTS TO DOCKER HUB AND DEPLOYS PUSHED IMAGE
-
-2 DEPLOY DROPLET
-
-3 Copy env file and deploy scripts
-
-copy .env.prod, docker-compose-prod.yml and deploy.sh files
 
 scp docker-compose.yml deploy.sh .env root@178.128.236.126:/home/root/
 
