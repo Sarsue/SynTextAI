@@ -1,0 +1,60 @@
+name: Deploy SynTextAI
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+      
+    - name: Login to DockerHub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+        
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: osasdeeon/syntextai:latest
+        cache-from: type=registry,ref=osasdeeon/syntextai:buildcache
+        cache-to: type=registry,ref=osasdeeon/syntextai:buildcache,mode=max
+        
+    - name: Copy deploy files to Digital Ocean
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_KEY }}
+        source: "deploy.sh,.env,docker-compose.yml"
+        target: "/home/root/"
+        
+    - name: Deploy to Digital Ocean
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_KEY }}
+        script_stop: true
+        script: |
+          cd /home/root/
+          docker pull osasdeeon/syntextai:latest
+          # Copy .env to .env if it exists
+          if [ -f "/home/root/.env" ]; then
+            cp /home/root/.env /home/root/.env
+          fi
+          # Run the comprehensive deploy script that handles HTTPS and other configurations
+          chmod +x deploy.sh
+          ./deploy.sh
+          
+  
