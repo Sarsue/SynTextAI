@@ -5,8 +5,8 @@ WORKDIR /app/frontend
 # Copy only package files first to leverage caching
 COPY frontend/package.json frontend/package-lock.json ./
 
-# Install dependencies
-RUN npm ci --only=production && npm prune --production
+# Install dependencies (including dev dependencies needed for build)
+RUN npm ci
 
 # Copy the remaining files and build
 COPY frontend/ ./
