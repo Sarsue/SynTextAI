@@ -30,11 +30,26 @@ def initialize_firebase():
                 # Fix newlines in private key
                 private_key = private_key.replace('\\n', '\n')
                 
+                # Get additional required fields
+                private_key_id = os.environ.get('FIREBASE_PRIVATE_KEY_ID', '')
+                client_id = os.environ.get('FIREBASE_CLIENT_ID', '')
+                auth_uri = os.environ.get('FIREBASE_AUTH_URI', 'https://accounts.google.com/o/oauth2/auth')
+                token_uri = os.environ.get('FIREBASE_TOKEN_URI', 'https://oauth2.googleapis.com/token')
+                auth_provider_cert_url = os.environ.get('FIREBASE_AUTH_PROVIDER_CERT_URL', 'https://www.googleapis.com/oauth2/v1/certs')
+                client_cert_url = os.environ.get('FIREBASE_CLIENT_CERT_URL', '')
+                
+                # Create a complete credential dictionary with all required fields
                 cred_dict = {
                     "type": "service_account",
                     "project_id": project_id,
+                    "private_key_id": private_key_id,
                     "private_key": private_key,
-                    "client_email": client_email
+                    "client_email": client_email,
+                    "client_id": client_id,
+                    "auth_uri": auth_uri,
+                    "token_uri": token_uri,
+                    "auth_provider_x509_cert_url": auth_provider_cert_url,
+                    "client_x509_cert_url": client_cert_url
                 }
                 
                 try:

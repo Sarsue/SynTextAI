@@ -35,6 +35,13 @@ jobs:
         echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> $GITHUB_ENV
         echo "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" >> $GITHUB_ENV
         echo "FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}" >> $GITHUB_ENV
+        echo "FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" >> $GITHUB_ENV
+        echo "FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}" >> $GITHUB_ENV
+        echo "FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}" >> $GITHUB_ENV
+        # Set default values for optional fields
+        echo "FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth" >> $GITHUB_ENV
+        echo "FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token" >> $GITHUB_ENV 
+        echo "FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs" >> $GITHUB_ENV
         
     # Create frontend .env file with Firebase web config
     - name: Create frontend environment file
@@ -74,6 +81,12 @@ jobs:
           FIREBASE_PROJECT_ID=${{ env.FIREBASE_PROJECT_ID }}
           FIREBASE_PRIVATE_KEY=${{ env.FIREBASE_PRIVATE_KEY }}
           FIREBASE_CLIENT_EMAIL=${{ env.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY_ID=${{ env.FIREBASE_PRIVATE_KEY_ID }}
+          FIREBASE_CLIENT_ID=${{ env.FIREBASE_CLIENT_ID }}
+          FIREBASE_CLIENT_CERT_URL=${{ env.FIREBASE_CLIENT_CERT_URL }}
+          FIREBASE_AUTH_URI=${{ env.FIREBASE_AUTH_URI }}
+          FIREBASE_TOKEN_URI=${{ env.FIREBASE_TOKEN_URI }}
+          FIREBASE_AUTH_PROVIDER_CERT_URL=${{ env.FIREBASE_AUTH_PROVIDER_CERT_URL }}
 
     - name: Copy deploy files to Digital Ocean
       uses: appleboy/scp-action@v0.1.3
