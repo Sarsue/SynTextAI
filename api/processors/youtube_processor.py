@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
+from api.llm_service import generate_key_concepts_dspy, get_text_embeddings_in_batches
 
 logger = logging.getLogger(__name__)
 
@@ -366,15 +367,27 @@ class YouTubeProcessor(FileProcessor):
         segment_chunk_map = {}  # Map segment index to its list of small chunk texts
         
         for entry in transcript_data:
+            # Handle both dictionary-style entries and object-style entries (FetchedTranscriptSnippet)
+            try:
+                # Try dictionary access first
+                start = entry['start']
+                duration = entry['duration']
+                text = entry['text']
+            except (TypeError, KeyError):
+                # If that fails, try attribute access
+                start = entry.start
+                duration = entry.duration
+                text = entry.text
+                
             segment = {
-                'start_time': entry['start'],
-                'end_time': entry['start'] + entry['duration'],
-                'content': entry['text'],
-                'duration': entry['duration']
+                'start_time': start,
+                'end_time': start + duration,
+                'content': text,
+                'duration': duration
             }
             processed_video_data.append(segment)
-            all_small_chunks.append((len(processed_video_data)-1, entry['text']))
-            segment_chunk_map[len(processed_video_data)-1] = [entry['text']]
+            all_small_chunks.append((len(processed_video_data)-1, text))
+            segment_chunk_map[len(processed_video_data)-1] = [text]
         
         # Generate embeddings for all small chunks across the video in one batch
         logger.info(f"Generating embeddings for {len(all_small_chunks)} small chunks across video...")
@@ -463,7 +476,7 @@ class YouTubeProcessor(FileProcessor):
     
     async def generate_key_concepts(self, processed_content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
         """
-        Generate key concepts from processed video segments.
+        Generate key concepts from the YouTube transcript.
         
         Args:
             processed_content: Dict with processed segments
@@ -472,7 +485,7 @@ class YouTubeProcessor(FileProcessor):
         Returns:
             List of key concepts
         """
-        from ..tasks import get_key_concepts_from_segments_with_timeout
+        # Use the generate_key_concepts_dspy function already imported at the top of the file
         
         language = kwargs.get('language', 'English')
         comprehension_level = kwargs.get('comprehension_level', 'Beginner')
@@ -486,16 +499,15 @@ class YouTubeProcessor(FileProcessor):
         segment_texts = [segment['content'] for segment in segments]
         full_text = '\n'.join(segment_texts)
         
-        # Use a timeout to prevent hanging on LLM calls
         try:
-            key_concepts = await asyncio.wait_for(
-                get_key_concepts_from_segments_with_timeout(full_text, language, comprehension_level),
-                timeout=300  # 5 minutes timeout
+            # Use the same function as PDFProcessor
+            key_concepts = generate_key_concepts_dspy(
+                document_text=full_text,
+                language=language,
+                comprehension_level=comprehension_level
             )
+            logger.info(f"Generated {len(key_concepts)} key concepts from YouTube transcript")
             return key_concepts
-        except asyncio.TimeoutError:
-            logger.error("Key concept generation timed out after 5 minutes")
-            return []
         except Exception as e:
             self._log_error("Error generating key concepts", e)
             return []
