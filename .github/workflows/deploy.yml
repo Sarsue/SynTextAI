@@ -33,8 +33,10 @@ jobs:
     - name: Create Firebase credentials directory
       run: |
         mkdir -p api/config
-        echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
+        echo '${{ secrets.FIREBASE_CREDENTIALS_JSON }}' > api/config/credentials.json
         chmod 600 api/config/credentials.json
+        # Verify JSON is valid
+        cat api/config/credentials.json | python -c "import sys, json; json.load(sys.stdin)" || echo 'WARNING: Invalid JSON in credentials file!'
         
     # Create frontend .env file with Firebase web config
     - name: Create frontend environment file
