@@ -33,6 +33,7 @@ jobs:
       uses: docker/build-push-action@v4
       with:
         context: .
+        file: ./Dockerfile
         push: true
         tags: osasdeeon/syntextai:latest
         cache-from: type=registry,ref=osasdeeon/syntextai:buildcache
@@ -44,7 +45,7 @@ jobs:
         host: ${{ secrets.DO_HOST }}
         username: ${{ secrets.DO_USERNAME }}
         key: ${{ secrets.DO_SSH_KEY }}
-        source: "deploy.sh,.env,docker-compose.yml"
+        source: "deploy.sh,docker-compose.yml"
         target: "/home/root/"
 
     - name: Deploy to Digital Ocean
@@ -58,11 +59,9 @@ jobs:
           cd /home/root/
           docker pull osasdeeon/syntextai:latest
           
-          # Ensure .env exists
-          if [ ! -f ".env" ]; then
-            echo ".env file not found!" && exit 1
-          fi
-
+          # Create .env file from GitHub secrets
+          echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+          
           # Make sure the deploy script is executable and run it
           chmod +x deploy.sh
           ./deploy.sh
