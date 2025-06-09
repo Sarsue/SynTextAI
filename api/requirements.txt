@@ -40,6 +40,7 @@ greenlet==3.0.3
 grpcio
 grpcio-status
 grpcio-tools
+google-generativeai
 faster-whisper==1.1.0
 flask
 firebase-admin
@@ -48,6 +49,7 @@ flask-sse==1.0.0
 pdfminer.six
 Pillow
 pytesseract
+PyMuPDF==1.23.7
 psycopg2-binary==2.9.9
 gunicorn
 gpt4all

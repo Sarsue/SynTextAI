@@ -54,30 +54,54 @@ class SyntextAgent:
     
     def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str, comprehension_level: str) -> str:
         """
-        Main pipeline using large context: formats context, prompts LLM to cite sources, 
-        appends source map. Falls back to web search.
+        Enhanced main pipeline using large context: formats context, prompts LLM to cite sources precisely, 
+        appends detailed source map. Falls back to web search.
         """
         try:
             if top_k_results:
-                # Step 1: Format context and generate the source map string
+                # Step 1: Format context and generate the source map string with enhanced details
                 formatted_context, source_map = self._format_context_and_sources(top_k_results)
                 
-                # Step 2: Construct the full prompt with citation instructions
-                history_prompt = f"\n\nPrevious Conversation History:\n{convo_history}\n\n" if convo_history else ""
+                # Step 2: Create a conversational summary if history is too long
+                if convo_history and len(convo_history) > 1500:  # If history is long
+                    try:
+                        summarization_prompt = f"Summarize this conversation history briefly, focusing on the most important points and context needed to answer follow-up questions:\n\n{convo_history}"
+                        history_summary = prompt_llm(summarization_prompt)
+                        history_prompt = f"\n\nPrevious Conversation Summary:\n{history_summary}\n\n"
+                    except Exception as e:
+                        logger.warning(f"Failed to summarize conversation history: {e}")
+                        # Truncate if summarization fails
+                        history_prompt = f"\n\nPrevious Conversation (truncated):\n{convo_history[:1500]}...\n\n"
+                else:
+                    history_prompt = f"\n\nPrevious Conversation History:\n{convo_history}\n\n" if convo_history else ""
                 
-                # **** Instruction for LLM ****
+                # Step 3: Enhanced citation instructions with confidence and precision guidelines
                 citation_instruction = (
-                    "When you use information from the provided context segments in your answer, " 
-                    "you MUST cite the segment number(s) using the format [Segment N] or [Segment N, M] " 
-                    "immediately after the information. For example: 'Attention mechanisms allow focus [Segment 1].' " 
-                    "or 'Self-attention relates positions [Segment 1, 2].' " 
-                    "Base your answer *only* on the provided context segments and conversation history."
-                 )
-                # ***************************
+                    "When using information from the provided context segments in your answer: \n" 
+                    "1. ALWAYS cite the segment number using [Segment N] format immediately after the information.\n" 
+                    "2. For information from multiple segments, cite all relevant segments: [Segment N, M, P].\n" 
+                    "3. If directly quoting text, use quotation marks and include page or timestamp: \"quoted text\" [Segment N, timestamp 3:45].\n"
+                    "4. If the context doesn't contain sufficient information to answer fully, clearly state what's missing.\n"
+                    "5. When citing timestamps or page numbers, be precise and only reference what actually appears in the context.\n"
+                    "IMPORTANT: Base your answer ONLY on the provided context segments and conversation history.\n"
+                    "Do NOT add information from your general knowledge that is not in the provided segments."
+                )
 
+                # Step 4: Adapt detail level based on comprehension level
+                detail_instruction = ""
+                if comprehension_level.lower() == "beginner":
+                    detail_instruction = "Explain concepts simply, define technical terms, and use basic examples."
+                elif comprehension_level.lower() == "intermediate":
+                    detail_instruction = "Use moderate technical detail and some domain-specific terminology. Provide examples where helpful."
+                elif comprehension_level.lower() == "advanced":
+                    detail_instruction = "Use precise technical language and domain-specific terminology. Go into depth on complex concepts."
+                else: # Default
+                    detail_instruction = "Provide a balanced response with clear explanations."
+
+                # Step 5: Create the full prompt with all components
                 full_prompt = (
                     f"{citation_instruction}\n\n"
-                    f"Respond in {language}. The user desires a {comprehension_level} level of detail.\n"
+                    f"Respond in {language}. {detail_instruction}\n"
                     f"{history_prompt}"
                     f"User Question: {query}\n\n"
                     f"Provided Context Segments:\n"
@@ -87,21 +111,47 @@ class SyntextAgent:
                     f"Answer:" # LLM starts generating here
                 )
                 
-                # Step 3: Check token count (optional but recommended)
+                # Step 6: Check token count and apply smart token management
                 prompt_tokens = token_count(full_prompt)
                 if prompt_tokens > MAX_TOKENS_CONTEXT:
-                    logger.warning(f"Combined prompt ({prompt_tokens} tokens) exceeds MAX_TOKENS_CONTEXT ({MAX_TOKENS_CONTEXT}). Truncation/errors may occur.")
-                    # Consider more robust handling like erroring or selective context reduction
+                    logger.warning(f"Combined prompt ({prompt_tokens} tokens) exceeds MAX_TOKENS_CONTEXT ({MAX_TOKENS_CONTEXT}). Applying smart token reduction.")
+                    # Get token count of fixed parts (everything except context)
+                    context_start = full_prompt.find("Provided Context Segments:")
+                    context_end = full_prompt.find("------------------------\n\n")
+                    non_context = full_prompt[:context_start] + full_prompt[context_end:]
+                    non_context_tokens = token_count(non_context)
+                    
+                    # Calculate available tokens for context
+                    available_context_tokens = MAX_TOKENS_CONTEXT - non_context_tokens - 100  # 100 token buffer
+                    
+                    # Smart truncation targeting most relevant segments
+                    from rag_utils import smart_chunk_selection
+                    reduced_chunks = smart_chunk_selection(top_k_results, query, available_context_tokens)
+                    formatted_context, source_map = self._format_context_and_sources(reduced_chunks)
+                    
+                    # Rebuild prompt with reduced context
+                    full_prompt = (
+                        f"{citation_instruction}\n\n"
+                        f"Respond in {language}. {detail_instruction}\n"
+                        f"{history_prompt}"
+                        f"User Question: {query}\n\n"
+                        f"Provided Context Segments (reduced due to length):\n"
+                        f"------------------------\n"
+                        f"{formatted_context}\n"
+                        f"------------------------\n\n"
+                        f"Answer:"
+                    )
 
-                # Step 4: Call the LLM with the combined context and instructions
+                # Step 7: Call the LLM with the combined context and instructions
                 llm_answer_with_citations = prompt_llm(full_prompt)
 
-                # Step 5: Combine LLM answer (with citations) and the source map
-                final_response = llm_answer_with_citations + source_map
+                # Step 8: Combine LLM answer with improved source map
+                # Enhance source map formatting for better readability
+                final_response = llm_answer_with_citations + "\n\n" + source_map
                 
                 return final_response
 
-            # Step 6: Fallback to Web search if no document results found
+            # Fallback to Web search if no document results found
             logger.info("No relevant document chunks found, falling back to web search.")
             results, _ = get_answers_from_web(query)
             if results:

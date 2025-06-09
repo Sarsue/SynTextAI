@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
 from typing import List
 from utils import get_user_id
-from docsynth_store import DocSynthStore
+from repositories.repository_manager import RepositoryManager
 from llm_service import get_text_embedding
 import logging
 from typing import Dict
@@ -17,7 +17,7 @@ def get_store(request: Request):
     return request.app.state.store
 
 # Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
+async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
     if not authorization:
         logger.error("Missing Authorization token")
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -44,7 +44,7 @@ async def create_message(
     comprehension_level: str = Query("beginner", description="Comprehension level of the message"),
     history_id: int = Query(..., description="ID of the chat history"),
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         from tasks import process_query_data

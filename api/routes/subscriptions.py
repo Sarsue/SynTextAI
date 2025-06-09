@@ -7,7 +7,8 @@ import logging
 import os
 from dotenv import load_dotenv
 from utils import get_user_id
-from docsynth_store import DocSynthStore, Subscription
+from repositories.repository_manager import RepositoryManager
+from repositories.domain_models import Subscription
 
 # Load environment variables
 load_dotenv()
@@ -29,7 +30,7 @@ def get_store(request: Request):
     return request.app.state.store
 
 # Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
+async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
     if not authorization:
         logger.error("Missing Authorization token")
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -51,13 +52,13 @@ async def authenticate_user(authorization: str = Header(None), store: DocSynthSt
 @subscriptions_router.get("/status")
 async def subscription_status(
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
-        subscription = store.get_subscription(user_id)
+        subscription_data = store.get_subscription(user_id)
         
-        if not subscription:
+        if not subscription_data:
             return {
                 'subscription_status': 'none',
                 'card_last4': None,
@@ -67,14 +68,17 @@ async def subscription_status(
                 'trial_end': None
             }
         
+        # Unpack the tuple (Subscription, CardDetails)
+        subscription, card_details = subscription_data
+        
         # Prepare subscription data to return
         response = {
-            'subscription_status': subscription["status"],
-            'card_last4': subscription["card_last4"],
-            'card_brand': subscription["card_brand"],
-            'card_exp_month': subscription["exp_month"],
-            'card_exp_year': subscription["exp_year"],
-            'trial_end': subscription["trial_end"]  
+            'subscription_status': subscription.status,
+            'card_last4': card_details.card_last4 if card_details else None,
+            'card_brand': card_details.card_type if card_details else None,
+            'card_exp_month': card_details.exp_month if card_details else None,
+            'card_exp_year': card_details.exp_year if card_details else None,
+            'trial_end': subscription.trial_end
         }
         
         return response
@@ -86,7 +90,7 @@ async def subscription_status(
 @subscriptions_router.post("/start-trial", status_code=201)
 async def start_trial(
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -156,7 +160,7 @@ async def start_trial(
 @subscriptions_router.post("/cancel", status_code=200)
 async def cancel_sub(
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -190,7 +194,7 @@ async def cancel_sub(
 async def create_subscription(
     payment_method: str = Body(..., embed=True),
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -295,7 +299,7 @@ async def create_subscription(
 async def update_payment(
     payment_method: str = Body(..., embed=True),
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -329,10 +333,9 @@ async def update_payment(
 
 # Route to handle Stripe webhooks
 @subscriptions_router.post("/webhook")
-async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
+async def webhook(request: Request, store: RepositoryManager = Depends(get_store)):
     payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
-    db_session = None # Initialize db_session
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
@@ -354,25 +357,29 @@ async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
 
             # --- Logic to handle trial end --- 
             try:
-                db_session = store.get_session()
-                # Find the subscription in our DB *before* updating it
-                subscription_in_db = db_session.query(Subscription).filter_by(stripe_customer_id=stripe_customer_id).first()
-
-                if subscription_in_db and subscription_in_db.status == 'trialing' and current_status != 'trialing':
-                    logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
-                    # TODO: Implement logic here to update the user's plan/tier based on the new status.
-                    # Example: Find the user associated with the subscription (subscription_in_db.user_id)
-                    # and update their plan in the User table (e.g., store.update_user_plan(subscription_in_db.user_id, 'free'))
-                    # Ensure changes are committed if updating directly: db_session.commit()
-                    pass # Placeholder for trial end logic
+                # Using the repository methods to get subscription info
+                # We need to find the user ID from the stripe customer ID first
+                user_id = None
+                subscriptions = store.user_repo._get_raw_subscription(stripe_customer_id)
+                
+                if subscriptions and len(subscriptions) > 0:
+                    subscription_in_db = subscriptions[0]
+                    user_id = subscription_in_db.user_id
+                    
+                    if subscription_in_db.status == 'trialing' and current_status != 'trialing':
+                        logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
+                        # TODO: Implement logic here to update the user's plan/tier based on the new status.
+                        # Now we have the user_id from the query, we can use it for updates
+                        # Example: store.update_user_plan(user_id, 'free')
+                        pass # Placeholder for trial end logic
 
             except Exception as db_exc:
                 logger.error(f"Database error checking/handling trial end for {stripe_customer_id}: {db_exc}")
                 # Decide if this should prevent the main subscription update - likely not, 
                 # but log it thoroughly.
             finally:
-                 if db_session:
-                    db_session.close() # Close the session used for checking
+                # No session to close as we're using repositories now
+                pass
             # --- End trial handling logic --- 
 
             # Always update the subscription record with the latest status from Stripe
@@ -391,8 +398,5 @@ async def webhook(request: Request, store: DocSynthStore = Depends(get_store)):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid payload")
     finally:
-        # Ensure session is closed if an early exception occurred before the specific check block's finally
-        if db_session and not db_session.is_active:
-             pass # Already closed
-        elif db_session:
-            db_session.close()
+        # No sessions to manage as we're using the repository pattern now
+        pass

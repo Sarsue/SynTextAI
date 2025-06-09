@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet';
 import './Home.css';
 import { useUserContext } from './UserContext';
 
@@ -8,6 +9,30 @@ const Home: React.FC = () => {
 
     return (
         <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
+            <Helmet>
+                <title>SynText AI - Intelligent Text Analysis & Learning Tool</title>
+                <meta name="description" content="Transform how you learn with SynText AI. Our platform analyzes documents, creates flashcards, generates quizzes, and extracts key concepts to enhance your learning experience." />
+                <meta name="keywords" content="AI learning, document analysis, flashcards, quizzes, study tool, education technology, key concepts, learning assistant" />
+                
+                {/* Additional SEO optimization */}
+                <link rel="canonical" href="https://syntextai.com/" />
+                <script type="application/ld+json">
+                    {
+                        JSON.stringify({
+                            "@context": "https://schema.org",
+                            "@type": "WebApplication",
+                            "name": "SynText AI",
+                            "description": "Transform how you learn with SynText AI. Our platform analyzes documents, creates flashcards, generates quizzes, and extracts key concepts to enhance your learning experience.",
+                            "applicationCategory": "EducationalApplication",
+                            "offers": {
+                                "@type": "Offer",
+                                "price": "0",
+                                "priceCurrency": "USD"
+                            }
+                        })
+                    }
+                </script>
+            </Helmet>
             {/* Header */}
             <header className="header">
                 <div className="logo-container">
@@ -26,7 +51,7 @@ const Home: React.FC = () => {
             {/* Hero Section */}
             <main className="content-container">
                 <section className="hero-section">
-                    <h2 className="hero-title">AI-Powered Learning Assistant</h2>
+                    <h1 className="hero-title">AI-Powered Learning Assistant</h1>
                     <p className="hero-description">
                         Transform complex educational content into easy-to-understand key concepts. Perfect for students,
                         lifelong learners, and educators who want to accelerate understanding and retention.

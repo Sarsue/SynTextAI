@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from typing import Optional
 from utils import get_user_id
-from docsynth_store import DocSynthStore
+from repositories.repository_manager import RepositoryManager
 import logging
 from typing import Dict
 # Set up logging
@@ -16,7 +16,7 @@ def get_store(request: Request):
     return request.app.state.store
 
 # Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: DocSynthStore = Depends(get_store)):
+async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
     if not authorization:
         logger.error("Missing Authorization token")
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -39,7 +39,7 @@ async def authenticate_user(authorization: str = Header(None), store: DocSynthSt
 async def create_history(
     title: str = Query(..., description="Title of the chat history"),
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -53,7 +53,7 @@ async def create_history(
 @histories_router.get("")
 async def get_history_messages(
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -68,7 +68,7 @@ async def get_history_messages(
 async def get_specific_history_messages(
     history_id: int = Query(..., description="ID of the chat history"),
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -83,7 +83,7 @@ async def get_specific_history_messages(
 async def delete_specific_history_messages(
     history_id: int = Query(..., description="ID of the chat history to delete"),
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
@@ -97,7 +97,7 @@ async def delete_specific_history_messages(
 @histories_router.delete("/all", status_code=200)
 async def delete_all_user_histories(
     user_data: Dict = Depends(authenticate_user),
-    store: DocSynthStore = Depends(get_store)
+    store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]

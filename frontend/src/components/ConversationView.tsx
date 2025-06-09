@@ -43,21 +43,33 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
                 // Look for the file in our files array that matches this URL
                 const matchingFile = files.find(file =>
                     url.includes(file.publicUrl)
-                  );
-                  
-                
+                );
+
                 if (matchingFile) {
                     // Found the file in our system
                     setSelectedFile(matchingFile);
                     setFileError(null);
                     console.log(`Found file: ${matchingFile.name} (${matchingFile.id})`);
                 } else {
+                    // Determine the file type based on extension
+                    let fileType: "audio" | "video" | "image" | "text" | "pdf" = "text"; // Default to text
+                    const extension = pathname.split('.').pop()?.toLowerCase() || '';
+
+                    if (["jpg", "jpeg", "png"].includes(extension)) {
+                        fileType = "image";
+                    } else if (["mp4", "mov"].includes(extension)) {
+                        fileType = "video";
+                    } else if (extension === "pdf") {
+                        fileType = "pdf";
+                    }
+
                     // If we can't find the file but it's still a valid URL, create a minimal file object
                     setSelectedFile({
                         id: -1, // Use negative ID for external files
-                        name: url.split('/').pop() || 'File',
-                        publicUrl: url,
-                        processed: true
+                        name: (url as string).split('/').pop() || 'File',
+                        publicUrl: url || '',
+                        processed: true,
+                        type: fileType // Use determined fileType
                     });
                     console.log(`External file link: ${url}`);
                 }
