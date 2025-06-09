@@ -34,13 +34,23 @@ async def generate_learning_materials_for_concept(
         
         concept_id = concept.get('id')
         if not concept_id:
-            logger.warning(f"Cannot generate learning materials - concept has no ID: {concept.get('concept_title', 'Unknown')}")
+            logger.warning(f"Cannot generate learning materials - concept has no ID: {concept.get('concept_title', concept.get('concept', 'Unknown'))}")
             return False
             
-        concept_title = concept.get('concept_title', '')
-        concept_explanation = concept.get('concept_explanation', '')
+        # Handle both naming conventions to ensure compatibility
+        concept_title = concept.get('concept_title', concept.get('concept', ''))
+        concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
+        
+        # Log complete field data to help with debugging
         logger.info(f"Generating learning materials for concept ID {concept_id}: '{concept_title[:30]}...'")
+        logger.debug(f"Full concept fields: {list(concept.keys())}")
+        logger.debug(f"Extracted concept_title: '{concept_title}', concept_explanation length: {len(concept_explanation)}")
         logger.debug(f"Full concept data for learning material generation: {concept}")
+        
+        # Ensure we actually have content to work with
+        if not concept_title or not concept_explanation:
+            logger.error(f"Missing concept title or explanation for concept ID {concept_id}. Title: '{concept_title}', Explanation length: {len(concept_explanation)}")
+            return False
         
         # Track success for each material type
         flashcards_saved = 0
@@ -118,12 +128,12 @@ async def generate_learning_materials_for_concept(
                         explanation = tf.get('explanation', '')
                         logger.debug(f"Saving T/F {i+1}/{len(tf_questions)}: statement='{statement[:30]}...', is_true={is_true}")
                         
+                        # Note: We're not passing explanation as it's not accepted by the method
                         await store.add_quiz_question_async(
                             file_id=int(file_id),
                             question=statement,
                             question_type="TRUE_FALSE",
                             correct_answer="True" if is_true else "False",
-                            explanation=explanation,
                             key_concept_id=int(concept_id)
                         )
                         tf_saved += 1

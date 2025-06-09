@@ -14,6 +14,7 @@ import google.generativeai as genai
 import dspy
 from typing import List
 
+
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
@@ -361,9 +362,21 @@ def _extract_key_concepts_from_chunk(document_chunk: str, language: str, compreh
                 if isinstance(parsed_concepts, list):
                     # Ensure each concept has required fields
                     for concept in parsed_concepts:
-                        if "concept" not in concept or "explanation" not in concept:
-                            concept["concept"] = concept.get("concept", concept.get("title", "Unknown Concept"))
-                            concept["explanation"] = concept.get("explanation", "")
+                        # Check for concept_title/concept_explanation format (from our DSPy model)
+                        if "concept_title" in concept and "concept" not in concept:
+                            concept["concept"] = concept["concept_title"]
+                            
+                        if "concept_explanation" in concept and "explanation" not in concept:
+                            concept["explanation"] = concept["concept_explanation"]
+                            
+                        # Apply default values if needed
+                        if "concept" not in concept:
+                            concept["concept"] = concept.get("title", "Unknown Concept")
+                            
+                        if "explanation" not in concept:
+                            concept["explanation"] = concept.get("description", "")
+                            
+                    logging.debug(f"Processed concepts: {parsed_concepts[:3]}")
                     return parsed_concepts
                 elif isinstance(parsed_concepts, dict) and "concepts" in parsed_concepts:
                     return parsed_concepts["concepts"]
@@ -392,10 +405,14 @@ def _deduplicate_concepts(concepts: List[dict]) -> List[dict]:
     seen_concepts = set()
     
     for concept in concepts:
-        concept_title = concept.get("concept", "").lower().strip()
+        # Check for both field naming conventions (concept_title or concept)
+        concept_title = concept.get("concept_title", concept.get("concept", "")).lower().strip()
         # Skip if empty or too similar to existing concepts
         if not concept_title or any(similar_enough(concept_title, seen) for seen in seen_concepts):
             continue
+            
+        # Log for debugging
+        logging.debug(f"Keeping unique concept: '{concept_title[:50]}...'")
         
         seen_concepts.add(concept_title)
         unique_concepts.append(concept)
@@ -404,14 +421,26 @@ def _deduplicate_concepts(concepts: List[dict]) -> List[dict]:
 
 def similar_enough(str1: str, str2: str) -> bool:
     """Check if two strings are similar enough to be considered duplicates.
-    Uses a simple approach based on Levenshtein distance ratio."""
+    Uses a simple approach based on string containment and word overlap."""
     # If either string contains the other entirely, consider them similar
     if str1 in str2 or str2 in str1:
         return True
     
-    # Otherwise use Levenshtein distance ratio
-    ratio = fuzz.ratio(str1.lower(), str2.lower())
-    return ratio > 80  # Adjust threshold as needed
+    # Convert to lowercase and split into words
+    words1 = set(str1.lower().split())
+    words2 = set(str2.lower().split())
+    
+    # Calculate word overlap ratio
+    if not words1 or not words2:
+        return False
+    
+    # Calculate Jaccard similarity (intersection over union)
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    
+    # Consider similar if they share more than 70% of words
+    similarity = intersection / union if union > 0 else 0
+    return similarity > 0.7  # 70% word overlap threshold
 
 
 def _standardize_concept_format(concepts: List[dict], is_video: bool = False) -> List[dict]:
@@ -440,20 +469,25 @@ def _standardize_concept_format(concepts: List[dict], is_video: bool = False) ->
         standardized = {}
         
         # Handle concept title (DSPy uses 'concept', we use 'concept_title')
-        if 'concept' in concept:
-            standardized['concept_title'] = concept['concept']
-        elif 'concept_title' in concept:
+        if 'concept_title' in concept:
             standardized['concept_title'] = concept['concept_title']
+        elif 'concept' in concept:
+            standardized['concept_title'] = concept['concept']
         else:
             standardized['concept_title'] = concept.get('title', 'Untitled Concept')
             
         # Handle explanation (DSPy uses 'explanation', we use 'concept_explanation')
-        if 'explanation' in concept:
-            standardized['concept_explanation'] = concept['explanation']
-        elif 'concept_explanation' in concept:
+        if 'concept_explanation' in concept:
             standardized['concept_explanation'] = concept['concept_explanation']
+        elif 'explanation' in concept:
+            standardized['concept_explanation'] = concept['explanation']
         else:
             standardized['concept_explanation'] = concept.get('description', '')
+            
+        # Debug log to help with troubleshooting
+        logging.debug(f"Original concept fields: {list(concept.keys())}")
+        logging.debug(f"Standardized to: concept_title='{standardized['concept_title']}', explanation length={len(standardized['concept_explanation'])}")
+
             
         # Handle video-specific fields
         if is_video:

@@ -406,6 +406,13 @@ async def get_quizzes_for_file(
                         logger.error(f"Error parsing distractors: {e}")
                         distractors = []
                 
+                # Handle None values and ensure defaults are applied
+                explanation = getattr(q, 'explanation', None) or ""
+                difficulty = getattr(q, 'difficulty', None) or "medium"
+                
+                # Log detailed information about the quiz question before conversion
+                logger.debug(f"Quiz question before conversion - ID: {q.id}, explanation: {type(explanation)}, difficulty: {type(difficulty)}")
+                
                 quizzes_out.append(QuizQuestionResponse(
                     id=q.id,
                     file_id=q.file_id,
@@ -415,9 +422,9 @@ async def get_quizzes_for_file(
                     question_type=q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
                     correct_answer=q.correct_answer if hasattr(q, 'correct_answer') and q.correct_answer else "",
                     distractors=distractors,
-                    explanation=getattr(q, 'explanation', ""),  # Empty string instead of None for frontend compatibility
-                    difficulty=getattr(q, 'difficulty', "medium"),  # Default value expected by frontend
-                    is_custom=getattr(q, 'is_custom', False)  # Default for system-generated questions
+                    explanation=explanation,  # Now guaranteed to be a string, not None
+                    difficulty=difficulty,  # Now guaranteed to be a string, not None
+                    is_custom=getattr(q, 'is_custom', False) or False  # Default for system-generated questions
                 ))
             except Exception as e:
                 logger.error(f"Error converting quiz question to dict: {e}")
