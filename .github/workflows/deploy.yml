@@ -3,45 +3,49 @@ name: Deploy SynTextAI
 on:
   push:
     branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      deploy_message:
+        description: 'Deployment message'
+        required: false
+        default: 'Manual deployment'
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: production 
+    environment: production
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Display deployment information
+      run: |
+        echo "🚀 Building and deploying SynTextAI"
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "📝 Message: ${{ github.event.inputs.deploy_message }}"
+        fi
+        
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    # Debug: Optional step to confirm secrets exist (safe)
-    - name: Confirm Docker secrets are available
+    # Prepare Firebase credentials for build
+    - name: Create Firebase credentials directory
       run: |
-        echo "DOCKER_USERNAME is set: ${{ secrets.DOCKER_USERNAME != '' }}"
-        echo "DOCKER_TOKEN is set: ${{ secrets.DOCKER_TOKEN != '' }}"
-        
-    # Debug: List files in repository
-    - name: List repository files
-      run: |
-        echo "Repository root:"
-        ls -la
-        echo "\nFrontend directory:"
-        ls -la frontend/ || echo "Frontend directory not found!"
-
+        mkdir -p api/config
+        echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
+        chmod 600 api/config/credentials.json
+    
     - name: Login to DockerHub
       uses: docker/login-action@v2
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
-        logout: false  # Keeps session for subsequent steps
 
     - name: Build and push Docker image
       uses: docker/build-push-action@v4
       with:
         context: .
-        file: ./Dockerfile
         push: true
         tags: osasdeeon/syntextai:latest
         cache-from: type=registry,ref=osasdeeon/syntextai:buildcache
@@ -67,10 +71,23 @@ jobs:
           cd /home/root/
           docker pull osasdeeon/syntextai:latest
           
-          # Create .env file from GitHub secrets
+          # Recreate .env file from GitHub secrets
           echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
           chmod 600 .env  # Secure file permissions
           
+          # Create Firebase credentials directory and file
+          mkdir -p api/config
+          echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
+          chmod 600 api/config/credentials.json
+          
           # Make sure the deploy script is executable and run it
           chmod +x deploy.sh
-          ./deploy.sh
+          
+          # Run deploy script - handle errors gracefully
+          ./deploy.sh || { 
+            echo "⚠️ Deploy script failed, but proceeding with container restart..."
+            # Stop previous container if running
+            docker-compose down || true
+            # Start new container with updated image
+            docker-compose up -d
+          }

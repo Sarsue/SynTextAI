@@ -8,6 +8,8 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    volumes:
+      - ./api/config:/app/api/config
     networks:
       - syntextai_network
     deploy:
