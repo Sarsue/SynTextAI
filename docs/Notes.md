@@ -85,6 +85,17 @@ Marketing
 $15 / month for professionals and students
 $135 / year 
  
+DOCKER_USERNAME
+osasdeeon
 
+DOCKER_TOKEN
+dckr_pat_u1fAECr8dybzqhqG4P4Xdl_rRvE
 
+DO_HOST
+178.128.236.126
+
+DO_USERNAME
+root
+
+DO_SSH_KEY
 
