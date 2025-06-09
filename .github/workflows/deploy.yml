@@ -29,19 +29,12 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    # Prepare Firebase credentials for build
-    - name: Create Firebase credentials directory
+    # Set Firebase environment variables directly from secrets
+    - name: Set Firebase credentials
       run: |
-        mkdir -p api/config
-        # Write JSON directly using the 'cat' command with a heredoc
-        # This preserves the exact format of the JSON without any shell interpretation
-        cat > api/config/credentials.json << 'EOF'
-        ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
-        EOF
-        
-        chmod 600 api/config/credentials.json
-        # Verify JSON is valid
-        cat api/config/credentials.json | python -c "import sys, json; json.load(sys.stdin)" || echo 'WARNING: Invalid JSON in credentials file!'
+        echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> $GITHUB_ENV
+        echo "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" >> $GITHUB_ENV
+        echo "FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}" >> $GITHUB_ENV
         
     # Create frontend .env file with Firebase web config
     - name: Create frontend environment file
@@ -78,6 +71,9 @@ jobs:
           REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
           REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
+          FIREBASE_PROJECT_ID=${{ env.FIREBASE_PROJECT_ID }}
+          FIREBASE_PRIVATE_KEY=${{ env.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_CLIENT_EMAIL=${{ env.FIREBASE_CLIENT_EMAIL }}
 
     - name: Copy deploy files to Digital Ocean
       uses: appleboy/scp-action@v0.1.3

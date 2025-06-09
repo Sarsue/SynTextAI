@@ -34,6 +34,16 @@ RUN npm run build && npm cache clean --force
 # Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
 FROM python:3.10-slim AS base
 
+# Define build arguments for Firebase credentials
+ARG FIREBASE_PROJECT_ID
+ARG FIREBASE_PRIVATE_KEY
+ARG FIREBASE_CLIENT_EMAIL
+
+# Set as environment variables
+ENV FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+ENV FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+ENV FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+
 # Install system dependencies including FFmpeg
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
