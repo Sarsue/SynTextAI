@@ -33,7 +33,12 @@ jobs:
     - name: Create Firebase credentials directory
       run: |
         mkdir -p api/config
-        echo '${{ secrets.FIREBASE_CREDENTIALS_JSON }}' > api/config/credentials.json
+        # Write JSON directly using the 'cat' command with a heredoc
+        # This preserves the exact format of the JSON without any shell interpretation
+        cat > api/config/credentials.json << 'EOF'
+        ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
+        EOF
+        
         chmod 600 api/config/credentials.json
         # Verify JSON is valid
         cat api/config/credentials.json | python -c "import sys, json; json.load(sys.stdin)" || echo 'WARNING: Invalid JSON in credentials file!'
