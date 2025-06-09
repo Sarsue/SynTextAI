@@ -27,7 +27,7 @@ def load_whisper_model_if_needed():
     if whisper_model is None:
         logger.info("Loading faster-whisper model...")
         # Consider making model size/params configurable if needed later
-        whisper_model = WhisperModel("medium", device="cpu", compute_type="int8", download_root="/app/models")
+        whisper_model = WhisperModel("small", device="cpu", compute_type="int8", download_root="/app/models")
         logger.info("Faster-whisper model loaded.")
     return whisper_model
 
@@ -74,7 +74,7 @@ syntext = SyntextAgent()
 # Model is only loaded when needed to save memory
 @contextmanager
 def load_whisper_model():
-    model = WhisperModel("medium", device="cpu", compute_type="int8")
+    model = WhisperModel("small", device="cpu", compute_type="int8")
     try:
         yield model
     finally:
@@ -216,28 +216,44 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         
         # Process the file using the selected processor
         try:
-            # Download the file from GCS
-            logger.info(f"Downloading file {filename} from GCS")
-            file_data = download_from_gcs(user_gc_id, filename)
+            # Check if this is a YouTube URL - if so, we don't need to download from GCS
+            is_youtube_url = "youtube.com" in filename or "youtu.be" in filename
             
-            if file_data is None:
-                logger.error(f"Failed to download file {filename} from GCS")
-                # Note: Status is inferred rather than explicitly stored
-                return
+            if is_youtube_url:
+                logger.info(f"Processing YouTube video directly: {filename}")
+                # For YouTube, we don't need the file data - we'll extract the transcript directly
+                result = await processor.process(
+                    user_id=user_id,
+                    file_id=file_id,
+                    filename=filename,
+                    file_url=file_url,
+                    user_gc_id=user_gc_id,
+                    language=language,
+                    comprehension_level=comprehension_level
+                )
+            else:
+                # For non-YouTube files, download from GCS as before
+                logger.info(f"Downloading file {filename} from GCS")
+                file_data = download_from_gcs(user_gc_id, filename)
                 
-            logger.info(f"Successfully downloaded file {filename}, size: {len(file_data)} bytes")
-            
-            # Process the file using the selected processor
-            result = await processor.process(
-                user_id=user_id,
-                file_id=file_id,
-                filename=filename,
-                file_data=file_data,  # Pass the file data to the processor
-                file_url=file_url,
-                user_gc_id=user_gc_id,
-                language=language,
-                comprehension_level=comprehension_level
-            )
+                if file_data is None:
+                    logger.error(f"Failed to download file {filename} from GCS")
+                    # Note: Status is inferred rather than explicitly stored
+                    return
+                    
+                logger.info(f"Successfully downloaded file {filename}, size: {len(file_data)} bytes")
+                
+                # Process the file using the selected processor
+                result = await processor.process(
+                    user_id=user_id,
+                    file_id=file_id,
+                    filename=filename,
+                    file_data=file_data,  # Pass the file data to the processor
+                    file_url=file_url,
+                    user_gc_id=user_gc_id,
+                    language=language,
+                    comprehension_level=comprehension_level
+                )
             
             if not result.get("success", False):
                 logger.error(f"Processing failed for file ID {file_id}: {result.get('error', 'Unknown error')}")
