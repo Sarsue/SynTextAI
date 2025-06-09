@@ -69,6 +69,7 @@ jobs:
           
           # Create .env file from GitHub secrets
           echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+          chmod 600 .env  # Secure file permissions
           
           # Make sure the deploy script is executable and run it
           chmod +x deploy.sh

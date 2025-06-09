@@ -1,18 +1,5 @@
-# Stage 1: Build the frontend
-FROM node:18-alpine AS build-step
-WORKDIR /app/frontend
-
-# Copy only package files first to leverage caching
-COPY frontend/package.json frontend/package-lock.json ./
-
-# Install dependencies
-RUN npm ci --only=production && npm prune --production
-
-# Copy the remaining files and build
-COPY frontend/ ./
-RUN npm run build && npm cache clean --force
-
-# Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
+# Stage 1: Build the Python backend with FFmpeg, Whisper, and dependencies
+# Single-stage build for Python backend with FFmpeg and dependencies
 FROM python:3.10-slim AS base
 
 # Install system dependencies including FFmpeg
