@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useNavigate } from 'react-router-dom';
+import { useAnalytics, usePostHog, trackFeatureUsage } from '../components/AnalyticsProvider';
 import ConversationView from './ConversationView';
 import InputArea from './InputArea';
 import HistoryView from './HistoryView';
@@ -21,6 +22,9 @@ interface ChatAppProps {
 }
 
 const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
+    // Initialize analytics
+    const analytics = useAnalytics();
+    const posthog = usePostHog();
     // --- YouTube link upload state ---
     const [youtubeUrl, setYoutubeUrl] = useState('');
     const [isYoutubeSubmitting, setIsYoutubeSubmitting] = useState(false);
@@ -38,6 +42,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const { socket } = useUserContext();
     const [isSending, setIsSending] = useState(false);
+    const [sessionStartTime] = useState(Date.now()); // Track when the session started
 
     const SOCKET_RECONNECTION_ATTEMPTS = 5;
     const SOCKET_RECONNECTION_DELAY = 3000;
@@ -45,10 +50,29 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
 
     useEffect(() => {
         const handleResize = () => {
-            setIsMobile(window.innerWidth <= 768);
+            const newIsMobile = window.innerWidth <= 768;
+            if (newIsMobile !== isMobile) {
+                // Track viewport change
+                posthog.capture('viewport_changed', {
+                    is_mobile: newIsMobile,
+                    viewport_width: window.innerWidth
+                });
+            }
+            setIsMobile(newIsMobile);
         };
         window.addEventListener("resize", handleResize);
         return () => window.removeEventListener("resize", handleResize);
+    }, [isMobile]);
+
+    // Track component mount
+    useEffect(() => {
+        // Track chat app loaded event
+        posthog.capture('chat_app_loaded', {
+            has_user: !!user,
+            user_id: user?.uid,
+            is_mobile: isMobile,
+            subscription_status: subscriptionStatus
+        });
     }, []);
 
     // Effect to get ID token
@@ -70,6 +94,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     }, [user]);
 
     const handleSettingsClick = () => {
+        // Track settings navigation
+        posthog.capture('navigate_to_settings', {
+            from_page: 'chat_app'
+        });
         navigate('/settings');
     };
 
@@ -90,47 +118,54 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     };
 
     const handleCopy = (message: Message) => {
-        const textToCopy = message.content;
-        navigator.clipboard.writeText(textToCopy)
-            .then(() => { console.log('Text successfully copied to clipboard:', textToCopy); })
-            .catch((err) => { console.error('Unable to copy text to clipboard:', err); });
+        navigator.clipboard.writeText(message.content);
+        toast.success('Copied to clipboard!');
+        
+        // Track copy message action
+        posthog.capture('copy_message', {
+            message_type: message.sender,
+            message_length: message.content.length,
+            history_id: currentHistory
+        });
     };
 
     const handleSend = async (message: string, files: File[]) => {
-        try {
-            setIsSending(true); // Disable input while processing
-            console.log('Files to append:', files);
-            if (files.length > 0) {
-                const formData = new FormData();
-                for (let i = 0; i < files.length; i++) {
-                    formData.append("files", files[i]);
-                }
-                const fileDataResponse = await callApiWithToken(
-                    `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
-                    'POST',
-                    formData
-                );
-                if (fileDataResponse && fileDataResponse.ok) {
-                    const fileData = await fileDataResponse.json();
-                    toast.success(fileData.message, { position: 'top-right', autoClose: 3000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
-                    fetchUserFiles();
-                } else {
-                    toast.error('File upload failed. Please try again.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
-                }
-                if (!message.trim()) {
-                    setIsSending(false); // Re-enable input if only uploading files
-                    return;
-                }
-            }
-            if (currentHistory !== null && !isNaN(currentHistory)) {
-                await sendMessage(message);
-            } else {
-                await sendMessage(message);
-            }
-        } catch (error) {
-            console.error('Error sending message:', error);
-            setIsSending(false); // Re-enable input on error
+        if (!message.trim() && files.length === 0) return;
+        
+        // Track message send attempt
+        posthog.capture('message_send', {
+            has_text: !!message.trim(),
+            has_files: files.length > 0,
+            file_count: files.length,
+            history_id: currentHistory
+        });
+        
+        setIsSending(true);
+        
+        if (message.trim()) {
+            await sendMessage(message);
         }
+
+        if (files.length > 0) {
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append("files", files[i]);
+            }
+            const fileDataResponse = await callApiWithToken(
+                `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                'POST',
+                formData
+            );
+            if (fileDataResponse && fileDataResponse.ok) {
+                const fileData = await fileDataResponse.json();
+                toast.success(fileData.message, { position: 'top-right', autoClose: 3000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
+                fetchUserFiles();
+            } else {
+                toast.error('File upload failed. Please try again.', { position: 'top-right', autoClose: 5000, hideProgressBar: false, closeOnClick: true, pauseOnHover: true, draggable: true, progress: undefined });
+            }
+        }
+
+        setIsSending(false);
     };
 
     const sendMessage = async (message: string) => {
@@ -189,24 +224,49 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-    const handleNewChat = async () => {
-        try {
-            const response = await callApiWithToken('/api/chat/history', 'POST');
-            if (response && response.ok) {
-                const newHistory = await response.json();
-                setHistories(prev => ({ ...prev, [newHistory.id]: newHistory }));
-                setCurrentHistory(newHistory.id);
-                toast.success('New chat started');
-            } else {
-                toast.error('Failed to start new chat');
-            }
-        } catch (error) {
-            console.error('Error starting new chat:', error);
-            toast.error('Error starting new chat');
-        }
+    const handleNewChat = () => {
+        if (!idToken) return;
+
+        // Track new chat creation
+        posthog.capture('new_chat_created', {
+            previous_history_id: currentHistory
+        });
+
+        // Make API request to create new chat
+        callApiWithToken('/api/v1/history', 'POST')
+            .then(response => response && response.ok ? response.json() : Promise.reject('Failed to create new chat'))
+            .then(data => {
+                // Add new history to the list
+                const newHistoryId = data.id;
+                const newHistory = {
+                    id: newHistoryId,
+                    title: 'New Chat',
+                    messages: [],
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                };
+
+                setHistories(prev => ({
+                    ...prev,
+                    [newHistoryId]: newHistory,
+                }));
+                setCurrentHistory(newHistoryId);
+            })
+            .catch(error => {
+                console.error('Error creating new chat:', error);
+                
+                // Track error
+                posthog.capture('new_chat_error', {
+                    error: error.message || 'Unknown error'
+                });
+            });
     };
 
     const handleDeleteHistory = async (historyIdOrObject: number | History) => {
+        // Track history deletion
+        posthog.capture('history_deleted', {
+            history_id: typeof historyIdOrObject === 'number' ? historyIdOrObject : historyIdOrObject.id
+        });
         const historyId = typeof historyIdOrObject === 'number' ? historyIdOrObject : historyIdOrObject.id;
         try {
             const response = await callApiWithToken(`/api/chat/history/${historyId}`, 'DELETE');
@@ -275,21 +335,58 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         }
     };
 
-    const handleLogout = () => {
-        onLogout();
-        navigate('/');
+    const handleLogout = async () => {
+        try {
+            // Track logout action with session data
+            posthog.capture('logout', {
+                method: 'button_click',
+                page: 'chat_app',
+                histories_count: Object.keys(histories).length,
+                files_count: knowledgeBaseFiles.length,
+                session_duration: Math.floor((Date.now() - sessionStartTime) / 1000)
+            });
+            
+            // Optional: flush events before logout to ensure they're sent
+            if (typeof posthog.flush === 'function') {
+                await posthog.flush();
+            }
+            
+            // Call the provided onLogout function
+            onLogout();
+        } catch (error) {
+            console.error('Error during logout:', error);
+        }
     };
-
 
     const handleFileError = (error: string) => {
         setSelectedFile(null);
     };
 
     const handleFileClick = (file: UploadedFile) => {
+        // Update the state with the selected file
         setSelectedFile(file);
+        
+        // Track file view event
+        posthog.capture('file_viewed', {
+            file_id: file.id,
+            file_name: file.name,
+            file_type: file.type
+        });
+        
+        // If on mobile, switch to file view tab
+        if (isMobile) {
+            setActiveTab("files");
+        }
     };
 
     const handleCloseFileViewer = () => {
+        // Track file viewer closed
+        if (selectedFile) {
+            posthog.capture('file_viewer_closed', {
+                file_id: selectedFile.id,
+                file_name: selectedFile.name
+            });
+        }
         setSelectedFile(null);
     };
 
@@ -318,6 +415,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     }, [fetchUserFiles]);
 
     const handleDeleteFile = async (fileId: number) => {
+        // Find file to track deletion details
+        const fileToDelete = knowledgeBaseFiles.find(file => file.id === fileId);
+        
+        // Track file deletion in PostHog
+        if (fileToDelete) {
+            posthog.capture('file_deleted', {
+                file_id: fileId,
+                file_name: fileToDelete.name,
+                file_type: fileToDelete.type
+            });
+        }
         if (!user) {
             console.error('User is not available.');
             return;

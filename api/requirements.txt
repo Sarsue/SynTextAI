@@ -172,3 +172,4 @@ ffmpeg-python
 websockets
 youtube-transcript-api
 yt-dlp
+posthog

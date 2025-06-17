@@ -92,6 +92,7 @@ from routes.histories import histories_router
 from routes.messages import messages_router
 from routes.subscriptions import subscriptions_router
 from routes.users import users_router
+from routes.analytics import router as analytics_router
 
 # Include routers
 app.include_router(files_router)
@@ -99,6 +100,7 @@ app.include_router(histories_router)
 app.include_router(messages_router)
 app.include_router(subscriptions_router)
 app.include_router(users_router)
+app.include_router(analytics_router)
 
 # Define the build path for React app
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))

@@ -4,6 +4,7 @@ import type { Stripe } from '@stripe/stripe-js';
 import './PaymentView.css';
 import { useUserContext } from '../UserContext'; // Importing the context hook
 import { User } from 'firebase/auth';
+import posthog from '../services/analytics'; // Import PostHog for analytics
 
 interface PaymentViewProps {
     stripePromise: Promise<Stripe | null>;
@@ -43,6 +44,12 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             return;
         }
 
+        // Track subscription attempt
+        posthog.capture('subscription_attempt', {
+            userId: user?.uid,
+            email: email
+        });
+
         setIsRequestPending(true);
         setError(null);
 
@@ -81,11 +88,27 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
 
             const data = await response.json();
             console.log("Subscription successful:", data);
+            
+            // Track successful subscription
+            posthog.capture('subscription_success', {
+                userId: user?.uid,
+                email: email,
+                subscriptionStatus: data.subscription_status,
+                plan: 'standard'
+            });
 
             setSubscriptionData(data);
             setSubscriptionStatus(data.subscription_status); // Update context with the new subscription status
         } catch (error) {
             console.error("Error during subscription:", error);
+            
+            // Track subscription error
+            posthog.capture('subscription_error', {
+                userId: user?.uid,
+                email: email,
+                error: (error as Error)?.message || 'Unknown error'
+            });
+            
             setError((error as Error)?.message || 'An error occurred while subscribing.');
         } finally {
             setIsRequestPending(false);
@@ -93,6 +116,12 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     };
 
     const handleStartTrial = async () => {
+        // Track trial start attempt
+        posthog.capture('trial_start_attempt', {
+            userId: user?.uid,
+            email: email
+        });
+        
         setIsRequestPending(true);
         setError(null);
         try {
@@ -111,10 +140,26 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             }
 
             const data = await response.json();
+            // Track successful trial start
+            posthog.capture('trial_start_success', {
+                userId: user?.uid,
+                email: email,
+                trialEnd: data.trial_end
+            });
+            
             setSubscriptionData(data);
-            setSubscriptionStatus(data.subscription_status); // Update context with the new subscription status
+            setSubscriptionStatus('trialing'); // Update context with new subscription status
         } catch (error) {
-            setError((error as Error)?.message || 'An error occurred while starting the trial.');
+            console.error("Error starting trial:", error);
+            
+            // Track trial start error
+            posthog.capture('trial_start_error', {
+                userId: user?.uid,
+                email: email,
+                error: (error as Error)?.message || 'Unknown error'
+            });
+            
+            setError((error as Error)?.message || 'An error occurred while starting your trial.');
         } finally {
             setIsRequestPending(false);
         }
@@ -124,8 +169,14 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     const handleUpdatePaymentMethod = async (e: React.FormEvent) => {
         e.preventDefault();
         const cardElement = validateStripeAndCard();
-        if (!cardElement || !clientSecret || !stripe) return;
+        if (!stripe || !cardElement) return;
 
+        // Track payment method update attempt
+        posthog.capture('payment_method_update_attempt', {
+            userId: user?.uid,
+            email: email
+        });
+        
         setIsRequestPending(true);
         setError(null);
         try {
@@ -135,8 +186,12 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                     billing_details: { email },
                 },
             });
-            if (stripeError) throw new Error(stripeError.message || 'Failed to update payment method.');
 
+            if (stripeError) {
+                throw new Error(stripeError.message || 'Failed to update payment method.');
+            }
+
+            console.log("Sending update payment method request...");
             const response = await fetch('/api/v1/subscriptions/update-payment', {
                 method: 'POST',
                 headers: {
@@ -145,12 +200,33 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 },
                 body: JSON.stringify({ payment_method_id: setupIntent?.payment_method }),
             });
-            if (!response.ok) throw new Error('Failed to update payment details.');
+
+            if (!response.ok) {
+                throw new Error('Failed to update payment details.');
+            }
+
             const data = await response.json();
+            // Track successful payment method update
+            posthog.capture('payment_method_update_success', {
+                userId: user?.uid,
+                email: email,
+                cardBrand: data.card_brand,
+                cardLast4: data.card_last4
+            });
+            
             setSubscriptionData(data);
             setSubscriptionStatus(data.subscription_status); // Update context with new subscription status
         } catch (error) {
-            setError((error as Error)?.message || 'An error occurred while updating payment method.');
+            console.error("Error updating payment method:", error);
+            
+            // Track payment method update error
+            posthog.capture('payment_method_update_error', {
+                userId: user?.uid,
+                email: email,
+                error: (error as Error)?.message || 'Unknown error'
+            });
+            
+            setError((error as Error)?.message || 'Failed to update payment method.');
         } finally {
             setIsRequestPending(false);
         }
@@ -158,6 +234,13 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
 
     // Handle Cancel Subscription
     const handleCancelSubscription = async () => {
+        // Track subscription cancellation attempt
+        posthog.capture('subscription_cancel_attempt', {
+            userId: user?.uid,
+            email: email,
+            subscriptionStatus: subscriptionData?.subscription_status
+        });
+        
         setIsRequestPending(true);
         setError(null);
         try {
@@ -166,12 +249,33 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 method: 'POST',
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error('Failed to cancel subscription.');
-            const data = await res.json();
 
+            if (!res.ok) {
+                throw new Error('Failed to cancel subscription.');
+            }
+
+            const data = await res.json();
+            // Track successful subscription cancellation
+            posthog.capture('subscription_cancel_success', {
+                userId: user?.uid,
+                email: email,
+                subscriptionStatus: subscriptionData?.subscription_status,
+                cancelReason: 'user_initiated'
+            });
+            
             setSubscriptionData({ ...subscriptionData, subscription_status: data.subscription_status });
             setSubscriptionStatus(data.subscription_status); // Update context with new subscription status
         } catch (error) {
+            console.error("Error canceling subscription:", error);
+            
+            // Track subscription cancellation error
+            posthog.capture('subscription_cancel_error', {
+                userId: user?.uid,
+                email: email,
+                subscriptionStatus: subscriptionData?.subscription_status,
+                error: (error as Error)?.message || 'Unknown error'
+            });
+            
             setError((error as Error)?.message || 'Failed to cancel subscription.');
         } finally {
             setIsRequestPending(false);

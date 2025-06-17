@@ -1,11 +1,63 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import './Home.css';
 import { useUserContext } from './UserContext';
+import { usePostHog } from './components/AnalyticsProvider';
 
 const Home: React.FC = () => {
     const { darkMode } = useUserContext();
+    const posthog = usePostHog();
+    const [inputText, setInputText] = useState('');
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    
+    const handleGetStarted = () => {
+        posthog.capture('homepage_get_started', {
+            source: 'demo_section',
+            has_input: inputText.length > 0,
+            has_file: selectedFile !== null
+        });
+        window.location.href = '/login';
+    };
+    
+    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            setSelectedFile(e.target.files[0]);
+            posthog.capture('homepage_file_selected', {
+                file_type: e.target.files[0].type,
+                file_size: e.target.files[0].size
+            });
+        }
+    };
+    
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        handleGetStarted();
+    };
+    
+    // Core features to showcase
+    const features = [
+        { 
+            name: "Create Flashcards", 
+            icon: "🗂️", 
+            description: "Automatically generate study flashcards from your documents"
+        },
+        { 
+            name: "Extract Key Concepts", 
+            icon: "🔑", 
+            description: "Identify and understand the most important ideas in any text"
+        },
+        { 
+            name: "Self-Assessment Quizzes", 
+            icon: "📝", 
+            description: "Test your knowledge with AI-generated quizzes tailored to your content"
+        },
+        { 
+            name: "Search Information", 
+            icon: "🔍", 
+            description: "Find specific details within your documents instantly"
+        }
+    ];
 
     return (
         <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
@@ -13,8 +65,6 @@ const Home: React.FC = () => {
                 <title>SynText AI - Intelligent Text Analysis & Learning Tool</title>
                 <meta name="description" content="Transform how you learn with SynText AI. Our platform analyzes documents, creates flashcards, generates quizzes, and extracts key concepts to enhance your learning experience." />
                 <meta name="keywords" content="AI learning, document analysis, flashcards, quizzes, study tool, education technology, key concepts, learning assistant" />
-                
-                {/* Additional SEO optimization */}
                 <link rel="canonical" href="https://syntextai.com/" />
                 <script type="application/ld+json">
                     {
@@ -33,101 +83,112 @@ const Home: React.FC = () => {
                     }
                 </script>
             </Helmet>
-            {/* Header */}
-            <header className="header">
+            
+            {/* Minimal Header */}
+            <header className="consensus-header">
                 <div className="logo-container">
                     <h1 className="app-title">SynText AI</h1>
-                    <p className="tagline">Your AI Learning Companion</p>
                 </div>
                 <div className="auth-buttons">
-                    <Link to="/login" className="signin-link">
-                        <button className="primary-button">
-                            Start Learning
-                        </button>
-                    </Link>
+                    <Link to="/login" className="signin-link">Sign In</Link>
+                    <Link to="/login" className="signup-button">Sign Up</Link>
                 </div>
             </header>
 
-            {/* Hero Section */}
-            <main className="content-container">
-                <section className="hero-section">
-                    <h1 className="hero-title">AI-Powered Learning Assistant</h1>
-                    <p className="hero-description">
-                        Transform complex educational content into easy-to-understand key concepts. Perfect for students,
-                        lifelong learners, and educators who want to accelerate understanding and retention.
-                    </p>
-                    <Link to="/login" className="signin-link">
-                        <button className="cta-button">Start Free Trial</button>
-                    </Link>
-                </section>
+            {/* Main Hero with Search */}
+            <main className="consensus-main">
+                <div className="hero-container">
+                    <h1 className="hero-title">Learning starts here</h1>
+                    <p className="hero-subtitle">Over 10,000 students and educators trust SynText AI</p>
+                    
+                    {/* Chat Interface similar to ChatApp */}
+                    <div className="chat-container">
+                        <div className="chat-messages">
+                            <div className="chat-message ai">
+                                <div className="message-avatar">AI</div>
+                                <div className="message-content">
+                                    <p>Hello! Upload a document or paste text, and I'll help you learn from it.</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <form onSubmit={handleSubmit} className="chat-input-area">
+                            <textarea 
+                                className="chat-input" 
+                                placeholder="Paste your text here or upload a document..."
+                                value={inputText}
+                                onChange={(e) => setInputText(e.target.value)}
+                                rows={2}
+                            />
+                            
+                            <div className="chat-actions">
+                                <div className="file-upload">
+                                    <label htmlFor="file-upload" className="file-upload-button">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="17 8 12 3 7 8"></polyline>
+                                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                                        </svg>
+                                        <span className="tooltip">{selectedFile ? selectedFile.name : "Upload document"}</span>
+                                    </label>
+                                    <input 
+                                        id="file-upload"
+                                        type="file" 
+                                        onChange={handleFileSelect} 
+                                        style={{display: 'none'}}
+                                        accept=".pdf,.doc,.docx,.txt"
+                                    />
+                                </div>
+                                
+                                <button 
+                                    type="submit" 
+                                    className="send-button"
+                                >
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                    </svg>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
 
+                </div>
+                
                 {/* Features Section */}
-                <section className="features-section">
-                    <h2 className="section-title">Powerful Learning Tools</h2>
+                <div className="features-section">
+                    <h2 className="features-title">Transform How You Learn</h2>
                     <div className="features-grid">
-                        <div className="feature-item">
-                            <div className="feature-icon">📄</div>
-                            <h3>PDF Document Analysis</h3>
-                            <p>Upload PDF textbooks, papers, and documents to extract key concepts and explanations with page references.</p>
-                        </div>
-                        <div className="feature-item">
-                            <div className="feature-icon">📺</div>
-                            <h3>YouTube Video Learning</h3>
-                            <p>Process educational YouTube videos and get key concepts with precise timestamp links for review.</p>
-                        </div>
-                        <div className="feature-item">
-                            <div className="feature-icon">🔑</div>
-                            <h3>Key Concept Extraction</h3>
-                            <p>Automatically identify and explain the most important concepts from any learning material.</p>
-                        </div>
-                        <div className="feature-item">
-                            <div className="feature-icon">📚</div>
-                            <h3>Interactive Learning</h3>
-                            <p>Chat with your content, ask questions, and get tailored explanations based on your comprehension level.</p>
-                        </div>
+                        {features.map((feature, index) => (
+                            <div className="feature-item" key={index}>
+                                <div className="feature-icon">{feature.icon}</div>
+                                <h3 className="feature-title">{feature.name}</h3>
+                                <p className="feature-description">{feature.description}</p>
+                            </div>
+                        ))}
                     </div>
-                </section>
+                </div>
+                
 
-                {/* Use Cases Section */}
-                <section className="use-cases-section">
-                    <h2 className="section-title">Perfect For</h2>
-                    <div className="use-cases-grid">
-                        <div className="use-case-item">
-                            <h3>College Students</h3>
-                            <p>Master course materials faster with key concept extraction</p>
-                        </div>
-                        <div className="use-case-item">
-                            <h3>Self-Learners</h3>
-                            <p>Process educational content and retain information better</p>
-                        </div>
-                        <div className="use-case-item">
-                            <h3>Educators</h3>
-                            <p>Create focused learning materials from complex sources</p>
-                        </div>
-                        <div className="use-case-item">
-                            <h3>Lifelong Learners</h3>
-                            <p>Learn from videos and documents with structured guidance</p>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Pricing Section */}
-                <section className="pricing-section">
-                    <h2 className="pricing-title">Accelerate Your Learning</h2>
-                    <p className="pricing-description">
-                        Start with a 30-day free trial. Then just <strong>$15/month</strong> for unlimited access to all learning tools.
-                        Perfect for students and continuous learners.
-                    </p>
-                    <Link to="/login" className="signin-link">
-                        <button className="cta-button">Begin Free Trial</button>
+                {/* Simple CTA */}
+                <div className="pricing-cta-section">
+                    <h2 className="pricing-title">Ready to enhance your learning?</h2>
+                    <p className="pricing-description">Get started with SynText AI today</p>
+                    <Link 
+                        to="/login" 
+                        className="pricing-button"
+                        onClick={() => posthog.capture('cta_clicked')}
+                    >
+                        Try SynText AI
                     </Link>
-                </section>
+                </div>
             </main>
 
-            {/* Footer */}
-            <footer className="footer">
-                <p>&copy; 2025 OSAS INC. All rights reserved.</p>
-                <p className="footer-info">Empowering learners with AI-driven concept extraction and explanations.</p>
+            {/* Simplified Footer */}
+            <footer className="consensus-footer">
+                <div className="copyright">
+                    <p>© 2025 OSAS INC. All rights reserved.</p>
+                </div>
             </footer>
         </div>
     );
