@@ -2,14 +2,17 @@ version: '3.8'
 
 services:
   syntextaiapp:
-    image: osasdeeon/syntextai:latest
-    container_name: syntextaiapp
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syntextaiapp-local
+    working_dir: /app/api
     ports:
       - "3000:3000"
     env_file:
       - .env
     volumes:
-      - ./api/config:/app/api/config
+      - ./api:/app/api
     networks:
       - syntextai_network
     deploy:
@@ -18,16 +21,19 @@ services:
           memory: 4G  # Limit to 4GB
           
   worker:
-    image: osasdeeon/syntextai:latest
-    container_name: syntextai-worker
-    command: python -m api.worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syntextai-worker-local
+    command: python worker.py
+    working_dir: /app/api
+    volumes:
+      - ./api:/app/api
     env_file:
       - .env
     environment:
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
-    volumes:
-      - ./api/config:/app/api/config
     networks:
       - syntextai_network
     deploy:
@@ -38,7 +44,7 @@ services:
 
   searxng:
     image: searxng/searxng:latest
-    container_name: searxng
+    container_name: searxng-local
     ports:
       - "8080:8080"
     volumes:
@@ -48,7 +54,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G  # Limit to 4GB
+          memory: 8G  # Limit to 8GB
 
 networks:
   syntextai_network:

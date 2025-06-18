@@ -67,7 +67,6 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
 # Route to save file
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def save_file(
-    background_tasks: BackgroundTasks,
     request: Request,
     language: str = Query(default="English", description="Language of the file content"),
     comprehension_level: str = Query(default="Beginner", description="Comprehension level of the file content"),
@@ -75,7 +74,6 @@ async def save_file(
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
-        from tasks import process_file_data  # Using relative import path
         import re
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
@@ -99,10 +97,9 @@ async def save_file(
                 logger.error(f"Failed to add YouTube URL {url} to database")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save YouTube information")
                 
-            # Use FastAPI's background_tasks for YouTube processing
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_id, url, url, True, language=language, comprehension_level=comprehension_level)  # True = is_youtube
-            logger.info(f"Enqueued Task for processing YouTube link: {url} with ID {file_id}")
-            return {"message": "YouTube video processing queued."}
+            # Let worker.py handle processing
+            logger.info(f"Added YouTube link to database with ID {file_id}, worker.py will process it")
+            return {"message": "YouTube video added. Processing will begin shortly."}
 
         # --- Handle regular file upload as before ---
         if not files:
@@ -125,9 +122,8 @@ async def save_file(
                 logger.error(f"Failed to add file {file.filename} to database")
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save file information")
                 
-            # Use FastAPI's background_tasks
-            background_tasks.add_task(process_file_data, user_gc_id, user_id, file_id, file.filename, file_url, language=language, comprehension_level=comprehension_level)
-            logger.info(f"Enqueued Task for processing {file.filename} with ID {file_id}")
+            # Let worker.py handle processing
+            logger.info(f"Added file {file.filename} to database with ID {file_id}, worker.py will process it")
 
         return {"message": "File processing queued."}
 
@@ -560,13 +556,10 @@ async def add_quiz_question_for_file(
 @files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
 async def reextract_file(
     file_id: int,
-    background_tasks: BackgroundTasks,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
-        from tasks import process_file_data
-        
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
         store = request.app.state.store
@@ -576,25 +569,19 @@ async def reextract_file(
         if not file_info or file_info.get('user_id') != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
-        # Reset processing status to mark it for reprocessing
-        store.update_file_processing_status(file_id, False)
+        # Reset file to uploaded status so worker will pick it up again
+        from api.db.orm_models import FileORM
         
-        # Check if it's a YouTube file
-        is_youtube = 'youtube' in file_info.get('file_name', '').lower()
+        with store.file_repo.get_unit_of_work() as uow:
+            file = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
+            if file:
+                file.processing_status = "uploaded"  # Reset to uploaded status for worker to pick up
+                uow.session.commit()
+                logger.info(f"Reset file {file_id} status to uploaded for worker to reprocess")
+            else:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in database")
         
-        # Restart processing task using background_tasks
-        background_tasks.add_task(
-            process_file_data, 
-            user_gc_id, 
-            user_id, 
-            file_id, 
-            file_info.get('file_name', ''),
-            file_info.get('file_url', ''),
-            is_youtube
-        )
-        
-        logger.info(f"Restarted processing for file ID: {file_id}, name: {file_info.get('file_name', '')}")
-        return {"message": "File processing restarted successfully"}
+        return {"message": "File reset for reprocessing. Worker will pick it up shortly."}
         
     except Exception as e:
         logger.error(f"Error reextracting file: {e}", exc_info=True)

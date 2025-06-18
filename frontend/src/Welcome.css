@@ -1,0 +1,140 @@
+.welcome-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-color: var(--background-color);
+  padding: 20px;
+}
+
+.welcome-card {
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 600px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.dark-mode .welcome-card {
+  background-color: #1f1f1f;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.welcome-header {
+  padding: 24px 32px;
+  border-bottom: 1px solid #eaeaea;
+}
+
+.dark-mode .welcome-header {
+  border-bottom: 1px solid #333;
+}
+
+.welcome-header h1 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--heading-color);
+  margin-bottom: 16px;
+}
+
+.steps-indicator {
+  display: flex;
+  gap: 8px;
+}
+
+.step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #e0e0e0;
+  transition: all 0.3s ease;
+}
+
+.step-dot.active {
+  background-color: var(--accent-color);
+}
+
+.welcome-content {
+  padding: 32px;
+  min-height: 320px;
+}
+
+.welcome-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.welcome-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.welcome-step h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--heading-color);
+}
+
+.welcome-step p {
+  color: var(--text-color);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.feature-list {
+  text-align: left;
+  width: 100%;
+  max-width: 320px;
+  padding-left: 24px;
+}
+
+.feature-list li {
+  margin-bottom: 12px;
+  color: var(--text-color);
+}
+
+.welcome-actions {
+  padding: 20px 32px;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid #eaeaea;
+}
+
+.dark-mode .welcome-actions {
+  border-top: 1px solid #333;
+}
+
+.next-button, .complete-button {
+  background-color: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.next-button:hover, .complete-button:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.skip-button {
+  background: none;
+  border: none;
+  color: var(--secondary-color);
+  cursor: pointer;
+  padding: 10px;
+}
+
+.skip-button:hover {
+  text-decoration: underline;
+}
+
+.complete-button {
+  margin-left: auto;
+}

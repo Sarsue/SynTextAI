@@ -71,6 +71,15 @@ ssh root@178.128.236.126
 chmod +x deploy.sh 
 ./deploy.sh
 
+Current 
+Local
+# Build both services from your local code
+docker-compose -f docker-compose.local.yml build
+
+# Start both services
+docker-compose -f docker-compose.local.yml up
+ProductionGithub actions
+
 
 Marketing
 $15 / month for professionals and students

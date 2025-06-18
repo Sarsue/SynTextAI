@@ -156,34 +156,30 @@ class FileRepository(BaseRepository):
             try:
                 from sqlalchemy import func
                 
-                # Fetch files with chunk count and key concepts count in a single query (more efficient)
+                # FileProcessingStatus enum no longer used - using string literals instead
+                
+                # Fetch files with their processing status (more efficient than counting related objects)
                 files = uow.session.query(
                     FileORM.id, 
                     FileORM.file_name, 
                     FileORM.file_url,
                     FileORM.created_at,
-                    func.count(ChunkORM.id).label('chunk_count'),
-                    func.count(KeyConceptORM.id).label('key_concepts_count')
-                ).outerjoin(ChunkORM, ChunkORM.file_id == FileORM.id)\
-                .outerjoin(KeyConceptORM, KeyConceptORM.file_id == FileORM.id)\
-                .filter(FileORM.user_id == user_id)\
-                .group_by(FileORM.id, FileORM.file_name, FileORM.file_url, FileORM.created_at)\
+                    FileORM.processing_status
+                ).filter(FileORM.user_id == user_id)\
                 .order_by(FileORM.created_at.desc())\
                 .all()
                 
                 result = []
                 for file in files:
-                    # A file is considered fully processed only when it has key concepts
-                    is_processed = file[5] > 0  # key_concepts_count > 0
-                    
+                    # No need to calculate is_processed - frontend can check status directly
                     file_dict = {
-                        "id": file[0],                 # FileORM.id
-                        "file_name": file[1],         # FileORM.file_name - keep for backend compatibility
-                        "name": file[1],              # Match original field name for frontend
-                        "file_url": file[2],          # FileORM.file_url - keep for backend compatibility
-                        "publicUrl": file[2],         # Match original field name for frontend
-                        "processed": is_processed,     # Using the original definition (has chunks)
-                        "created_at": file[3].isoformat() if file[3] else None  # FileORM.created_at
+                        "id": file.id,                 # FileORM.id
+                        "file_name": file.file_name,   # FileORM.file_name - keep for backend compatibility
+                        "name": file.file_name,        # Match original field name for frontend
+                        "file_url": file.file_url,     # FileORM.file_url - keep for backend compatibility
+                        "publicUrl": file.file_url,    # Match original field name for frontend
+                        "status": file.processing_status, # Frontend can check if status == "processed"
+                        "created_at": file.created_at.isoformat() if file.created_at else None  # FileORM.created_at
                     }
                     
                     result.append(file_dict)

@@ -30,6 +30,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add PostHog middleware for analytics
+@app.middleware("http")
+async def apply_posthog_middleware(request: Request, call_next):
+    return await posthog_middleware(request, call_next)
+
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -92,7 +97,7 @@ from routes.histories import histories_router
 from routes.messages import messages_router
 from routes.subscriptions import subscriptions_router
 from routes.users import users_router
-from routes.analytics import router as analytics_router
+from routes.analytics import router as analytics_router, posthog_middleware
 
 # Include routers
 app.include_router(files_router)

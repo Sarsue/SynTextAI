@@ -5,6 +5,7 @@ import { loadStripe } from '@stripe/stripe-js';
 import { useUserContext } from './UserContext';
 import Home from './Home';
 import Auth from './Auth';
+import Welcome from './Welcome';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
 import AnalyticsProvider from './components/AnalyticsProvider';
@@ -26,6 +27,10 @@ const App: React.FC = () => {
                         <Routes>
                         <Route path="/" element={<Home />} />
                         <Route path="/login" element={<Auth />} />
+                        <Route 
+                            path="/welcome" 
+                            element={user ? <Welcome /> : <Navigate to="/login" replace />} 
+                        />
                         <Route
                             path="/chat"
                             element={

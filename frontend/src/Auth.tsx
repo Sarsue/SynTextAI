@@ -12,12 +12,14 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { auth } from './firebase';
 import { useUserContext } from './UserContext';
+import { usePostHog } from './components/AnalyticsProvider';
 
 const Auth: FC = () => {
     const navigate = useNavigate();
     const { setUser, user, subscriptionStatus, setSubscriptionStatus } = useUserContext();
     const [isLoading, setIsLoading] = useState(true);
     const isDev = window.location.hostname === 'localhost'; // Check if in dev mode
+    const posthog = usePostHog();
 
     useEffect(() => {
         if (user && subscriptionStatus !== null) {
@@ -57,13 +59,38 @@ const Auth: FC = () => {
                     const storedState = localStorage.getItem('authState');
                     const redirectPath = storedState ? JSON.parse(storedState).redirectPath : '/chat';
                     localStorage.removeItem('authState');
-                    navigate(redirectPath);
+                    
+                    // Check if this is a sign-up or sign-in intent
+                    const authIntent = localStorage.getItem('authIntent');
+                    
+                    // Check if this is a new user (metadata.creationTime === metadata.lastSignInTime)
+                    const isNewUser = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
+                    
+                    if (isNewUser || authIntent === 'signup') {
+                        // This is likely a new user or explicitly signed up
+                        posthog.capture('user_signup', {
+                            isNewUser: isNewUser,
+                            fromSignupButton: authIntent === 'signup'
+                        });
+                        
+                        // Redirect to onboarding or welcome page
+                        navigate('/welcome');
+                    } else {
+                        // This is a returning user
+                        posthog.capture('user_signin', {
+                            fromSignupButton: authIntent === 'signup'
+                        });
+                        
+                        navigate(redirectPath);
+                    }
+                    
+                    localStorage.removeItem('authIntent');
                 }
             })
             .catch((error) => {
                 console.error('Redirect sign-in error:', error);
             });
-    }, [setUser, navigate]);
+    }, [setUser, navigate, posthog]);
 
     const signInWithGoogle = async () => {
         if (user) return; // Avoid double redirects

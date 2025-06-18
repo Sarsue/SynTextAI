@@ -182,7 +182,34 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
     
     try:
-        # Note: File processing status is now inferred from the presence of chunks/concepts rather than explicit status fields
+        # Get the file object and validate status - don't process if already processing or processed
+        # FileProcessingStatus enum no longer used - using string literals instead
+        file = store.file_repo.get_file_by_id(file_id)
+        if not file:
+            logger.error(f"File not found with ID: {file_id}")
+            return
+            
+        # Update file type if not set
+        if not file.file_type:
+            if "youtube.com" in filename or "youtu.be" in filename:
+                file.file_type = "youtube"
+            elif filename.lower().endswith(".pdf"):
+                file.file_type = "pdf"
+            store.file_repo.session.commit()
+        
+        # Check if file is already being processed elsewhere
+        if file.processing_status in ["processing", "extracting"]:  # Use string literals instead of enums
+            logger.warning(f"File {file_id} is already being processed (status: {file.processing_status}). Skipping.")
+            return
+        elif file.processing_status == "processed":  # Use string literal instead of enum
+            logger.info(f"File {file_id} is already processed. Skipping.")
+            return
+            
+        # Update status to EXTRACTING
+        file.processing_status = "extracting"  # Use string literal instead of enum
+        store.file_repo.session.commit()
+        logger.info(f"Updated file {file_id} status to extracting")
+        
         logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
         
         # Fix import issues by doing a direct import with the correct sys.path
@@ -231,6 +258,13 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     language=language,
                     comprehension_level=comprehension_level
                 )
+                
+                # Update status to EXTRACTED after successful extraction
+                if result.get("success", False):
+                    file = store.file_repo.get_file_by_id(file_id)  # Reload to avoid stale data
+                    file.processing_status = "extracted"  # Use string literal instead of enum
+                    store.file_repo.session.commit()
+                    logger.info(f"Updated file {file_id} status to extracted")
             else:
                 # For non-YouTube files, download from GCS as before
                 logger.info(f"Downloading file {filename} from GCS")
@@ -254,22 +288,63 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     language=language,
                     comprehension_level=comprehension_level
                 )
+                
+                # Update status to EXTRACTED after successful extraction
+                if result.get("success", False):
+                    file = store.file_repo.get_file_by_id(file_id)  # Reload to avoid stale data
+                    file.processing_status = "extracted"  # Use string literal instead of enum
+                    store.file_repo.session.commit()
+                    logger.info(f"Updated file {file_id} status to extracted")
             
             if not result.get("success", False):
                 logger.error(f"Processing failed for file ID {file_id}: {result.get('error', 'Unknown error')}")
-                # Note: Status is inferred rather than explicitly stored
+                # Update status to FAILED
+                file = store.file_repo.get_file_by_id(file_id)
+                file.processing_status = "failed"  # Use string literal instead of enum
+                store.file_repo.session.commit()
+                logger.info(f"Updated file {file_id} status to failed")
                 return  # Exit so processing can be retried
-                
+             
+            # Update status to PROCESSING   
+            file = store.file_repo.get_file_by_id(file_id)
+            file.processing_status = "processing"  # Use string literal instead of enum
+            store.file_repo.session.commit()
+            logger.info(f"Updated file {file_id} status to processing")
+            
+            # Generate key concepts and other learning materials
+            # This happens implicitly in the processor's process method
+            
+            # Update status to PROCESSED after successful processing
+            file = store.file_repo.get_file_by_id(file_id)
+            file.processing_status = "processed"  # Use string literal instead of enum
+            store.file_repo.session.commit()
+            
             logger.info(f"Processing completed successfully for file_id: {file_id}")
-            # Success is now inferred from the presence of chunks and key concepts
+            logger.info(f"Updated file {file_id} status to processed")
             return
             
         except Exception as e:
             logger.error(f"Error in file processing: {e}", exc_info=True)
+            # Update status to FAILED
+            try:
+                file = store.file_repo.get_file_by_id(file_id)
+                file.processing_status = "failed"  # Use string literal instead of enum
+                store.file_repo.session.commit()
+                logger.info(f"Updated file {file_id} status to failed")
+            except Exception as ex:
+                logger.error(f"Failed to update file status: {ex}")
             return
             
     except Exception as e:
         logger.error(f"Fatal error in file processing pipeline: {e}", exc_info=True)
+        # Update status to FAILED
+        try:
+            file = store.file_repo.get_file_by_id(file_id)
+            file.processing_status = "failed"  # Use string literal instead of enum
+            store.file_repo.session.commit()
+            logger.info(f"Updated file {file_id} status to failed")
+        except Exception as ex:
+            logger.error(f"Failed to update file status: {ex}")
     
     # We've either had a fatal error or processing has completed
     return

@@ -2,7 +2,7 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, Table, UniqueConstraint, TIMESTAMP, text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, Table, UniqueConstraint, TIMESTAMP, text, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -65,6 +65,14 @@ class File(Base):
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    file_type = Column(String, nullable=True)  # 'pdf', 'youtube', etc.
+    # Using direct PostgreSQL enum type with string literal
+    processing_status = Column(
+        String,  # Using String instead of Enum type to avoid case sensitivity issues
+        default="uploaded",
+        nullable=False,
+        index=True
+    )
     
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")

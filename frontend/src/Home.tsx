@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import './Home.css';
 import { useUserContext } from './UserContext';
 import { usePostHog } from './components/AnalyticsProvider';
 
 const Home: React.FC = () => {
+    const navigate = useNavigate();
     const { darkMode } = useUserContext();
     const posthog = usePostHog();
     const [inputText, setInputText] = useState('');
@@ -17,7 +18,7 @@ const Home: React.FC = () => {
             has_input: inputText.length > 0,
             has_file: selectedFile !== null
         });
-        window.location.href = '/login';
+        navigate('/login');
     };
     
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -32,7 +33,21 @@ const Home: React.FC = () => {
     
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        handleGetStarted();
+        
+        // Track the attempt to send a message
+        posthog.capture('homepage_message_attempt', {
+            has_input: inputText.length > 0,
+            has_file: selectedFile !== null
+        });
+        
+        // Redirect to login
+        navigate('/login');
+    };
+    
+    // Handler to redirect to login
+    const redirectToLogin = () => {
+        posthog.capture('homepage_interaction');
+        navigate('/login');
     };
     
     // Core features to showcase
@@ -91,66 +106,74 @@ const Home: React.FC = () => {
                 </div>
                 <div className="auth-buttons">
                     <Link to="/login" className="signin-link">Sign In</Link>
-                    <Link to="/login" className="signup-button">Sign Up</Link>
+                    <Link 
+                        to="/login" 
+                        className="signup-button"
+                        onClick={() => {
+                            posthog.capture('homepage_signup_click');
+                            localStorage.setItem('authIntent', 'signup');
+                        }}
+                    >
+                        Sign Up
+                    </Link>
                 </div>
             </header>
 
             {/* Main Hero with Search */}
             <main className="consensus-main">
-                <div className="hero-container">
-                    <h1 className="hero-title">Learning starts here</h1>
-                    <p className="hero-subtitle">Over 10,000 students and educators trust SynText AI</p>
+                <div className="hero-section">
+                    <div className="hero-content">
+                        <h2 className="hero-title">Unlock Knowledge from Any Document</h2>
+                        <p className="hero-text">SynText AI analyzes your documents, generates flashcards, creates quizzes, and extracts key concepts to enhance your learning and comprehension.</p>
+                    </div>
                     
-                    {/* Chat Interface similar to ChatApp */}
-                    <div className="chat-container">
-                        <div className="chat-messages">
-                            <div className="chat-message ai">
-                                <div className="message-avatar">AI</div>
-                                <div className="message-content">
-                                    <p>Hello! Upload a document or paste text, and I'll help you learn from it.</p>
-                                </div>
-                            </div>
-                        </div>
+                    <div className="home-input-preview">
                         
-                        <form onSubmit={handleSubmit} className="chat-input-area">
-                            <textarea 
-                                className="chat-input" 
-                                placeholder="Paste your text here or upload a document..."
-                                value={inputText}
-                                onChange={(e) => setInputText(e.target.value)}
-                                rows={2}
-                            />
+                        <div className="chat-container">
+                            <h2 className="input-preview-title">Analyze any document instantly</h2>
+                            <p className="input-preview-description">Upload a PDF, paste text, or enter a YouTube link to get summaries, flashcards, quizzes, and more.</p>
                             
-                            <div className="chat-actions">
-                                <div className="file-upload">
-                                    <label htmlFor="file-upload" className="file-upload-button">
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                            <polyline points="17 8 12 3 7 8"></polyline>
-                                            <line x1="12" y1="3" x2="12" y2="15"></line>
-                                        </svg>
-                                        <span className="tooltip">{selectedFile ? selectedFile.name : "Upload document"}</span>
-                                    </label>
-                                    <input 
-                                        id="file-upload"
-                                        type="file" 
-                                        onChange={handleFileSelect} 
-                                        style={{display: 'none'}}
-                                        accept=".pdf,.doc,.docx,.txt"
-                                    />
-                                </div>
+                            <form onSubmit={handleSubmit} className="chat-input-container">
+                                <textarea 
+                                    className="chat-input" 
+                                    placeholder="Paste your text here or upload a document..."
+                                    value={inputText}
+                                    onChange={(e) => setInputText(e.target.value)}
+                                    rows={3}
+                                />
                                 
-                                <button 
-                                    type="submit" 
-                                    className="send-button"
-                                >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                    </svg>
-                                </button>
-                            </div>
-                        </form>
+                                <div className="chat-actions">
+                                    <div className="file-upload-wrapper">
+                                        <span 
+                                            className="add-content-button"
+                                            aria-label="Add content"
+                                            onClick={() => {document.getElementById('file-upload')?.click()}}
+                                        >
+                                            ➕
+                                        </span>
+                                        <input 
+                                            id="file-upload"
+                                            type="file" 
+                                            onChange={handleFileSelect} 
+                                            style={{display: 'none'}}
+                                            accept=".pdf,.doc,.docx,.txt"
+                                        />
+                                    </div>
+                                    
+                                    <button 
+                                        type="submit" 
+                                        className="send-button"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            redirectToLogin();
+                                        }}
+                                        aria-label="Send message"
+                                    >
+                                        ✉️
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
 
                 </div>

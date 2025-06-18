@@ -6,8 +6,8 @@ import os
 import time
 import posthog
 from sqlalchemy.orm import Session
-from ..models.db import get_db
-from ..repositories.users import get_user_by_id
+from models.db import get_db
+from repositories.repository_manager import RepositoryManager
 from pydantic import BaseModel, Field
 
 # Initialize PostHog client
@@ -18,7 +18,7 @@ posthog.api_key = os.environ.get('POST_HOG_API_KEY', '')
 router = APIRouter()
 
 # PostHog middleware to track API requests
-@router.middleware("http")
+# This function should be registered in app.py as middleware, not on the router
 async def posthog_middleware(request: Request, call_next):
     # Capture request start time
     start_time = time.time()
@@ -91,8 +91,9 @@ async def receive_analytics(
         if payload.userId:
             event["_meta"]["userId"] = payload.userId
             # Optionally validate user exists
-            # user = get_user_by_id(db, payload.userId)
-            # if not user:
+            # store = RepositoryManager()
+            # user_id = store.get_user_id_from_email(payload.userId)  # Assuming userId is an email
+            # if not user_id:
             #     raise HTTPException(status_code=404, detail="User not found")
         
         # Send event to PostHog
