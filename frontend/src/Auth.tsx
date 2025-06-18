@@ -21,6 +21,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth } from './firebase';
 import { useUserContext } from './UserContext';
 import { useAnalytics } from './hooks/useAnalytics';
+import { getPosthog } from './utils/analyticsQueue';
 
 // Extend the Window interface to include PostHog
 declare global {
@@ -279,7 +280,7 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
             resetAnalytics();
             
             // If PostHog is available and has flush method, flush events
-            const posthog = window.posthog;
+            const posthog = getPosthog();
             if (posthog?.flush) {
               try {
                 const flushResult = posthog.flush();

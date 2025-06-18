@@ -19,6 +19,9 @@ export interface UploadedFile {
     processed: boolean;
     upload_time?: string;
     type: 'pdf' | 'image' | 'audio' | 'video' | 'text';
+    size?: number; // File size in bytes
+    is_processed?: boolean; // Alias for processed
+    viewStartTime?: number; // Timestamp when file was opened for viewing
     // summary: string | null; // Removed summary
 }
 
