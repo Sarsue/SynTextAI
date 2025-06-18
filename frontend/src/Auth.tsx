@@ -333,25 +333,55 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   return (
     <div className="auth-container">
       {!user ? (
-        <div className="auth-buttons">
+        <div className="auth-buttons" style={{ display: 'flex', gap: '15px' }}>
           <button 
-            className="btn btn-primary"
+            className="signin-link"
             onClick={() => signInWithGoogle('signin')}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--accent-color)',
+              color: 'var(--accent-color)',
+              padding: '8px 15px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              transition: 'all 0.2s ease'
+            }}
           >
             Sign in with Google
           </button>
           <button 
-            className="btn btn-secondary"
+            className="signup-button"
             onClick={() => signInWithGoogle('signup')}
+            style={{
+              background: 'var(--accent-color)',
+              color: 'white',
+              border: 'none',
+              padding: '8px 15px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 500,
+              transition: 'all 0.2s ease'
+            }}
           >
             Sign up with Google
           </button>
         </div>
       ) : (
         <button 
-          className="btn btn-logout"
+          className="signup-button"
           onClick={logOut}
           disabled={isLoggingOut.current}
+          style={{
+            background: 'var(--accent-color)',
+            color: 'white',
+            border: 'none',
+            padding: '8px 15px',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 500,
+            opacity: isLoggingOut.current ? 0.7 : 1
+          }}
         >
           {isLoggingOut.current ? 'Signing out...' : 'Sign Out'}
         </button>
