@@ -5,6 +5,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
+        - REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
+        - REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
+        - REACT_APP_FIREBASE_STORAGE_BUCKET=${REACT_APP_FIREBASE_STORAGE_BUCKET}
+        - REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
+        - REACT_APP_FIREBASE_APP_ID=${REACT_APP_FIREBASE_APP_ID}
     container_name: syntextaiapp-local
     working_dir: /app/api
     ports:
@@ -18,12 +25,19 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G  # Limit to 4GB
-          
+          memory: 4G
+
   worker:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
+        - REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
+        - REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
+        - REACT_APP_FIREBASE_STORAGE_BUCKET=${REACT_APP_FIREBASE_STORAGE_BUCKET}
+        - REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
+        - REACT_APP_FIREBASE_APP_ID=${REACT_APP_FIREBASE_APP_ID}
     container_name: syntextai-worker-local
     command: python worker.py
     working_dir: /app/api
@@ -39,7 +53,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G  # Worker needs less memory than the API
+          memory: 2G
     restart: unless-stopped
 
   searxng:
@@ -48,13 +62,12 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./settings.yml:/etc/searxng/settings.yml
+      - ./searxng:/etc/searxng
+    environment:
+      - INSTANCE_NAME=SyntextAI
     networks:
       - syntextai_network
-    deploy:
-      resources:
-        limits:
-          memory: 8G  # Limit to 8GB
+    restart: unless-stopped
 
 networks:
   syntextai_network:

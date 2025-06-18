@@ -13,7 +13,11 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-
+console.log('Process env:', process.env);
+console.log('Firebase config:', {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  // ... other fields
+});
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);

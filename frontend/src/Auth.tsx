@@ -35,17 +35,47 @@ const Auth: FC = () => {
                 console.error('Failed to set persistence:', error);
             }
 
-            const unsubscribe = onAuthStateChanged(auth, (authUser) => {
-                if (authUser) {
-                    setUser(authUser);
-                } else {
-                    setUser(null);
-                    setSubscriptionStatus(null);
+            const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
+                try {
+                    if (authUser) {
+                        // Only update if we don't already have a user or if the user ID changed
+                        if (!user || user.uid !== authUser.uid) {
+                            // Identify the user in PostHog
+                            posthog.identify(authUser.uid, {
+                                email: authUser.email,
+                                name: authUser.displayName,
+                                uid: authUser.uid,
+                                provider: authUser.providerData?.[0]?.providerId
+                            });
+                            setUser(authUser);
+                        }
+                    } else {
+                        // Only clear if we currently have a user
+                        if (user) {
+                            // Reset PostHog identity
+                            posthog.reset();
+                            setUser(null);
+                            setSubscriptionStatus(null);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error in auth state change:', error);
+                } finally {
+                    if (isLoading) {
+                        setIsLoading(false);
+                    }
                 }
-                setIsLoading(false);
             });
 
-            return unsubscribe;
+            return () => {
+                // Clean up the auth state listener
+                unsubscribe();
+                
+                // Reset PostHog on unmount if user is logged out
+                if (!user) {
+                    posthog.reset();
+                }
+            };
         };
 
         initializeAuth();
@@ -113,12 +143,75 @@ const Auth: FC = () => {
     };
 
     const logOut = async () => {
+        console.log('=== Starting logout process ===');
+        
         try {
+            console.log('1. Resetting PostHog');
+            posthog.reset();
+            
+            // Log current auth state before clearing
+            console.log('2. Current auth state before signOut:', {
+                currentUser: auth.currentUser?.uid,
+                isLoggedIn: !!auth.currentUser,
+                hasSession: document.cookie.includes('session=')
+            });
+            
+            console.log('3. Clearing local storage items');
+            const keysToRemove = [
+                'authState', 
+                'authIntent',
+                'posthog_ph_last_event_time',
+                'posthog_ph_last_event_ts',
+                'posthog_ph_last_event_ts_/'
+            ];
+            
+            keysToRemove.forEach(key => {
+                const existed = localStorage.getItem(key) !== null;
+                localStorage.removeItem(key);
+                console.log(`   - Cleared ${key}: ${existed ? 'existed' : 'did not exist'}`);
+            });
+            
+            console.log('4. Clearing session storage');
+            const sessionKeys = Object.keys(sessionStorage);
+            sessionStorage.clear();
+            console.log(`   - Cleared ${sessionKeys.length} session items`);
+            
+            console.log('5. Clearing cookies');
+            const cookies = document.cookie.split(';');
+            cookies.forEach(cookie => {
+                const [name] = cookie.split('=');
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+                console.log(`   - Cleared cookie: ${name}`);
+            });
+            
+            console.log('6. Signing out from Firebase');
             await signOut(auth);
+            console.log('   - Firebase signOut completed');
+            
+            console.log('7. Resetting user state');
             setUser(null);
             setSubscriptionStatus(null);
+            
+            console.log('8. Final PostHog reset');
+            posthog.reset(true);
+            
+            console.log('9. Reloading page');
+            // Small delay to ensure all state is cleared before reload
+            setTimeout(() => {
+                window.location.href = '/';
+                window.location.reload();
+            }, 100);
+            
         } catch (error) {
-            console.error('Logout error:', error);
+            console.error('!!! Logout error !!!', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined,
+                time: new Date().toISOString()
+            });
+            // Even if there's an error, try to force a reload
+            window.location.href = '/';
+        } finally {
+            console.log('=== Logout process completed ===');
         }
     };
 
