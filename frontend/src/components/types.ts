@@ -85,3 +85,9 @@ export interface QuizQuestion {
     correct_answer: string;
     distractors: string[];
 }
+
+export interface PaginationState {
+    page: number;
+    pageSize: number;
+    totalItems: number;
+}

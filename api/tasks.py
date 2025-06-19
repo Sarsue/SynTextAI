@@ -181,6 +181,17 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate key concepts, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
     
+    # Helper function to update file status with proper error handling
+    async def update_status(status: str, error_msg: str = None):
+        try:
+            from api.worker import update_file_status
+            await update_file_status(int(file_id), status)
+            logger.info(f"Updated file {file_id} status to {status}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update file {file_id} status to {status}: {str(e)}", exc_info=True)
+            return False
+    
     try:
         # Get the file object and validate status - don't process if already processing or processed
         file = store.file_repo.get_file_by_id(file_id)
@@ -228,12 +239,10 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             return
             
         # Update status to EXTRACTING
-        set_file_attr(file, 'processing_status', "extracting")
-        if hasattr(file, 'session'):
-            file.session.commit()
-        elif hasattr(store.file_repo, 'session'):
-            store.file_repo.session.commit()
-        logger.info(f"Updated file {file_id} status to extracting")
+        success = await update_status("extracting")
+        if not success:
+            logger.error(f"Failed to update status to extracting for file {file_id}")
+            return
         
         logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level})")
         
@@ -286,10 +295,10 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 
                 # Update status to EXTRACTED after successful extraction
                 if result.get("success", False):
-                    file = store.file_repo.get_file_by_id(file_id)  # Reload to avoid stale data
-                    file.processing_status = "extracted"  # Use string literal instead of enum
-                    store.file_repo.session.commit()
-                    logger.info(f"[TRACE] [process_file_data] Updated file {file_id} status to extracted")
+                    success = await update_status("extracted")
+                    if not success:
+                        logger.error(f"Failed to update status to extracted for file {file_id}")
+                        return
             else:
                 # For non-YouTube files, download from GCS as before
                 logger.info(f"[TRACE] [process_file_data] Downloading file {filename} from GCS")
@@ -344,67 +353,27 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                     error_msg = result.get('error', 'Unknown error')
                     logger.error(f"[ERROR] [process_file_data] Processing failed for file ID {file_id}: {error_msg}")
                     # Update status to FAILED
-                    try:
-                        file = store.file_repo.get_file_by_id(file_id)
-                        if file is not None:
-                            if hasattr(file, 'processing_status'):
-                                file.processing_status = "failed"
-                            elif isinstance(file, dict):
-                                file['processing_status'] = "failed"
-                            
-                            if hasattr(store.file_repo, 'session'):
-                                store.file_repo.session.commit()
-                                logger.info(f"[TRACE] [process_file_data] Updated file {file_id} status to failed")
-                            else:
-                                logger.error("[ERROR] [process_file_data] No session available to commit failed status")
-                        else:
-                            logger.error(f"[ERROR] [process_file_data] File with ID {file_id} not found when trying to update status to failed")
-                    except Exception as fail_err:
-                        logger.error(f"[ERROR] [process_file_data] Error updating status to failed: {str(fail_err)}", exc_info=True)
+                    success = await update_status("failed", error_msg=error_msg)
+                    if not success:
+                        logger.error(f"Failed to update status to failed for file {file_id}")
                     return  # Exit so processing can be retried
                 
                 # Update status to PROCESSING   
                 logger.info("[TRACE] [process_file_data] Updating status to PROCESSING")
-                try:
-                    file = store.file_repo.get_file_by_id(file_id)
-                    if file is not None:
-                        if hasattr(file, 'processing_status'):
-                            file.processing_status = "processing"
-                        elif isinstance(file, dict):
-                            file['processing_status'] = "processing"
-                        
-                        if hasattr(store.file_repo, 'session'):
-                            store.file_repo.session.commit()
-                            logger.info(f"[TRACE] [process_file_data] Updated file {file_id} status to processing")
-                        else:
-                            logger.error("[ERROR] [process_file_data] No session available to commit processing status")
-                    else:
-                        logger.error(f"[ERROR] [process_file_data] File with ID {file_id} not found when trying to update status to processing")
-                except Exception as proc_err:
-                    logger.error(f"[ERROR] [process_file_data] Error updating status to processing: {str(proc_err)}", exc_info=True)
+                success = await update_status("processing")
+                if not success:
+                    logger.error(f"Failed to update status to processing for file {file_id}")
+                    return
                 
                 # Generate key concepts and other learning materials
                 # This happens implicitly in the processor's process method
                 
                 # Update status to PROCESSED after successful processing
                 logger.info("[TRACE] [process_file_data] Updating status to PROCESSED")
-                try:
-                    file = store.file_repo.get_file_by_id(file_id)
-                    if file is not None:
-                        if hasattr(file, 'processing_status'):
-                            file.processing_status = "processed"
-                        elif isinstance(file, dict):
-                            file['processing_status'] = "processed"
-                        
-                        if hasattr(store.file_repo, 'session'):
-                            store.file_repo.session.commit()
-                            logger.info(f"[TRACE] [process_file_data] Processing completed successfully for file_id: {file_id}")
-                        else:
-                            logger.error("[ERROR] [process_file_data] No session available to commit processed status")
-                    else:
-                        logger.error(f"[ERROR] [process_file_data] File with ID {file_id} not found when trying to update status to processed")
-                except Exception as proc_err:
-                    logger.error(f"[ERROR] [process_file_data] Error updating status to processed: {str(proc_err)}", exc_info=True)
+                success = await update_status("processed")
+                if not success:
+                    logger.error(f"Failed to update status to processed for file {file_id}")
+                    return
                 
                 logger.info(f"[TRACE] [process_file_data] Updated file {file_id} status to processed")
             return
@@ -412,25 +381,17 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         except Exception as e:
             logger.error(f"Error in file processing: {e}", exc_info=True)
             # Update status to FAILED
-            try:
-                file = store.file_repo.get_file_by_id(file_id)
-                set_file_attr(file, 'processing_status', 'failed')
-                store.file_repo.session.commit()
-                logger.info(f"Updated file {file_id} status to failed")
-            except Exception as ex:
-                logger.error(f"Failed to update file status: {ex}")
+            success = await update_status("failed", error_msg=str(e))
+            if not success:
+                logger.error(f"Failed to update status to failed for file {file_id}")
             return
             
     except Exception as e:
         logger.error(f"Fatal error in file processing pipeline: {e}", exc_info=True)
         # Update status to FAILED
-        try:
-            file = store.file_repo.get_file_by_id(file_id)
-            file.processing_status = "failed"  # Use string literal instead of enum
-            store.file_repo.session.commit()
-            logger.info(f"Updated file {file_id} status to failed")
-        except Exception as ex:
-            logger.error(f"Failed to update file status: {ex}")
+        success = await update_status("failed", error_msg=str(e))
+        if not success:
+            logger.error(f"Failed to update status to failed for file {file_id} in outer exception handler")
     
     # We've either had a fatal error or processing has completed
     return

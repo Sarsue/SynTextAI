@@ -19,8 +19,14 @@ export const AnalyticsEvents = {
   
   // Files
   FILE_UPLOAD: 'file_upload',
-  FILE_DELETE: 'file_delete',
-  FILE_VIEW: 'file_view',
+  FILE_DELETE: 'file_delete', // Generic delete, might be deprecated by specific ones below
+  FILE_VIEW: 'file_view', // Generic view, might be deprecated by specific ones below
+  FILE_DELETE_INITIATED: 'file_delete_initiated',
+  FILE_DELETE_SUCCESS: 'file_delete_success',
+  FILE_DELETE_FAILED: 'file_delete_failed',
+  FILE_VIEW_CLICKED: 'file_view_clicked',
+  FILE_VIEW_CLOSED: 'file_view_closed',
+  YOUTUBE_LINK_SUBMITTED: 'youtube_link_submitted',
   
   // Knowledge Base
   KNOWLEDGE_BASE_SEARCH: 'knowledge_base_search',

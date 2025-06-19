@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import './KnowledgeBase.css';
 import { UploadedFile } from './types';
+import { KnownWebSocketMessage, FileStatusUpdatePayload, FileStatusUpdateMessage } from '../types/websocketTypes';
 import Modal from './Modal';
 import { toast } from 'react-toastify';
+import { useUserContext } from '../UserContext';
 
 // Helper function to identify YouTube URLs with more robust detection
 const isYouTubeUrl = (url: string): boolean => {
@@ -31,8 +33,6 @@ const isYouTubeUrl = (url: string): boolean => {
 };
 
 interface KnowledgeBaseComponentProps {
-    token: string;
-    fetchFiles: (page: number, pageSize: number) => Promise<{ items: UploadedFile[], total: number }>;
     onDeleteFile: (fileId: number) => void;
     onFileClick: (file: UploadedFile) => void;
     darkMode?: boolean;
@@ -47,91 +47,58 @@ interface FileStatus {
 }
 
 const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
-    token,
-    fetchFiles,
     onDeleteFile,
     onFileClick,
     darkMode = false,
 }) => {
-    const [files, setFiles] = useState<UploadedFile[]>([]);
+    const {
+        files, // Renamed from userFiles
+        loadUserFiles,
+        filePagination,
+        isLoadingFiles,
+        fileError: contextFileError,
+    } = useUserContext();
     const [expandedFile, setExpandedFile] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [pagination, setPagination] = useState({
-        page: 1,
-        pageSize: 10,
-        totalItems: 0,
-    });
-    const [fileStatus, setFileStatus] = useState<FileStatus>({});
-    const [error, setError] = useState<string | null>(null);
+interface FileStatusEntry { isDeleting?: boolean; }
+    const [fileStatus, setFileStatus] = useState<{[key: number]: FileStatusEntry}>({});
+    const [error, setError] = useState<string | null>(null); 
 
-    const loadFiles = useCallback(async (page: number, pageSize: number) => {
-        try {
-            setIsLoading(true);
-            setError(null);
-            
-            console.log(`Fetching files - page: ${page}, pageSize: ${pageSize}`);
-            const { items, total } = await fetchFiles(page, pageSize);
-            console.log(`Received ${items.length} files, total: ${total}`);
-            
-            // Transform items to ensure they match the UploadedFile type
-            const formattedItems = items.map((item: any) => ({
-                ...item,
-                // Ensure all required fields are present
-                name: item.name || item.file_name || 'Untitled',
-                publicUrl: item.publicUrl || item.file_url || '',
-                status: item.status || 'unknown',
-                created_at: item.created_at || new Date().toISOString(),
-                // For backward compatibility
-                processed: item.processed || item.status === 'processed'
-            }));
-            
-            setFiles(formattedItems);
-            setPagination(prev => ({
-                ...prev,
-                totalItems: total || 0
-            }));
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Failed to load files';
-            console.error('Error loading files:', errorMessage, error);
-            setError(errorMessage);
-            setFiles([]);
-            setPagination(prev => ({
-                ...prev,
-                totalItems: 0
-            }));
-        } finally {
-            setIsLoading(false);
-        }
-    }, [fetchFiles]);
-
-    // Initial load
     useEffect(() => {
-        loadFiles(pagination.page, pagination.pageSize);
-    }, [loadFiles]);
+        if (contextFileError) {
+            setError(contextFileError);
+        } else {
+            setError(null); // Clear local error if context error is gone
+        }
+    }, [contextFileError]);
+
+    // Initial load and load on page/pageSize change from context
+    useEffect(() => {
+        loadUserFiles(filePagination.page, filePagination.pageSize);
+    }, [loadUserFiles, filePagination.page, filePagination.pageSize]);
+
+
 
     const handlePageChange = useCallback((newPage: number) => {
-        setPagination(prev => ({
-            ...prev,
-            page: newPage
-        }));
-        loadFiles(newPage, pagination.pageSize);
-    }, [pagination.pageSize, loadFiles]);
+        loadUserFiles(newPage, filePagination.pageSize);
+    }, [loadUserFiles, filePagination.pageSize]);
 
     const handlePageSizeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
         const newSize = Number(e.target.value);
-        setPagination(prev => ({
-            ...prev,
-            page: 1,
-            pageSize: newSize
-        }));
-        loadFiles(1, newSize);
-    }, [loadFiles]);
+        loadUserFiles(1, newSize);
+    }, [loadUserFiles]);
 
-    const handleFileClick = (file: UploadedFile) => {
+    const handleFileClick = async (file: UploadedFile) => {
         console.log(`Clicked file: ${file.name}, ID: ${file.id}, status: ${file.processing_status}, isYouTube: ${isYouTubeUrl(file.name)}`);
         
-        // Show the file content in the viewer
-        onFileClick(file);
+        // Refresh the file list to get the latest status
+        try {
+            onFileClick(file);
+        } catch (error) {
+            // If onFileClick itself throws, it will be caught here.
+            // The primary purpose of onFileClick is to notify the parent.
+            // If the parent's handler throws, it's an issue in the parent.
+            console.error('Error during onFileClick callback execution in parent:', error);
+        }
         
         // Expand the file details so delete button is visible
         setExpandedFile(file.id);
@@ -143,13 +110,10 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         if (isConfirmed) {
             setFileStatus(prev => ({
                 ...prev,
-                [file.id]: { ...prev[file.id], isDeleting: true }
+                [file.id]: { isDeleting: true }
             }));
             
             onDeleteFile(file.id);
-            
-            // Refresh files after deletion
-            loadFiles(pagination.page, pagination.pageSize);
         }
     };
     
@@ -162,36 +126,42 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         console.log(`Toggling file details for ID: ${fileId}, new state: ${newExpandedFileId ? 'expanded' : 'collapsed'}`);
     };
 
+    const handleNextPage = () => {
+        if (filePagination.page * filePagination.pageSize < filePagination.totalItems) {
+            loadUserFiles(filePagination.page + 1, filePagination.pageSize);
+        }
+    };
+
     return (
         <div className={`knowledgebase-container ${darkMode ? 'dark-mode' : ''}`}>
             <div className="knowledgebase-header">
                 <h3>📚 Knowledge Base</h3>
                 <div className="pagination-controls">
                     <button 
-                        onClick={() => handlePageChange(pagination.page - 1)}
-                        disabled={pagination.page === 1 || isLoading}
+                        onClick={() => handlePageChange(filePagination.page - 1)}
+                        disabled={filePagination.page <= 1 || isLoadingFiles}
                         className="pagination-button"
                     >
                         Previous
                     </button>
-                    <span>Page {pagination.page}</span>
+                    <span>Page {filePagination.page}</span>
                     <button 
-                        onClick={() => handlePageChange(pagination.page + 1)}
-                        disabled={isLoading || (files.length < pagination.pageSize && files.length < pagination.totalItems)}
+                        onClick={handleNextPage}
+                        disabled={filePagination.page * filePagination.pageSize >= filePagination.totalItems || isLoadingFiles}
                         className="pagination-button"
                     >
                         Next
                     </button>
                     <select 
-                        value={pagination.pageSize} 
+                        value={filePagination.pageSize} 
                         onChange={handlePageSizeChange}
                         className="page-size-selector"
-                        disabled={isLoading}
+                        disabled={isLoadingFiles}
                     >
                         <option value={10}>10 per page</option>
                         <option value={25}>25 per page</option>
                     </select>
-                    {isLoading && <span className="loading-indicator">Loading...</span>}
+                    {isLoadingFiles && <span className="loading-indicator">Loading...</span>}
                 </div>
             </div>
             <div className="file-status-legend">
@@ -208,69 +178,69 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
                 </div>
             )}
             <ul className="file-list">
-                {files.length === 0 ? (
+                {isLoadingFiles && files.length === 0 && (
                     <li className="empty-file-list">
-                        {isLoading ? 'Loading files...' : 'No files uploaded yet'}
+                        Loading files...
                     </li>
-                ) : (
-                    files.map((file) => {
-                        const status = fileStatus[file.id] || { isDeleting: false, isRetrying: false };
-                        
+                )}
+                {!isLoadingFiles && files.length === 0 && (
+                    <li className="empty-file-list">
+                        No files uploaded yet
+                    </li>
+                )}
+                {files.length > 0 && (
+                    files.map((currentFile: UploadedFile) => {
+
                         return (
-                            <li key={file.id} className={`file-item ${
-                                file.processing_status === 'processed' ? 'processed-file' : 
-                                file.processing_status === 'failed' ? 'failed-file' : 
-                                file.processing_status === 'uploaded' ? 'uploaded-file' : 'processing-file'}`}>
+                            <li key={currentFile.id} className={`file-item ${
+                                currentFile.processing_status === 'processed' ? 'processed-file' :
+                                currentFile.processing_status === 'failed' ? 'failed-file' :
+                                currentFile.processing_status === 'uploaded' ? 'uploaded-file' : 'processing-file'}`}>
                                 <div className="file-item-header">
-                                    <div className="file-info" onClick={() => handleFileClick(file)}>
+                                    <div className="file-info" onClick={() => handleFileClick(currentFile)}>
                                         <span className="file-icon">
-                                            {isYouTubeUrl(file.name) ? '🎬' : 
-                                             file.name.endsWith('.mp4') ? '🎬' : 
-                                             file.name.endsWith('.pdf') ? '📄' : 
-                                             file.name.endsWith('.txt') ? '📝' : 
-                                             file.name.endsWith('.md') ? '📝' : 
-                                             file.name.endsWith('.jpg') || file.name.endsWith('.jpeg') || file.name.endsWith('.png') ? '🖼️' : 
+                                            {isYouTubeUrl(currentFile.name) ? '🎬' :
+                                             currentFile.name.endsWith('.mp4') ? '🎬' :
+                                             currentFile.name.endsWith('.pdf') ? '📄' :
+                                             currentFile.name.endsWith('.txt') ? '📝' :
+                                             currentFile.name.endsWith('.md') ? '📝' :
+                                             currentFile.name.endsWith('.jpg') || currentFile.name.endsWith('.jpeg') || currentFile.name.endsWith('.png') ? '🖼️' :
                                              '📄'}
                                         </span>
                                         
                                         <span className="file-link">
                                             <span className="file-name">
-                                                {isYouTubeUrl(file.name) 
-                                                    ? `YouTube: ${file.name.length > 40 ? file.name.substring(0, 37) + '...' : file.name}`
-                                                    : file.name.length > 30 
-                                                        ? file.name.substring(0, 27) + '...' 
-                                                        : file.name}
+                                                {isYouTubeUrl(currentFile.name)
+                                                    ? `YouTube: ${currentFile.name.length > 40 ? currentFile.name.substring(0, 37) + '...' : currentFile.name}`
+                                                    : currentFile.name.length > 30
+                                                        ? currentFile.name.substring(0, 27) + '...'
+                                                        : currentFile.name}
                                             </span>
                                             <span className="file-status">
-                                                {file.processing_status === 'processed' ? '✓ Ready' : 
-                                                 file.processing_status === 'failed' ? '❌ Failed' : 
-                                                 file.processing_status === 'processing' ? '⏳ Processing...' : 
-                                                 file.processing_status === 'extracted' ? '🔍 Extracting content...' : 
-                                                 file.processing_status === 'uploaded' ? '📤 Uploaded' : 
+                                                {currentFile.processing_status === 'processed' ? '✓ Ready' :
+                                                 currentFile.processing_status === 'failed' ? '❌ Failed' :
+                                                 currentFile.processing_status === 'processing' ? '⏳ Processing...' :
+                                                 currentFile.processing_status === 'extracted' ? '🔍 Extracting content...' :
+                                                 currentFile.processing_status === 'uploaded' ? '📤 Uploaded' :
                                                  '⏳ Processing...'}
-                                                {file.error_message && ` (${file.error_message})`}
+                                                {currentFile.error_message && ` (${currentFile.error_message})`}
                                             </span>
                                         </span>
                                         
                                         <div className="file-actions">
-                                        <button 
+                                        <button
                                             className="kb-action-button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleDeleteClick(file, e);
+                                                handleDeleteClick(currentFile, e);
                                             }}
-                                            disabled={status.isDeleting}
+                                            disabled={fileStatus[currentFile.id]?.isDeleting || false}
                                         >
-                                            {status.isDeleting ? 'Deleting...' : 'Delete'}
+                                            {fileStatus[currentFile.id]?.isDeleting ? 'Deleting...' : <span className="delete-icon">🗑️</span>}
                                         </button>
-                                        {file.processing_status === 'failed' && (
-                                            <span className="file-error">
-                                                {file.error_message || 'Processing failed'}
-                                            </span>
-                                        )}
+                                        {/* Manual retry button removed, retry is automatic on click/expand for failed files */}
                                     </div>
                                     </div>
-                                    {/* Removed expand/collapse arrow since it's redundant with always-visible delete button */}
                                 </div>
                             </li>
                         );
