@@ -648,21 +648,23 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             
             if (response && response.ok) {
                 const data = await response.json();
-                console.log("Files received:", data.items);
+                console.log("Files response:", data);
                 
-                // Update the knowledge base files in state
-                setKnowledgeBaseFiles(data.items);
+                // The backend now returns a paginated response
+                const items = data.items || [];
+                const total = data.total || 0;
+                
+                // Update the knowledge base files in state with paginated results
+                setKnowledgeBaseFiles(items);
                 setPagination(prev => ({
                     ...prev,
-                    totalItems: data.total
+                    totalItems: total
                 }));
                 
-                return {
-                    items: data.items,
-                    total: data.total
-                };
+                return { items, total };
             } else {
-                console.error('Failed to fetch files:', response ? response.statusText : 'No response');
+                const errorText = response ? await response.text().catch(() => response.statusText) : 'No response';
+                console.error('Failed to fetch files:', errorText);
                 setKnowledgeBaseFiles([]);
                 return { items: [], total: 0 };
             }

@@ -319,23 +319,61 @@ class RepositoryManager:
             logger.error(f"Error in async wrapper for update_file_with_chunks: {e}", exc_info=True)
             return False
     
-    def get_files_for_user(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get all files for a user."""
-        return self.file_repo.get_files_for_user(user_id)
+    def get_files_for_user(
+        self, 
+        user_id: int, 
+        skip: int = 0, 
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """Get paginated files for a user.
+        
+        Args:
+            user_id: ID of the user
+            skip: Number of records to skip (for pagination)
+            limit: Maximum number of records to return (for pagination)
+            
+        Returns:
+            Dict: {
+                'items': List[Dict],  # List of file records with metadata
+                'total': int,         # Total number of files for the user
+                'page': int,          # Current page number (1-based)
+                'page_size': int      # Number of items per page
+            }
+        """
+        return self.file_repo.get_files_for_user(user_id, skip, limit)
     
-    async def get_files_for_user_async(self, user_id: int) -> List[Dict[str, Any]]:
-        """Async wrapper for get_files_for_user."""
+    async def get_files_for_user_async(
+        self, 
+        user_id: int, 
+        skip: int = 0, 
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """Async wrapper for get_files_for_user with pagination.
+        
+        Args:
+            user_id: ID of the user
+            skip: Number of records to skip (for pagination)
+            limit: Maximum number of records to return (for pagination)
+            
+        Returns:
+            Dict: {
+                'items': List[Dict],  # List of file records with metadata
+                'total': int,         # Total number of files for the user
+                'page': int,          # Current page number (1-based)
+                'page_size': int      # Number of items per page
+            }
+        """
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
                 result = await loop.run_in_executor(
                     pool,
-                    lambda: self.get_files_for_user(user_id)
+                    lambda: self.get_files_for_user(user_id, skip, limit)
                 )
                 return result
         except Exception as e:
             logger.error(f"Error in async wrapper for get_files_for_user: {e}", exc_info=True)
-            return []
+            return {'items': [], 'total': 0, 'page': 1, 'page_size': limit}
     
     def delete_file_entry(self, user_id: int, file_id: int) -> bool:
         """Delete a file and all associated data."""

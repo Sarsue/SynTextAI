@@ -143,22 +143,37 @@ class FileRepository(BaseRepository):
                 logger.error(f"Error updating file with chunks: {e}", exc_info=True)
                 return False
     
-    def get_files_for_user(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get all files for a user.
+    def get_files_for_user(
+        self, 
+        user_id: int, 
+        skip: int = 0, 
+        limit: int = 10
+    ) -> Dict[str, Any]:
+        """Get paginated files for a user.
         
         Args:
             user_id: ID of the user
+            skip: Number of records to skip (for pagination)
+            limit: Maximum number of records to return (for pagination)
             
         Returns:
-            List[Dict]: List of file records with metadata
+            Dict: {
+                'items': List[Dict],  # List of file records with metadata
+                'total': int,         # Total number of files for the user
+                'page': int,          # Current page number (1-based)
+                'page_size': int      # Number of items per page
+            }
         """
         with self.get_unit_of_work() as uow:
             try:
                 from sqlalchemy import func
                 
-                # FileProcessingStatus enum no longer used - using string literals instead
+                # First, get total count
+                total = uow.session.query(func.count(FileORM.id))\
+                    .filter(FileORM.user_id == user_id)\
+                    .scalar() or 0
                 
-                # Fetch files with their processing status (more efficient than counting related objects)
+                # Then get paginated results
                 files = uow.session.query(
                     FileORM.id, 
                     FileORM.file_name, 
@@ -167,27 +182,34 @@ class FileRepository(BaseRepository):
                     FileORM.processing_status
                 ).filter(FileORM.user_id == user_id)\
                 .order_by(FileORM.created_at.desc())\
+                .offset(skip)\
+                .limit(limit)\
                 .all()
                 
-                result = []
+                items = []
                 for file in files:
-                    # No need to calculate is_processed - frontend can check status directly
                     file_dict = {
-                        "id": file.id,                 # FileORM.id
-                        "file_name": file.file_name,   # FileORM.file_name - keep for backend compatibility
-                        "name": file.file_name,        # Match original field name for frontend
-                        "file_url": file.file_url,     # FileORM.file_url - keep for backend compatibility
-                        "publicUrl": file.file_url,    # Match original field name for frontend
-                        "status": file.processing_status, # Frontend can check if status == "processed"
-                        "created_at": file.created_at.isoformat() if file.created_at else None  # FileORM.created_at
+                        "id": file.id,
+                        "file_name": file.file_name,
+                        "name": file.file_name,
+                        "file_url": file.file_url,
+                        "publicUrl": file.file_url,
+                        "status": file.processing_status,
+                        "created_at": file.created_at.isoformat() if file.created_at else None,
+                        "processed": file.processing_status == "processed"  # For backward compatibility
                     }
-                    
-                    result.append(file_dict)
+                    items.append(file_dict)
                 
-                return result
+                return {
+                    'items': items,
+                    'total': total,
+                    'page': (skip // limit) + 1,
+                    'page_size': limit
+                }
+                
             except Exception as e:
                 logger.error(f"Error getting files for user {user_id}: {e}", exc_info=True)
-                return []
+                return {'items': [], 'total': 0, 'page': 1, 'page_size': limit}
     
     def delete_file_entry(self, user_id: int, file_id: int) -> bool:
         """Delete a file and all associated data.

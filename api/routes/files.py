@@ -135,21 +135,46 @@ async def save_file(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 # Route to retrieve files
-@files_router.get("", response_model=List[Dict])
+@files_router.get("", response_model=Dict[str, Any])
 async def retrieve_files(
     request: Request,
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    page_size: int = Query(10, ge=1, le=100, description="Number of items per page"),
     user_data: Dict = Depends(authenticate_user)
 ):
+    """
+    Retrieve paginated list of files for the authenticated user.
+    
+    Returns:
+        Dict: {
+            'items': List[Dict],  # List of file records with metadata
+            'total': int,         # Total number of files for the user
+            'page': int,          # Current page number (1-based)
+            'page_size': int      # Number of items per page
+        }
+    """
     try:
         user_id = user_data["user_id"]
         store = request.app.state.store
-        files = store.get_files_for_user(user_id)
-        # The processing status is already calculated in the FileRepository.get_files_for_user method
-        # based on whether the file has key concepts
-        return files
+        
+        # Calculate skip value for pagination
+        skip = (page - 1) * page_size
+        
+        # Get paginated files
+        result = await store.get_files_for_user_async(
+            user_id=user_id,
+            skip=skip,
+            limit=page_size
+        )
+        
+        return result
+        
     except Exception as e:
-        logger.error(f"Error retrieving files: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        logger.error(f"Error retrieving files: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="An error occurred while retrieving files"
+        )
 
 # Route to delete a file
 @files_router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)

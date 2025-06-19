@@ -62,18 +62,43 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         totalItems: 0,
     });
     const [fileStatus, setFileStatus] = useState<FileStatus>({});
+    const [error, setError] = useState<string | null>(null);
 
     const loadFiles = useCallback(async (page: number, pageSize: number) => {
         try {
             setIsLoading(true);
+            setError(null);
+            
+            console.log(`Fetching files - page: ${page}, pageSize: ${pageSize}`);
             const { items, total } = await fetchFiles(page, pageSize);
-            setFiles(items);
+            console.log(`Received ${items.length} files, total: ${total}`);
+            
+            // Transform items to ensure they match the UploadedFile type
+            const formattedItems = items.map((item: any) => ({
+                ...item,
+                // Ensure all required fields are present
+                name: item.name || item.file_name || 'Untitled',
+                publicUrl: item.publicUrl || item.file_url || '',
+                status: item.status || 'unknown',
+                created_at: item.created_at || new Date().toISOString(),
+                // For backward compatibility
+                processed: item.processed || item.status === 'processed'
+            }));
+            
+            setFiles(formattedItems);
             setPagination(prev => ({
                 ...prev,
-                totalItems: total
+                totalItems: total || 0
             }));
         } catch (error) {
-            console.error('Error loading files:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Failed to load files';
+            console.error('Error loading files:', errorMessage, error);
+            setError(errorMessage);
+            setFiles([]);
+            setPagination(prev => ({
+                ...prev,
+                totalItems: 0
+            }));
         } finally {
             setIsLoading(false);
         }
@@ -177,9 +202,16 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
             <div className="kb-header">
                 <h4>Your Files</h4>
             </div>
+            {error && (
+                <div className="error-message">
+                    Error loading files: {error}
+                </div>
+            )}
             <ul className="file-list">
                 {files.length === 0 ? (
-                    <li className="empty-file-list">No files uploaded yet</li>
+                    <li className="empty-file-list">
+                        {isLoading ? 'Loading files...' : 'No files uploaded yet'}
+                    </li>
                 ) : (
                     files.map((file) => {
                         const status = fileStatus[file.id] || { isDeleting: false, isRetrying: false };
