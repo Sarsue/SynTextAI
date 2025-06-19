@@ -1,0 +1,62 @@
+.websocket-status-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background-color: rgba(0, 0, 0, 0.05);
+    cursor: help;
+    transition: background-color 0.3s ease;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.dark-mode .websocket-status-container {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    transition: background-color 0.3s ease;
+}
+
+.status-indicator.connected {
+    background-color: #28a745; /* Green */
+}
+
+.status-indicator.connecting,
+.status-indicator.reconnecting {
+    background-color: #ffc107; /* Yellow */
+    animation: pulse 1.5s infinite ease-in-out;
+}
+
+.status-indicator.disconnected {
+    background-color: #dc3545; /* Red */
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.15);
+        opacity: 0.7;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.status-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: #333;
+}
+
+.dark-mode .status-text {
+    color: #eee;
+}

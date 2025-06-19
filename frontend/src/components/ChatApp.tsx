@@ -1,7 +1,6 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+
 import { useNavigate, useLocation } from 'react-router-dom';
 import ConversationView from './ConversationView';
 import InputArea from './InputArea';
@@ -11,6 +10,7 @@ import { Message, History } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
+import { useToast } from '../contexts/ToastContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
@@ -20,6 +20,7 @@ import { AnalyticsEvents, createEventProperties } from '../utils/analyticsEvents
 import { trackPageView, trackAction, trackError, getPosthog } from '../utils/analyticsQueue';
 import { Navigate } from 'react-router-dom';
 import { WebSocketMessage, FileStatusUpdatePayload } from '../types/websocketTypes';
+import WebSocketStatusIndicator from './WebSocketStatusIndicator';
 
 
 interface ChatAppProps {
@@ -36,8 +37,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         setDarkMode: setContextDarkMode, 
         userSettings,
         setUserSettings,
-        isPollingFiles,
-        setIsPollingFiles,
+
         isPollingMessages,
         setIsPollingMessages,
         subscriptionStatus,
@@ -61,6 +61,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         deleteFileFromContext, // Added for centralized deletion
         authLoading
     } = useUserContext();
+    const { addToast } = useToast();
     const { capture, identify } = useAnalytics();
     const location = useLocation();
     const prevPathRef = useRef('');
@@ -176,10 +177,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 });
                 await handleSendMessage(lastUserMessage.content, historyId);
             } else {
-                toast.warn('No user message found to regenerate.');
+                addToast('No user message found to regenerate.', 'warning');
             }
         } else {
-            toast.warn('No messages in history to regenerate.');
+            addToast('No messages in history to regenerate.', 'warning');
         }
     };
 
@@ -220,7 +221,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const callApiWithToken = async (apiUrl: string, method: string, body?: any) => {
         if (!idTokenRef.current) {
             console.error('User token not available for callApiWithToken');
-            toast.error('Authentication session expired. Please refresh.');
+            addToast('Authentication session expired. Please refresh.', 'error');
             return Promise.reject(new Error('User token not available'));
         }
         const headers: HeadersInit = { 'Authorization': `Bearer ${idTokenRef.current}` };
@@ -239,7 +240,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             return response;
         } catch (error) {
             console.error('Unexpected error calling API:', error);
-            toast.error('Failed to communicate with the server.');
+            addToast('Failed to communicate with the server.', 'error');
             return Promise.reject(error);
         }
     };
@@ -305,15 +306,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             comprehension_level: comprehensionLevel,
                         });
                         
-                        toast.success(fileData.message, { 
-                            position: 'top-right', 
-                            autoClose: 3000, 
-                            hideProgressBar: false, 
-                            closeOnClick: true, 
-                            pauseOnHover: true, 
-                            draggable: true, 
-                            progress: undefined 
-                        });
+                        addToast(fileData.message, 'success'); 
                         
                         loadUserFiles(1, filePagination.pageSize); 
                     } else {
@@ -324,15 +317,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             status: fileDataResponse?.status,
                         });
                         
-                        toast.error('File upload failed. Please try again.', { 
-                            position: 'top-right', 
-                            autoClose: 5000, 
-                            hideProgressBar: false, 
-                            closeOnClick: true, 
-                            pauseOnHover: true, 
-                            draggable: true, 
-                            progress: undefined 
-                        });
+                        addToast('File upload failed. Please try again.', 'error'); 
                     }
                 } catch (error) {
                     // Track file upload error
@@ -341,15 +326,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         file_count: files.length,
                     });
                     
-                    toast.error('An error occurred during file upload. Please try again.', { 
-                        position: 'top-right', 
-                        autoClose: 5000, 
-                        hideProgressBar: false, 
-                        closeOnClick: true, 
-                        pauseOnHover: true, 
-                        draggable: true, 
-                        progress: undefined 
-                    });
+                    addToast('An error occurred during file upload. Please try again.', 'error'); 
                 }
                 if (!message.trim()) {
                     setIsSending(false); // Re-enable input if only uploading files
@@ -458,7 +435,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 setHistories(prev => ({ ...prev, [newHistory.id]: newHistory }));
                 setCurrentHistory(newHistory.id);
                 
-                toast.success('New chat started');
+                addToast('New chat started', 'success');
             } else {
                 // Track failed chat creation
                 capture(AnalyticsEvents.BUTTON_CLICK, {
@@ -466,12 +443,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     error: response ? await response.text() : 'No response',
                 });
                 
-                toast.error('Failed to start new chat');
+                addToast('Failed to start new chat', 'error');
             }
         } catch (error) {
             console.error('Error starting new chat:', error);
             trackError(error as Error, { action: 'new_chat' });
-            toast.error('Error starting new chat');
+            addToast('Error starting new chat', 'error');
         }
     };
 
@@ -501,13 +478,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 if (currentHistory === historyId) {
                     setCurrentHistory(null); // Or set to the latest, or none
                 }
-                toast.success('Chat history deleted');
+                addToast('Chat history deleted', 'success');
             } else {
-                toast.error('Failed to delete history');
+                addToast('Failed to delete history', 'error');
             }
         } catch (error) {
             console.error('Error deleting history:', error);
-            toast.error('Error deleting history');
+            addToast('Error deleting history', 'error');
         }
     };
 
@@ -563,7 +540,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             console.log('Loaded Histories:', histories);
         } catch (error) {
             console.error('Error fetching chat histories:', error);
-            toast.error('Could not load chat histories.');
+            addToast('Could not load chat histories.', 'error');
         }
     };
 
@@ -590,34 +567,25 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             }, 200);
         } catch (error) {
             console.error('Error during logout:', error);
-            trackError(error as Error, { action: 'logout' });
         }
+        setSelectedFile(null);
     };
 
-    const handleDeleteFile = async (fileId: number) => {
+    const handleDeleteFile = useCallback(async (fileId: number) => {
         trackAction(AnalyticsEvents.FILE_DELETE_INITIATED, 'file_management', `file_id: ${fileId}`);
-        const promise = deleteFileFromContext(fileId);
-        toast.promise(promise, {
-            pending: 'Deleting file...', 
-            success: 'File deleted successfully!',
-            error: 'Failed to delete file.'
-        });
         try {
-            await promise;
-            trackAction(AnalyticsEvents.FILE_DELETE_SUCCESS, 'file_management', `file_id: ${fileId}`);
+            await deleteFileFromContext(fileId);
+            addToast('File deleted successfully!', 'success');
         } catch (error) {
-            trackError(error as Error, {
-                action_event: AnalyticsEvents.FILE_DELETE_FAILED, // trackError uses context for additional properties
-                file_id: fileId,
-                error_message: (error instanceof Error) ? error.message : String(error)
-            });
+            addToast('Failed to delete file.', 'error');
+            console.error('Error deleting file:', error);
         }
-    };
+    }, [deleteFileFromContext, addToast]);
 
-    const handleFileClick = (file: UploadedFile) => {
+    const handleFileClick = useCallback((file: UploadedFile) => {
         trackAction(AnalyticsEvents.FILE_VIEW_CLICKED, 'file_management', `file_id: ${file.id}, name: ${file.name}, type: ${file.type}`);
         setSelectedFile(file);
-    };
+    }, [setSelectedFile]);
 
     const handleCloseFileViewer = () => {
         if (selectedFile) {
@@ -668,6 +636,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''} ${isMobile ? 'mobile-view' : ''}`}>
             {!isMobile && (
                  <div className="sidebar-left">
+                    <WebSocketStatusIndicator />
                     <div className="sidebar-tabs">
                         <button onClick={() => setActiveTab("chat")} className={`tab-button ${activeTab === "chat" ? "active" : ""}`}>Chat</button>
                         <button onClick={() => setActiveTab("knowledge")} className={`tab-button ${activeTab === "knowledge" ? "active" : ""}`}>Knowledge</button>
@@ -712,17 +681,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     onError={(error) => console.error(`File ${selectedFile.id} processing error:`, selectedFile.processing_status, selectedFile.error_message)}
                 />
             )}
-            <ToastContainer 
-                position="bottom-right" 
-                autoClose={5000} 
-                newestOnTop={false}
-                closeOnClick 
-                rtl={false} 
-                pauseOnFocusLoss
-                draggable
-                pauseOnHover
-                theme={darkMode ? "dark" : "light"}
-            />
         </div>
     );
 };

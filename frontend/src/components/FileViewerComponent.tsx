@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './FileViewerComponent.css';
 import { UploadedFile, KeyConcept, Flashcard, QuizQuestion } from './types';
 import { useUserContext } from '../UserContext';
-import { toast } from 'react-toastify';
+import { useToast } from '../contexts/ToastContext';
+
 import FlashcardViewer from './FlashcardViewer';
 import QuizInterface from './QuizInterface';
 
@@ -20,6 +21,7 @@ interface SourceLinkProps {
 
 const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose, onError, darkMode }) => {
     const { user } = useUserContext();
+    const { addToast } = useToast();
     const isMountedRef = useRef(true);
     const highlightTimeoutRef = useRef<NodeJS.Timeout>();
     const [fileType, setFileType] = useState<string>('unknown');
@@ -350,7 +352,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             // For PDFs, navigate to the page number
             const iframe = pdfViewerRef.current;
             iframe.contentWindow?.postMessage({ type: 'goto-page', page: concept.source_page_number }, '*');
-            toast.info(`Navigated to page ${concept.source_page_number}`);
+            addToast(`Navigated to page ${concept.source_page_number}`, 'info');
         } else if (concept.source_video_timestamp_start_seconds !== null && concept.source_video_timestamp_start_seconds !== undefined) {
             const startTimestamp = concept.source_video_timestamp_start_seconds;
             const endTimestamp = concept.source_video_timestamp_end_seconds;
@@ -369,7 +371,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 // If there's an end timestamp, setup a highlight timer for the duration
                 if (hasDuration) {
                     const durationSeconds = endTimestamp! - startTimestamp;
-                    toast.info(`Playing segment (${durationText}, ${Math.round(durationSeconds)}s)`, { autoClose: durationSeconds * 1000 });
+                    addToast(`Playing segment (${durationText}, ${Math.round(durationSeconds)}s)`, 'info');
                     
                     // Keep the concept highlighted for the duration
                     if (concept.id) {
@@ -378,7 +380,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                         highlightTimeoutRef.current = setTimeout(() => setHighlightedConceptId(null), durationSeconds * 1000);
                     }
                 } else {
-                    toast.info(`Jumped to ${durationText}`);
+                    addToast(`Jumped to ${durationText}`, 'info');
                 }
             } else if (youtubePlayerRef.current && fileType === 'youtube') {
                 // For YouTube videos
@@ -387,13 +389,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 
                 if (hasDuration) {
                     const durationSeconds = endTimestamp! - startTimestamp;
-                    toast.info(`Playing segment (${durationText}, ${Math.round(durationSeconds)}s)`, { autoClose: durationSeconds * 1000 });
+                    addToast(`Playing segment (${durationText}, ${Math.round(durationSeconds)}s)`, 'info');
                     
                     // Reset our timeout - keep highlighted for the full duration
                     clearTimeout(highlightTimeoutRef.current);
                     highlightTimeoutRef.current = setTimeout(() => setHighlightedConceptId(null), durationSeconds * 1000);
                 } else {
-                    toast.info(`Jumped to ${durationText}`);
+                    addToast(`Jumped to ${durationText}`, 'info');
                 }
             }
         }

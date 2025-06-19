@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { toast } from 'react-toastify';
+
 import { useUserContext } from '../UserContext';
+import { useToast } from '../contexts/ToastContext';
 import VoiceInput from './VoiceInput';
 import './InputArea.css';
 
@@ -20,6 +21,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
     const { darkMode } = useUserContext();
+    const { addToast } = useToast();
     const [youtubeUrl, setYoutubeUrl] = useState('');
     // Reference to the YouTube input element for focus management
     const youtubeInputRef = React.useRef<HTMLInputElement>(null);
@@ -46,7 +48,7 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const handleSendClick = () => {
         if (!message.trim() && attachedFiles.length === 0) {
-            toast.info("Nothing to send. Please type a message or attach files.");
+            addToast("Nothing to send. Please type a message or attach files.", 'info');
             return;
         }
 
@@ -54,11 +56,11 @@ const InputArea: React.FC<InputAreaProps> = ({
         let canProceed = true;
 
         if (filesToSend.length !== attachedFiles.length && attachedFiles.length > 0) {
-            toast.warn('Some attached files have unsupported types and will be ignored.');
+            addToast('Some attached files have unsupported types and will be ignored.', 'warning');
         }
 
         if (filesToSend.length > 10) {
-            toast.error('Cannot send: Maximum of 10 files allowed per upload.');
+            addToast('Cannot send: Maximum of 10 files allowed per upload.', 'error');
             canProceed = false;
         }
 
@@ -69,7 +71,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             });
         } else if (canProceed && !message.trim() && filesToSend.length === 0 && attachedFiles.length > 0) {
             // This case means all attached files were unsupported, and there's no message
-            toast.error('No valid files to send, and no message typed.');
+            addToast('No valid files to send, and no message typed.', 'error');
         }
     };
 
@@ -80,10 +82,10 @@ const InputArea: React.FC<InputAreaProps> = ({
         const newlySupportedFiles = allSelectedFiles.filter(isFileSupported);
 
         if (allSelectedFiles.length > 0 && newlySupportedFiles.length === 0) {
-            toast.error('No supported files selected. Please choose PDF, video, image (JPG, PNG, GIF), or text files.');
+            addToast('No supported files selected. Please choose PDF, video, image (JPG, PNG, GIF), or text files.', 'error');
         } else {
             if (allSelectedFiles.length > newlySupportedFiles.length && newlySupportedFiles.length > 0) {
-                toast.info(`${allSelectedFiles.length - newlySupportedFiles.length} file(s) were not added due to unsupported type.`);
+                addToast(`${allSelectedFiles.length - newlySupportedFiles.length} file(s) were not added due to unsupported type.`, 'info');
             }
 
             if (newlySupportedFiles.length > 0) {
@@ -92,10 +94,10 @@ const InputArea: React.FC<InputAreaProps> = ({
                     if (combinedFiles.length > 10) {
                         const spaceRemaining = 10 - currentAttachedFiles.length;
                         if (spaceRemaining > 0) {
-                            toast.warn(`Maximum of 10 files. Adding first ${spaceRemaining} of the selected supported files.`);
+                            addToast(`Maximum of 10 files. Adding first ${spaceRemaining} of the selected supported files.`, 'warning');
                             return [...currentAttachedFiles, ...newlySupportedFiles.slice(0, spaceRemaining)];
                         }
-                        toast.error(`Cannot add more files. Maximum of 10 files already attached.`);
+                        addToast(`Cannot add more files. Maximum of 10 files already attached.`, 'error');
                         return currentAttachedFiles;
                     }
                     return combinedFiles;
@@ -167,11 +169,11 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     const handleAddYoutubeVideo = async () => {
         if (!youtubeUrl.trim()) {
-            toast.error('Please enter a YouTube Video URL.');
+            addToast('Please enter a YouTube Video URL.', 'error');
             return;
         }
         if (!token) {
-            toast.error('Authentication token not found. Please log in again.');
+            addToast('Authentication token not found. Please log in again.', 'error');
             return;
         }
         try {
@@ -190,7 +192,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             setYoutubeUrl('');
             setShowYoutubeInput(false);
             onContentAdded();
-            toast.success('YouTube video added and is now processing.');
+            addToast('YouTube video added and is now processing.', 'success');
         } catch (error) {
             console.error('Error adding YouTube video:', error);
             let detailMessage = 'Please check the URL and try again.';
@@ -199,7 +201,7 @@ const InputArea: React.FC<InputAreaProps> = ({
             } else if (typeof error === 'string') {
                 detailMessage = error;
             }
-            toast.error(`Failed to add YouTube video: ${detailMessage}`);
+            addToast(`Failed to add YouTube video: ${detailMessage}`, 'error');
         }
     };
 

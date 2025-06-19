@@ -3,14 +3,17 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
-import { UserProvider } from './UserContext'; // Import DarkModeProvider
+import { UserProvider } from './UserContext';
+import { ToastProvider } from './contexts/ToastContext';
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration"; // Import service worker
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 root.render(
-  <UserProvider> {/* Move UserProvider here */}
-    <App />
-  </UserProvider>
+  <ToastProvider>
+    <UserProvider>
+      <App />
+    </UserProvider>
+  </ToastProvider>
 );
 
 

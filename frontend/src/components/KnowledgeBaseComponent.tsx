@@ -3,7 +3,7 @@ import './KnowledgeBase.css';
 import { UploadedFile } from './types';
 import { KnownWebSocketMessage, FileStatusUpdatePayload, FileStatusUpdateMessage } from '../types/websocketTypes';
 import Modal from './Modal';
-import { toast } from 'react-toastify';
+
 import { useUserContext } from '../UserContext';
 
 // Helper function to identify YouTube URLs with more robust detection
@@ -46,11 +46,7 @@ interface FileStatus {
     };
 }
 
-const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
-    onDeleteFile,
-    onFileClick,
-    darkMode = false,
-}) => {
+const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onDeleteFile, onFileClick, darkMode = false }) => {
     const {
         files, // Renamed from userFiles
         loadUserFiles,
@@ -58,7 +54,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({
         isLoadingFiles,
         fileError: contextFileError,
     } = useUserContext();
-    const [expandedFile, setExpandedFile] = useState<number | null>(null);
 interface FileStatusEntry { isDeleting?: boolean; }
     const [fileStatus, setFileStatus] = useState<{[key: number]: FileStatusEntry}>({});
     const [error, setError] = useState<string | null>(null); 
@@ -88,20 +83,12 @@ interface FileStatusEntry { isDeleting?: boolean; }
     }, [loadUserFiles]);
 
     const handleFileClick = async (file: UploadedFile) => {
-        console.log(`Clicked file: ${file.name}, ID: ${file.id}, status: ${file.processing_status}, isYouTube: ${isYouTubeUrl(file.name)}`);
-        
-        // Refresh the file list to get the latest status
-        try {
-            onFileClick(file);
-        } catch (error) {
-            // If onFileClick itself throws, it will be caught here.
-            // The primary purpose of onFileClick is to notify the parent.
-            // If the parent's handler throws, it's an issue in the parent.
-            console.error('Error during onFileClick callback execution in parent:', error);
-        }
-        
-        // Expand the file details so delete button is visible
-        setExpandedFile(file.id);
+        console.log(`Refreshing file list and handling click for: ${file.name}`);
+        // Refresh the file list to get the latest status before handling the click
+        await loadUserFiles(filePagination.page, filePagination.pageSize);
+
+        // Propagate the click to the parent component
+        onFileClick(file);
     };
 
     const handleDeleteClick = (file: UploadedFile, e: React.MouseEvent) => {
@@ -115,15 +102,6 @@ interface FileStatusEntry { isDeleting?: boolean; }
             
             onDeleteFile(file.id);
         }
-    };
-    
-    const toggleFileDetails = (fileId: number) => {
-        // If the file is already expanded, close it; otherwise expand it
-        const newExpandedFileId = expandedFile === fileId ? null : fileId;
-        setExpandedFile(newExpandedFileId);
-        
-        // Log for debugging
-        console.log(`Toggling file details for ID: ${fileId}, new state: ${newExpandedFileId ? 'expanded' : 'collapsed'}`);
     };
 
     const handleNextPage = () => {
@@ -258,4 +236,4 @@ interface FileStatusEntry { isDeleting?: boolean; }
     );
 };
 
-export default KnowledgeBaseComponent;
+export default React.memo(KnowledgeBaseComponent);
