@@ -68,7 +68,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
                         id: -1, // Use negative ID for external files
                         name: (url as string).split('/').pop() || 'File',
                         publicUrl: url || '',
-                        processed: true,
+                        processing_status: 'processed',
                         type: fileType // Use determined fileType
                     });
                     console.log(`External file link: ${url}`);

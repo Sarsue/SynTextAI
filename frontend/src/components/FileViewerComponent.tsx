@@ -259,7 +259,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         const urlToTest = fileUrl || file.name; 
         const type = getFileType(urlToTest) || 'unknown';
         
-        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File processed: ${file.processed}`);
+        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File status: ${file.processing_status}`);
         
         // Set file type right away
         setFileType(type);
@@ -272,8 +272,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (user && fileId) {
             // If the file is processed, we only need to fetch data once
             // If not processed, we continue polling for data
-            if (!file.processed) {
-                console.log(`File ${fileId} is not yet processed. Fetching data...`);
+            if (file.processing_status !== 'processed') {
+                console.log(`File ${fileId} is not yet processed (status: ${file.processing_status}). Fetching data...`);
                 fetchKeyConcepts();
                 fetchFlashcards();
                 fetchQuizzes();
@@ -285,7 +285,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 if (quizzes.length === 0) fetchQuizzes();
             }
         }
-    }, [fileUrl, file.name, onError, file.processed, user, fileId]); 
+    }, [fileUrl, file.name, onError, file.processing_status, user, fileId]); 
 
     // We no longer need placeholder data since users can create their own content
 
@@ -413,8 +413,15 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         
         // Show loading indicator for unprocessed files
-        if (!file.processed) {
-            return <div className="processing-indicator">File is being processed. Key concepts will appear when ready.</div>;
+        if (file.processing_status !== 'processed') {
+            const statusMessage = {
+                'uploaded': 'File has been uploaded and is queued for processing.',
+                'processing': 'File is being processed. Key concepts will appear when ready.',
+                'extracted': 'File content has been extracted and is being analyzed.',
+                'failed': 'File processing failed. Please try again later.'
+            }[file.processing_status] || 'File is being processed...';
+            
+            return <div className="processing-indicator">{statusMessage}</div>;
         }
 
         // Handle different file types with a single return statement using conditional rendering
@@ -499,12 +506,19 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return <div className="error-message">{error}</div>;
         }
 
-        if (!file.processed) {
-            return <div className="processing-message">
-                <p>This file is still being processed.</p>
-                <p>Key concepts will appear here once processing is complete.</p>
-                <div className="processing-spinner"></div>
-            </div>;
+        if (file.processing_status !== 'processed') {
+            const statusMessage = {
+                'uploaded': 'File has been uploaded and is queued for processing.',
+                'processing': 'File is being processed. Key concepts will appear when ready.',
+                'extracted': 'File content has been extracted and is being analyzed.',
+                'failed': 'File processing failed. Please try again later.'
+            }[file.processing_status] || 'File is being processed...';
+            
+            return (
+                <div className="key-concepts-container">
+                    <p>{statusMessage}</p>
+                </div>
+            );
         }
         
         // Combine API-fetched key concepts with custom user-created ones

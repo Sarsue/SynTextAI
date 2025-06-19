@@ -59,6 +59,32 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
     const [selectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
     const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
     const [knowledgeBaseFiles, setKnowledgeBaseFiles] = useState<UploadedFile[]>([]);
+    interface PaginationState {
+        page: number;
+        pageSize: number;
+        totalItems: number;
+    }
+
+    const [pagination, setPagination] = useState<PaginationState>({
+        page: 1,
+        pageSize: 10,
+        totalItems: 0
+    });
+    
+    const handlePageChange = useCallback((newPage: number) => {
+        setPagination(prev => ({
+            ...prev,
+            page: newPage
+        }));
+    }, []);
+    
+    const handlePageSizeChange = useCallback((newSize: number) => {
+        setPagination(prev => ({
+            ...prev,
+            page: 1,
+            pageSize: newSize
+        }));
+    }, []);
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     const [idToken, setIdToken] = useState<string | null>(null); // State for ID token
     const navigate = useNavigate();
@@ -499,7 +525,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                     file_name: file?.name || 'unknown',
                     file_type: file?.type || 'unknown',
                     file_size: file?.size || 0,
-                    was_processed: file?.processed || false,
+                    processing_status: file?.processing_status || 'unknown',
                 });
                 
                 // Remove file from state
@@ -557,22 +583,22 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
             file_name: file.name,
             file_type: file.type,
             file_size: file.size || 0,
-            is_processed: file.processed,
+            processing_status: file.processing_status,
         });
         
         // Set view start time for tracking view duration
         const fileWithViewTime = {
             ...file,
             viewStartTime: Date.now(),
-            is_processed: file.processed
+            processing_status: file.processing_status
         };
         
         setSelectedFile(fileWithViewTime);
         
-        // If file is not processed, track the attempt to view unprocessed file
-        if (!file.processed) {
+        // Track view of unprocessed or failed files
+        if (file.processing_status !== 'processed') {
             capture(AnalyticsEvents.FEATURE_USAGE, {
-                action: 'view_unprocessed_file',
+                action: `view_${file.processing_status || 'unknown'}_file`,
                 file_id: file.id,
                 file_type: file.type,
             });
@@ -594,16 +620,22 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
         setSelectedFile(null);
     };
 
-    const fetchUserFiles = useCallback(async () => {
+    const fetchUserFiles = useCallback(async (page: number = 1, pageSize: number = 10): Promise<{ items: UploadedFile[], total: number }> => {
         if (process.env.NODE_ENV === 'development') {
-            console.log("Fetching user files...");
+            console.log(`Fetching user files... Page: ${page}, PageSize: ${pageSize}`);
         }
         
-        if (!user || !idToken) return; // Ensure user and token are available
+        if (!user || !idToken) {
+            setKnowledgeBaseFiles([]);
+            return { items: [], total: 0 };
+        }
         
         try {
             const startTime = Date.now();
-            const response = await callApiWithToken('/api/v1/files', 'GET');
+            const response = await callApiWithToken(
+                `/api/v1/files?page=${page}&page_size=${pageSize}`,
+                'GET'
+            );
             const duration = Date.now() - startTime;
             
             // Track file fetch operation
@@ -613,19 +645,33 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                 success: response?.ok === true,
                 status: response?.status,
             });
+            
             if (response && response.ok) {
-                const filesData: UploadedFile[] = await response.json();
-                console.log("Files received:", filesData);
-                setKnowledgeBaseFiles(filesData);
+                const data = await response.json();
+                console.log("Files received:", data.items);
+                
+                // Update the knowledge base files in state
+                setKnowledgeBaseFiles(data.items);
+                setPagination(prev => ({
+                    ...prev,
+                    totalItems: data.total
+                }));
+                
+                return {
+                    items: data.items,
+                    total: data.total
+                };
             } else {
                 console.error('Failed to fetch files:', response ? response.statusText : 'No response');
-                setKnowledgeBaseFiles([]); // Clear files on failure
+                setKnowledgeBaseFiles([]);
+                return { items: [], total: 0 };
             }
         } catch (error) {
             console.error('Error fetching user files:', error);
-            setKnowledgeBaseFiles([]); // Clear files on error
+            setKnowledgeBaseFiles([]);
+            return { items: [], total: 0 };
         }
-    }, [user, idToken]); // Added dependencies
+    }, [user, idToken, capture]); // Added dependencies
 
     // Fetch files initially and when user/token changes
     useEffect(() => {
@@ -642,7 +688,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                         <KnowledgeBaseComponent
                             token={idToken ?? ''}
                             fetchFiles={fetchUserFiles}
-                            files={knowledgeBaseFiles}
                             onDeleteFile={handleDeleteFile}
                             onFileClick={handleFileClick}
                             darkMode={darkMode}
@@ -781,7 +826,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user, onLogout }) => {
                             <KnowledgeBaseComponent
                                 token={idToken ?? ''}
                                 fetchFiles={fetchUserFiles}
-                                files={knowledgeBaseFiles}
                                 onDeleteFile={handleDeleteFile}
                                 onFileClick={handleFileClick}
                                 darkMode={darkMode}

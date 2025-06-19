@@ -57,77 +57,122 @@ running_tasks = []
 shutdown_event = asyncio.Event()
 
 
-async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
-                       file_url: str, language: str = "English", 
-                       comprehension_level: str = "Beginner") -> None:
-    """Process a single file with concurrency control"""
+async def update_file_status(file_id: int, status: str, error: str = None) -> None:
+    """Update file status in the database using SQLAlchemy ORM"""
+    from api.repositories.repository_manager import RepositoryManager
+    from models import File
     
-    # Use a semaphore to limit concurrent processing
-    async with semaphore:
-        if shutdown_event.is_set():
-            logger.info(f"Shutdown requested, skipping processing of file {file_id}")
-            return
+    # Get database URL from environment variables
+    database_config = {
+        'dbname': os.getenv("DATABASE_NAME"),
+        'user': os.getenv("DATABASE_USER"),
+        'password': os.getenv("DATABASE_PASSWORD"),
+        'host': os.getenv("DATABASE_HOST"),
+        'port': os.getenv("DATABASE_PORT"),
+    }
+
+    DATABASE_URL = (
+        f"postgresql://{database_config['user']}:{database_config['password']}"
+        f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+    )
+    
+    store = RepositoryManager(database_url=DATABASE_URL)
+    
+    try:
+        with store.file_repo.get_unit_of_work() as uow:
+            # Get the file by ID with a lock
+            file = uow.session.query(File).filter(File.id == file_id).with_for_update().first()
+            if not file:
+                logger.error(f"File with ID {file_id} not found")
+                return
+                
+            # Update the file status
+            file.processing_status = status
             
-        logger.info(f"Starting processing file {filename} (ID: {file_id}) for user {user_id}")
-        
-        try:
-            # Import here to avoid circular imports
+            # Save changes
+            uow.session.add(file)
+            uow.session.commit()
+            logger.info(f"Successfully updated file {file_id} status to {status}")
+            
+    except Exception as e:
+        logger.error(f"Failed to update file {file_id} status: {str(e)}")
+        raise
+
+
+async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
+                     file_url: str, language: str = "English", 
+                     comprehension_level: str = "Beginner") -> None:
+    """Process a single file with concurrency control"""
+    logger.info(f"[TRACE] Starting process_file for file_id: {file_id}, filename: {filename}")
+    
+    try:
+        # Use a semaphore to limit concurrent processing
+        async with semaphore:
+            if shutdown_event.is_set():
+                logger.info(f"[TRACE] Shutdown requested, skipping processing of file {file_id}")
+                return
+                
+            # Determine if this is a YouTube URL
+            is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
+            logger.info(f"[TRACE] File type detection - is_youtube: {is_youtube}")
+                
+            # Update status to PROCESSING
+            logger.info(f"[TRACE] Updating status to PROCESSING for file_id: {file_id}")
+            await update_file_status(file_id, "processing")
+            logger.info(f"[TRACE] Successfully updated status to PROCESSING for file_id: {file_id}")
+            
+            # Process the file
+            logger.info(f"[TRACE] Starting process_file_data for file_id: {file_id}")
             from api.tasks import process_file_data
-            
-            # Call the existing file processing function
             await process_file_data(
                 user_gc_id=user_gc_id,
-                user_id=str(user_id),  # Convert to string as expected by process_file_data
-                file_id=str(file_id),  # Convert to string as expected by process_file_data
+                user_id=str(user_id),
+                file_id=str(file_id),
                 filename=filename,
                 file_url=file_url,
-                is_youtube="youtube" in filename.lower() or "youtu.be" in filename.lower(),
+                is_youtube=is_youtube,
                 language=language,
                 comprehension_level=comprehension_level
             )
+            logger.info(f"[TRACE] Completed process_file_data for file_id: {file_id}")
             
-            logger.info(f"Completed processing file {filename} (ID: {file_id})")
-        
-        except Exception as e:
-            logger.exception(f"Error processing file {file_id}: {str(e)}")
+            # Update status to PROCESSED
+            logger.info(f"[TRACE] Updating status to PROCESSED for file_id: {file_id}")
+            await update_file_status(file_id, "processed")
+            logger.info(f"[TRACE] Successfully completed processing file {filename} (ID: {file_id})")
             
-            # Update status to FAILED if there was an exception
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[ERROR] Error processing file {file_id}: {error_msg}", exc_info=True)
+        # Update status to FAILED with error message
+        try:
+            logger.error(f"[ERROR] Updating status to FAILED for file_id: {file_id}")
+            await update_file_status(file_id, "failed")
+            logger.error(f"[ERROR] Successfully updated status to FAILED for file_id: {file_id}")
+        except Exception as update_err:
+            logger.error(f"[ERROR] Failed to update file status to failed: {str(update_err)}", exc_info=True)
+            # If we can't update status, try one more time with a new session
             try:
-                # FileProcessingStatus enum no longer used - using string literals instead
                 from api.repositories.repository_manager import RepositoryManager
-                
-                # Get database URL from environment variables
-                database_config = {
-                    'dbname': os.getenv("DATABASE_NAME"),
-                    'user': os.getenv("DATABASE_USER"),
-                    'password': os.getenv("DATABASE_PASSWORD"),
-                    'host': os.getenv("DATABASE_HOST"),
-                    'port': os.getenv("DATABASE_PORT"),
-                }
-
-                DATABASE_URL = (
-                    f"postgresql://{database_config['user']}:{database_config['password']}"
-                    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-                )
-                
-                store = RepositoryManager(database_url=DATABASE_URL)
-                
-                file = store.file_repo.get_file_by_id(file_id)
-                if file and file.processing_status != "failed":  # Use string literal instead of enum
-                    with store.file_repo.get_unit_of_work() as uow:
-                        file.processing_status = "failed"  # Use string literal instead of enum
-                        # No need for explicit commit with unit of work pattern
-                    logger.info(f"Updated file {file_id} status to failed")
-            
-            except Exception as ex:
-                logger.error(f"Error updating file status to FAILED: {str(ex)}")
+                repo = RepositoryManager().get_repository('file')
+                with repo.get_session() as session:
+                    file = session.query(repo.model).filter_by(id=file_id).first()
+                    if file:
+                        file.processing_status = "failed"
+                        session.commit()
+                        logger.error(f"[RECOVERY] Successfully updated status to FAILED for file_id: {file_id} using new session")
+            except Exception as recovery_err:
+                logger.error(f"[RECOVERY] Failed to update status with new session: {str(recovery_err)}", exc_info=True)
+        
+        # Re-raise the original error to allow retry logic to work
+        raise
 
 
 async def fetch_pending_files() -> List[Dict[str, Any]]:
-    """Fetch files with 'uploaded' status from the database"""
+    """Fetch files with 'uploaded' status from the database and mark them as processing"""
     try:
-        # FileProcessingStatus enum no longer used - using string literals instead
         from api.repositories.repository_manager import RepositoryManager
+        from sqlalchemy import text
         
         # Get database URL from environment variables
         database_config = {
@@ -145,57 +190,46 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
         
         store = RepositoryManager(database_url=DATABASE_URL)
         
-        # Get files with UPLOADED status
-        # Use ORM instead of raw SQL for better safety and maintainability
-        from models import File as FileORM, User as UserORM
-        
-        # Execute ORM query - using proper unit of work pattern
+        # Use a transaction to atomically fetch and update files
         with store.file_repo.get_unit_of_work() as uow:
-            # Join files and users tables using SQLAlchemy ORM
-            query = uow.session.query(
-                FileORM.id, 
-                FileORM.file_name, 
-                FileORM.file_url, 
-                FileORM.user_id, 
-                FileORM.created_at
-                # We'll extract gc_id from file_url in Python code instead of SQL
-            ).join(
-                UserORM, FileORM.user_id == UserORM.id
-            ).filter(
-                # Use explicit string literal instead of enum
-                FileORM.processing_status == "uploaded"
+            from models import File
+            
+            # Find files that need processing
+            files_to_process = uow.session.query(File).filter(
+                File.processing_status == 'uploaded'
             ).order_by(
-                FileORM.created_at.asc()
-            ).limit(10)
+                File.created_at.asc()
+            ).with_for_update(skip_locked=True).limit(10).all()
             
-            result = query.all()
-        
-        # Convert SQLAlchemy result to list of dictionaries and extract gc_id from file_url
-        pending_files = []
-        for row in result:
-            # Extract user_gc_id from file_url if it's not a YouTube URL
-            user_gc_id = ''
-            if row.file_url and not ('youtube.com' in row.file_url or 'youtu.be' in row.file_url):
-                # Extract the folder name which is the gc_id
-                # URL structure: https://storage.googleapis.com/bucket-name/{gc_id}/{filename}
-                try:
-                    # Split by '/' and get the second-to-last segment which should be the gc_id
-                    url_parts = row.file_url.split('/')
-                    if len(url_parts) >= 2:
-                        user_gc_id = url_parts[-2]  # Second-to-last part is gc_id
-                    logger.debug(f"Extracted user_gc_id '{user_gc_id}' from URL: {row.file_url}")
-                except Exception as e:
-                    logger.error(f"Failed to extract user_gc_id from URL: {row.file_url}. Error: {e}")
+            # Update status to processing
+            for file in files_to_process:
+                file.processing_status = 'processing'
             
-            # Create the file dict with all necessary information
-            pending_files.append({
-                "id": row.id,
-                "file_name": row.file_name,
-                "file_url": row.file_url, 
-                "user_id": row.user_id,
-                "user_gc_id": user_gc_id,  # Use the extracted gc_id
-                "created_at": row.created_at
-            })
+            # Commit the transaction to release the lock
+            uow.session.commit()
+            
+            # Convert files to list of dictionaries
+            pending_files = []
+            for file in files_to_process:
+                # Extract user_gc_id from file_url if it's not a YouTube URL
+                user_gc_id = ''
+                if file.file_url and not ('youtube.com' in file.file_url or 'youtu.be' in file.file_url):
+                    try:
+                        url_parts = file.file_url.split('/')
+                        if len(url_parts) >= 2:
+                            user_gc_id = url_parts[-2]  # Second-to-last part is gc_id
+                        logger.debug(f"Extracted user_gc_id '{user_gc_id}' from URL: {file.file_url}")
+                    except Exception as e:
+                        logger.error(f"Failed to extract user_gc_id from URL: {file.file_url}. Error: {e}")
+                
+                pending_files.append({
+                    "id": file.id,
+                    "file_name": file.file_name,
+                    "file_url": file.file_url, 
+                    "user_id": file.user_id,
+                    "user_gc_id": user_gc_id,
+                    "created_at": file.created_at
+                })
         
         
         return pending_files

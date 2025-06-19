@@ -12,17 +12,18 @@ export interface User {
 
 }
 
+export type ProcessingStatus = 'uploaded' | 'processing' | 'extracted' | 'processed' | 'failed';
+
 export interface UploadedFile {
     id: number;
     name: string;
     publicUrl: string;
-    processed: boolean;
     upload_time?: string;
-    type: 'pdf' | 'image' | 'audio' | 'video' | 'text';
+    type: 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'youtube';
     size?: number; // File size in bytes
-    is_processed?: boolean; // Alias for processed
     viewStartTime?: number; // Timestamp when file was opened for viewing
-    // summary: string | null; // Removed summary
+    processing_status: ProcessingStatus; // Current processing state
+    error_message?: string | null; // Error message if processing failed
 }
 
 export interface KeyConcept {

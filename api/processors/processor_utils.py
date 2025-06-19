@@ -132,7 +132,7 @@ async def generate_learning_materials_for_concept(
                         await store.add_quiz_question_async(
                             file_id=int(file_id),
                             question=statement,
-                            question_type="TRUE_FALSE",
+                            question_type="TF",  # Must match frontend's expected type 'TF' for true/false
                             correct_answer="True" if is_true else "False",
                             key_concept_id=int(concept_id)
                         )
