@@ -6,6 +6,7 @@ import logging
 from typing import Dict, List, Optional, TypeVar, Generic, Any
 from repositories.repository_manager import RepositoryManager
 from pydantic import BaseModel, Field, create_model
+from schemas.learning_content import KeyConceptUpdate, FlashcardUpdate, QuizQuestionUpdate
 from llm_service import prompt_llm
 from datetime import datetime
 
@@ -215,6 +216,9 @@ class FlashcardResponse(BaseModel):
     is_custom: bool = False
     created_at: Optional[str] = None
 
+    class Config:
+        from_attributes = True
+
 class FlashcardsListResponse(BaseModel):
     flashcards: List[FlashcardResponse]
 
@@ -364,6 +368,61 @@ async def add_flashcard_for_file(
             message=f"Error creating flashcard: {str(e)[:100]}"
         )
 
+@files_router.put("/flashcards/{flashcard_id}", response_model=StandardResponse[FlashcardResponse])
+async def update_flashcard(
+    flashcard_id: int,
+    flashcard_update: FlashcardUpdate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        # Verify user owns the file associated with the flashcard
+        flashcard = store.get_flashcard_by_id(flashcard_id)
+        if not flashcard or not store.user_owns_file(user_id, flashcard.file_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or access denied.")
+
+        updated_flashcard = store.update_flashcard(
+            flashcard_id,
+            flashcard_update.dict(exclude_unset=True)
+        )
+
+        return StandardResponse(
+            status="success",
+            data=FlashcardResponse.from_orm(updated_flashcard),
+            message="Flashcard updated successfully."
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update flashcard.")
+
+@files_router.delete("/flashcards/{flashcard_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_flashcard(
+    flashcard_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        # Verify user owns the file associated with the flashcard
+        flashcard = store.get_flashcard_by_id(flashcard_id)
+        if not flashcard or not store.user_owns_file(user_id, flashcard.file_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or access denied.")
+
+        store.delete_flashcard(flashcard_id)
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error deleting flashcard {flashcard_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete flashcard.")
+
 # Define Quiz Question Response model for better type safety
 class QuizQuestionResponse(BaseModel):
     id: int
@@ -377,6 +436,9 @@ class QuizQuestionResponse(BaseModel):
     explanation: str = ""  # Empty string instead of None for frontend compatibility
     difficulty: str = "medium"  # Default value expected by frontend
     is_custom: bool = False  # Default for system-generated questions
+
+    class Config:
+        from_attributes = True
 
 class QuizzesListResponse(BaseModel):
     quizzes: List[QuizQuestionResponse]
@@ -577,6 +639,61 @@ async def add_quiz_question_for_file(
             message=f"Error creating quiz question: {str(e)[:100]}"
         )
 
+@files_router.put("/quizzes/{quiz_question_id}", response_model=StandardResponse[QuizQuestionResponse])
+async def update_quiz_question(
+    quiz_question_id: int,
+    quiz_question_update: QuizQuestionUpdate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        # Verify user owns the file associated with the quiz question
+        quiz_question = store.get_quiz_question_by_id(quiz_question_id)
+        if not quiz_question or not store.user_owns_file(user_id, quiz_question.file_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
+
+        updated_quiz_question = store.update_quiz_question(
+            quiz_question_id,
+            quiz_question_update.dict(exclude_unset=True)
+        )
+
+        return StandardResponse(
+            status="success",
+            data=QuizQuestionResponse.from_orm(updated_quiz_question),
+            message="Quiz question updated successfully."
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update quiz question.")
+
+@files_router.delete("/quizzes/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_quiz_question(
+    quiz_question_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        # Verify user owns the file associated with the quiz question
+        quiz_question = store.get_quiz_question_by_id(quiz_question_id)
+        if not quiz_question or not store.user_owns_file(user_id, quiz_question.file_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
+
+        store.delete_quiz_question(quiz_question_id)
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question.")
+
 # Route to re-extract a file (retry processing)
 @files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
 async def reextract_file(
@@ -733,3 +850,59 @@ async def get_key_concepts_for_file(
             count=0,
             message=f"Error processing request: {str(e)[:100]}"
         )
+
+@files_router.put("/key_concepts/{key_concept_id}", response_model=StandardResponse[KeyConceptResponse])
+async def update_key_concept(
+    key_concept_id: int,
+    key_concept_update: KeyConceptUpdate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        # Verify user owns the file associated with the key concept
+        key_concept = store.get_key_concept_by_id(key_concept_id)
+        if not key_concept or not store.user_owns_file(user_id, key_concept.file_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or access denied.")
+
+        updated_concept = store.update_key_concept(
+            key_concept_id,
+            key_concept_update.concept_title,
+            key_concept_update.concept_explanation
+        )
+
+        return StandardResponse(
+            status="success",
+            data=KeyConceptResponse.from_orm(updated_concept),
+            message="Key concept updated successfully."
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error updating key concept {key_concept_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update key concept.")
+
+@files_router.delete("/key_concepts/{key_concept_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_key_concept(
+    key_concept_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        # Verify user owns the file associated with the key concept
+        key_concept = store.get_key_concept_by_id(key_concept_id)
+        if not key_concept or not store.user_owns_file(user_id, key_concept.file_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or access denied.")
+
+        store.delete_key_concept(key_concept_id)
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error deleting key concept {key_concept_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete key concept.")

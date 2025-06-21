@@ -32,6 +32,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const [expandedConcepts, setExpandedConcepts] = useState<Set<number>>(new Set());
     const [highlightedConceptId, setHighlightedConceptId] = useState<number | null>(null);
     const [sortOrder, setSortOrder] = useState<'default' | 'alphabetical' | 'chronological'>('default');
+    const [editingConcept, setEditingConcept] = useState<KeyConcept | null>(null);
     
     // Custom key concepts state
     const [customKeyConcepts, setCustomKeyConcepts] = useState<KeyConcept[]>([]);
@@ -499,6 +500,69 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         </div>
     );
     
+    const handleEditConcept = (concept: KeyConcept) => {
+        setEditingConcept(JSON.parse(JSON.stringify(concept)));
+    };
+
+    const handleCancelEdit = () => {
+        setEditingConcept(null);
+    };
+
+    const handleSaveConcept = async (conceptId: number) => {
+        if (!editingConcept) return;
+
+        try {
+            const token = await user?.getIdToken();
+            const response = await fetch(`/api/v1/files/key_concepts/${conceptId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    concept_title: editingConcept.concept_title,
+                    concept_explanation: editingConcept.concept_explanation,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to save concept');
+            }
+
+            const updatedConcept = (await response.json()).data;
+            setKeyConcepts(keyConcepts.map(c => c.id === updatedConcept.id ? updatedConcept : c));
+            setEditingConcept(null);
+            addToast('Key concept saved!', 'success');
+        } catch (error) {
+            console.error('Save error:', error);
+            addToast('Error saving concept', 'error');
+        }
+    };
+
+    const handleDeleteConcept = async (conceptId: number) => {
+        if (window.confirm('Are you sure you want to delete this key concept?')) {
+            try {
+                const token = await user?.getIdToken();
+                const response = await fetch(`/api/v1/files/key_concepts/${conceptId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete concept');
+                }
+
+                setKeyConcepts(keyConcepts.filter(c => c.id !== conceptId));
+                addToast('Key concept deleted!', 'success');
+            } catch (error) {
+                console.error('Delete error:', error);
+                addToast('Error deleting concept', 'error');
+            }
+        }
+    };
+
     const renderKeyConcepts = () => {
         if (isLoadingKeyConcepts) {
             return <div className="loading-indicator">Loading key concepts...</div>;
@@ -587,33 +651,54 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                     {sortedConcepts.map((concept) => (
                         <div 
                             key={concept.id} 
-                            className={`key-concept-card ${highlightedConceptId === concept.id ? 'concept-highlight' : ''} ${concept.is_custom ? 'custom-concept' : ''}`}
-                        >
-                            <div 
-                                className="concept-header"
-                                onClick={() => expandConcept(concept.id)}
-                            >
-                                <h4>
-                                    {concept.concept_title || 'Untitled Concept'}
-                                    {concept.is_custom && <span className="custom-badge">Custom</span>}
-                                </h4>
-                                <span className="expand-icon">
-                                    {expandedConcepts.has(concept.id) ? "−" : "+"}
-                                </span>
-                            </div>
-                            
-                            {expandedConcepts.has(concept.id) && (
-                                <div className="concept-content">
-                                    <p>{concept.concept_explanation}</p>
-                                    <SourceLink concept={concept} onNavigate={handleKeyConceptSourceClick} />
-                                    <small>
-                                        {concept.created_at ? (
-                                            <em>Added: {new Date(concept.created_at).toLocaleString()}</em>
-                                        ) : concept.is_custom ? (
-                                            <em>Custom concept</em>
-                                        ) : null}
-                                    </small>
+                            className={`key-concept-card ${highlightedConceptId === concept.id ? 'concept-highlight' : ''} ${concept.is_custom ? 'custom-concept' : ''}`}>
+                            {editingConcept && editingConcept.id === concept.id ? (
+                                <div className="key-concept-edit-form">
+                                    <input 
+                                        type="text" 
+                                        value={editingConcept.concept_title || ''}
+                                        onChange={(e) => setEditingConcept({...editingConcept, concept_title: e.target.value})}
+                                        className="edit-concept-title-input"
+                                    />
+                                    <textarea 
+                                        value={editingConcept.concept_explanation || ''}
+                                        onChange={(e) => setEditingConcept({...editingConcept, concept_explanation: e.target.value})}
+                                        className="edit-concept-explanation-textarea"
+                                    />
+                                    <div className="edit-actions">
+                                        <button onClick={() => handleSaveConcept(concept.id)} className="save-btn">Save</button>
+                                        <button onClick={handleCancelEdit} className="cancel-btn">Cancel</button>
+                                    </div>
                                 </div>
+                            ) : (
+                                <>
+                                    <div className="concept-header" onClick={() => expandConcept(concept.id)}>
+                                        <h4>
+                                            {concept.concept_title || 'Untitled Concept'}
+                                            {concept.is_custom && <span className="custom-badge">Custom</span>}
+                                        </h4>
+                                        <div className="key-concept-actions">
+                                            <button onClick={(e) => {e.stopPropagation(); handleEditConcept(concept);}} className="action-btn">✏️</button>
+                                            <button onClick={(e) => {e.stopPropagation(); handleDeleteConcept(concept.id);}} className="action-btn">🗑️</button>
+                                            <span className="expand-icon">
+                                                {expandedConcepts.has(concept.id) ? "−" : "+"}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {expandedConcepts.has(concept.id) && (
+                                        <div className="concept-content">
+                                            <p>{concept.concept_explanation}</p>
+                                            <SourceLink concept={concept} onNavigate={handleKeyConceptSourceClick} />
+                                            <small>
+                                                {concept.created_at ? (
+                                                    <em>Added: {new Date(concept.created_at).toLocaleString()}</em>
+                                                ) : concept.is_custom ? (
+                                                    <em>Custom concept</em>
+                                                ) : null}
+                                            </small>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     ))}
@@ -1019,6 +1104,148 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         </div>
     );
 
+    const handleUpdateFlashcard = async (id: number, data: { question: string; answer: string }) => {
+        if (!user) {
+            addToast("You must be logged in to update a flashcard.", "error");
+            return;
+        }
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`/api/v1/files/flashcards/${id}`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify(data),
+                }
+            );
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to update flashcard');
+            }
+
+            const updatedFlashcardResponse = await response.json();
+            const updatedFlashcard = updatedFlashcardResponse.data;
+
+            setFlashcards(prev => prev.map(fc => (fc.id === id ? { ...fc, ...updatedFlashcard } : fc)));
+            setCustomFlashcards(prev => prev.map(fc => (fc.id === id ? { ...fc, ...updatedFlashcard } : fc)));
+
+            addToast("Flashcard updated successfully!", "success");
+        } catch (error) {
+            console.error("Error updating flashcard:", error);
+            let message = "An error occurred while updating the flashcard.";
+            if (error instanceof Error) {
+                message = error.message;
+            }
+            addToast(message, "error");
+        }
+    };
+
+    const handleDeleteFlashcard = async (id: number) => {
+        if (!user) {
+            addToast("You must be logged in to delete a flashcard.", "error");
+            return;
+        }
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`/api/v1/files/flashcards/${id}`,
+                {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                    },
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`Failed to delete flashcard. Server responded with ${response.status}`);
+            }
+
+            setFlashcards(prev => prev.filter(fc => fc.id !== id));
+            setCustomFlashcards(prev => prev.filter(fc => fc.id !== id));
+            addToast("Flashcard deleted successfully!", "success");
+        } catch (error) {
+            console.error("Error deleting flashcard:", error);
+            let message = "An error occurred while deleting the flashcard.";
+            if (error instanceof Error) {
+                message = error.message;
+            }
+            addToast(message, "error");
+        }
+    };
+
+    const handleUpdateQuiz = async (id: number, data: Partial<QuizQuestion>) => {
+        if (!user) {
+            addToast("You must be logged in to update a quiz question.", "error");
+            return;
+        }
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`/api/v1/files/quizzes/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify(data),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Failed to update quiz question');
+            }
+
+            const updatedQuizResponse = await response.json();
+            const updatedQuizQuestion = updatedQuizResponse.data;
+
+            setQuizzes((prev: QuizQuestion[]) => prev.map(q => (q.id === id ? { ...q, ...updatedQuizQuestion } : q)));
+            setCustomQuizzes((prev: QuizQuestion[]) => prev.map(q => (q.id === id ? { ...q, ...updatedQuizQuestion } : q)));
+
+            addToast("Quiz question updated successfully!", "success");
+        } catch (error) {
+            console.error("Error updating quiz question:", error);
+            let message = "An error occurred while updating the quiz question.";
+            if (error instanceof Error) {
+                message = error.message;
+            }
+            addToast(message, "error");
+        }
+    };
+
+    const handleDeleteQuiz = async (id: number) => {
+        if (!user) {
+            addToast("You must be logged in to delete a quiz question.", "error");
+            return;
+        }
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`/api/v1/files/quizzes/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to delete quiz question. Server responded with ${response.status}`);
+            }
+
+            setQuizzes((prev: QuizQuestion[]) => prev.filter(q => q.id !== id));
+            setCustomQuizzes((prev: QuizQuestion[]) => prev.filter(q => q.id !== id));
+            addToast("Quiz question deleted successfully!", "success");
+        } catch (error) {
+            console.error("Error deleting quiz question:", error);
+            let message = "An error occurred while deleting the quiz question.";
+            if (error instanceof Error) {
+                message = error.message;
+            }
+            addToast(message, "error");
+        }
+    };
+
     const renderContent = () => {
         switch (tab) {
             case 'Key Concepts':
@@ -1050,7 +1277,11 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                                         No flashcards available. Create your own to get started!
                                     </div>
                                 ) : (
-                                    <FlashcardViewer flashcards={allFlashcards} />
+                                    <FlashcardViewer 
+                                        flashcards={allFlashcards}
+                                        onUpdateFlashcard={handleUpdateFlashcard}
+                                        onDeleteFlashcard={handleDeleteFlashcard}
+                                    />
                                 )}
                             </>
                         )}
@@ -1082,7 +1313,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                                         No quiz questions available. Create your own to get started!
                                     </div>
                                 ) : (
-                                    <QuizInterface questions={allQuizzes} />
+                                    <QuizInterface questions={allQuizzes} onUpdateQuiz={handleUpdateQuiz} onDeleteQuiz={handleDeleteQuiz} />
                                 )}
                             </>
                         )}

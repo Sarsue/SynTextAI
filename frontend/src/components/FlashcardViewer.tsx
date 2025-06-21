@@ -13,11 +13,16 @@ interface Flashcard {
 
 interface FlashcardViewerProps {
   flashcards: Flashcard[];
+  onUpdateFlashcard: (id: number, data: { question: string; answer: string }) => void;
+  onDeleteFlashcard: (id: number) => void;
 }
 
-const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards }) => {
+const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateFlashcard, onDeleteFlashcard }) => {
   const [current, setCurrent] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedQuestion, setEditedQuestion] = useState('');
+  const [editedAnswer, setEditedAnswer] = useState('');
   const [cardStatus, setCardStatus] = useState<{ [id: number]: 'known' | 'needs_review' | 'unseen' }>(
     Object.fromEntries(flashcards.map(fc => [fc.id, 'unseen']))
   );
@@ -42,27 +47,85 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards }) => {
   if (!flashcards.length) return <div>No flashcards available.</div>;
 
   const card = flashcards[current];
-  const status = cardStatus[card.id];
+  const status = card ? cardStatus[card.id] : 'unseen';
+
+  const handleEdit = () => {
+    if (!card) return;
+    setEditedQuestion(card.question);
+    setEditedAnswer(card.answer);
+    setIsEditing(true);
+    setFlipped(false); // Exit flip mode when editing
+  };
+
+  const handleCancel = () => {
+    setIsEditing(false);
+  };
+
+  const handleSave = () => {
+    if (!card) return;
+    onUpdateFlashcard(card.id, { question: editedQuestion, answer: editedAnswer });
+    setIsEditing(false);
+  };
+
+  const handleDelete = () => {
+    if (!card) return;
+    if (window.confirm('Are you sure you want to delete this flashcard?')) {
+      onDeleteFlashcard(card.id);
+      if (current >= flashcards.length - 1) {
+        setCurrent(Math.max(0, flashcards.length - 2));
+      }
+    }
+  };
 
   return (
     <div className="flashcard-viewer">
       <div className="progress-indicator">
         {reviewed}/{total} cards reviewed
       </div>
-      <div className={`flashcard${flipped ? ' flipped' : ''}`} onClick={handleFlip}>
-        <div className="flashcard-inner">
-          <div className="flashcard-front">{card.question}</div>
-          <div className="flashcard-back">{card.answer}</div>
+
+      {isEditing ? (
+        <div className="flashcard-editor">
+          <div className="edit-field">
+            <label>Question</label>
+            <textarea value={editedQuestion} onChange={(e) => setEditedQuestion(e.target.value)} />
+          </div>
+          <div className="edit-field">
+            <label>Answer</label>
+            <textarea value={editedAnswer} onChange={(e) => setEditedAnswer(e.target.value)} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className={`flashcard${flipped ? ' flipped' : ''}`} onClick={!isEditing ? handleFlip : undefined}>
+          <div className="flashcard-inner">
+            <div className="flashcard-front">{card.question}</div>
+            <div className="flashcard-back">{card.answer}</div>
+          </div>
+        </div>
+      )}
+
       <div className="navigation">
-        <button onClick={handlePrev} disabled={current === 0}>Previous</button>
-        <button onClick={handleNext} disabled={current === total - 1}>Next</button>
+        <button onClick={handlePrev} disabled={current === 0 || isEditing}>Previous</button>
+        <button onClick={handleNext} disabled={current === total - 1 || isEditing}>Next</button>
       </div>
-      <div className="actions">
-        <button onClick={() => markCard('known')} disabled={status === 'known'}>Mark as Known</button>
-        <button onClick={() => markCard('needs_review')} disabled={status === 'needs_review'}>Needs Review</button>
-      </div>
+
+      {isEditing ? (
+        <div className="actions">
+          <button onClick={handleSave}>Save</button>
+          <button onClick={handleCancel}>Cancel</button>
+        </div>
+      ) : (
+        <div className="actions">
+          <button onClick={() => markCard('known')} disabled={status === 'known'}>Mark as Known</button>
+          <button onClick={() => markCard('needs_review')} disabled={status === 'needs_review'}>Needs Review</button>
+        </div>
+      )}
+
+      {!isEditing && (
+        <div className="custom-actions">
+            <button className="edit-btn" onClick={handleEdit}>Edit</button>
+            <button className="delete-btn" onClick={handleDelete}>Delete</button>
+        </div>
+      )}
     </div>
   );
 };

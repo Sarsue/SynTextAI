@@ -110,33 +110,7 @@ interface FileStatusEntry { isDeleting?: boolean; }
         <div className={`knowledgebase-container ${darkMode ? 'dark-mode' : ''}`}>
             <div className="knowledgebase-header">
                 <h3>📚 Knowledge Base</h3>
-                <div className="pagination-controls">
-                    <button 
-                        onClick={() => handlePageChange(filePagination.page - 1)}
-                        disabled={filePagination.page <= 1 || isLoadingFiles}
-                        className="pagination-button"
-                    >
-                        Previous
-                    </button>
-                    <span>Page {filePagination.page}</span>
-                    <button 
-                        onClick={handleNextPage}
-                        disabled={filePagination.page * filePagination.pageSize >= filePagination.totalItems || isLoadingFiles}
-                        className="pagination-button"
-                    >
-                        Next
-                    </button>
-                    <select 
-                        value={filePagination.pageSize} 
-                        onChange={handlePageSizeChange}
-                        className="page-size-selector"
-                        disabled={isLoadingFiles}
-                    >
-                        <option value={10}>10 per page</option>
-                        <option value={25}>25 per page</option>
-                    </select>
-                    {isLoadingFiles && <span className="loading-indicator">Loading...</span>}
-                </div>
+
             </div>
             <div className="file-status-legend">
                 <p><span className="status-indicator processing"></span> Processing</p>
@@ -221,6 +195,14 @@ interface FileStatusEntry { isDeleting?: boolean; }
                 )}
             </ul>
 
+
+
+            <div className="kb-help-text">
+                <p>Use the + button in the chat to upload files or YouTube videos</p>
+                <p>Processing happens automatically in the background</p>
+                <p>Files are ready when marked with a ✅</p>
+            </div>
+
             <div className="kb-pagination-controls">
                 <button
                     onClick={() => handlePageChange(filePagination.page - 1)}
@@ -246,11 +228,6 @@ interface FileStatusEntry { isDeleting?: boolean; }
                 </select>
             </div>
 
-            <div className="kb-help-text">
-                <p>Use the + button in the chat to upload files or YouTube videos</p>
-                <p>Processing happens automatically in the background</p>
-                <p>Files are ready when marked with a ✅</p>
-            </div>
 
         </div>
     );

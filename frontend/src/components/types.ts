@@ -82,6 +82,7 @@ export interface QuizQuestion {
     question_type: 'MCQ' | 'TF';
     correct_answer: string;
     distractors: string[];
+    is_custom?: boolean;
 }
 
 export interface PaginationState {

@@ -750,6 +750,18 @@ class RepositoryManager:
     def get_key_concepts_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get key concepts for a file."""
         return self.learning_material_repo.get_key_concepts_for_file(file_id)
+
+    def get_key_concept_by_id(self, key_concept_id: int):
+        """Get a single key concept by its ID."""
+        return self.learning_material_repo.get_key_concept_by_id(key_concept_id)
+
+    def update_key_concept(self, key_concept_id: int, title: Optional[str], explanation: Optional[str]):
+        """Update a key concept's title and/or explanation."""
+        return self.learning_material_repo.update_key_concept(key_concept_id, title, explanation)
+
+    def delete_key_concept(self, key_concept_id: int):
+        """Delete a key concept by its ID."""
+        return self.learning_material_repo.delete_key_concept(key_concept_id)
     
     async def get_key_concepts_for_file_async(self, file_id: int) -> List[Dict[str, Any]]:
         """Async wrapper for get_key_concepts_for_file.
@@ -784,10 +796,34 @@ class RepositoryManager:
     def get_flashcards_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get flashcards for a file."""
         return self.learning_material_repo.get_flashcards_for_file(file_id)
+
+    def get_flashcard_by_id(self, flashcard_id: int):
+        """Get a single flashcard by its ID."""
+        return self.learning_material_repo.get_flashcard_by_id(flashcard_id)
+
+    def update_flashcard(self, flashcard_id: int, update_data: Dict[str, Any]):
+        """Update a flashcard."""
+        return self.learning_material_repo.update_flashcard(flashcard_id, update_data)
+
+    def delete_flashcard(self, flashcard_id: int):
+        """Delete a flashcard by its ID."""
+        return self.learning_material_repo.delete_flashcard(flashcard_id)
     
     def get_quiz_questions_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get all quiz questions for a file."""
         return self.learning_material_repo.get_quiz_questions_for_file(file_id)
+
+    def get_quiz_question_by_id(self, quiz_question_id: int):
+        """Get a single quiz question by its ID."""
+        return self.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
+
+    def update_quiz_question(self, quiz_question_id: int, update_data: Dict[str, Any]):
+        """Update a quiz question."""
+        return self.learning_material_repo.update_quiz_question(quiz_question_id, update_data)
+
+    def delete_quiz_question(self, quiz_question_id: int):
+        """Delete a quiz question by its ID."""
+        return self.learning_material_repo.delete_quiz_question(quiz_question_id)
         
     def add_key_concept(self, file_id: int, concept_title: str, concept_explanation: str, **kwargs) -> Optional[int]:
         """Add a new key concept for a file."""

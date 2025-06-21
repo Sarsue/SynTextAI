@@ -622,8 +622,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             {/* Right Sidebar: History View */}
             <aside className="sidebar-right history-column">
                 <div className="logout-button-container">
-                    <WebSocketStatusIndicator />
                     <button onClick={handleLogout} className="button-secondary">Logout</button>
+                    <WebSocketStatusIndicator />
                 </div>
                 <HistoryView
                     histories={Object.values(histories)}

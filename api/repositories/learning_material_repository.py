@@ -187,6 +187,49 @@ class LearningMaterialRepository(BaseRepository):
 
             return flashcards
             
+    def get_flashcard_by_id(self, flashcard_id: int) -> Optional[FlashcardORM]:
+        """Get a single flashcard by its ID."""
+        with self.get_unit_of_work() as uow:
+            try:
+                return uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+            except Exception as e:
+                logger.error(f"Error fetching flashcard {flashcard_id}: {e}", exc_info=True)
+                return None
+
+    def update_flashcard(self, flashcard_id: int, update_data: Dict[str, Any]) -> Optional[FlashcardORM]:
+        """Update a flashcard."""
+        with self.get_unit_of_work() as uow:
+            try:
+                flashcard_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+                if not flashcard_orm:
+                    return None
+
+                for key, value in update_data.items():
+                    setattr(flashcard_orm, key, value)
+                
+                uow.session.commit()
+                return flashcard_orm
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
+                return None
+
+    def delete_flashcard(self, flashcard_id: int) -> bool:
+        """Delete a flashcard by its ID."""
+        with self.get_unit_of_work() as uow:
+            try:
+                flashcard_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+                if not flashcard_orm:
+                    return False
+                
+                uow.session.delete(flashcard_orm)
+                uow.session.commit()
+                return True
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error deleting flashcard {flashcard_id}: {e}", exc_info=True)
+                return False
+            
     # Quiz questions methods
     def add_quiz_question(
         self, 
@@ -281,3 +324,104 @@ class LearningMaterialRepository(BaseRepository):
                 raise
 
             return quizzes
+
+    def get_quiz_question_by_id(self, quiz_question_id: int) -> Optional[QuizQuestionORM]:
+        """Get a single quiz question by its ID."""
+        with self.get_unit_of_work() as uow:
+            try:
+                return uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+            except Exception as e:
+                logger.error(f"Error fetching quiz question {quiz_question_id}: {e}", exc_info=True)
+                return None
+
+    def update_quiz_question(self, quiz_question_id: int, update_data: Dict[str, Any]) -> Optional[QuizQuestionORM]:
+        """Update a quiz question."""
+        with self.get_unit_of_work() as uow:
+            try:
+                quiz_question_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+                if not quiz_question_orm:
+                    return None
+
+                for key, value in update_data.items():
+                    setattr(quiz_question_orm, key, value)
+                
+                uow.session.commit()
+                return quiz_question_orm
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
+                return None
+
+    def delete_quiz_question(self, quiz_question_id: int) -> bool:
+        """Delete a quiz question by its ID."""
+        with self.get_unit_of_work() as uow:
+            try:
+                quiz_question_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+                if not quiz_question_orm:
+                    return False
+                
+                uow.session.delete(quiz_question_orm)
+                uow.session.commit()
+                return True
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
+                return False
+
+    def get_key_concept_by_id(self, key_concept_id: int) -> Optional[KeyConcept]:
+        """Get a single key concept by its ID."""
+        with self.get_unit_of_work() as uow:
+            try:
+                concept_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
+                if not concept_orm:
+                    return None
+                
+                return KeyConcept(
+                    id=concept_orm.id,
+                    file_id=concept_orm.file_id,
+                    concept_title=concept_orm.concept_title,
+                    concept_explanation=concept_orm.concept_explanation,
+                    source_page_number=concept_orm.source_page_number,
+                    source_video_timestamp_start_seconds=concept_orm.source_video_timestamp_start_seconds,
+                    source_video_timestamp_end_seconds=concept_orm.source_video_timestamp_end_seconds,
+                    created_at=concept_orm.created_at
+                )
+            except Exception as e:
+                logger.error(f"Error fetching key concept {key_concept_id}: {e}", exc_info=True)
+                return None
+
+    def update_key_concept(self, key_concept_id: int, title: Optional[str], explanation: Optional[str]) -> Optional[KeyConceptORM]:
+        """Update a key concept's title and/or explanation."""
+        with self.get_unit_of_work() as uow:
+            try:
+                concept_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
+                if not concept_orm:
+                    return None
+
+                if title is not None:
+                    concept_orm.concept_title = title
+                if explanation is not None:
+                    concept_orm.concept_explanation = explanation
+                
+                uow.session.commit()
+                return concept_orm
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error updating key concept {key_concept_id}: {e}", exc_info=True)
+                return None
+
+    def delete_key_concept(self, key_concept_id: int) -> bool:
+        """Delete a key concept by its ID."""
+        with self.get_unit_of_work() as uow:
+            try:
+                concept_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
+                if not concept_orm:
+                    return False
+                
+                uow.session.delete(concept_orm)
+                uow.session.commit()
+                return True
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error deleting key concept {key_concept_id}: {e}", exc_info=True)
+                return False
