@@ -3,10 +3,16 @@
     background-color: var(--background-color);
     color: var(--text-color);
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     height: 100vh;
-    gap: 16px; /* Adds spacing between columns */
     transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.layout-container {
+    display: flex;
+    flex: 1;
+    gap: 16px;
+    overflow: hidden;
 }
 
 /* Column Styles */
