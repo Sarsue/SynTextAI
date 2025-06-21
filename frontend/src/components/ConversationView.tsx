@@ -152,4 +152,4 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
     );
 };
 
-export default ConversationView;
+export default React.memo(ConversationView);

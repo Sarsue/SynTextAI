@@ -207,7 +207,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     }, [user]);
 
     const handleSettingsClick = () => {
-        trackAction(AnalyticsEvents.SETTINGS_VIEW, 'navigation');
+        trackAction(AnalyticsEvents.BUTTON_CLICK, 'navigation', 'settings_button');
         navigate('/settings');
     };
 
