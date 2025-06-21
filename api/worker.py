@@ -72,21 +72,25 @@ INITIAL_POLL_INTERVAL = 10  # Start with 10 seconds
 MAX_POLL_INTERVAL = 300     # 5 minutes maximum
 POLL_BACKOFF_FACTOR = 1.5   # 1.5x backoff factor
 
-# WebSocket configuration
-WEBSOCKET_URL = os.getenv("WEBSOCKET_URL", "ws://localhost:3000/ws/")
+# API configuration for notifications
+API_NOTIFY_URL = os.getenv("API_NOTIFY_URL", "http://api:3000/api/v1/internal/notify-client")
 
-async def notify_websocket(user_id: str, event_type: str, data: dict):
-    """Send a WebSocket notification to the frontend"""
+async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
+    """Send a notification to the main API via HTTP POST"""
+    payload = {
+        "user_gc_id": user_gc_id,
+        "event_type": event_type,
+        "data": data
+    }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.ws_connect(f"{WEBSOCKET_URL}{user_id}") as ws:
-                await ws.send_json({
-                    "event": event_type,
-                    "data": data
-                })
-        logger.info(f"Sent WebSocket notification for {event_type} to user {user_id}")
+            async with session.post(API_NOTIFY_URL, json=payload) as response:
+                if response.status == 200:
+                    logger.info(f"Sent notification for {event_type} to user {user_gc_id} via API")
+                else:
+                    logger.error(f"Failed to send notification via API. Status: {response.status}, Response: {await response.text()}")
     except Exception as e:
-        logger.error(f"Failed to send WebSocket notification: {e}")
+        logger.error(f"Exception while sending notification to API: {e}")
 
 # Global semaphore for limiting concurrent file processing
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
@@ -122,7 +126,6 @@ def get_repository_manager():
 
 async def update_file_status(file_id: int, status: str, error: str = None) -> None:
     """Update file status in the database using SQLAlchemy ORM"""
-    user_id = None
     try:
         from sqlalchemy.exc import SQLAlchemyError
         from models import File
@@ -131,7 +134,6 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
         
         with store.file_repo.get_unit_of_work() as uow:
             try:
-                # Get the file and lock the row for update
                 file = uow.session.query(File).filter(
                     File.id == file_id
                 ).with_for_update().first()
@@ -140,30 +142,12 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                     logger.error(f"File with ID {file_id} not found")
                     return
                 
-                # Store user_id for WebSocket notification
-                user_id = str(file.user_id)
-                
-                # Update status and error message if provided
-                previous_status = file.processing_status
                 file.processing_status = status
                 if error:
                     file.error_message = error
                 
-                # Commit the transaction
                 uow.session.commit()
                 logger.info(f"Successfully updated file {file_id} status to {status}")
-                
-                # Send WebSocket notification if status changed
-                if previous_status != status and user_id:
-                    await notify_websocket(
-                        user_id=user_id,
-                        event_type="file_status_update",
-                        data={
-                            "file_id": file_id,
-                            "status": status,
-                            "error": error
-                        }
-                    )
                 
             except SQLAlchemyError as e:
                 uow.session.rollback()
@@ -172,21 +156,6 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                 
     except Exception as e:
         logger.exception(f"Error updating file {file_id} status: {str(e)}")
-        
-        # Try to send error notification if we have user_id
-        if user_id:
-            try:
-                await notify_websocket(
-                    user_id=user_id,
-                    event_type="file_status_error",
-                    data={
-                        "file_id": file_id,
-                        "error": str(e)
-                    }
-                )
-            except Exception as ws_error:
-                logger.error(f"Failed to send WebSocket error notification: {ws_error}")
-        
         raise
 
 async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
@@ -206,14 +175,16 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
             is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
             logger.info(f"[TRACE] File type detection - is_youtube: {is_youtube}")
                 
-            # Update status to PROCESSING
-            logger.info(f"[TRACE] Updating status to PROCESSING for file_id: {file_id}")
+            # Update status to PROCESSING and notify frontend
             await update_file_status(file_id, "processing")
-            logger.info(f"[TRACE] Successfully updated status to PROCESSING for file_id: {file_id}")
-            
+            await send_notification_to_api(user_gc_id, 'file_status_update', {
+                'file_id': file_id,
+                'status': 'processing',
+                'progress': 10,
+            })
+
             try:
                 # Process the file
-                logger.info(f"[TRACE] Starting process_file_data for file_id: {file_id}")
                 from api.tasks import process_file_data
                 await process_file_data(
                     user_gc_id=user_gc_id,
@@ -225,43 +196,26 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
                     language=language,
                     comprehension_level=comprehension_level
                 )
-                logger.info(f"[TRACE] Completed process_file_data for file_id: {file_id}")
-                
-                # Verify the status was set to processed in process_file_data
-                repo = get_repository_manager()
-                with repo.file_repo.get_unit_of_work() as uow:
-                    file = uow.session.query(File).filter_by(id=file_id).first()
-                    if file and file.processing_status == "processed":
-                        logger.info(f"[TRACE] File {file_id} already marked as processed")
-                        return
-                        
-                # If not marked as processed, update it now
-                logger.info(f"[TRACE] Updating status to PROCESSED for file_id: {file_id}")
+
+                # Update status to PROCESSED and notify frontend
                 await update_file_status(file_id, "processed")
-                logger.info(f"[TRACE] Successfully completed processing file {filename} (ID: {file_id})")
-                    
+                await send_notification_to_api(user_gc_id, 'file_status_update', {
+                    'file_id': file_id,
+                    'status': 'processed',
+                    'progress': 100,
+                })
+                logger.info(f"Successfully completed processing file {filename} (ID: {file_id})")
+
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"[ERROR] Error in process_file_data for file {file_id}: {error_msg}", exc_info=True)
-                # Update status to FAILED with error message
-                try:
-                    logger.error(f"[ERROR] Updating status to FAILED for file_id: {file_id}")
-                    await update_file_status(file_id, "failed")
-                    logger.error(f"[ERROR] Successfully updated status to FAILED for file_id: {file_id}")
-                except Exception as update_err:
-                    logger.error(f"[ERROR] Failed to update file status to failed: {str(update_err)}", exc_info=True)
-                    # If we can't update status, try one more time with a new session
-                    try:
-                        repo = get_repository_manager()
-                        with repo.file_repo.get_unit_of_work() as uow:
-                            file = uow.session.query(File).filter_by(id=file_id).first()
-                            if file:
-                                file.processing_status = "failed"
-                                uow.session.commit()
-                                logger.error(f"[RECOVERY] Successfully updated status to FAILED for file_id: {file_id} using new session")
-                    except Exception as recovery_err:
-                        logger.error(f"[RECOVERY] Failed to update status with new session: {str(recovery_err)}", exc_info=True)
-                
+                logger.error(f"Error processing file {file_id}: {error_msg}", exc_info=True)
+                # Update status to FAILED and notify frontend
+                await update_file_status(file_id, "failed", error=error_msg)
+                await send_notification_to_api(user_gc_id, 'file_status_update', {
+                    'file_id': file_id,
+                    'status': 'failed',
+                    'error': error_msg,
+                })
                 # Re-raise the original error to allow retry logic to work
                 raise
                 

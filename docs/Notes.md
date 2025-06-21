@@ -1,39 +1,16 @@
-SyntextAI is an information and knowledge assistant for learning
-
-default or user preferences (settings | customizations)
-theme
-language
-comprehension level
-domain
-web search
-
-
-Documents to be supported
-PDF
-Youtube link
-MP4
-Csv
-Images
-PPT
-
-
-
-Preprocessing
-update frontend and give user ability to fix issues in preprocessing pipeline
-dspy 
+SyntextAI knowledge assistant
 
 1. QA
 answers with source from documents and or web pages
 with references included
 
 
-2. Explanations (notes)
+2. Key Concepts (Flashcards and Key Concepts)
 as we extract data we create detailed explanations to help understand the content using web if we must to learn 
 
 give user choice to edit and enhance notes
 - page - pdf
 - time stamps for videos
-- row index for financial sheets
 
 3. Evaluations (Quiz)
 options for multi-choice or type response (easy | hard mode)
