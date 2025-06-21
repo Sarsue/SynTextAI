@@ -207,7 +207,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     }, [user]);
 
     const handleSettingsClick = () => {
-        trackAction('settings_click', 'navigation');
+        trackAction(AnalyticsEvents.SETTINGS_VIEW, 'navigation');
         navigate('/settings');
     };
 
@@ -596,44 +596,54 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     return (
         <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''}`}>
-            {/* Left Sidebar: Knowledge Base */}
-            <aside className="sidebar-left knowledge-column">
-                <KnowledgeBaseComponent
-                    onFileClick={setSelectedFile}
-                    darkMode={darkMode}
-                />
-            </aside>
-
-            {/* Main Content: Conversation View and Input */}
-            <main className="main-content-area chat-column">
-                <ConversationView
-                    files={userFiles}
-                    history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
-                    onCopy={handleCopy}
-                />
-                <InputArea
-                    onSend={handleSend}
-                    isSending={isSending}
-                    token={idTokenRef.current}
-                    onContentAdded={() => {}}
-                />
-            </main>
-
-            {/* Right Sidebar: History View */}
-            <aside className="sidebar-right history-column">
-                <div className="logout-button-container">
-                    <button onClick={handleLogout} className="button-secondary">Logout</button>
-                    <WebSocketStatusIndicator />
+            {isMobile && (
+                <div className="tabs">
+                    <button className={activeTab === 'knowledge' ? 'active' : ''} onClick={() => setActiveTab('knowledge')}>Knowledge</button>
+                    <button className={activeTab === 'chat' ? 'active' : ''} onClick={() => setActiveTab('chat')}>Chat</button>
+                    <button className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')}>History</button>
                 </div>
-                <HistoryView
-                    histories={Object.values(histories)}
-                    setCurrentHistory={setCurrentHistory}
-                    onNewChat={handleNewChat}
-                    onDeleteHistory={handleDeleteHistory}
-                />
-            </aside>
+            )}
+            <div className="layout-container">
+                <aside className={`sidebar-left knowledge-column ${activeTab === 'knowledge' ? 'active' : ''}`}>
+                    <KnowledgeBaseComponent
+                        onFileClick={setSelectedFile}
+                        darkMode={darkMode}
+                    />
+                    <div className="settings-button-container">
+                        <button onClick={handleSettingsClick} className="button-secondary settings-btn">
+                            ⚙️ Settings
+                        </button>
+                    </div>
+                </aside>
 
-            {/* File Viewer Modal (covers the screen) */}
+                <main className={`main-content-area chat-column ${activeTab === 'chat' ? 'active' : ''}`}>
+                    <ConversationView
+                        files={userFiles}
+                        history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
+                        onCopy={handleCopy}
+                    />
+                    <InputArea
+                        onSend={handleSend}
+                        isSending={isSending}
+                        token={idTokenRef.current}
+                        onContentAdded={() => {}}
+                    />
+                </main>
+
+                <aside className={`sidebar-right history-column ${activeTab === 'history' ? 'active' : ''}`}>
+                    <div className="logout-button-container">
+                        <button onClick={handleLogout} className="button-secondary">Logout</button>
+                        <WebSocketStatusIndicator />
+                    </div>
+                    <HistoryView
+                        histories={Object.values(histories)}
+                        setCurrentHistory={setCurrentHistory}
+                        onNewChat={handleNewChat}
+                        onDeleteHistory={handleDeleteHistory}
+                    />
+                </aside>
+            </div>
+
             {selectedFile && (
                 <FileViewerComponent
                     file={selectedFile!}

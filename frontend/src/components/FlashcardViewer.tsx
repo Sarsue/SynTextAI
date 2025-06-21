@@ -104,28 +104,27 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateF
       )}
 
       <div className="navigation">
-        <button onClick={handlePrev} disabled={current === 0 || isEditing}>Previous</button>
-        <button onClick={handleNext} disabled={current === total - 1 || isEditing}>Next</button>
+        <button onClick={handlePrev} disabled={current === 0 || isEditing} className="icon-btn">⬅️</button>
+        <button onClick={handleNext} disabled={current === total - 1 || isEditing} className="icon-btn">➡️</button>
       </div>
 
-      {isEditing ? (
-        <div className="actions">
-          <button onClick={handleSave}>Save</button>
-          <button onClick={handleCancel}>Cancel</button>
-        </div>
-      ) : (
-        <div className="actions">
-          <button onClick={() => markCard('known')} disabled={status === 'known'}>Mark as Known</button>
-          <button onClick={() => markCard('needs_review')} disabled={status === 'needs_review'}>Needs Review</button>
-        </div>
-      )}
-
-      {!isEditing && (
-        <div className="custom-actions">
-            <button className="edit-btn" onClick={handleEdit}>Edit</button>
-            <button className="delete-btn" onClick={handleDelete}>Delete</button>
-        </div>
-      )}
+      <div className="actions">
+        {isEditing ? (
+          <>
+            <button onClick={handleSave}>Save</button>
+            <button onClick={handleCancel}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => markCard('known')} disabled={status === 'known'} className="icon-btn">✅</button>
+            <button onClick={() => markCard('needs_review')} disabled={status === 'needs_review'} className="icon-btn">🤔</button>
+            <div className="custom-actions">
+              <button className="icon-btn edit-btn" onClick={handleEdit}>✏️</button>
+              <button className="icon-btn delete-btn" onClick={handleDelete}>🗑️</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };

@@ -128,12 +128,6 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
 
   return (
     <div className="quiz-interface">
-       {q && !isEditing && (
-        <div className="custom-actions">
-            <button className="edit-btn" onClick={handleEdit}>Edit</button>
-            <button className="delete-btn" onClick={handleDelete}>Delete</button>
-        </div>
-      )}
       <div className="progress-indicator">
         {progress}/{total} questions answered | Score: {score}
       </div>
@@ -152,20 +146,28 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
           ))}
         </div>
       </div>
-      {!answered[q.id] && (
-        <button onClick={handleSubmit} disabled={selected == null}>Submit</button>
-      )}
+      <div className="actions">
+        {!answered[q.id] && (
+          <button onClick={handleSubmit} disabled={!selected} className="icon-btn">📤</button>
+        )}
+        <button onClick={handleRestart} className="icon-btn restart-btn">🔄</button>
+        {q && !isEditing && (
+          <div className="custom-actions">
+            <button className="icon-btn edit-btn" onClick={handleEdit}>✏️</button>
+            <button className="icon-btn delete-btn" onClick={handleDelete}>🗑️</button>
+          </div>
+        )}
+      </div>
+
       {showFeedback && (
         <div className={`feedback ${isCorrect ? 'correct' : 'incorrect'}`}>
           {isCorrect ? 'Correct!' : `Incorrect. Correct answer: ${q.correct_answer}`}
         </div>
       )}
+
       <div className="navigation">
-        <button onClick={handlePrev} disabled={current === 0}>Previous</button>
-        <button onClick={handleNext} disabled={current === total - 1}>Next</button>
-      </div>
-      <div className="actions">
-        <button onClick={handleRestart}>Restart Quiz</button>
+        <button onClick={handlePrev} disabled={current === 0} className="icon-btn">⬅️</button>
+        <button onClick={handleNext} disabled={current === total - 1} className="icon-btn">➡️</button>
       </div>
     </div>
   );

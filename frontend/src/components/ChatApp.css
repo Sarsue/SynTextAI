@@ -62,6 +62,47 @@
     opacity: 0.9;
 }
 
+/* Settings Button */
+.settings-button-container {
+    margin-top: auto; /* Pushes it to the bottom */
+    padding-top: 16px;
+    border-top: 1px solid #e0e0e0; /* Separator */
+}
+
+.dark-mode .settings-button-container {
+    border-top-color: #444;
+}
+
+.settings-btn {
+    width: 100%;
+    padding: 12px;
+    background-color: transparent;
+    border: 1px solid #ccc;
+    color: var(--text-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.settings-btn:hover {
+    background-color: #f0f0f0;
+    border-color: #bbb;
+}
+
+.dark-mode .settings-btn {
+    border-color: #555;
+}
+
+.dark-mode .settings-btn:hover {
+    background-color: #3a3a3a;
+    border-color: #666;
+}
+
 /* Mobile Adjustments */
 @media (max-width: 768px) {
     .layout-container {
