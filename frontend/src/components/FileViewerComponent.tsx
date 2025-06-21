@@ -70,7 +70,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const youtubePlayerRef = useRef<any>(null);
 
     const fileId = file.id;
-    const fileUrl = file.publicUrl;
+    const fileUrl = file.file_url;
 
     const getFileType = (urlOrName: string): string | null => {
         // Check for YouTube URLs first using a regex
@@ -258,24 +258,24 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
     useEffect(() => {
         // Set file type immediately to avoid null values in logs and UI
-        const urlToTest = fileUrl || file.name; 
+        const urlToTest = fileUrl || file.file_name; 
         const type = getFileType(urlToTest) || 'unknown';
         
-        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File status: ${file.processing_status}`);
+        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File status: ${file.status}`);
         
         // Set file type right away
         setFileType(type);
 
         if (type === 'unknown') {
-            onError(`Unsupported file type or could not determine type for: ${file.name}`);
+            onError(`Unsupported file type or could not determine type for: ${file.file_name}`);
         }
         
         // Only fetch data if user is logged in, file ID exists, and file is not yet processed
         if (user && fileId) {
             // If the file is processed, we only need to fetch data once
             // If not processed, we continue polling for data
-            if (file.processing_status !== 'processed') {
-                console.log(`File ${fileId} is not yet processed (status: ${file.processing_status}). Fetching data...`);
+            if (file.status !== 'processed') {
+                console.log(`File ${fileId} is not yet processed (status: ${file.status}). Fetching data...`);
                 fetchKeyConcepts();
                 fetchFlashcards();
                 fetchQuizzes();
@@ -287,7 +287,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 if (quizzes.length === 0) fetchQuizzes();
             }
         }
-    }, [fileUrl, file.name, onError, file.processing_status, user, fileId]); 
+    }, [fileUrl, file.file_name, onError, file.status, user, fileId]); 
 
     // We no longer need placeholder data since users can create their own content
 
@@ -415,13 +415,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         
         // Show loading indicator for unprocessed files
-        if (file.processing_status !== 'processed') {
+        if (file.status !== 'processed') {
             const statusMessage = {
                 'uploaded': 'File has been uploaded and is queued for processing.',
                 'processing': 'File is being processed. Key concepts will appear when ready.',
                 'extracted': 'File content has been extracted and is being analyzed.',
                 'failed': 'File processing failed. Please try again later.'
-            }[file.processing_status] || 'File is being processed...';
+            }[file.status] || 'File is being processed...';
             
             return <div className="processing-indicator">{statusMessage}</div>;
         }
@@ -429,7 +429,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         // Handle different file types with a single return statement using conditional rendering
         if (fileType === 'youtube') { 
             let videoId = '';
-            const url = file.publicUrl || ''; 
+            const url = file.file_url || ''; 
             const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?\&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/);
             if (match && match[1]) {
                 videoId = match[1];
@@ -454,7 +454,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                         ref={pdfViewerRef}
                         src={fileUrl}
                         className="pdf-viewer"
-                        title={`PDF Viewer - ${file.name}`}
+                        title={`PDF Viewer - ${file.file_name}`}
                     />
                 </div>
             );
@@ -475,7 +475,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         } else if (fileType === 'image') {
             return (
                 <div className="image-container file-content-area">
-                    <img src={fileUrl} alt={file.name} className="image-viewer" />
+                    <img src={fileUrl} alt={file.file_name} className="image-viewer" />
                 </div>
             );
         } else {
@@ -508,13 +508,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return <div className="error-message">{error}</div>;
         }
 
-        if (file.processing_status !== 'processed') {
+        if (file.status !== 'processed') {
             const statusMessage = {
                 'uploaded': 'File has been uploaded and is queued for processing.',
                 'processing': 'File is being processed. Key concepts will appear when ready.',
                 'extracted': 'File content has been extracted and is being analyzed.',
                 'failed': 'File processing failed. Please try again later.'
-            }[file.processing_status] || 'File is being processed...';
+            }[file.status] || 'File is being processed...';
             
             return (
                 <div className="key-concepts-container">
@@ -1100,7 +1100,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 <button onClick={onClose} className="close-button">✕</button>
                 
                 <div className="file-viewer-header">
-                    <h2>{file.name}</h2>
+                    <h2>{file.file_name}</h2>
                 </div>
                 
                 <div className="file-viewer-main-layout">

@@ -600,7 +600,7 @@ async def reextract_file(
         with store.file_repo.get_unit_of_work() as uow:
             file = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
             if file:
-                file.processing_status = "uploaded"  # Reset to uploaded status for worker to pick up
+                file.processing_status = "uploaded"  
                 uow.session.commit()
                 logger.info(f"Reset file {file_id} status to uploaded for worker to reprocess")
             else:

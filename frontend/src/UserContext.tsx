@@ -132,6 +132,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const response = await _callApiWithTokenInternal(url, 'GET');
             if (response?.ok) {
                 const data = await response.json();
+                console.log('Server response for files:', JSON.stringify(data, null, 2));
                 setFiles(data.items || []);
                 setFilePagination({ page: data.page, pageSize: data.page_size, totalItems: data.total });
             } else {
@@ -181,25 +182,57 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         ws.onmessage = (event) => {
             try {
-                const message = JSON.parse(event.data) as KnownWebSocketMessage;
-                switch (message.event) {
+                const parsedMessage: KnownWebSocketMessage = JSON.parse(event.data);
+
+                switch (parsedMessage.event) {
                     case 'file_processed': {
-                        const updatedFile = message.result as UploadedFile;
-                        setFiles(prev => prev.map(f => (f.id === updatedFile.id ? updatedFile : f)));
-                        addToast(`File "${updatedFile.name}" processed.`, 'success');
+                        const updatedFile = parsedMessage.result as UploadedFile;
+                        setFiles(prevFiles => prevFiles.map(f => (f.id === updatedFile.id ? updatedFile : f)));
+                        addToast(`File "${updatedFile.file_name}" has been processed.`, 'success');
                         break;
                     }
-                    case 'file_status_update':
-                    case 'file_status_error': {
-                        const data = message.data as FileStatusUpdatePayload;
-                        setFiles(prev => prev.map(f => f.id === data.file_id ? { ...f, processing_status: data.status, error_message: data.error ?? f.error_message } : f));
-                        if (data.status === 'failed') addToast(`Error processing file: ${data.error}`, 'error');
+
+                    case 'file_status_update': {
+                        const data = parsedMessage.data as FileStatusUpdatePayload;
+                        setFiles(prevFiles =>
+                            prevFiles.map(file =>
+                                file.id === data.file_id
+                                    ? {
+                                        ...file,
+                                        status: data.status,
+                                        error_message: data.error_message, // Will be undefined if not present, which is fine
+                                    }
+                                    : file
+                            )
+                        );
+
+                        if (data.status === 'failed') {
+                            addToast(`Error processing file: ${data.error_message || 'Unknown error'}`, 'error');
+                        }
                         break;
                     }
+
+                    case 'file_status_error': { // This is likely redundant but handled for safety
+                        const data = parsedMessage.data as FileStatusUpdatePayload;
+                        setFiles(prevFiles =>
+                            prevFiles.map(file =>
+                                file.id === data.file_id
+                                    ? {
+                                        ...file,
+                                        status: 'failed',
+                                        error_message: data.error_message,
+                                    }
+                                    : file
+                            )
+                        );
+                        addToast(`Error processing file: ${data.error_message}`, 'error');
+                        break;
+                    }
+
                     case 'file_deleted': {
-                        const data = message.data as { file_id: number };
-                        setFiles(prev => prev.filter(f => f.id !== data.file_id));
-                        addToast(`File deleted.`, 'info');
+                        const data = parsedMessage.data as { file_id: number };
+                        setFiles(prevFiles => prevFiles.filter(f => f.id !== data.file_id));
+                        addToast(`File was deleted.`, 'info');
                         break;
                     }
                 }

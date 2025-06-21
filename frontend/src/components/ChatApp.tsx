@@ -62,6 +62,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         authLoading
     } = useUserContext();
     const { addToast } = useToast();
+    const { webSocketStatus } = useUserContext();
     const { capture, identify } = useAnalytics();
     const location = useLocation();
     const prevPathRef = useRef('');
@@ -101,14 +102,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const [activeTab, setActiveTab] = useState("chat"); 
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [isSending, setIsSending] = useState(false);
-
-    const fetchFilesForKnowledgeBase = async (page: number, pageSize: number): Promise<{ items: UploadedFile[], total: number }> => {
-        await loadUserFiles(page, pageSize); 
-        return {
-            items: userFiles, 
-            total: filePagination.totalItems 
-        };
-    };
 
     // Placeholder chat handlers - implement actual logic as needed
     const handleSendMessage = async (messageContent: string, historyId: number | null, attachments?: File[]) => {
@@ -583,46 +576,15 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     }, [deleteFileFromContext, addToast]);
 
     const handleFileClick = useCallback((file: UploadedFile) => {
-        trackAction(AnalyticsEvents.FILE_VIEW_CLICKED, 'file_management', `file_id: ${file.id}, name: ${file.name}, type: ${file.type}`);
+        trackAction(AnalyticsEvents.FILE_VIEW_CLICKED, 'file_management', `file_id: ${file.id}, name: ${file.file_name}, type: ${file.file_type}`);
         setSelectedFile(file);
     }, [setSelectedFile]);
 
     const handleCloseFileViewer = () => {
-        if (selectedFile) {
+                if (selectedFile) {
             trackAction(AnalyticsEvents.FILE_VIEW_CLOSED, 'file_management', `file_id: ${selectedFile.id}`);
         }
         setSelectedFile(null);
-    };
-
-    const renderTabContent = () => {
-        switch (activeTab) {
-            case "knowledge":
-                return (
-                    <KnowledgeBaseComponent
-                        onDeleteFile={handleDeleteFile} 
-                        onFileClick={handleFileClick}
-                        darkMode={darkMode}
-                    />
-                );
-            case "chat":
-            default:
-                return (
-                    <>
-                        <ConversationView
-                            files={userFiles} // Added required files prop
-                            history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
-                            onCopy={handleCopy}
-                             // Pass handleSettingsClick to ConversationView if needed
-                        />
-                        <InputArea
-                            onSend={handleSend}
-                            isSending={isSending}
-                            token={idTokenRef.current}
-                            onContentAdded={() => {}}
-                        />
-                    </>
-                );
-        }
     };
 
     if (!user && authLoading) {
@@ -633,56 +595,55 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     }
 
     return (
-        <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''} ${isMobile ? 'mobile-view' : ''}`}>
-            {!isMobile && (
-                 <div className="sidebar-left">
-                    <WebSocketStatusIndicator />
-                    <div className="sidebar-tabs">
-                        <button onClick={() => setActiveTab("chat")} className={`tab-button ${activeTab === "chat" ? "active" : ""}`}>Chat</button>
-                        <button onClick={() => setActiveTab("knowledge")} className={`tab-button ${activeTab === "knowledge" ? "active" : ""}`}>Knowledge</button>
-                    </div>
-                    {/* User profile/other static sidebar content can go here if needed */}
-                 </div>
-            )}
-            <main className="main-content-area">
-                {renderTabContent()}
+        <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''}`}>
+            {/* Left Sidebar: Knowledge Base */}
+            <aside className="sidebar-left knowledge-column">
+                <KnowledgeBaseComponent
+                    onFileClick={setSelectedFile}
+                    darkMode={darkMode}
+                />
+            </aside>
+
+            {/* Main Content: Conversation View and Input */}
+            <main className="main-content-area chat-column">
+                <ConversationView
+                    files={userFiles}
+                    history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
+                    onCopy={handleCopy}
+                />
+                <InputArea
+                    onSend={handleSend}
+                    isSending={isSending}
+                    token={idTokenRef.current}
+                    onContentAdded={() => {}}
+                />
             </main>
-            {!isMobile && activeTab === 'chat' && (
-                <aside className="sidebar-right history-column">
-                    {user !== null && (
-                        <div className="logout-button-container">
-                            <button onClick={handleLogout} className="button-secondary">Logout</button>
-                        </div>
-                    )}
-                    <HistoryView
-                        histories={Object.values(histories)}
-                        setCurrentHistory={setCurrentHistory}
-                        onNewChat={handleNewChat}
-                        onDeleteHistory={handleDeleteHistory}
-                    />
-                </aside>
-            )}
 
-            {isMobile && (
-                <div className="mobile-nav">
-                    <button onClick={() => setActiveTab("chat")} className={activeTab === "chat" ? "active" : ""}>Chat</button>
-                    <button onClick={() => { /* Implement mobile history view toggle or navigation */ setActiveTab("chat"); console.log('Mobile history view TBD'); }} className={activeTab === "history_mobile" ? "active" : ""}>History</button>
-                    <button onClick={() => setActiveTab("knowledge")} className={activeTab === "knowledge" ? "active" : ""}>Knowledge</button>
-                    <button onClick={handleSettingsClick}>⚙️</button>
-                    <button onClick={handleLogout}>Logout</button>
+            {/* Right Sidebar: History View */}
+            <aside className="sidebar-right history-column">
+                <div className="logout-button-container">
+                    <WebSocketStatusIndicator />
+                    <button onClick={handleLogout} className="button-secondary">Logout</button>
                 </div>
-            )}
+                <HistoryView
+                    histories={Object.values(histories)}
+                    setCurrentHistory={setCurrentHistory}
+                    onNewChat={handleNewChat}
+                    onDeleteHistory={handleDeleteHistory}
+                />
+            </aside>
 
+            {/* File Viewer Modal (covers the screen) */}
             {selectedFile && (
                 <FileViewerComponent
                     file={selectedFile!}
                     onClose={handleCloseFileViewer}
                     darkMode={darkMode}
-                    onError={(error) => console.error(`File ${selectedFile.id} processing error:`, selectedFile.processing_status, selectedFile.error_message)}
+                    onError={(error) => console.error(`File ${selectedFile.id} processing error:`)}
                 />
             )}
         </div>
     );
 };
 
-export default ChatApp; 
+export default ChatApp;

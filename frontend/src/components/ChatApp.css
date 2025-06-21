@@ -3,24 +3,15 @@
     background-color: var(--background-color);
     color: var(--text-color);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     height: 100vh;
+    gap: 16px; /* Adds spacing between columns */
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Layout Container */
-.layout-container {
-    display: flex;
-    flex: 1;
-    height: 100%;
-    justify-content: space-between;
-    gap: 16px;
-    /* Adds spacing between columns */
-}
-
 /* Column Styles */
-.files-column,
-.conversation-column,
+.knowledge-column,
+.chat-column,
 .history-column {
     display: flex;
     flex-direction: column;
@@ -30,7 +21,7 @@
 }
 
 /* Knowledge Base (Files) - Left column */
-.files-column {
+.knowledge-column {
     flex: 1;
     background-color: var(--column-bg);
     order: 1;
@@ -38,7 +29,7 @@
 }
 
 /* Conversation Column - Center column */
-.conversation-column {
+.chat-column {
     flex: 2;
     background-color: var(--column-bg);
     order: 2;
@@ -80,8 +71,8 @@
         /* Reduces gap between stacked columns */
     }
 
-    .files-column,
-    .conversation-column,
+    .knowledge-column,
+    .chat-column,
     .history-column {
         display: none;
         /* Hide columns by default on mobile */
@@ -90,8 +81,8 @@
         /* Removes any previous order restrictions */
     }
 
-    .files-column.active,
-    .conversation-column.active,
+    .knowledge-column.active,
+    .chat-column.active,
     .history-column.active {
         display: flex;
         /* Show only the active tab content */
@@ -112,8 +103,8 @@
         /* Further reduces gap for mobile screens */
     }
 
-    .files-column,
-    .conversation-column,
+    .knowledge-column,
+    .chat-column,
     .history-column {
         padding: clamp(8px, 4vw, 12px);
     }
@@ -162,5 +153,47 @@
     /* Style adjustments for the tabs */
     .tabs button {
         font-size: clamp(1rem, 3vw, 1.2rem);
+    }
+
+    .logout-button-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .status-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        transition: background-color 0.3s ease;
+    }
+
+    .status-indicator.connected {
+        background-color: #28a745; /* Green */
+    }
+
+    .status-indicator.connecting,
+    .status-indicator.reconnecting {
+        background-color: #ffc107; /* Yellow */
+        animation: pulse 1.5s infinite ease-in-out;
+    }
+
+    .status-indicator.disconnected {
+        background-color: #dc3545; /* Red */
+    }
+
+    @keyframes pulse {
+        0% {
+            transform: scale(1);
+            opacity: 1;
+        }
+        50% {
+            transform: scale(1.15);
+            opacity: 0.7;
+        }
+        100% {
+            transform: scale(1);
+            opacity: 1;
+        }
     }
 }

@@ -16,14 +16,12 @@ export type ProcessingStatus = 'uploaded' | 'processing' | 'extracted' | 'proces
 
 export interface UploadedFile {
     id: number;
-    name: string;
-    publicUrl: string;
-    upload_time?: string;
-    type: 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'youtube';
-    size?: number; // File size in bytes
-    viewStartTime?: number; // Timestamp when file was opened for viewing
-    processing_status: ProcessingStatus; // Current processing state
-    error_message?: string | null; // Error message if processing failed
+    file_name: string;
+    file_url: string;
+    created_at?: string;
+    file_type: 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'youtube';
+    status: ProcessingStatus; // Current processing state
+
 }
 
 export interface KeyConcept {

@@ -21,7 +21,7 @@ export interface AuthMessagePayload {
 export interface FileStatusUpdatePayload {
     file_id: number;
     status: ProcessingStatus; // Use the specific type from components/types.ts
-    error?: string | null;
+    error_message?: string | null;
     // Add other relevant fields like progress if available
 }
 

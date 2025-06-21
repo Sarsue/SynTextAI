@@ -33,7 +33,6 @@ const isYouTubeUrl = (url: string): boolean => {
 };
 
 interface KnowledgeBaseComponentProps {
-    onDeleteFile: (fileId: number) => void;
     onFileClick: (file: UploadedFile) => void;
     darkMode?: boolean;
 }
@@ -46,10 +45,11 @@ interface FileStatus {
     };
 }
 
-const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onDeleteFile, onFileClick, darkMode = false }) => {
+const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileClick, darkMode = false }) => {
     const {
         files, // Renamed from userFiles
         loadUserFiles,
+        deleteFileFromContext,
         filePagination,
         isLoadingFiles,
         fileError: contextFileError,
@@ -82,25 +82,21 @@ interface FileStatusEntry { isDeleting?: boolean; }
         loadUserFiles(1, newSize);
     }, [loadUserFiles]);
 
-    const handleFileClick = async (file: UploadedFile) => {
-        console.log(`Refreshing file list and handling click for: ${file.name}`);
-        // Refresh the file list to get the latest status before handling the click
-        await loadUserFiles(filePagination.page, filePagination.pageSize);
-
-        // Propagate the click to the parent component
+    const handleFileClick = (file: UploadedFile) => {
+        // Propagate the click to the parent to open the file viewer.
         onFileClick(file);
     };
 
     const handleDeleteClick = (file: UploadedFile, e: React.MouseEvent) => {
         e.stopPropagation();
-        const isConfirmed = window.confirm(`Are you sure you want to delete ${file.name}?`);
+        const isConfirmed = window.confirm(`Are you sure you want to delete ${file.file_name}?`);
         if (isConfirmed) {
             setFileStatus(prev => ({
                 ...prev,
                 [file.id]: { isDeleting: true }
             }));
             
-            onDeleteFile(file.id);
+            deleteFileFromContext(file.id);
         }
     };
 
@@ -171,37 +167,36 @@ interface FileStatusEntry { isDeleting?: boolean; }
 
                         return (
                             <li key={currentFile.id} className={`file-item ${
-                                currentFile.processing_status === 'processed' ? 'processed-file' :
-                                currentFile.processing_status === 'failed' ? 'failed-file' :
-                                currentFile.processing_status === 'uploaded' ? 'uploaded-file' : 'processing-file'}`}>
+                                currentFile.status === 'processed' ? 'processed-file' :
+                                currentFile.status === 'failed' ? 'failed-file' :
+                                currentFile.status === 'uploaded' ? 'uploaded-file' : 'processing-file'}`}>
                                 <div className="file-item-header">
                                     <div className="file-info" onClick={() => handleFileClick(currentFile)}>
                                         <span className="file-icon">
-                                            {isYouTubeUrl(currentFile.name) ? '🎬' :
-                                             currentFile.name.endsWith('.mp4') ? '🎬' :
-                                             currentFile.name.endsWith('.pdf') ? '📄' :
-                                             currentFile.name.endsWith('.txt') ? '📝' :
-                                             currentFile.name.endsWith('.md') ? '📝' :
-                                             currentFile.name.endsWith('.jpg') || currentFile.name.endsWith('.jpeg') || currentFile.name.endsWith('.png') ? '🖼️' :
+                                            {isYouTubeUrl(currentFile.file_name) ? '🎬' :
+                                             currentFile.file_name.endsWith('.mp4') ? '🎬' :
+                                             currentFile.file_name.endsWith('.pdf') ? '📄' :
+                                             currentFile.file_name.endsWith('.txt') ? '📝' :
+                                             currentFile.file_name.endsWith('.md') ? '📝' :
+                                             currentFile.file_name.endsWith('.jpg') || currentFile.file_name.endsWith('.jpeg') || currentFile.file_name.endsWith('.png') ? '🖼️' :
                                              '📄'}
                                         </span>
                                         
                                         <span className="file-link">
                                             <span className="file-name">
-                                                {isYouTubeUrl(currentFile.name)
-                                                    ? `YouTube: ${currentFile.name.length > 40 ? currentFile.name.substring(0, 37) + '...' : currentFile.name}`
-                                                    : currentFile.name.length > 30
-                                                        ? currentFile.name.substring(0, 27) + '...'
-                                                        : currentFile.name}
+                                                {isYouTubeUrl(currentFile.file_name)
+                                                    ? `YouTube: ${currentFile.file_name.length > 40 ? currentFile.file_name.substring(0, 37) + '...' : currentFile.file_name}`
+                                                    : currentFile.file_name.length > 30
+                                                        ? currentFile.file_name.substring(0, 27) + '...'
+                                                        : currentFile.file_name}
                                             </span>
                                             <span className="file-status">
-                                                {currentFile.processing_status === 'processed' ? '✓ Ready' :
-                                                 currentFile.processing_status === 'failed' ? '❌ Failed' :
-                                                 currentFile.processing_status === 'processing' ? '⏳ Processing...' :
-                                                 currentFile.processing_status === 'extracted' ? '🔍 Extracting content...' :
-                                                 currentFile.processing_status === 'uploaded' ? '📤 Uploaded' :
+                                                {currentFile.status === 'processed' ? '✓ Ready' :
+                                                 currentFile.status === 'failed' ? '❌ Failed' :
+                                                 currentFile.status === 'processing' ? '⏳ Processing...' :
+                                                 currentFile.status === 'extracted' ? '🔍 Extracting content...' :
+                                                 currentFile.status === 'uploaded' ? '📤 Uploaded' :
                                                  '⏳ Processing...'}
-                                                {currentFile.error_message && ` (${currentFile.error_message})`}
                                             </span>
                                         </span>
                                         
@@ -225,6 +220,31 @@ interface FileStatusEntry { isDeleting?: boolean; }
                     })
                 )}
             </ul>
+
+            <div className="kb-pagination-controls">
+                <button
+                    onClick={() => handlePageChange(filePagination.page - 1)}
+                    disabled={filePagination.page <= 1}
+                    className="kb-action-button"
+                >
+                    &lt; Prev
+                </button>
+                <span>
+                    Page {filePagination.page} of {Math.ceil(filePagination.totalItems / filePagination.pageSize) || 1}
+                </span>
+                <button
+                    onClick={() => handlePageChange(filePagination.page + 1)}
+                    disabled={filePagination.page * filePagination.pageSize >= filePagination.totalItems}
+                    className="kb-action-button"
+                >
+                    Next &gt;
+                </button>
+                <select value={filePagination.pageSize} onChange={handlePageSizeChange} className="kb-page-size-selector">
+                    <option value={10}>10 / page</option>
+                    <option value={25}>25 / page</option>
+                    <option value={50}>50 / page</option>
+                </select>
+            </div>
 
             <div className="kb-help-text">
                 <p>Use the + button in the chat to upload files or YouTube videos</p>
