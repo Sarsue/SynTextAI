@@ -73,7 +73,7 @@ MAX_POLL_INTERVAL = 300     # 5 minutes maximum
 POLL_BACKOFF_FACTOR = 1.5   # 1.5x backoff factor
 
 # API configuration for notifications
-API_NOTIFY_URL = os.getenv("API_NOTIFY_URL", "http://api:3000/api/v1/internal/notify-client")
+API_NOTIFY_URL = os.getenv("API_NOTIFY_URL", "http://syntextaiapp:3000/api/v1/internal/notify-client")
 
 async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
     """Send a notification to the main API via HTTP POST"""
