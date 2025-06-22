@@ -381,7 +381,11 @@ async def update_flashcard(
 
         # Verify user owns the file associated with the flashcard
         flashcard = store.get_flashcard_by_id(flashcard_id)
-        if not flashcard or not store.user_owns_file(user_id, flashcard.file_id):
+        if not flashcard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found.")
+
+        file_record = store.file_repo.get_file_by_id(flashcard.file_id)
+        if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or access denied.")
 
         updated_flashcard = store.update_flashcard(
@@ -412,7 +416,11 @@ async def delete_flashcard(
 
         # Verify user owns the file associated with the flashcard
         flashcard = store.get_flashcard_by_id(flashcard_id)
-        if not flashcard or not store.user_owns_file(user_id, flashcard.file_id):
+        if not flashcard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found.")
+
+        file_record = store.file_repo.get_file_by_id(flashcard.file_id)
+        if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or access denied.")
 
         store.delete_flashcard(flashcard_id)
@@ -652,7 +660,11 @@ async def update_quiz_question(
 
         # Verify user owns the file associated with the quiz question
         quiz_question = store.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question or not store.user_owns_file(user_id, quiz_question.file_id):
+        if not quiz_question:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
+
+        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
+        if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
 
         updated_quiz_question = store.update_quiz_question(
@@ -683,7 +695,11 @@ async def delete_quiz_question(
 
         # Verify user owns the file associated with the quiz question
         quiz_question = store.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question or not store.user_owns_file(user_id, quiz_question.file_id):
+        if not quiz_question:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
+
+        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
+        if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
 
         store.delete_quiz_question(quiz_question_id)
@@ -864,7 +880,11 @@ async def update_key_concept(
 
         # Verify user owns the file associated with the key concept
         key_concept = store.get_key_concept_by_id(key_concept_id)
-        if not key_concept or not store.user_owns_file(user_id, key_concept.file_id):
+        if not key_concept:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found.")
+
+        file_record = store.file_repo.get_file_by_id(key_concept.file_id)
+        if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or access denied.")
 
         updated_concept = store.update_key_concept(
@@ -896,7 +916,11 @@ async def delete_key_concept(
 
         # Verify user owns the file associated with the key concept
         key_concept = store.get_key_concept_by_id(key_concept_id)
-        if not key_concept or not store.user_owns_file(user_id, key_concept.file_id):
+        if not key_concept:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found.")
+
+        file_record = store.file_repo.get_file_by_id(key_concept.file_id)
+        if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or access denied.")
 
         store.delete_key_concept(key_concept_id)
