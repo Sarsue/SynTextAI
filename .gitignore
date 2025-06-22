@@ -3,6 +3,8 @@
 
 # dependencies
 node_modules/
+searxng/settings.yml.new
+searxng/uwsgi.ini.new
 
 # testing
 /coverage

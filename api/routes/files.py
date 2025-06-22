@@ -214,7 +214,7 @@ class FlashcardResponse(BaseModel):
     answer: str
     key_concept_id: Optional[int] = None
     is_custom: bool = False
-    created_at: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

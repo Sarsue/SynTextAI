@@ -5,7 +5,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, noload
 
 from models import Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
 from repositories.domain_models import KeyConcept, Flashcard, QuizQuestion
@@ -191,7 +191,10 @@ class LearningMaterialRepository(BaseRepository):
         """Get a single flashcard by its ID."""
         with self.get_unit_of_work() as uow:
             try:
-                return uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+                flashcard = uow.session.query(FlashcardORM).options(noload('*')).filter(FlashcardORM.id == flashcard_id).first()
+                if flashcard:
+                    uow.session.expunge(flashcard)
+                return flashcard
             except Exception as e:
                 logger.error(f"Error fetching flashcard {flashcard_id}: {e}", exc_info=True)
                 return None
@@ -208,6 +211,8 @@ class LearningMaterialRepository(BaseRepository):
                     setattr(flashcard_orm, key, value)
                 
                 uow.session.commit()
+                uow.session.refresh(flashcard_orm)
+                uow.session.expunge(flashcard_orm)
                 return flashcard_orm
             except Exception as e:
                 uow.session.rollback()
@@ -329,7 +334,10 @@ class LearningMaterialRepository(BaseRepository):
         """Get a single quiz question by its ID."""
         with self.get_unit_of_work() as uow:
             try:
-                return uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+                quiz_question = uow.session.query(QuizQuestionORM).options(noload('*')).filter(QuizQuestionORM.id == quiz_question_id).first()
+                if quiz_question:
+                    uow.session.expunge(quiz_question)
+                return quiz_question
             except Exception as e:
                 logger.error(f"Error fetching quiz question {quiz_question_id}: {e}", exc_info=True)
                 return None
@@ -346,6 +354,8 @@ class LearningMaterialRepository(BaseRepository):
                     setattr(quiz_question_orm, key, value)
                 
                 uow.session.commit()
+                uow.session.refresh(quiz_question_orm)
+                uow.session.expunge(quiz_question_orm)
                 return quiz_question_orm
             except Exception as e:
                 uow.session.rollback()
@@ -368,24 +378,14 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
                 return False
 
-    def get_key_concept_by_id(self, key_concept_id: int) -> Optional[KeyConcept]:
+    def get_key_concept_by_id(self, key_concept_id: int) -> Optional[KeyConceptORM]:
         """Get a single key concept by its ID."""
         with self.get_unit_of_work() as uow:
             try:
-                concept_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
-                if not concept_orm:
-                    return None
-                
-                return KeyConcept(
-                    id=concept_orm.id,
-                    file_id=concept_orm.file_id,
-                    concept_title=concept_orm.concept_title,
-                    concept_explanation=concept_orm.concept_explanation,
-                    source_page_number=concept_orm.source_page_number,
-                    source_video_timestamp_start_seconds=concept_orm.source_video_timestamp_start_seconds,
-                    source_video_timestamp_end_seconds=concept_orm.source_video_timestamp_end_seconds,
-                    created_at=concept_orm.created_at
-                )
+                concept_orm = uow.session.query(KeyConceptORM).options(noload('*')).filter(KeyConceptORM.id == key_concept_id).first()
+                if concept_orm:
+                    uow.session.expunge(concept_orm)
+                return concept_orm
             except Exception as e:
                 logger.error(f"Error fetching key concept {key_concept_id}: {e}", exc_info=True)
                 return None
@@ -404,6 +404,8 @@ class LearningMaterialRepository(BaseRepository):
                     concept_orm.concept_explanation = explanation
                 
                 uow.session.commit()
+                uow.session.refresh(concept_orm)
+                uow.session.expunge(concept_orm)
                 return concept_orm
             except Exception as e:
                 uow.session.rollback()
