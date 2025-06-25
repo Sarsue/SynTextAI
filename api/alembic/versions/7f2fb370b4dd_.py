@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.create_table('flashcards',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('file_id', sa.Integer(), nullable=False),
-    sa.Column('key_concept_id', sa.Integer(), nullable=False),
+    sa.Column('key_concept_id', sa.Integer(), nullable=True),
     sa.Column('question', sa.String(), nullable=False),
     sa.Column('answer', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),

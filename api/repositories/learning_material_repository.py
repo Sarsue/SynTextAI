@@ -23,12 +23,12 @@ class LearningMaterialRepository(BaseRepository):
     def add_key_concept(
         self,
         file_id: int,
-        concept_title: str,
-        concept_explanation: str,
+        concept_title: Optional[str] = None,
+        concept_explanation: Optional[str] = None,
         source_page_number: Optional[int] = None,
         source_video_timestamp_start_seconds: Optional[int] = None,
         source_video_timestamp_end_seconds: Optional[int] = None
-    ) -> Optional[int]:
+    ) -> Optional[KeyConceptORM]:
         """Add a new key concept associated with a file.
         
         Args:
@@ -41,31 +41,33 @@ class LearningMaterialRepository(BaseRepository):
 
         
         Returns:
-            int: The ID of the newly created concept, or None if creation failed
+            KeyConceptORM: The newly created key concept object, or None if creation failed
         """
         with self.get_unit_of_work() as uow:
             try:
                 logger.debug(f"Creating key concept: title='{concept_title[:50]}...', file_id={file_id}")
+                # Ensure non-nullable fields have default values if not provided
+                db_concept_title = concept_title if concept_title is not None else ""
+                db_concept_explanation = concept_explanation if concept_explanation is not None else ""
+
                 new_concept = KeyConceptORM(
                     file_id=file_id,
-                    concept_title=concept_title,
-                    concept_explanation=concept_explanation,
+                    concept_title=db_concept_title,
+                    concept_explanation=db_concept_explanation,
                     source_page_number=source_page_number,
                     source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
                     source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
                 )
                 uow.session.add(new_concept)
-                uow.session.flush()  # Make sure we have an ID before continuing
-                concept_id = new_concept.id
-                
-                # Explicitly commit to ensure transaction completion
+                uow.session.flush()
+                uow.session.refresh(new_concept)
                 uow.session.commit()
-                logger.info(f"Successfully added key concept '{concept_title[:50]}...' for file {file_id}, id={concept_id}")
-                return concept_id
+                uow.session.expunge(new_concept)
+                logger.info(f"Successfully added key concept '{new_concept.concept_title[:50]}...' for file {file_id}, id={new_concept.id}")
+                return new_concept
             except Exception as e:
-                # Explicitly rollback on error
                 uow.session.rollback()
-                logger.error(f"Error adding key concept '{concept_title[:50]}...': {e}", exc_info=True)
+                logger.error(f"Error adding key concept: {e}", exc_info=True)
                 return None
     
     # Flashcard functionality removed as it no longer exists in the DB schema
@@ -114,18 +116,18 @@ class LearningMaterialRepository(BaseRepository):
                 raise
     
     # Flashcard methods
-    def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, is_custom: bool = False) -> Optional[int]:
+    def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, is_custom: bool = False) -> Optional[FlashcardORM]:
         """Add a new flashcard.
-        
+
         Args:
             file_id: ID of the file associated with this flashcard
             question: Question text
             answer: Answer text
             key_concept_id: Optional ID of the associated key concept
             is_custom: Whether this is a custom flashcard (vs AI-generated)
-            
+
         Returns:
-            int: The ID of the newly created flashcard, or None if creation failed
+            FlashcardORM: The newly created flashcard object, or None if creation failed
         """
         with self.get_unit_of_work() as uow:
             try:
@@ -137,11 +139,14 @@ class LearningMaterialRepository(BaseRepository):
                     is_custom=is_custom
                 )
                 uow.session.add(new_flashcard)
-                # Commit handled by UnitOfWork
+                uow.session.flush()
+                uow.session.refresh(new_flashcard)
+                uow.session.commit()
+                uow.session.expunge(new_flashcard)
                 logger.info(f"Added flashcard for file {file_id}")
-                return new_flashcard.id
+                return new_flashcard
             except Exception as e:
-                # Rollback handled by UnitOfWork
+                uow.session.rollback()
                 logger.error(f"Error adding flashcard: {e}", exc_info=True)
                 return None
     
@@ -245,7 +250,7 @@ class LearningMaterialRepository(BaseRepository):
         distractors: List[str],
         key_concept_id: Optional[int] = None,
         is_custom: bool = False
-    ) -> Optional[int]:
+    ) -> Optional[QuizQuestionORM]:
         """Add a new quiz question.
         
         Args:
@@ -258,25 +263,28 @@ class LearningMaterialRepository(BaseRepository):
             is_custom: Whether this is a custom question (vs AI-generated)
             
         Returns:
-            int: The ID of the newly created quiz question, or None if creation failed
+            QuizQuestionORM: The newly created quiz question object, or None if creation failed
         """
         with self.get_unit_of_work() as uow:
             try:
                 new_quiz = QuizQuestionORM(
                     file_id=file_id,
-                    question=question,  # Updated field name
-                    question_type=question_type,  # Added required field
+                    question=question,
+                    question_type=question_type,
                     correct_answer=correct_answer,
                     distractors=distractors,
-                    key_concept_id=key_concept_id,  # Added field
-                    # Note: explanation and difficulty fields removed as they don't exist in DB
+                    key_concept_id=key_concept_id,
+                    is_custom=is_custom
                 )
                 uow.session.add(new_quiz)
-                # Commit handled by UnitOfWork
+                uow.session.flush()
+                uow.session.refresh(new_quiz)
+                uow.session.commit()
+                uow.session.expunge(new_quiz)
                 logger.info(f"Added quiz question for file {file_id}")
-                return new_quiz.id
+                return new_quiz
             except Exception as e:
-                # Rollback handled by UnitOfWork
+                uow.session.rollback()
                 logger.error(f"Error adding quiz question: {e}", exc_info=True)
                 return None
     
@@ -330,6 +338,31 @@ class LearningMaterialRepository(BaseRepository):
 
             return quizzes
 
+    def delete_quiz_question(self, quiz_question_id: int) -> bool:
+        """Delete a quiz question by its ID.
+
+        Args:
+            quiz_question_id: The ID of the quiz question to delete
+
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        with self.get_unit_of_work() as uow:
+            try:
+                question_to_delete = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+                if question_to_delete:
+                    uow.session.delete(question_to_delete)
+                    uow.session.commit()
+                    logger.info(f"Successfully deleted quiz question with ID: {quiz_question_id}")
+                    return True
+                else:
+                    logger.warning(f"Quiz question with ID {quiz_question_id} not found for deletion.")
+                    return False
+            except Exception as e:
+                uow.session.rollback()
+                logger.error(f"Error deleting quiz question with ID {quiz_question_id}: {e}", exc_info=True)
+                return False
+
     def get_quiz_question_by_id(self, quiz_question_id: int) -> Optional[QuizQuestionORM]:
         """Get a single quiz question by its ID."""
         with self.get_unit_of_work() as uow:
@@ -362,17 +395,7 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
                 return None
 
-    def delete_quiz_question(self, quiz_question_id: int) -> bool:
-        """Delete a quiz question by its ID."""
-        with self.get_unit_of_work() as uow:
-            try:
-                quiz_question_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
-                if not quiz_question_orm:
-                    return False
-                
-                uow.session.delete(quiz_question_orm)
-                uow.session.commit()
-                return True
+
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)

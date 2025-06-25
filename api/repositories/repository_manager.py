@@ -809,6 +809,10 @@ class RepositoryManager:
         """Delete a flashcard by its ID."""
         return self.learning_material_repo.delete_flashcard(flashcard_id)
     
+    def delete_quiz_question(self, quiz_question_id: int) -> bool:
+        """Delete a quiz question by its ID."""
+        return self.learning_material_repo.delete_quiz_question(quiz_question_id)
+
     def get_quiz_questions_for_file(self, file_id: int) -> List[Dict[str, Any]]:
         """Get all quiz questions for a file."""
         return self.learning_material_repo.get_quiz_questions_for_file(file_id)

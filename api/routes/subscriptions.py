@@ -138,7 +138,7 @@ async def start_trial(
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription["status"],
-                current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
+                current_period_end=datetime.utcfromtimestamp(created_subscription.trial_end),
                 trial_end=datetime.utcfromtimestamp(created_subscription.trial_end),  # Pass trial_end
                 card_last4=None,  # No card details at the start of the trial
                 card_type=None,

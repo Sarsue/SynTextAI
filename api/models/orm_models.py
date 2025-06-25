@@ -177,8 +177,8 @@ class Flashcard(Base):
     key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
     question = Column(String)
     answer = Column(String)
-    is_custom = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    is_custom = Column(Boolean, nullable=False, server_default='false')
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
     
     # Relationships
     file = relationship("File", back_populates="flashcards")
@@ -195,6 +195,7 @@ class QuizQuestion(Base):
     question_type = Column(String, nullable=False)
     correct_answer = Column(String, nullable=False)
     distractors = Column(JSON, nullable=True)
+    is_custom = Column(Boolean, nullable=False, server_default='false')
     created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
     
     # Relationships
