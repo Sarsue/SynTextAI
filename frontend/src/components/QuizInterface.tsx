@@ -24,7 +24,7 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
   if (!questions.length) return <div>No quiz questions available.</div>;
 
   const q = questions[current];
-  const options = q ? (q.question_type === 'MCQ' ? [...q.distractors, q.correct_answer].sort() : ['True', 'False']) : [];
+  const options = q ? (q.question_type === 'MCQ' ? Array.from(new Set([...q.distractors, q.correct_answer])).sort() : ['True', 'False']) : [];
 
   const handleEdit = () => {
     if (!q) return;
@@ -153,8 +153,14 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
         <button onClick={handleRestart} className="icon-btn restart-btn">🔄</button>
         {q && !isEditing && (
           <div className="custom-actions">
-            <button className="icon-btn edit-btn" onClick={handleEdit}>✏️</button>
-            <button className="icon-btn delete-btn" onClick={handleDelete}>🗑️</button>
+            <button className="action-btn edit-btn" onClick={handleEdit}>
+              <span className="icon">✏️</span>
+              <span className="text">Edit</span>
+            </button>
+            <button className="action-btn delete-btn" onClick={handleDelete}>
+              <span className="icon">🗑️</span>
+              <span className="text">Delete</span>
+            </button>
           </div>
         )}
       </div>

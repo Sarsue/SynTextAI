@@ -119,8 +119,14 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateF
             <button onClick={() => markCard('known')} disabled={status === 'known'} className="icon-btn">✅</button>
             <button onClick={() => markCard('needs_review')} disabled={status === 'needs_review'} className="icon-btn">🤔</button>
             <div className="custom-actions">
-              <button className="icon-btn edit-btn" onClick={handleEdit}>✏️</button>
-              <button className="icon-btn delete-btn" onClick={handleDelete}>🗑️</button>
+              <button className="action-btn edit-btn" onClick={handleEdit}>
+                <span className="icon">✏️</span>
+                <span className="text">Edit</span>
+              </button>
+              <button className="action-btn delete-btn" onClick={handleDelete}>
+                <span className="icon">🗑️</span>
+                <span className="text">Delete</span>
+              </button>
             </div>
           </>
         )}

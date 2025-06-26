@@ -790,3 +790,67 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
 .expand-icon {
     margin-left: 10px;
 }
+
+.action-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    width: 30px;
+    height: 30px;
+    overflow: hidden;
+}
+
+.action-btn .icon {
+    font-size: 16px;
+    transition: opacity 0.2s ease;
+}
+
+.action-btn .text {
+    position: absolute;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateX(-10px);
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    padding-left: 28px; /* Space for the icon */
+}
+
+.action-btn:hover {
+    width: 80px; /* Adjust width to fit icon and text */
+    border-radius: 15px;
+    justify-content: flex-start;
+}
+
+.action-btn:hover .icon {
+    opacity: 1;
+}
+
+.action-btn:hover .text {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.edit-btn:hover {
+    background-color: #e0f7fa; /* Light cyan */
+    color: #00796b;
+}
+
+.delete-btn:hover {
+    background-color: #ffebee; /* Light pink */
+    color: #c62828;
+}
+
+.dark-mode .edit-btn:hover {
+    background-color: #004d40;
+    color: #b2dfdb;
+}
+
+.dark-mode .delete-btn:hover {
+    background-color: #b71c1c;
+    color: #ffcdd2;
+}

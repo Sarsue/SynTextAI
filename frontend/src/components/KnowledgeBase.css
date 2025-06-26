@@ -311,3 +311,79 @@
         margin-bottom: 8px;
     }
 }
+
+/* Additional Dark Mode Styles */
+.dark-mode .knowledgebase-container {
+    background-color: #1a202c;
+    color: #e2e8f0;
+}
+
+.dark-mode .knowledgebase-header h3 {
+    color: #e2e8f0;
+}
+
+.dark-mode .file-item {
+    background-color: #2d3748;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    border-left-color: #4a5568;
+}
+
+.dark-mode .file-link,
+.dark-mode .file-name,
+.dark-mode .file-status {
+    color: #cbd5e0;
+}
+
+.dark-mode .file-item.processed-file .file-link {
+    color: #68d391;
+}
+
+.dark-mode .file-item.failed-file .file-link {
+    color: #fc8181;
+}
+
+.dark-mode .file-details {
+    background-color: #1a202c;
+    border-top-color: #4a5568;
+}
+
+.dark-mode .file-status-text,
+.dark-mode .file-time {
+    color: #a0aec0;
+}
+
+.dark-mode .kb-action-button {
+    background-color: #4a5568;
+    color: #e2e8f0;
+    border: 1px solid #718096;
+}
+
+.dark-mode .kb-action-button:hover {
+    background-color: #718096;
+}
+
+.dark-mode .kb-action-button:disabled {
+    background-color: #2d3748;
+    color: #718096;
+    opacity: 0.6;
+}
+
+.dark-mode .kb-help-text {
+    color: #a0aec0;
+    border-top-color: #4a5568;
+}
+
+.dark-mode .empty-state {
+    color: #a0aec0;
+}
+
+.dark-mode .kb-page-size-selector {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #e2e8f0;
+}
+
+.dark-mode .kb-page-size-selector option {
+    background: #2d3748;
+    color: #e2e8f0;
+}

@@ -678,8 +678,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                                             {concept.is_custom && <span className="custom-badge">Custom</span>}
                                         </h4>
                                         <div className="key-concept-actions">
-                                            <button onClick={(e) => {e.stopPropagation(); handleEditConcept(concept);}} className="action-btn">✏️</button>
-                                            <button onClick={(e) => {e.stopPropagation(); handleDeleteConcept(concept.id);}} className="action-btn">🗑️</button>
+                                            <button onClick={(e) => {e.stopPropagation(); handleEditConcept(concept);}} className="action-btn edit-btn">
+                                                <span className="icon">✏️</span>
+                                                <span className="text">Edit</span>
+                                            </button>
+                                            <button onClick={(e) => {e.stopPropagation(); handleDeleteConcept(concept.id);}} className="action-btn delete-btn">
+                                                <span className="icon">🗑️</span>
+                                                <span className="text">Delete</span>
+                                            </button>
                                             <span className="expand-icon">
                                                 {expandedConcepts.has(concept.id) ? "−" : "+"}
                                             </span>
@@ -932,7 +938,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const savedFlashcard: Flashcard = await response.json();
             
             // Add the saved flashcard to our local state
-            setCustomFlashcards([...customFlashcards, savedFlashcard]);
+            setFlashcards(prev => [...prev, savedFlashcard]);
+            setCustomFlashcards(prev => [...prev, savedFlashcard]);
             
             // Reset form
             setNewFlashcardQuestion('');
@@ -947,16 +954,20 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             setIsLoadingFlashcards(false);
         }
     };
-    
+
     // Add a new custom quiz question to the collection with backend persistence
     const addQuiz = async () => {
         if (!user || newQuizQuestion.trim() === '' || newQuizAnswer.trim() === '') return;
-        
-        // For MCQ, we need distractors
+
         let distractors: string[] = [];
         if (newQuizType === 'MCQ') {
             distractors = newQuizDistractors.split(',').map(d => d.trim()).filter(d => d !== '');
-            if (distractors.length === 0) return; // Need at least one distractor for MCQ
+            if (distractors.length === 0) {
+                addToast('MCQ questions must have at least one distractor.', 'error');
+                return; 
+            }
+        } else if (newQuizType === 'TF') {
+            distractors = [newQuizAnswer === 'True' ? 'False' : 'True'];
         }
         
         const quizData = {
@@ -966,18 +977,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             correct_answer: newQuizAnswer,
             distractors: distractors,
             key_concept_id: 0, // Custom questions don't relate to specific key concepts
-            is_custom: true
+            is_custom: true,
+            // explanation and difficulty are intentionally omitted to avoid backend error
         };
         
         try {
-            // Show loading state
             setIsLoadingQuizzes(true);
             
-            // Get authentication token
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            // Call the API to save the custom quiz
             const response = await fetch(`/api/v1/files/${file.id}/quizzes`, {
                 method: 'POST',
                 headers: {
@@ -989,122 +998,101 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             });
             
             if (!response.ok) {
-                throw new Error(`Failed to save quiz: ${response.statusText}`);
+                const errorData = await response.json().catch(() => ({ detail: `Failed to save quiz: ${response.statusText}` }));
+                console.error("Error saving custom quiz:", errorData);
+                throw new Error(errorData.detail || `Failed to save quiz: ${response.statusText}`);
             }
             
-            // Get the saved quiz with proper ID from the server
-            const savedQuiz: QuizQuestion = await response.json();
+            const responseData = await response.json();
+            if (responseData.status !== 'success' || !responseData.data) {
+                throw new Error(responseData.message || 'Failed to parse successful response from server.');
+            }
+            const savedQuiz: QuizQuestion = responseData.data;
             
-            // Add the saved quiz to our local state
-            setCustomQuizzes([...customQuizzes, savedQuiz]);
+            addToast('Quiz question added successfully!', 'success');
+            setQuizzes(prevQuizzes => [...prevQuizzes, savedQuiz]);
             
-            // Reset form
             setNewQuizQuestion('');
             setNewQuizAnswer('');
             setNewQuizDistractors('');
+            setNewQuizType('MCQ');
             setShowQuizForm(false);
         } catch (err) {
-            // Handle errors
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
             console.error('Error saving custom quiz:', err);
-            setQuizError(err instanceof Error ? err.message : 'Failed to save quiz');
+            addToast(`Error saving custom quiz: ${errorMessage}`, 'error');
+            setQuizError(errorMessage);
         } finally {
-            // Hide loading state
             setIsLoadingQuizzes(false);
         }
     };
-    
 
-    
-    // Render flashcard creation form
-    const renderFlashcardForm = () => (
-        <div className="creation-form">
-            <h3>Create New Flashcard</h3>
-            <div className="form-group">
-                <label>Question:</label>
-                <textarea 
-                    value={newFlashcardQuestion}
-                    onChange={(e) => setNewFlashcardQuestion(e.target.value)}
-                    placeholder="Enter question..."
-                />
-            </div>
-            <div className="form-group">
-                <label>Answer:</label>
-                <textarea 
-                    value={newFlashcardAnswer}
-                    onChange={(e) => setNewFlashcardAnswer(e.target.value)}
-                    placeholder="Enter answer..."
-                />
-            </div>
-            <div className="form-buttons">
-                <button onClick={() => setShowFlashcardForm(false)}>Cancel</button>
-                <button 
-                    onClick={addFlashcard} 
-                    disabled={!newFlashcardQuestion.trim() || !newFlashcardAnswer.trim()}
-                >
-                    Add Flashcard
-                </button>
-            </div>
-        </div>
-    );
-    
     // Render quiz creation form
     const renderQuizForm = () => (
         <div className="creation-form">
             <h3>Create New Quiz Question</h3>
             <div className="form-group">
                 <label>Question Type:</label>
-                <select value={newQuizType} onChange={(e) => setNewQuizType(e.target.value as 'MCQ' | 'TF')}>
+                <select value={newQuizType} onChange={(e) => {
+                    const type = e.target.value as 'MCQ' | 'TF';
+                    setNewQuizType(type);
+                    if (type === 'TF') {
+                        setNewQuizAnswer('True'); // Default answer to enable button
+                    } else {
+                        setNewQuizAnswer(''); // Clear for MCQ
+                    }
+                }}>
                     <option value="MCQ">Multiple Choice</option>
                     <option value="TF">True/False</option>
                 </select>
-            </div>
+        </div>
+        <div className="form-group">
+            <label>Question:</label>
+            <textarea 
+                value={newQuizQuestion}
+                onChange={(e) => setNewQuizQuestion(e.target.value)}
+                placeholder="Enter question..."
+            />
+        </div>
+        <div className="form-group">
+            <label>Correct Answer:</label>
+            {newQuizType === 'TF' ? (
+                <select value={newQuizAnswer} onChange={(e) => setNewQuizAnswer(e.target.value)}>
+                    <option value="True">True</option>
+                    <option value="False">False</option>
+                </select>
+            ) : (
+                <input 
+                    type="text" 
+                    value={newQuizAnswer}
+                    onChange={(e) => setNewQuizAnswer(e.target.value)}
+                    placeholder="Enter correct answer..."
+                />
+            )}
+        </div>
+        {newQuizType === 'MCQ' && (
             <div className="form-group">
-                <label>Question:</label>
+                <label>Distractors (comma-separated):</label>
                 <textarea 
-                    value={newQuizQuestion}
-                    onChange={(e) => setNewQuizQuestion(e.target.value)}
-                    placeholder="Enter question..."
+                    value={newQuizDistractors}
+                    onChange={(e) => setNewQuizDistractors(e.target.value)}
+                    placeholder="Option 1, Option 2, Option 3..."
                 />
             </div>
-            <div className="form-group">
-                <label>Correct Answer:</label>
-                {newQuizType === 'TF' ? (
-                    <select value={newQuizAnswer} onChange={(e) => setNewQuizAnswer(e.target.value)}>
-                        <option value="True">True</option>
-                        <option value="False">False</option>
-                    </select>
-                ) : (
-                    <input 
-                        type="text" 
-                        value={newQuizAnswer}
-                        onChange={(e) => setNewQuizAnswer(e.target.value)}
-                        placeholder="Enter correct answer..."
-                    />
-                )}
-            </div>
-            {newQuizType === 'MCQ' && (
-                <div className="form-group">
-                    <label>Distractors (comma-separated):</label>
-                    <textarea 
-                        value={newQuizDistractors}
-                        onChange={(e) => setNewQuizDistractors(e.target.value)}
-                        placeholder="Option 1, Option 2, Option 3..."
-                    />
-                </div>
-            )}
-            <div className="form-buttons">
-                <button onClick={() => setShowQuizForm(false)}>Cancel</button>
-                <button 
-                    onClick={addQuiz} 
-                    disabled={!newQuizQuestion.trim() || !newQuizAnswer.trim() || (newQuizType === 'MCQ' && !newQuizDistractors.trim())}
-                >
-                    Add Quiz Question
-                </button>
-            </div>
+        )}
+        <div className="form-buttons">
+            <button onClick={() => setShowQuizForm(false)}>Cancel</button>
+            <button 
+                onClick={addQuiz} 
+                disabled={!newQuizQuestion.trim() || !newQuizAnswer.trim() || (newQuizType === 'MCQ' && !newQuizDistractors.trim())}
+            >
+                Add Quiz Question
+            </button>
         </div>
+    </div>
     );
 
-    const handleUpdateFlashcard = async (id: number, data: { question: string; answer: string }) => {
+    const handleUpdateFlashcard = async (id: number, data: { question?: string; answer?: string }) => {
         if (!user) {
             addToast("You must be logged in to update a flashcard.", "error");
             return;
@@ -1143,6 +1131,37 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             addToast(message, "error");
         }
     };
+
+    const renderFlashcardForm = () => (
+        <div className="creation-form">
+            <h3>Create New Flashcard</h3>
+            <div className="form-group">
+                <label>Question:</label>
+                <textarea 
+                    value={newFlashcardQuestion}
+                    onChange={(e) => setNewFlashcardQuestion(e.target.value)}
+                    placeholder="Enter question..."
+                />
+            </div>
+            <div className="form-group">
+                <label>Answer:</label>
+                <textarea 
+                    value={newFlashcardAnswer}
+                    onChange={(e) => setNewFlashcardAnswer(e.target.value)}
+                    placeholder="Enter answer..."
+                />
+            </div>
+            <div className="form-buttons">
+                <button onClick={() => setShowFlashcardForm(false)}>Cancel</button>
+                <button 
+                    onClick={addFlashcard} 
+                    disabled={!newFlashcardQuestion.trim() || !newFlashcardAnswer.trim()}
+                >
+                    Add Flashcard
+                </button>
+            </div>
+        </div>
+    );
 
     const handleDeleteFlashcard = async (id: number) => {
         if (!user) {

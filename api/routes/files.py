@@ -397,7 +397,8 @@ async def delete_flashcard(
         logger.error(f"Error deleting flashcard {flashcard_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete flashcard.")
 
-# Define Quiz Question Response model for better type safety
+# --- Quiz Learning Content ---
+
 class QuizQuestionResponse(BaseModel):
     id: int
     file_id: int
@@ -406,9 +407,9 @@ class QuizQuestionResponse(BaseModel):
     question_type: str = "MCQ"
     correct_answer: str = ""
     distractors: List[str] = []
-    explanation: str = ""  # Empty string instead of None for frontend compatibility
-    difficulty: str = "medium"  # Default value expected by frontend
-    is_custom: bool = False  # Default for system-generated questions
+    explanation: Optional[str] = ""
+    difficulty: Optional[str] = "medium"
+    is_custom: bool = False
 
     class Config:
         from_attributes = True
@@ -419,136 +420,29 @@ class QuizQuestionResponse(BaseModel):
             try:
                 return json.loads(v)
             except json.JSONDecodeError:
-                return v
+                logger.warning(f"Could not parse distractors string to JSON: {v}")
+                return []
         return v
 
 class QuizzesListResponse(BaseModel):
     quizzes: List[QuizQuestionResponse]
 
-# Endpoint: Get all quiz questions for a file
+class QuizQuestionCreate(BaseModel):
+    question: str
+    correct_answer: str
+    distractors: List[str] = []
+    key_concept_id: Optional[int] = None
+    question_type: str = "MCQ"
+    explanation: Optional[str] = ""
+    difficulty: str = "medium"
+    is_custom: bool = True
+
 @files_router.get(
     "/{file_id}/quizzes",
     response_model=StandardResponse[QuizzesListResponse],
     summary="Get Quiz Questions for File",
     description="Retrieves all quiz questions generated for a specific file."
 )
-class QuizQuestionCreate(BaseModel):
-    question: str
-    question_type: str = "MCQ"
-    correct_answer: str
-    distractors: List[str] = []
-    key_concept_id: Optional[int] = None
-
-@files_router.post("/{file_id}/quizzes", response_model=StandardResponse[QuizQuestionResponse], status_code=status.HTTP_201_CREATED)
-async def add_quiz_for_file(
-    file_id: int,
-    quiz_data: QuizQuestionCreate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    """Manually add a single quiz question to a file."""
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        file_record = store.file_repo.get_file_by_id(file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
-
-        created_quiz_orm = store.learning_material_repo.add_quiz_question(
-            file_id=file_id,
-            question=quiz_data.question,
-            question_type=quiz_data.question_type,
-            correct_answer=quiz_data.correct_answer,
-            distractors=quiz_data.distractors,
-            key_concept_id=quiz_data.key_concept_id,
-            is_custom=True
-        )
-
-        if not created_quiz_orm:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create quiz question.")
-
-        response_data = QuizQuestionResponse.from_orm(created_quiz_orm)
-
-        return StandardResponse(
-            status="success",
-            data=response_data,
-            message="Quiz question added successfully."
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error adding quiz question for file {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not add quiz question.")
-
-@files_router.put("/quizzes/{quiz_question_id}", response_model=StandardResponse[QuizQuestionResponse])
-async def update_quiz_question(
-    quiz_question_id: int,
-    quiz_update: QuizQuestionUpdate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    """Update a quiz question."""
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
-
-        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
-
-        update_data = quiz_update.dict(exclude_unset=True)
-        updated_quiz = store.learning_material_repo.update_quiz_question(quiz_question_id, update_data)
-
-        if not updated_quiz:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update quiz question.")
-
-        return StandardResponse(
-            status="success",
-            data=QuizQuestionResponse.from_orm(updated_quiz),
-            message="Quiz question updated successfully."
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update quiz question.")
-
-@files_router.delete("/quizzes/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_quiz_question(
-    quiz_question_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    """Delete a quiz question."""
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
-
-        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
-
-        success = store.learning_material_repo.delete_quiz_question(quiz_question_id)
-        if not success:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question.")
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question.")
-
-
-@files_router.get("/{file_id}/quizzes", response_model=StandardResponse[QuizzesListResponse])
 async def get_quizzes_for_file(
     file_id: int,
     request: Request,
@@ -561,58 +455,11 @@ async def get_quizzes_for_file(
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
-        # Simply retrieve existing quizzes - no generation on request
         quizzes = store.get_quiz_questions_for_file(file_id)
         logger.info(f"Retrieved {len(quizzes) if quizzes else 0} quizzes for file {file_id}")
         
-        logger.info(f"Raw quizzes data from repo for file {file_id}: {quizzes}")
-        quizzes_out = []
-        for q in quizzes:
-            try:
-                # Ensure distractors is properly serialized JSON
-                if not hasattr(q, 'distractors') or q.distractors is None:
-                    distractors = []
-                elif isinstance(q.distractors, list):
-                    distractors = q.distractors
-                else:
-                    # Handle string or other unexpected formats
-                    try:
-                        # If it's a string representation of JSON, parse it
-                        if isinstance(q.distractors, str):
-                            import json
-                            distractors = json.loads(q.distractors)
-                        else:
-                            # Default to empty list if we can't parse
-                            distractors = []
-                    except Exception as e:
-                        logger.error(f"Error parsing distractors: {e}")
-                        distractors = []
-                
-                # Handle None values and ensure defaults are applied
-                explanation = getattr(q, 'explanation', None) or ""
-                difficulty = getattr(q, 'difficulty', None) or "medium"
-                
-                # Log detailed information about the quiz question before conversion
-                logger.debug(f"Quiz question before conversion - ID: {q.id}, explanation: {type(explanation)}, difficulty: {type(difficulty)}")
-                
-                quizzes_out.append(QuizQuestionResponse(
-                    id=q.id,
-                    file_id=q.file_id,
-                    key_concept_id=getattr(q, 'key_concept_id', None),
-                    question_text=q.question,  # Frontend expects this field
-                    question=q.question,
-                    question_type=q.question_type if hasattr(q, 'question_type') and q.question_type else "MCQ",
-                    correct_answer=q.correct_answer if hasattr(q, 'correct_answer') and q.correct_answer else "",
-                    distractors=distractors,
-                    explanation=explanation,  # Now guaranteed to be a string, not None
-                    difficulty=difficulty,  # Now guaranteed to be a string, not None
-                    is_custom=getattr(q, 'is_custom', False) or False  # Default for system-generated questions
-                ))
-            except Exception as e:
-                logger.error(f"Error converting quiz question to dict: {e}")
-                # Skip this quiz question if conversion fails
-                
-        # Return standardized response
+        quizzes_out = [QuizQuestionResponse.from_orm(q) for q in quizzes]
+        
         response_data = QuizzesListResponse(quizzes=quizzes_out)
         return StandardResponse(
             status="success",
@@ -623,121 +470,6 @@ async def get_quizzes_for_file(
     except Exception as e:
         logger.error(f"Error getting quizzes for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve quizzes")
-
-class QuizQuestionCreate(BaseModel):
-    key_concept_id: Optional[int] = None
-    question_text: str
-    question_type: str = Field("MCQ", description="Type of question, e.g., MCQ, True/False")
-    correct_answer: str
-    distractors: List[str] = Field([], description="List of incorrect answers for MCQ")
-    explanation: Optional[str] = Field("", description="Explanation for the correct answer")
-    difficulty: str = Field("medium", description="Difficulty level: easy, medium, hard")
-    is_custom: bool = True
-
-@files_router.post("/{file_id}/quizzes", response_model=StandardResponse[QuizQuestionResponse], status_code=status.HTTP_201_CREATED)
-async def add_quiz_question_for_file(
-    file_id: int,
-    quiz_question: QuizQuestionCreate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file
-        file_record = store.file_repo.get_file_by_id(file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
-
-        # Prepare data, converting key_concept_id 0 to None
-        quiz_data = quiz_question.dict()
-        if quiz_data.get("key_concept_id") == 0:
-            quiz_data["key_concept_id"] = None
-
-        # Add quiz question to the database
-        created_question = store.learning_material_repo.add_quiz_question(
-            file_id=file_id,
-            **quiz_data
-        )
-
-        return StandardResponse(
-            status="success",
-            data=QuizQuestionResponse.from_orm(created_question),
-            message="Quiz question added successfully."
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error adding quiz question for file {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not add quiz question.")
-
-@files_router.put("/quizzes/{quiz_question_id}", response_model=StandardResponse[QuizQuestionResponse])
-async def update_quiz_question(
-    quiz_question_id: int,
-    quiz_update: QuizQuestionUpdate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the quiz question
-        question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
-
-        file_record = store.file_repo.get_file_by_id(question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
-
-        updated_question = store.learning_material_repo.update_quiz_question(
-            quiz_question_id=quiz_question_id,
-            **quiz_update.dict(exclude_unset=True)
-        )
-
-        return StandardResponse(
-            status="success",
-            data=QuizQuestionResponse.from_orm(updated_question),
-            message="Quiz question updated successfully."
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update quiz question.")
-
-@files_router.delete("/quizzes/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_quiz_question(
-    quiz_question_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the quiz question
-        question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not question:
-            # This allows the request to be idempotent
-            return
-
-        file_record = store.file_repo.get_file_by_id(question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
-
-        store.learning_material_repo.delete_quiz_question(quiz_question_id)
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question.")
-
-
-
 
 @files_router.post(
     "/{file_id}/quizzes",
@@ -751,331 +483,50 @@ async def add_quiz_question_for_file(
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
+    """Manually add a single quiz question to a file."""
     try:
         user_id = user_data["user_id"]
-        store = request.app.state.store
-        
-        # Verify file exists and belongs to user
-        file = store.get_file_by_id(file_id)
-        if not file or file['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
-            
-        # Add the quiz question
-        quiz_id = store.add_quiz_question(
+        store = get_store(request)
+
+        file_record = store.file_repo.get_file_by_id(file_id)
+        if not file_record or file_record['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
+
+        # Prepare data, converting key_concept_id 0 to None
+        quiz_data = quiz_question.dict()
+        key_concept_id = quiz_data.pop("key_concept_id", None)
+        if key_concept_id == 0:
+            key_concept_id = None
+
+        # Add quiz question to the database, ensuring only valid fields are passed
+        new_quiz_id = store.learning_material_repo.add_quiz_question(
             file_id=file_id,
             question=quiz_question.question,
             question_type=quiz_question.question_type,
             correct_answer=quiz_question.correct_answer,
             distractors=quiz_question.distractors,
-            key_concept_id=quiz_question.key_concept_id,
+            key_concept_id=key_concept_id,
             is_custom=quiz_question.is_custom
         )
-        
-        if not quiz_id:
-            return StandardResponse(
-                status="error",
-                data=QuizQuestionResponse(
-                    id=0,
-                    file_id=file_id,
-                    question=quiz_question.question,
-                    question_text=quiz_question.question,
-                    question_type=quiz_question.question_type,
-                    correct_answer=quiz_question.correct_answer,
-                    distractors=quiz_question.distractors,
-                    key_concept_id=quiz_question.key_concept_id,
-                    is_custom=quiz_question.is_custom,
-                    explanation="",
-                    difficulty="medium"
-                ),
-                count=0,
-                message="Failed to create quiz question"
-            )
-            
-        # Return the created quiz question in standardized format
-        created_quiz = QuizQuestionResponse(
-            id=quiz_id,
-            file_id=file_id,
-            question=quiz_question.question,
-            question_text=quiz_question.question,  # Frontend expects this field
-            question_type=quiz_question.question_type,
-            correct_answer=quiz_question.correct_answer,
-            distractors=quiz_question.distractors,
-            key_concept_id=quiz_question.key_concept_id,
-            is_custom=quiz_question.is_custom,
-            # Include these for frontend compatibility with default values
-            explanation="",
-            difficulty="medium"
-        )
-        
-        return StandardResponse(
-            status="success",
-            data=created_quiz,
-            count=1,
-            message="Quiz question created successfully"
-        )
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        logger.error(f"Error adding quiz question for file {file_id}: {e}")
-        return StandardResponse(
-            status="error",
-            data=QuizQuestionResponse(
-                id=0,
-                file_id=file_id,
-                question=quiz_question.question,
-                question_text=quiz_question.question,
-                question_type=quiz_question.question_type,
-                correct_answer=quiz_question.correct_answer,
-                distractors=quiz_question.distractors,
-                key_concept_id=quiz_question.key_concept_id,
-                is_custom=quiz_question.is_custom,
-                explanation="",
-                difficulty="medium"
-            ),
-            count=0,
-            message=f"Error creating quiz question: {str(e)[:100]}"
-        )
 
-@files_router.put("/quizzes/{quiz_question_id}", response_model=StandardResponse[QuizQuestionResponse])
-async def update_quiz_question(
-    quiz_question_id: int,
-    quiz_question_update: QuizQuestionUpdate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
+        if not new_quiz_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create the quiz question.")
 
-        # Verify user owns the file associated with the quiz question
-        quiz_question = store.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
-
-        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
-
-        updated_quiz_question = store.update_quiz_question(
-            quiz_question_id,
-            quiz_question_update.dict(exclude_unset=True)
-        )
+        # Fetch the full object to ensure it's attached to a session
+        new_quiz_orm = store.learning_material_repo.get_quiz_question_by_id(new_quiz_id)
+        if not new_quiz_orm:
+            raise HTTPException(status_code=404, detail="Quiz question not found after creation")
 
         return StandardResponse(
             status="success",
-            data=QuizQuestionResponse.from_orm(updated_quiz_question),
-            message="Quiz question updated successfully."
+            data=QuizQuestionResponse.from_orm(new_quiz_orm),
+            message="Quiz question added successfully."
         )
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update quiz question.")
-
-@files_router.delete("/quizzes/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_quiz_question(
-    quiz_question_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the quiz question
-        quiz_question = store.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found.")
-
-        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
-
-        store.delete_quiz_question(quiz_question_id)
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question.")
-
-# Route to re-extract a file (retry processing)
-@files_router.patch("/{file_id}/reextract", status_code=status.HTTP_202_ACCEPTED)
-async def reextract_file(
-    file_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        user_gc_id = user_data["user_gc_id"]
-        store = request.app.state.store
-
-        # Get file information
-        file_info = store.get_file_by_id(file_id)
-        if not file_info or file_info.get('user_id') != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
-            
-        # Reset file to uploaded status so worker will pick it up again
-        from api.db.orm_models import FileORM
-        
-        with store.file_repo.get_unit_of_work() as uow:
-            file = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
-            if file:
-                file.processing_status = "uploaded"  
-                uow.session.commit()
-                logger.info(f"Reset file {file_id} status to uploaded for worker to reprocess")
-            else:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in database")
-        
-        return {"message": "File reset for reprocessing. Worker will pick it up shortly."}
-        
-    except Exception as e:
-        logger.error(f"Error reextracting file: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-# Pydantic models for Key Concepts
-class KeyConceptResponse(BaseModel):
-    id: int
-    file_id: int
-    concept_title: Optional[str] = None
-    concept_explanation: Optional[str] = None
-
-    source_page_number: Optional[int] = None
-    source_video_timestamp_start_seconds: Optional[int] = None
-    source_video_timestamp_end_seconds: Optional[int] = None
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-class KeyConceptsFileResponse(BaseModel):
-    key_concepts: List[KeyConceptResponse]
-
-# Endpoint to delete a quiz question
-@files_router.delete("/quizzes/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_quiz_question(
-    quiz_question_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    """
-    Delete a quiz question by its ID.
-    
-    Ensures that the user owns the file associated with the quiz before deletion.
-    Returns 204 No Content on successful deletion or if the resource is not found.
-    """
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the quiz question
-        quiz_question = store.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            # Return 204 even if not found to ensure idempotency
-            logger.info(f"Quiz question with ID {quiz_question_id} not found. Returning 204.")
-            return
-
-        file_record = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or access denied.")
-
-        if not store.delete_quiz_question(quiz_question_id):
-            # This case handles if deletion fails in the repo layer for other reasons
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete quiz question.")
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question.")
-
-
-# Route to get key concepts for a file
-@files_router.get(
-    "/{file_id}/key_concepts", 
-    response_model=StandardResponse[KeyConceptsFileResponse],
-    summary="Get Key Concepts for File", 
-    description="Retrieves all key concepts extracted for a specific file."
-)
-async def get_key_concepts_for_file(
-    file_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        store = request.app.state.store
-        user_id = user_data["user_id"]
-
-        # Use the repository method to get key concepts
-        key_concepts_from_repo = store.learning_material_repo.get_key_concepts_for_file(file_id)
-        logger.info(f"Raw key_concepts data from repo: {key_concepts_from_repo}")
-
-        # Convert domain models to Pydantic models for the response
-        key_concept_responses = [KeyConceptResponse.from_orm(kc) for kc in key_concepts_from_repo]
-
-        response_data = KeyConceptsFileResponse(key_concepts=key_concept_responses)
-        return StandardResponse(
-            status="success",
-            data=response_data,
-            count=len(key_concept_responses),
-            message="Key concepts retrieved successfully"
-        )
-    except Exception as e:
-        logger.error(f"Error in key concepts endpoint for file {file_id}: {e}", exc_info=True)
-        # Return empty response with error status
-        return StandardResponse(
-            status="error",
-            data=KeyConceptsFileResponse(key_concepts=[]),
-            count=0,
-            message=f"Error processing request: {str(e)[:100]}"
-        )
-
-@files_router.put("/key_concepts/{key_concept_id}", response_model=StandardResponse[KeyConceptResponse])
-async def update_key_concept(
-    key_concept_id: int,
-    key_concept_update: KeyConceptUpdate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the key concept
-        key_concept = store.get_key_concept_by_id(key_concept_id)
-        if not key_concept:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found.")
-
-        file_record = store.file_repo.get_file_by_id(key_concept.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or access denied.")
-
-        updated_concept = store.update_key_concept(
-            key_concept_id,
-            key_concept_update.concept_title,
-            key_concept_update.concept_explanation
-        )
-
-        return StandardResponse(
-            status="success",
-            data=KeyConceptResponse.from_orm(updated_concept),
-            message="Key concept updated successfully."
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error updating key concept {key_concept_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update key concept.")
-
-class KeyConceptCreate(BaseModel):
-    concept_title: Optional[str] = None
-    concept_explanation: Optional[str] = None
-    source_page_number: Optional[int] = None
-    source_video_timestamp_start_seconds: Optional[int] = None
-    source_video_timestamp_end_seconds: Optional[int] = None
+        logger.error(f"Error adding quiz question for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not add quiz question.")
 
 @files_router.post("/{file_id}/key_concepts", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
 async def add_key_concept_for_file(
@@ -1095,16 +546,21 @@ async def add_key_concept_for_file(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
 
         # Call the repository method to add a single key concept
-        created_concept_orm = store.learning_material_repo.add_key_concept(
+        new_concept_id = store.learning_material_repo.add_key_concept(
             file_id=file_id,
             **key_concept_data.dict()
         )
 
-        if not created_concept_orm:
+        if not new_concept_id:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create the key concept.")
 
+        # Fetch the full object to avoid DetachedInstanceError
+        new_concept_orm = store.learning_material_repo.get_key_concept_by_id(new_concept_id)
+        if not new_concept_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found after creation")
+
         # Convert the ORM object to a Pydantic response model
-        response_data = KeyConceptResponse.from_orm(created_concept_orm)
+        response_data = KeyConceptResponse.from_orm(new_concept_orm)
 
         return StandardResponse(
             status="success",
