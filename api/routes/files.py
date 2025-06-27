@@ -1,13 +1,18 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks, Query, Response
 from redis.exceptions import RedisError
-from utils import get_user_id, upload_to_gcs, delete_from_gcs
+from utils import get_user_id, upload_to_gcs, delete_from_gcs, authenticate_user, get_store
 import logging
 from typing import Dict, List, Optional, TypeVar, Generic, Any
 from repositories.repository_manager import RepositoryManager
 import json
 from pydantic import BaseModel, Field, create_model, field_validator
-from schemas.learning_content import KeyConceptUpdate, FlashcardUpdate, QuizQuestionUpdate, QuizQuestionUpdateRequest
+from schemas.learning_content import (
+    KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse, KeyConceptsListResponse,
+    FlashcardCreate, FlashcardUpdate, FlashcardResponse, FlashcardsListResponse,
+    QuizQuestionCreate, QuizQuestionUpdate, QuizQuestionResponse, QuizQuestionsListResponse
+)
+from schemas.file import FileResponse, FileListResponse, StandardResponse, StatusResponse, UploadResponse
 from llm_service import prompt_llm
 from datetime import datetime
 
@@ -450,34 +455,28 @@ async def add_quiz_question_for_file(
 )
 async def update_quiz_question(
     quiz_question_id: int,
-    update_data: QuizQuestionUpdateRequest,
+    update_data: QuizQuestionUpdate,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
     try:
         user_id = user_data["user_id"]
-        store = request.app.state.store
+        store = get_store(request)
 
-        # First, get the quiz question to find its file_id
         quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
         if not quiz_question:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found")
 
-        # Then, get the file to check ownership
         file = store.file_repo.get_file_by_id(quiz_question.file_id)
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this quiz question")
 
-        # Update the question
-        updated_question_orm = store.learning_material_repo.update_quiz_question(quiz_question_id, update_data.dict(exclude_unset=True))
+        updated_question_orm = store.learning_material_repo.update_quiz_question(quiz_question_id, update_data.model_dump(exclude_unset=True))
         if not updated_question_orm:
             raise HTTPException(status_code=500, detail="Failed to update quiz question")
-        
-        updated_question = QuizQuestionResponse.from_orm(updated_question_orm)
 
         return StandardResponse(
-            status="success",
-            data=updated_question,
+            data=QuizQuestionResponse.from_orm(updated_question_orm),
             message="Quiz question updated successfully."
         )
     except HTTPException:
@@ -500,30 +499,106 @@ async def delete_quiz_question(
 ):
     try:
         user_id = user_data["user_id"]
-        store = request.app.state.store
+        store = get_store(request)
 
-        # First, get the quiz question to find its file_id
         quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
         if not quiz_question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found")
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-        # Then, get the file to check ownership
         file = store.file_repo.get_file_by_id(quiz_question.file_id)
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to delete this quiz question")
 
-        # If authorized, delete the question
         success = store.learning_material_repo.delete_quiz_question(quiz_question_id)
         if not success:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete quiz question")
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not delete quiz question")
+
+
+# --- Flashcard Learning Content ---
+
+@files_router.put(
+    "/flashcards/{flashcard_id}",
+    response_model=StandardResponse[FlashcardResponse],
+    summary="Update a Flashcard",
+    description="Updates a specific flashcard by its ID."
+)
+async def update_flashcard(
+    flashcard_id: int,
+    update_data: FlashcardUpdate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        flashcard = store.learning_material_repo.get_flashcard_by_id(flashcard_id)
+        if not flashcard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found")
+
+        file = store.file_repo.get_file_by_id(flashcard.file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this flashcard")
+
+        updated_flashcard_orm = store.learning_material_repo.update_flashcard(
+            flashcard_id,
+            update_data.model_dump(exclude_unset=True)
+        )
+        if not updated_flashcard_orm:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update flashcard")
+
+        return StandardResponse(
+            data=FlashcardResponse.from_orm(updated_flashcard_orm),
+            message="Flashcard updated successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update flashcard")
+
+
+@files_router.delete(
+    "/flashcards/{flashcard_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a Flashcard",
+    description="Deletes a specific flashcard by its ID."
+)
+async def delete_flashcard(
+    flashcard_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        flashcard = store.learning_material_repo.get_flashcard_by_id(flashcard_id)
+        if not flashcard:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+        file = store.file_repo.get_file_by_id(flashcard.file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to delete this flashcard")
+
+        success = store.learning_material_repo.delete_flashcard(flashcard_id)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete flashcard")
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting flashcard {flashcard_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete flashcard")
+
 
 # --- Key Concepts Learning Content ---
 

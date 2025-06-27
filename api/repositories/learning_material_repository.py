@@ -63,8 +63,7 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             try:
                 concepts = uow.session.query(KeyConceptORM).filter(KeyConceptORM.file_id == file_id).all()
-                for concept in concepts:
-                    uow.session.expunge(concept)
+
                 return concepts
             except Exception as e:
                 logger.error(f"ORM query for key concepts failed: {e}", exc_info=True)
@@ -131,8 +130,7 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             try:
                 flashcards = uow.session.query(FlashcardORM).filter(FlashcardORM.file_id == file_id).all()
-                for fc in flashcards:
-                    uow.session.expunge(fc)
+
                 return flashcards
             except Exception as e:
                 logger.error(f"ORM query for flashcards failed: {e}", exc_info=True)
@@ -215,8 +213,7 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             try:
                 questions = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.file_id == file_id).all()
-                for q in questions:
-                    uow.session.expunge(q)
+
                 return questions
             except Exception as e:
                 logger.error(f"ORM query for quiz questions failed: {e}", exc_info=True)
