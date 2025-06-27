@@ -58,12 +58,14 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             return uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
 
-    def get_key_concepts_for_file(self, file_id: int) -> List[KeyConcept]:
+    def get_key_concepts_for_file(self, file_id: int) -> List[KeyConceptORM]:
         """Get key concepts for a file."""
         with self.get_unit_of_work() as uow:
             try:
-                concepts_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.file_id == file_id).all()
-                return [KeyConcept.from_orm(concept) for concept in concepts_orm]
+                concepts = uow.session.query(KeyConceptORM).filter(KeyConceptORM.file_id == file_id).all()
+                for concept in concepts:
+                    uow.session.expunge(concept)
+                return concepts
             except Exception as e:
                 logger.error(f"ORM query for key concepts failed: {e}", exc_info=True)
                 return []
@@ -124,12 +126,14 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"Error adding flashcard: {e}", exc_info=True)
                 return None
     
-    def get_flashcards_for_file(self, file_id: int) -> List[Flashcard]:
+    def get_flashcards_for_file(self, file_id: int) -> List[FlashcardORM]:
         """Get flashcards for a file by ID."""
         with self.get_unit_of_work() as uow:
             try:
-                flashcards_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.file_id == file_id).all()
-                return [Flashcard.from_rm(fc) for fc in flashcards_orm]
+                flashcards = uow.session.query(FlashcardORM).filter(FlashcardORM.file_id == file_id).all()
+                for fc in flashcards:
+                    uow.session.expunge(fc)
+                return flashcards
             except Exception as e:
                 logger.error(f"ORM query for flashcards failed: {e}", exc_info=True)
                 return []
@@ -206,12 +210,14 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"Error adding quiz question: {e}", exc_info=True)
                 return None
 
-    def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestion]:
+    def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestionORM]:
         """Get quiz questions for a file by ID."""
         with self.get_unit_of_work() as uow:
             try:
-                quiz_questions_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.file_id == file_id).all()
-                return [QuizQuestion.from_orm(qq) for qq in quiz_questions_orm]
+                questions = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.file_id == file_id).all()
+                for q in questions:
+                    uow.session.expunge(q)
+                return questions
             except Exception as e:
                 logger.error(f"ORM query for quiz questions failed: {e}", exc_info=True)
                 return []

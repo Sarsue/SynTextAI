@@ -234,13 +234,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             console.log(`Quizzes API response data:`, responseData);
             
             // Handle the standardized response format
-            if (!responseData || responseData.status !== 'success' || !responseData.data || !Array.isArray(responseData.data.quizzes)) {
+            if (!responseData || responseData.status !== 'success' || !Array.isArray(responseData.data)) {
                 console.error("API response structure incorrect for quizzes:", responseData);
                 const errorMessage = responseData.message || 'API returned malformed data structure for quizzes';
                 throw new Error(errorMessage);
             }
 
-            const data: QuizQuestion[] = responseData.data.quizzes;
+            const data: QuizQuestion[] = responseData.data;
             console.log(`Parsed ${data.length} quizzes for file ID: ${fileId} (total count: ${responseData.count})`);
             
             if (data.length === 0) {

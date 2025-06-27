@@ -6,7 +6,7 @@ import logging
 from typing import Dict, List, Optional, TypeVar, Generic, Any
 from repositories.repository_manager import RepositoryManager
 import json
-from pydantic import BaseModel, Field, create_model, validator
+from pydantic import BaseModel, Field, create_model, field_validator
 from schemas.learning_content import KeyConceptUpdate, FlashcardUpdate, QuizQuestionUpdate
 from llm_service import prompt_llm
 from datetime import datetime
@@ -207,7 +207,32 @@ async def delete_file(
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-# Define a Flashcard response model for better type safety
+# --- Learning Content Models ---
+
+# Key Concepts
+class KeyConceptResponse(BaseModel):
+    id: int
+    file_id: int
+    concept: str = Field(alias='concept_title')
+    explanation: str = Field(alias='concept_explanation')
+    source_link: Optional[str] = None
+    is_custom: bool = False
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+class KeyConceptsListResponse(BaseModel):
+    key_concepts: List[KeyConceptResponse]
+
+class KeyConceptCreate(BaseModel):
+    concept: str
+    explanation: str
+    source_link: Optional[str] = None
+    is_custom: bool = True
+
+# Flashcards
 class FlashcardResponse(BaseModel):
     id: int
     file_id: int
@@ -223,7 +248,54 @@ class FlashcardResponse(BaseModel):
 class FlashcardsListResponse(BaseModel):
     flashcards: List[FlashcardResponse]
 
-# Endpoint: Get all flashcards for a file
+class FlashcardCreate(BaseModel):
+    question: str
+    answer: str
+    key_concept_id: Optional[int] = None
+    is_custom: bool = True
+
+# Quiz Questions
+class QuizQuestionResponse(BaseModel):
+    id: int
+    file_id: int
+    key_concept_id: Optional[int] = None
+    question: str
+    question_type: str = "MCQ"
+    correct_answer: str = ""
+    distractors: List[str] = []
+    answer_explanation: Optional[str] = Field(default="", alias="explanation")
+    difficulty: Optional[str] = "medium"
+    is_custom: bool = False
+
+    class Config:
+        from_attributes = True
+        populate_by_name = True
+
+    @field_validator('distractors', mode='before')
+    def parse_distractors_from_json(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse distractors string to JSON: {v}")
+                return []
+        return v
+
+class QuizQuestionsListResponse(BaseModel):
+    quiz_questions: List[QuizQuestionResponse]
+
+class QuizQuestionCreate(BaseModel):
+    question: str
+    correct_answer: str
+    distractors: List[str] = []
+    key_concept_id: Optional[int] = None
+    question_type: str = "MCQ"
+    explanation: Optional[str] = ""
+    difficulty: str = "medium"
+    is_custom: bool = True
+
+# --- Flashcard Learning Content ---
+
 @files_router.get(
     "/{file_id}/flashcards", 
     response_model=StandardResponse[FlashcardsListResponse],
@@ -238,51 +310,32 @@ async def get_flashcards_for_file(
     try:
         user_id = user_data["user_id"]
         store = request.app.state.store
-        file = store.get_file_by_id(file_id)
+        file = store.file_repo.get_file_by_id(file_id)
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
-        # Simply retrieve existing flashcards - no generation on request
-        flashcards = store.get_flashcards_for_file(file_id)
-        logger.info(f"Retrieved {len(flashcards) if flashcards else 0} flashcards for file {file_id}")
+        flashcards_orm = store.learning_material_repo.get_flashcards_for_file(file_id=file_id)
+        flashcards = [FlashcardResponse.from_orm(fc) for fc in flashcards_orm]
         
-        # Format the flashcards for API response
-        result = [FlashcardResponse.from_orm(card) for card in flashcards] if flashcards else []
-        
-        # Return standardized response
-        response_data = FlashcardsListResponse(flashcards=result)
         return StandardResponse(
-            status="success",
-            data=response_data,
-            count=len(result),
+            data=FlashcardsListResponse(flashcards=flashcards),
+            count=len(flashcards),
             message="Flashcards retrieved successfully"
         )
     except Exception as e:
-        logger.error(f"Error fetching flashcards for file {file_id}: {e}")
-        # Return error response with empty data instead of raising exception
-        return StandardResponse(
-            status="error",
-            data=FlashcardsListResponse(flashcards=[]),
-            count=0,
-            message=f"Error retrieving flashcards: {str(e)[:100]}"
-        )
-
-# Endpoint: Add a flashcard for a file
-class FlashcardCreate(BaseModel):
-    question: str
-    answer: str
-    key_concept_id: Optional[int] = None
-    is_custom: bool = True
+        logger.error(f"Error fetching flashcards for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not retrieve flashcards")
 
 @files_router.post(
     "/{file_id}/flashcards",
     response_model=StandardResponse[FlashcardResponse],
+    status_code=status.HTTP_201_CREATED,
     summary="Add Flashcard for File",
     description="Creates a new flashcard for the specified file."
 )
 async def add_flashcard_for_file(
     file_id: int,
-    flashcard: FlashcardCreate,
+    flashcard_data: FlashcardCreate,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
@@ -290,160 +343,38 @@ async def add_flashcard_for_file(
         user_id = user_data["user_id"]
         store = get_store(request)
         
-        # Verify file exists and belongs to user
         file_record = store.file_repo.get_file_by_id(file_id)
         if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
-        # Add the flashcard
-        created_flashcard_orm = store.learning_material_repo.add_flashcard(
-            file_id=file_id,
-            question=flashcard.question,
-            answer=flashcard.answer,
-            key_concept_id=flashcard.key_concept_id,
-            is_custom=flashcard.is_custom
+        new_flashcard_id = store.learning_material_repo.add_flashcard(
+            file_id=file_id, **flashcard_data.dict()
         )
 
-        if not created_flashcard_orm:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create flashcard.")
+        if not new_flashcard_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create the flashcard.")
 
-        response_data = FlashcardResponse.from_orm(created_flashcard_orm)
-        
+        new_flashcard_orm = store.learning_material_repo.get_flashcard_by_id(new_flashcard_id)
+        if not new_flashcard_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found after creation")
+
         return StandardResponse(
-            status="success",
-            data=response_data,
+            data=FlashcardResponse.from_orm(new_flashcard_orm),
             message="Flashcard created successfully"
         )
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
     except Exception as e:
-        logger.error(f"Error adding flashcard for file {file_id}: {e}")
-        return StandardResponse(
-            status="error",
-            data=FlashcardResponse(
-                id=0,
-                file_id=file_id,
-                question=flashcard.question,
-                answer=flashcard.answer,
-                key_concept_id=flashcard.key_concept_id,
-                is_custom=flashcard.is_custom
-            ),
-            count=0,
-            message=f"Error creating flashcard: {str(e)[:100]}"
-        )
-
-@files_router.put("/flashcards/{flashcard_id}", response_model=StandardResponse[FlashcardResponse])
-async def update_flashcard(
-    flashcard_id: int,
-    flashcard_update: FlashcardUpdate,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the flashcard
-        flashcard = store.get_flashcard_by_id(flashcard_id)
-        if not flashcard:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found.")
-
-        file_record = store.file_repo.get_file_by_id(flashcard.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or access denied.")
-
-        updated_flashcard = store.update_flashcard(
-            flashcard_id,
-            flashcard_update.dict(exclude_unset=True)
-        )
-
-        return StandardResponse(
-            status="success",
-            data=FlashcardResponse.from_orm(updated_flashcard),
-            message="Flashcard updated successfully."
-        )
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update flashcard.")
-
-@files_router.delete("/flashcards/{flashcard_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_flashcard(
-    flashcard_id: int,
-    request: Request,
-    user_data: Dict = Depends(authenticate_user)
-):
-    try:
-        user_id = user_data["user_id"]
-        store = get_store(request)
-
-        # Verify user owns the file associated with the flashcard
-        flashcard = store.get_flashcard_by_id(flashcard_id)
-        if not flashcard:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found.")
-
-        file_record = store.file_repo.get_file_by_id(flashcard.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or access denied.")
-
-        store.delete_flashcard(flashcard_id)
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.error(f"Error deleting flashcard {flashcard_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete flashcard.")
+        logger.error(f"Error creating flashcard for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create flashcard")
 
 # --- Quiz Learning Content ---
 
-class QuizQuestionResponse(BaseModel):
-    id: int
-    file_id: int
-    key_concept_id: Optional[int] = None
-    question: str
-    question_type: str = "MCQ"
-    correct_answer: str = ""
-    distractors: List[str] = []
-    explanation: Optional[str] = ""
-    difficulty: Optional[str] = "medium"
-    is_custom: bool = False
-
-    class Config:
-        from_attributes = True
-
-    @validator('distractors', pre=True, allow_reuse=True)
-    def parse_json_string(cls, v):
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse distractors string to JSON: {v}")
-                return []
-        return v
-
-class QuizzesListResponse(BaseModel):
-    quizzes: List[QuizQuestionResponse]
-
-class QuizQuestionCreate(BaseModel):
-    question: str
-    correct_answer: str
-    distractors: List[str] = []
-    key_concept_id: Optional[int] = None
-    question_type: str = "MCQ"
-    explanation: Optional[str] = ""
-    difficulty: str = "medium"
-    is_custom: bool = True
-
 @files_router.get(
     "/{file_id}/quizzes",
-    response_model=StandardResponse[QuizzesListResponse],
+    response_model=StandardResponse[List[QuizQuestionResponse]],
     summary="Get Quiz Questions for File",
     description="Retrieves all quiz questions generated for a specific file."
 )
-async def get_quizzes_for_file(
+async def get_quiz_questions_for_file(
     file_id: int,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
@@ -451,35 +382,33 @@ async def get_quizzes_for_file(
     try:
         user_id = user_data["user_id"]
         store = request.app.state.store
-        file = store.get_file_by_id(file_id)
+        file = store.file_repo.get_file_by_id(file_id)
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
-            
-        quizzes = store.get_quiz_questions_for_file(file_id)
-        logger.info(f"Retrieved {len(quizzes) if quizzes else 0} quizzes for file {file_id}")
-        
-        quizzes_out = [QuizQuestionResponse.from_orm(q) for q in quizzes]
-        
-        response_data = QuizzesListResponse(quizzes=quizzes_out)
+
+        quiz_questions_orm = store.learning_material_repo.get_quiz_questions_for_file(file_id=file_id)
+        quiz_questions = [QuizQuestionResponse.from_orm(q) for q in quiz_questions_orm]
+
         return StandardResponse(
             status="success",
-            data=response_data,
-            count=len(quizzes_out),
-            message="Quizzes retrieved successfully"
+            data=quiz_questions,
+            count=len(quiz_questions),
+            message="Quiz questions retrieved successfully."
         )
     except Exception as e:
-        logger.error(f"Error getting quizzes for file {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not retrieve quizzes")
+        logger.error(f"Error getting quiz questions for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve quiz questions")
 
 @files_router.post(
     "/{file_id}/quizzes",
     response_model=StandardResponse[QuizQuestionResponse],
+    status_code=status.HTTP_201_CREATED,
     summary="Add Quiz Question for File",
     description="Creates a new quiz question for the specified file."
 )
 async def add_quiz_question_for_file(
     file_id: int,
-    quiz_question: QuizQuestionCreate,
+    quiz_question_data: QuizQuestionCreate,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
@@ -492,9 +421,97 @@ async def add_quiz_question_for_file(
         if not file_record or file_record['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
 
-        # Prepare data, converting key_concept_id 0 to None
-        quiz_data = quiz_question.dict()
-        key_concept_id = quiz_data.pop("key_concept_id", None)
+        new_question_id = store.learning_material_repo.add_quiz_question(
+            file_id=file_id,
+            **quiz_question_data.dict()
+        )
+
+        if not new_question_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create the quiz question.")
+
+        new_question_orm = store.learning_material_repo.get_quiz_question_by_id(new_question_id)
+        if not new_question_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found after creation")
+
+        return StandardResponse(
+            data=QuizQuestionResponse.from_orm(new_question_orm),
+            message="Quiz question created successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error creating quiz question for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create quiz question")
+
+# --- Key Concepts Learning Content ---
+
+@files_router.get(
+    "/{file_id}/key_concepts",
+    response_model=StandardResponse[KeyConceptsListResponse],
+    summary="Get Key Concepts for File",
+    description="Retrieves all key concepts generated for a specific file."
+)
+async def get_key_concepts_for_file(
+    file_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+        file = store.file_repo.get_file_by_id(file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
+            
+        key_concepts_orm = store.learning_material_repo.get_key_concepts_for_file(file_id=file_id)
+        key_concepts = [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
+        
+        return StandardResponse(
+            data=KeyConceptsListResponse(key_concepts=key_concepts),
+            count=len(key_concepts),
+            message="Key concepts retrieved successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error getting key concepts for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve key concepts")
+
+@files_router.post(
+    "/{file_id}/key_concepts", 
+    response_model=StandardResponse[KeyConceptResponse], 
+    status_code=status.HTTP_201_CREATED
+)
+async def add_key_concept_for_file(
+    file_id: int,
+    key_concept_data: KeyConceptCreate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    """Manually add a single key concept to a file."""
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        file_record = store.file_repo.get_file_by_id(file_id)
+        if not file_record or file_record['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
+
+        new_concept_id = store.learning_material_repo.add_key_concept(
+            file_id=file_id,
+            **key_concept_data.dict()
+        )
+
+        if not new_concept_id:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create the key concept.")
+
+        new_concept_orm = store.learning_material_repo.get_key_concept_by_id(new_concept_id)
+        if not new_concept_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found after creation")
+
+        return StandardResponse(
+            data=KeyConceptResponse.from_orm(new_concept_orm),
+            message="Key concept created successfully"
+        )
+    except Exception as e:
+        logger.error(f"Error creating key concept for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create key concept")
         if key_concept_id == 0:
             key_concept_id = None
 
@@ -528,50 +545,82 @@ async def add_quiz_question_for_file(
         logger.error(f"Error adding quiz question for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not add quiz question.")
 
-@files_router.post("/{file_id}/key_concepts", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
-async def add_key_concept_for_file(
+# ... (rest of the code remains the same)
+
+# Endpoint: Get all key concepts for a file
+@files_router.get(
+    "/{file_id}/key_concepts",
+    response_model=StandardResponse[KeyConceptsListResponse],
+    summary="Get Key Concepts for File",
+    description="Retrieves all key concepts generated for a specific file."
+)
+async def get_key_concepts_for_file(
     file_id: int,
-    key_concept_data: KeyConceptCreate,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
-    """Manually add a single key concept to a file."""
     try:
         user_id = user_data["user_id"]
-        store = get_store(request)
+        store = request.app.state.store
+        file = store.get_file_by_id(file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
 
-        # Verify user owns the file
-        file_record = store.file_repo.get_file_by_id(file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or access denied.")
+        key_concepts_orm = store.learning_material_repo.get_key_concepts_for_file(file_id=file_id)
+        key_concepts = [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
+        logger.info(f"Retrieved {len(key_concepts)} key concepts for file {file_id}")
 
-        # Call the repository method to add a single key concept
-        new_concept_id = store.learning_material_repo.add_key_concept(
-            file_id=file_id,
-            **key_concept_data.dict()
-        )
-
-        if not new_concept_id:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create the key concept.")
-
-        # Fetch the full object to avoid DetachedInstanceError
-        new_concept_orm = store.learning_material_repo.get_key_concept_by_id(new_concept_id)
-        if not new_concept_orm:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found after creation")
-
-        # Convert the ORM object to a Pydantic response model
-        response_data = KeyConceptResponse.from_orm(new_concept_orm)
+        response_data = KeyConceptsListResponse(key_concepts=key_concepts)
 
         return StandardResponse(
             status="success",
             data=response_data,
-            message="Key concept added successfully."
+            count=len(key_concepts),
+            message="Key concepts retrieved successfully."
         )
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f"Error adding key concept for file {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not add key concept.")
+        logger.error(f"Error getting key concepts for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not retrieve key concepts.")
+
+@files_router.patch("/key_concepts/{key_concept_id}", response_model=StandardResponse[KeyConceptResponse])
+async def update_key_concept(
+    key_concept_id: int,
+    update_data: KeyConceptUpdate,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = get_store(request)
+
+        key_concept = store.learning_material_repo.get_key_concept_by_id(key_concept_id)
+        if not key_concept:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found.")
+
+        file_record = store.file_repo.get_file_by_id(key_concept.file_id)
+        if not file_record or file_record.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+        updated_concept_orm = store.learning_material_repo.update_key_concept(
+            key_concept_id,
+            update_data.model_dump(exclude_unset=True)
+        )
+
+        if not updated_concept_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update failed, key concept not found.")
+
+        return StandardResponse(
+            status="success",
+            data=KeyConceptResponse.from_orm(updated_concept_orm),
+            message="Key concept updated successfully."
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error updating key concept {key_concept_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update key concept.")
 
 @files_router.delete("/key_concepts/{key_concept_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_key_concept(
