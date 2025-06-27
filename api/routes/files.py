@@ -1,20 +1,21 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks, Query, Response
 from redis.exceptions import RedisError
-from utils import get_user_id, upload_to_gcs, delete_from_gcs, authenticate_user, get_store
+from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from typing import Dict, List, Optional, TypeVar, Generic, Any
 from repositories.repository_manager import RepositoryManager
 import json
-from pydantic import BaseModel, Field, create_model, field_validator
+from datetime import datetime
+from schemas.file import (
+    FileResponse, FileListResponse, StandardResponse, StatusResponse, UploadResponse
+)
 from schemas.learning_content import (
     KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse, KeyConceptsListResponse,
     FlashcardCreate, FlashcardUpdate, FlashcardResponse, FlashcardsListResponse,
     QuizQuestionCreate, QuizQuestionUpdate, QuizQuestionResponse, QuizQuestionsListResponse
 )
-from schemas.file import FileResponse, FileListResponse, StandardResponse, StatusResponse, UploadResponse
 from llm_service import prompt_llm
-from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
@@ -25,22 +26,6 @@ files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 # Define a standardized API response model
 T = TypeVar('T')
-class StandardResponse(BaseModel, Generic[T]):
-    """Standardized API response format for all endpoints"""
-    status: str = "success"
-    data: T
-    count: Optional[int] = None
-    message: Optional[str] = None
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "status": "success",
-                "data": {},
-                "count": 0,
-                "message": "Data retrieved successfully"
-            }
-        }
 
 # Dependency to get the store
 def get_store(request: Request):
@@ -212,92 +197,7 @@ async def delete_file(
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-# --- Learning Content Models ---
 
-# Key Concepts
-class KeyConceptResponse(BaseModel):
-    id: int
-    file_id: int
-    concept: str = Field(alias='concept_title')
-    explanation: str = Field(alias='concept_explanation')
-    source_link: Optional[str] = None
-    is_custom: bool = False
-    created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-        populate_by_name = True
-
-class KeyConceptsListResponse(BaseModel):
-    key_concepts: List[KeyConceptResponse]
-
-class KeyConceptCreate(BaseModel):
-    concept: str
-    explanation: str
-    source_link: Optional[str] = None
-    is_custom: bool = True
-
-# Flashcards
-class FlashcardResponse(BaseModel):
-    id: int
-    file_id: int
-    question: str
-    answer: str
-    key_concept_id: Optional[int] = None
-    is_custom: bool = False
-    created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-class FlashcardsListResponse(BaseModel):
-    flashcards: List[FlashcardResponse]
-
-class FlashcardCreate(BaseModel):
-    question: str
-    answer: str
-    key_concept_id: Optional[int] = None
-    is_custom: bool = True
-
-# Quiz Questions
-class QuizQuestionResponse(BaseModel):
-    id: int
-    file_id: int
-    key_concept_id: Optional[int] = None
-    question: str
-    question_type: str = "MCQ"
-    correct_answer: str = ""
-    distractors: List[str] = []
-    answer_explanation: Optional[str] = Field(default="", alias="explanation")
-    difficulty: Optional[str] = "medium"
-    is_custom: bool = False
-
-    class Config:
-        from_attributes = True
-        populate_by_name = True
-
-    @field_validator('distractors', mode='before')
-    def parse_distractors_from_json(cls, v):
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse distractors string to JSON: {v}")
-                return []
-        return v
-
-class QuizQuestionsListResponse(BaseModel):
-    quiz_questions: List[QuizQuestionResponse]
-
-class QuizQuestionCreate(BaseModel):
-    question: str
-    correct_answer: str
-    distractors: List[str] = []
-    key_concept_id: Optional[int] = None
-    question_type: str = "MCQ"
-    explanation: Optional[str] = ""
-    difficulty: str = "medium"
-    is_custom: bool = True
 
 # --- Flashcard Learning Content ---
 
