@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, BackgroundTasks, Query, Response
 from redis.exceptions import RedisError
 from utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, TypeVar, Generic, Any
 from repositories.repository_manager import RepositoryManager
 import json
 from pydantic import BaseModel, Field, create_model, field_validator
-from schemas.learning_content import KeyConceptUpdate, FlashcardUpdate, QuizQuestionUpdate
+from schemas.learning_content import KeyConceptUpdate, FlashcardUpdate, QuizQuestionUpdate, QuizQuestionUpdateRequest
 from llm_service import prompt_llm
 from datetime import datetime
 
@@ -440,6 +440,90 @@ async def add_quiz_question_for_file(
     except Exception as e:
         logger.error(f"Error creating quiz question for file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create quiz question")
+
+
+@files_router.put(
+    "/quizzes/{quiz_question_id}",
+    response_model=StandardResponse[QuizQuestionResponse],
+    summary="Update a Quiz Question",
+    description="Updates a specific quiz question by its ID."
+)
+async def update_quiz_question(
+    quiz_question_id: int,
+    update_data: QuizQuestionUpdateRequest,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+
+        # First, get the quiz question to find its file_id
+        quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
+        if not quiz_question:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found")
+
+        # Then, get the file to check ownership
+        file = store.file_repo.get_file_by_id(quiz_question.file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this quiz question")
+
+        # Update the question
+        updated_question_orm = store.learning_material_repo.update_quiz_question(quiz_question_id, update_data.dict(exclude_unset=True))
+        if not updated_question_orm:
+            raise HTTPException(status_code=500, detail="Failed to update quiz question")
+        
+        updated_question = QuizQuestionResponse.from_orm(updated_question_orm)
+
+        return StandardResponse(
+            status="success",
+            data=updated_question,
+            message="Quiz question updated successfully."
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not update quiz question")
+
+
+@files_router.delete(
+    "/quizzes/{quiz_question_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a Quiz Question",
+    description="Deletes a specific quiz question by its ID."
+)
+async def delete_quiz_question(
+    quiz_question_id: int,
+    request: Request,
+    user_data: Dict = Depends(authenticate_user)
+):
+    try:
+        user_id = user_data["user_id"]
+        store = request.app.state.store
+
+        # First, get the quiz question to find its file_id
+        quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
+        if not quiz_question:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found")
+
+        # Then, get the file to check ownership
+        file = store.file_repo.get_file_by_id(quiz_question.file_id)
+        if not file or file['user_id'] != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to delete this quiz question")
+
+        # If authorized, delete the question
+        success = store.learning_material_repo.delete_quiz_question(quiz_question_id)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete quiz question")
+
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not delete quiz question")
 
 # --- Key Concepts Learning Content ---
 
