@@ -5,10 +5,11 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from models import Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
+from models import File, Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
 from repositories.domain_models import KeyConcept, Flashcard, QuizQuestion
+from schemas.learning_content import KeyConceptResponse, FlashcardResponse, QuizQuestionResponse
 from repositories.base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
@@ -58,43 +59,62 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             return uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
 
-    def get_key_concepts_for_file(self, file_id: int) -> List[KeyConceptORM]:
+    def get_key_concepts_for_file(self, file_id: int) -> List[KeyConceptResponse]:
         """Get key concepts for a file."""
         with self.get_unit_of_work() as uow:
             try:
-                concepts = uow.session.query(KeyConceptORM).filter(KeyConceptORM.file_id == file_id).all()
-
-                return concepts
+                key_concepts_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.file_id == file_id).all()
+                return [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
             except Exception as e:
                 logger.error(f"ORM query for key concepts failed: {e}", exc_info=True)
                 return []
 
-    def update_key_concept(self, key_concept_id: int, update_data: Dict[str, Any]) -> Optional[KeyConceptORM]:
-        """Update a key concept."""
+    def update_key_concept(self, key_concept_id: int, user_id: int, update_data: KeyConcept) -> Optional[KeyConceptORM]:
+        """Update a key concept's details, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
-                concept_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
+                concept_orm = uow.session.query(KeyConceptORM).join(KeyConceptORM.file).filter(
+                    KeyConceptORM.id == key_concept_id,
+                    File.user_id == user_id
+                ).first()
+
                 if not concept_orm:
+                    logger.warning(f"Update failed: KeyConcept {key_concept_id} not found or user {user_id} lacks ownership.")
                     return None
-                for key, value in update_data.items():
-                    setattr(concept_orm, key, value)
+
+                # Update fields from the domain model
+                concept_orm.concept_title = update_data.concept_title
+                concept_orm.concept_explanation = update_data.concept_explanation
+                concept_orm.source_page_number = update_data.source_page_number
+                concept_orm.source_video_timestamp_start_seconds = update_data.source_video_timestamp_start_seconds
+                concept_orm.source_video_timestamp_end_seconds = update_data.source_video_timestamp_end_seconds
+
                 uow.session.commit()
                 uow.session.refresh(concept_orm)
+                logger.info(f"Successfully updated KeyConcept {key_concept_id} by user {user_id}.")
                 return concept_orm
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error updating key concept {key_concept_id}: {e}", exc_info=True)
                 return None
 
-    def delete_key_concept(self, key_concept_id: int) -> bool:
-        """Delete a key concept by its ID."""
+    def delete_key_concept(self, key_concept_id: int, user_id: int) -> bool:
+        """Delete a key concept by its ID, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
-                concept_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
+                # Join with File to check ownership
+                concept_orm = uow.session.query(KeyConceptORM).join(KeyConceptORM.file).filter(
+                    KeyConceptORM.id == key_concept_id,
+                    File.user_id == user_id
+                ).first()
+
                 if not concept_orm:
+                    logger.warning(f"Delete failed: KeyConcept {key_concept_id} not found or user {user_id} lacks ownership.")
                     return False
+
                 uow.session.delete(concept_orm)
                 uow.session.commit()
+                logger.info(f"Successfully deleted KeyConcept {key_concept_id} by user {user_id}.")
                 return True
             except Exception as e:
                 uow.session.rollback()
@@ -125,13 +145,12 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"Error adding flashcard: {e}", exc_info=True)
                 return None
     
-    def get_flashcards_for_file(self, file_id: int) -> List[FlashcardORM]:
+    def get_flashcards_for_file(self, file_id: int) -> List[FlashcardResponse]:
         """Get flashcards for a file by ID."""
         with self.get_unit_of_work() as uow:
             try:
-                flashcards = uow.session.query(FlashcardORM).filter(FlashcardORM.file_id == file_id).all()
-
-                return flashcards
+                flashcards_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.file_id == file_id).all()
+                return [FlashcardResponse.from_orm(fc) for fc in flashcards_orm]
             except Exception as e:
                 logger.error(f"ORM query for flashcards failed: {e}", exc_info=True)
                 return []
@@ -139,34 +158,49 @@ class LearningMaterialRepository(BaseRepository):
     def get_flashcard_by_id(self, flashcard_id: int) -> Optional[FlashcardORM]:
         """Get a single flashcard by its ID."""
         with self.get_unit_of_work() as uow:
-            return uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+            return uow.session.query(FlashcardORM).options(selectinload('*')).filter(FlashcardORM.id == flashcard_id).first()
 
-    def update_flashcard(self, flashcard_id: int, update_data: Dict[str, Any]) -> Optional[FlashcardORM]:
-        """Update a flashcard."""
+    def update_flashcard(self, flashcard_id: int, user_id: int, update_data: Flashcard) -> Optional[FlashcardORM]:
+        """Update a flashcard's details, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
-                flashcard_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+                flashcard_orm = uow.session.query(FlashcardORM).join(FlashcardORM.file).filter(
+                    FlashcardORM.id == flashcard_id,
+                    File.user_id == user_id
+                ).first()
+
                 if not flashcard_orm:
+                    logger.warning(f"Update failed: Flashcard {flashcard_id} not found or user {user_id} lacks ownership.")
                     return None
-                for key, value in update_data.items():
-                    setattr(flashcard_orm, key, value)
+
+                flashcard_orm.question = update_data.question
+                flashcard_orm.answer = update_data.answer
+
                 uow.session.commit()
                 uow.session.refresh(flashcard_orm)
+                logger.info(f"Successfully updated Flashcard {flashcard_id} by user {user_id}.")
                 return flashcard_orm
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
                 return None
 
-    def delete_flashcard(self, flashcard_id: int) -> bool:
-        """Delete a flashcard by its ID."""
+    def delete_flashcard(self, flashcard_id: int, user_id: int) -> bool:
+        """Delete a flashcard by its ID, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
-                flashcard_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.id == flashcard_id).first()
+                flashcard_orm = uow.session.query(FlashcardORM).join(FlashcardORM.file).filter(
+                    FlashcardORM.id == flashcard_id,
+                    File.user_id == user_id
+                ).first()
+
                 if not flashcard_orm:
+                    logger.warning(f"Delete failed: Flashcard {flashcard_id} not found or user {user_id} lacks ownership.")
                     return False
+
                 uow.session.delete(flashcard_orm)
                 uow.session.commit()
+                logger.info(f"Successfully deleted Flashcard {flashcard_id} by user {user_id}.")
                 return True
             except Exception as e:
                 uow.session.rollback()
@@ -208,13 +242,12 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"Error adding quiz question: {e}", exc_info=True)
                 return None
 
-    def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestionORM]:
+    def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestionResponse]:
         """Get quiz questions for a file by ID."""
         with self.get_unit_of_work() as uow:
             try:
-                questions = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.file_id == file_id).all()
-
-                return questions
+                quiz_questions_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.file_id == file_id).all()
+                return [QuizQuestionResponse.from_orm(q) for q in quiz_questions_orm]
             except Exception as e:
                 logger.error(f"ORM query for quiz questions failed: {e}", exc_info=True)
                 return []
@@ -224,32 +257,49 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             return uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
 
-    def update_quiz_question(self, quiz_question_id: int, update_data: Dict[str, Any]) -> Optional[QuizQuestionORM]:
-        """Update a quiz question."""
+    def update_quiz_question(self, quiz_question_id: int, user_id: int, update_data: QuizQuestion) -> Optional[QuizQuestionORM]:
+        """Update a quiz question's details, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
-                quiz_question_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+                quiz_question_orm = uow.session.query(QuizQuestionORM).join(QuizQuestionORM.file).filter(
+                    QuizQuestionORM.id == quiz_question_id,
+                    File.user_id == user_id
+                ).first()
+
                 if not quiz_question_orm:
+                    logger.warning(f"Update failed: QuizQuestion {quiz_question_id} not found or user {user_id} lacks ownership.")
                     return None
-                for key, value in update_data.items():
-                    setattr(quiz_question_orm, key, value)
+
+                quiz_question_orm.question_text = update_data.question_text
+                quiz_question_orm.options = update_data.options
+                quiz_question_orm.correct_answer = update_data.correct_answer
+                quiz_question_orm.explanation = update_data.explanation
+
                 uow.session.commit()
                 uow.session.refresh(quiz_question_orm)
+                logger.info(f"Successfully updated QuizQuestion {quiz_question_id} by user {user_id}.")
                 return quiz_question_orm
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
                 return None
 
-    def delete_quiz_question(self, quiz_question_id: int) -> bool:
-        """Delete a quiz question by its ID."""
+    def delete_quiz_question(self, quiz_question_id: int, user_id: int) -> bool:
+        """Delete a quiz question by its ID, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
-                quiz_question_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
+                quiz_question_orm = uow.session.query(QuizQuestionORM).join(QuizQuestionORM.file).filter(
+                    QuizQuestionORM.id == quiz_question_id,
+                    File.user_id == user_id
+                ).first()
+
                 if not quiz_question_orm:
+                    logger.warning(f"Delete failed: QuizQuestion {quiz_question_id} not found or user {user_id} lacks ownership.")
                     return False
+
                 uow.session.delete(quiz_question_orm)
                 uow.session.commit()
+                logger.info(f"Successfully deleted QuizQuestion {quiz_question_id} by user {user_id}.")
                 return True
             except Exception as e:
                 uow.session.rollback()

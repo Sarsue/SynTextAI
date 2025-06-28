@@ -13,8 +13,10 @@ from schemas.file import (
 from schemas.learning_content import (
     KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse, KeyConceptsListResponse,
     FlashcardCreate, FlashcardUpdate, FlashcardResponse, FlashcardsListResponse,
-    QuizQuestionCreate, QuizQuestionUpdate, QuizQuestionResponse, QuizQuestionsListResponse
+    QuizQuestionCreate, QuizQuestionUpdate, QuizQuestionResponse, QuizQuestionsListResponse,
+    KeyConceptUpdateRequest, FlashcardUpdateRequest, QuizQuestionUpdateRequest
 )
+from repositories.domain_models import KeyConcept, Flashcard, QuizQuestion
 from llm_service import prompt_llm
 
 # Set up logging
@@ -219,8 +221,7 @@ async def get_flashcards_for_file(
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
-        flashcards_orm = store.learning_material_repo.get_flashcards_for_file(file_id=file_id)
-        flashcards = [FlashcardResponse.from_orm(fc) for fc in flashcards_orm]
+        flashcards = store.learning_material_repo.get_flashcards_for_file(file_id=file_id)
         
         return StandardResponse(
             data=FlashcardsListResponse(flashcards=flashcards),
@@ -291,8 +292,7 @@ async def get_quiz_questions_for_file(
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
 
-        quiz_questions_orm = store.learning_material_repo.get_quiz_questions_for_file(file_id=file_id)
-        quiz_questions = [QuizQuestionResponse.from_orm(q) for q in quiz_questions_orm]
+        quiz_questions = store.learning_material_repo.get_quiz_questions_for_file(file_id=file_id)
 
         return StandardResponse(
             status="success",
@@ -355,7 +355,7 @@ async def add_quiz_question_for_file(
 )
 async def update_quiz_question(
     quiz_question_id: int,
-    update_data: QuizQuestionUpdate,
+    update_data: QuizQuestionUpdateRequest,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
@@ -363,27 +363,23 @@ async def update_quiz_question(
         user_id = user_data["user_id"]
         store = get_store(request)
 
-        quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found")
+        # Convert Pydantic request to domain model
+        quiz_question_domain = QuizQuestion(**update_data.dict(exclude_unset=True))
 
-        file = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file or file['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this quiz question")
-
-        updated_question_orm = store.learning_material_repo.update_quiz_question(quiz_question_id, update_data.model_dump(exclude_unset=True))
-        if not updated_question_orm:
-            raise HTTPException(status_code=500, detail="Failed to update quiz question")
-
-        return StandardResponse(
-            data=QuizQuestionResponse.from_orm(updated_question_orm),
-            message="Quiz question updated successfully."
+        updated_question_orm = store.learning_material_repo.update_quiz_question(
+            quiz_question_id, user_id, quiz_question_domain
         )
-    except HTTPException:
-        raise
+
+        if not updated_question_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or user does not have permission to update.")
+
+        return StandardResponse(data=QuizQuestionResponse.from_orm(updated_question_orm))
+
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error updating quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not update quiz question")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update quiz question")
 
 
 @files_router.delete(
@@ -401,24 +397,16 @@ async def delete_quiz_question(
         user_id = user_data["user_id"]
         store = get_store(request)
 
-        quiz_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not quiz_question:
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        success = store.learning_material_repo.delete_quiz_question(quiz_question_id, user_id)
 
-        file = store.file_repo.get_file_by_id(quiz_question.file_id)
-        if not file or file['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to delete this quiz question")
-
-        success = store.learning_material_repo.delete_quiz_question(quiz_question_id)
         if not success:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete quiz question")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz question not found or user does not have permission to delete.")
 
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except HTTPException:
-        raise
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error deleting quiz question {quiz_question_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not delete quiz question")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete quiz question")
 
 
 # --- Flashcard Learning Content ---
@@ -431,7 +419,7 @@ async def delete_quiz_question(
 )
 async def update_flashcard(
     flashcard_id: int,
-    update_data: FlashcardUpdate,
+    update_data: FlashcardUpdateRequest,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
@@ -439,27 +427,20 @@ async def update_flashcard(
         user_id = user_data["user_id"]
         store = get_store(request)
 
-        flashcard = store.learning_material_repo.get_flashcard_by_id(flashcard_id)
-        if not flashcard:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found")
-
-        file = store.file_repo.get_file_by_id(flashcard.file_id)
-        if not file or file['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to update this flashcard")
+        # Convert Pydantic request to domain model
+        flashcard_domain = Flashcard(**update_data.dict(exclude_unset=True))
 
         updated_flashcard_orm = store.learning_material_repo.update_flashcard(
-            flashcard_id,
-            update_data.model_dump(exclude_unset=True)
+            flashcard_id, user_id, flashcard_domain
         )
-        if not updated_flashcard_orm:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update flashcard")
 
-        return StandardResponse(
-            data=FlashcardResponse.from_orm(updated_flashcard_orm),
-            message="Flashcard updated successfully"
-        )
-    except HTTPException:
-        raise
+        if not updated_flashcard_orm:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or user does not have permission to update.")
+
+        return StandardResponse(data=FlashcardResponse.from_orm(updated_flashcard_orm))
+
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not update flashcard")
@@ -480,21 +461,13 @@ async def delete_flashcard(
         user_id = user_data["user_id"]
         store = get_store(request)
 
-        flashcard = store.learning_material_repo.get_flashcard_by_id(flashcard_id)
-        if not flashcard:
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        success = store.learning_material_repo.delete_flashcard(flashcard_id, user_id)
 
-        file = store.file_repo.get_file_by_id(flashcard.file_id)
-        if not file or file['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to delete this flashcard")
-
-        success = store.learning_material_repo.delete_flashcard(flashcard_id)
         if not success:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete flashcard")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flashcard not found or user does not have permission to delete.")
 
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except HTTPException:
-        raise
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error deleting flashcard {flashcard_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not delete flashcard")
@@ -520,8 +493,7 @@ async def get_key_concepts_for_file(
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
             
-        key_concepts_orm = store.learning_material_repo.get_key_concepts_for_file(file_id=file_id)
-        key_concepts = [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
+        key_concepts = store.learning_material_repo.get_key_concepts_for_file(file_id=file_id)
         
         return StandardResponse(
             data=KeyConceptsListResponse(key_concepts=key_concepts),
@@ -625,8 +597,7 @@ async def get_key_concepts_for_file(
         if not file or file['user_id'] != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized")
 
-        key_concepts_orm = store.learning_material_repo.get_key_concepts_for_file(file_id=file_id)
-        key_concepts = [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
+        key_concepts = store.learning_material_repo.get_key_concepts_for_file(file_id=file_id)
         logger.info(f"Retrieved {len(key_concepts)} key concepts for file {file_id}")
 
         response_data = KeyConceptsListResponse(key_concepts=key_concepts)
@@ -646,7 +617,7 @@ async def get_key_concepts_for_file(
 @files_router.patch("/key_concepts/{key_concept_id}", response_model=StandardResponse[KeyConceptResponse])
 async def update_key_concept(
     key_concept_id: int,
-    update_data: KeyConceptUpdate,
+    update_data: KeyConceptUpdateRequest,
     request: Request,
     user_data: Dict = Depends(authenticate_user)
 ):
@@ -654,27 +625,18 @@ async def update_key_concept(
         user_id = user_data["user_id"]
         store = get_store(request)
 
-        key_concept = store.learning_material_repo.get_key_concept_by_id(key_concept_id)
-        if not key_concept:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found.")
-
-        file_record = store.file_repo.get_file_by_id(key_concept.file_id)
-        if not file_record or file_record.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+        # Convert Pydantic request to domain model
+        key_concept_domain = KeyConcept(**update_data.dict(exclude_unset=True))
 
         updated_concept_orm = store.learning_material_repo.update_key_concept(
-            key_concept_id,
-            update_data.model_dump(exclude_unset=True)
+            key_concept_id, user_id, key_concept_domain
         )
 
         if not updated_concept_orm:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Update failed, key concept not found.")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or user does not have permission to update.")
 
-        return StandardResponse(
-            status="success",
-            data=KeyConceptResponse.from_orm(updated_concept_orm),
-            message="Key concept updated successfully."
-        )
+        return StandardResponse(data=KeyConceptResponse.from_orm(updated_concept_orm))
+
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -691,16 +653,10 @@ async def delete_key_concept(
         user_id = user_data["user_id"]
         store = get_store(request)
 
-        # Verify user owns the file associated with the key concept
-        key_concept = store.get_key_concept_by_id(key_concept_id)
-        if not key_concept:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found.")
+        success = store.learning_material_repo.delete_key_concept(key_concept_id, user_id)
 
-        file_record = store.file_repo.get_file_by_id(key_concept.file_id)
-        if not file_record or file_record['user_id'] != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or access denied.")
-
-        store.delete_key_concept(key_concept_id)
+        if not success:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key concept not found or user does not have permission to delete.")
 
     except HTTPException as e:
         raise e
