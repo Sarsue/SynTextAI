@@ -1,9 +1,17 @@
 import json
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, TypeVar, Generic
 
 from pydantic import BaseModel, Field, field_validator
+
+T = TypeVar('T')
+
+class StandardResponse(BaseModel, Generic[T]):
+    status: str = "success"
+    message: Optional[str] = None
+    data: Optional[T] = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +120,7 @@ class QuizQuestionResponse(BaseModel):
         return v
 
 class QuizQuestionsListResponse(BaseModel):
-    quiz_questions: List[QuizQuestionResponse]
+    quizzes: List[QuizQuestionResponse]
 
 
 # --- Request-specific Update Models ---

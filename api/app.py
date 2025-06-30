@@ -2,13 +2,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from websocket_manager import websocket_manager
-from repositories.repository_manager import RepositoryManager
+from .websocket_manager import websocket_manager
+from .repositories.repository_manager import RepositoryManager
 from dotenv import load_dotenv
-from firebase_setup import initialize_firebase
+from .firebase_setup import initialize_firebase
 import os
 import logging
-from utils import decode_firebase_token
+from .utils import decode_firebase_token
 # Load environment variables
 load_dotenv()
 
@@ -92,12 +92,12 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         logger.info(f"User {user_id} disconnected")
 
 # Import routers after app is set up
-from routes.files import files_router
-from routes.histories import histories_router
-from routes.messages import messages_router
-from routes.subscriptions import subscriptions_router
-from routes.users import users_router
-from routes.analytics import router as analytics_router, posthog_middleware
+from .routes.files import files_router
+from .routes.histories import histories_router
+from .routes.messages import messages_router
+from .routes.subscriptions import subscriptions_router
+from .routes.users import users_router
+from .routes.analytics import router as analytics_router, posthog_middleware
 
 # Include routers
 app.include_router(files_router)

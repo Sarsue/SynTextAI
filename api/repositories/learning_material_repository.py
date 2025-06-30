@@ -7,14 +7,14 @@ import logging
 
 from sqlalchemy.orm import Session, selectinload
 
-from models import File, Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
-from repositories.domain_models import KeyConcept, Flashcard, QuizQuestion
-from schemas.learning_content import (
+from ..models import File, Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
+from .domain_models import KeyConcept, Flashcard, QuizQuestion
+from ..schemas.learning_content import (
     KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse,
     FlashcardCreate, FlashcardUpdate, FlashcardResponse,
     QuizQuestionCreate, QuizQuestionUpdate, QuizQuestionResponse
 )
-from repositories.base_repository import BaseRepository
+from .base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
 

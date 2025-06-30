@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
 from typing import List
-from utils import get_user_id
-from repositories.repository_manager import RepositoryManager
-from llm_service import get_text_embedding
+from ..utils import get_user_id
+from ..repositories.repository_manager import RepositoryManager
+from ..llm_service import get_text_embedding
 import logging
 from typing import Dict
 # Set up logging

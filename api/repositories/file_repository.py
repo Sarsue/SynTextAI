@@ -14,8 +14,8 @@ from .base_repository import BaseRepository
 from .domain_models import File, Segment, Chunk
 
 # Import ORM models from the new models module
-from models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
-from models import Segment as SegmentORM
+from ..models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
+from ..models import Segment as SegmentORM
 
 logger = logging.getLogger(__name__)
 

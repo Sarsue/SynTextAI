@@ -10,9 +10,9 @@ from .base_repository import BaseRepository
 from .domain_models import User, Subscription, CardDetails
 
 # Import ORM models from the new models module
-from models import User as UserORM
-from models import Subscription as SubscriptionORM
-from models import CardDetails as CardDetailsORM
+from ..models import User as UserORM
+from ..models import Subscription as SubscriptionORM
+from ..models import CardDetails as CardDetailsORM
 
 logger = logging.getLogger(__name__)
 

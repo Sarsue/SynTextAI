@@ -1,20 +1,25 @@
 import os
-import re
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, status, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, Response, status, Query
 from redis.exceptions import RedisError
-from utils import get_user_id, upload_to_gcs, delete_from_gcs
+from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from typing import Dict, List, Optional, TypeVar
-from repositories.repository_manager import RepositoryManager
-from schemas.file import (
-    FileResponse, FileListResponse, StandardResponse, UploadResponse
+from ..repositories.repository_manager import RepositoryManager
+from fastapi.responses import JSONResponse
+from ..dependencies import get_store, authenticate_user
+from pydantic import BaseModel, Field
+from ..schemas.learning_content import (
+    StandardResponse,
+    KeyConceptCreate, KeyConceptResponse, KeyConceptsListResponse, KeyConceptUpdateRequest,
+    FlashcardCreate, FlashcardResponse, FlashcardsListResponse, FlashcardUpdateRequest,
+    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdateRequest
 )
-from schemas.learning_content import (
-    KeyConceptCreate, KeyConceptResponse, KeyConceptsListResponse,
-    FlashcardCreate, FlashcardResponse, FlashcardsListResponse,
-    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse,
-    KeyConceptUpdateRequest, FlashcardUpdateRequest, QuizQuestionUpdateRequest
-)
+
+class UploadResponse(BaseModel):
+    message: str
+    file_id: Optional[int] = None
+    file_name: Optional[str] = None
+    job_id: Optional[str] = None
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
@@ -115,7 +120,7 @@ async def save_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Route to retrieve files
-@files_router.get("", response_model=StandardResponse[FileListResponse])
+@files_router.get("", response_class=JSONResponse)
 async def retrieve_files(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
@@ -127,17 +132,27 @@ async def retrieve_files(
         offset = (page - 1) * page_size
         paginated_result = store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size)
         
-        files_list = paginated_result.get('items', [])
+        db_files = paginated_result.get('items', [])
         total_files = paginated_result.get('total', 0)
-        
-        response_data = FileListResponse(
-            files=files_list,
-            total_files=total_files,
-            current_page=page,
-            total_pages=(total_files + page_size - 1) // page_size if page_size > 0 else 0
-        )
-        
-        return StandardResponse(data=response_data, message="Files retrieved successfully")
+
+        # Construct the response to match the frontend's expectation
+        response_items = [
+            {
+                "id": f.id,
+                "file_name": f.file_name,
+                "file_url": f.file_url,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+                "file_type": f.file_type,
+                "status": f.status,
+            } for f in db_files
+        ]
+
+        return {
+            "items": response_items,
+            "page": page,
+            "page_size": page_size,
+            "total": total_files,
+        }
     except Exception as e:
         logger.error(f"Error retrieving files for user {user_data.get('user_id')}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve files.")
@@ -213,7 +228,7 @@ async def delete_flashcard(flashcard_id: int, user_data: Dict = Depends(authenti
 async def get_quiz_questions_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
     check_ownership(file_id, user_data["user_id"], store)
     questions = store.learning_material_repo.get_quiz_questions_for_file(file_id)
-    return StandardResponse(data=QuizQuestionsListResponse(quiz_questions=questions), message="Quiz questions retrieved successfully.")
+    return StandardResponse(data=QuizQuestionsListResponse(quizzes=questions), message="Quiz questions retrieved successfully.")
 
 @files_router.post("/{file_id}/quizzes", response_model=StandardResponse[QuizQuestionResponse], status_code=status.HTTP_201_CREATED)
 async def add_quiz_question_for_file(file_id: int, quiz_question_data: QuizQuestionCreate, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
@@ -239,7 +254,7 @@ async def delete_quiz_question(quiz_question_id: int, user_data: Dict = Depends(
 
 # --- Key Concepts ---
 
-@files_router.get("/{file_id}/key-concepts", response_model=StandardResponse[KeyConceptsListResponse])
+@files_router.get("/{file_id}/key_concepts", response_model=StandardResponse[KeyConceptsListResponse])
 async def get_key_concepts_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
     check_ownership(file_id, user_data["user_id"], store)
     concepts = store.learning_material_repo.get_key_concepts_for_file(file_id)

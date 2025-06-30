@@ -9,8 +9,8 @@ from .base_repository import BaseRepository
 from .domain_models import ChatHistory, Message
 
 # Import ORM models from the new models module
-from models import ChatHistory as ChatHistoryORM
-from models import Message as MessageORM
+from ..models import ChatHistory as ChatHistoryORM
+from ..models import Message as MessageORM
 
 logger = logging.getLogger(__name__)
 

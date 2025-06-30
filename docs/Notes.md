@@ -50,12 +50,10 @@ chmod +x deploy.sh
 
 Current 
 Local
-# Build both services from your local code
-docker-compose -f docker-compose.local.yml build
+# Build and start both services from your local code
+colima stop && colima start && docker-compose -f docker-compose.local.yml build && docker-compose -f docker-compose.local.yml up      
 
-# Start both services
-docker-compose -f docker-compose.local.yml up
-ProductionGithub actions
+Production uses Github actions on master branch 
 
 
 Marketing
