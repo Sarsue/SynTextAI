@@ -113,3 +113,10 @@ class QuizQuestionResponse(BaseModel):
 
 class QuizQuestionsListResponse(BaseModel):
     quiz_questions: List[QuizQuestionResponse]
+
+
+# --- Request-specific Update Models ---
+# These are aliases for the main update models, used for clarity in the API routes.
+KeyConceptUpdateRequest = KeyConceptUpdate
+FlashcardUpdateRequest = FlashcardUpdate
+QuizQuestionUpdateRequest = QuizQuestionUpdate

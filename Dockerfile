@@ -81,10 +81,10 @@ RUN pip install --no-cache-dir -r ./api/requirements.txt
 # Set environment variable for Whisper model directory
 ENV WHISPER_CACHE_DIR=/app/models
 
-# Download the 1.5GB Whisper model and store it in the image
+# Download the Whisper model and store it in the image
 RUN mkdir -p $WHISPER_CACHE_DIR && \
     pip install faster-whisper && \
-    python -c "from faster_whisper import WhisperModel; WhisperModel('medium', download_root='$WHISPER_CACHE_DIR')"
+    python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
 
 # Copy the frontend build from the first stage
 COPY --from=build-step /app/frontend/build ./frontend/build

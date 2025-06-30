@@ -767,14 +767,19 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             sourceVideoEnd = newConceptVideoEnd; // May be null
         }
         
-        // Create the concept object to send to the API
+        // Create a structured source link
+        let sourceLink = null;
+        if (fileType === 'pdf' && newConceptSourcePage !== null) {
+            sourceLink = JSON.stringify({ page: newConceptSourcePage });
+        } else if ((fileType === 'video' || fileType === 'youtube') && newConceptVideoStart !== null) {
+            sourceLink = JSON.stringify({ start: newConceptVideoStart, end: newConceptVideoEnd });
+        }
+
+        // Create the concept object to send to the API, matching the KeyConceptCreate schema
         const conceptData = {
-            file_id: file.id,
-            concept_title: newConceptTitle,
-            concept_explanation: newConceptExplanation,
-            source_page_number: sourcePage,
-            source_video_timestamp_start_seconds: sourceVideoStart,
-            source_video_timestamp_end_seconds: sourceVideoEnd,
+            concept: newConceptTitle,
+            explanation: newConceptExplanation,
+            source_link: sourceLink,
             is_custom: true
         };
         

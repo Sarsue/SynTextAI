@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from models import File, Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
 from repositories.domain_models import KeyConcept, Flashcard, QuizQuestion
-from schemas.learning_content import KeyConceptResponse, FlashcardResponse, QuizQuestionResponse
+from schemas.learning_content import (
+    KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse,
+    FlashcardCreate, FlashcardUpdate, FlashcardResponse,
+    QuizQuestionCreate, QuizQuestionUpdate, QuizQuestionResponse
+)
 from repositories.base_repository import BaseRepository
 
 logger = logging.getLogger(__name__)
@@ -23,32 +27,22 @@ class LearningMaterialRepository(BaseRepository):
         
     # --- Key Concept Methods ---
     
-    def add_key_concept(
-        self,
-        file_id: int,
-        concept_title: str,
-        concept_explanation: str,
-        source_page_number: Optional[int] = None,
-        source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
-    ) -> Optional[int]:
-        """Add a new key concept associated with a file and return its ID."""
+    def add_key_concept(self, file_id: int, key_concept_data: KeyConceptCreate) -> Optional[KeyConceptORM]:
+        """Add a new key concept from a Pydantic model and return the ORM instance."""
         with self.get_unit_of_work() as uow:
             try:
                 new_concept = KeyConceptORM(
                     file_id=file_id,
-                    concept_title=concept_title,
-                    concept_explanation=concept_explanation,
-                    source_page_number=source_page_number,
-                    source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
-                    source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
+                    concept_title=key_concept_data.concept,  # Map from schema to ORM
+                    concept_explanation=key_concept_data.explanation,  # Map from schema to ORM
+                    source_link=key_concept_data.source_link,
+                    is_custom=key_concept_data.is_custom
                 )
                 uow.session.add(new_concept)
-                uow.session.flush()
-                new_concept_id = new_concept.id
                 uow.session.commit()
-                logger.info(f"Successfully added key concept for file {file_id}, id={new_concept_id}")
-                return new_concept_id
+                uow.session.refresh(new_concept)
+                logger.info(f"Successfully added key concept for file {file_id}, id={new_concept.id}")
+                return new_concept
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error adding key concept: {e}", exc_info=True)
@@ -69,8 +63,8 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"ORM query for key concepts failed: {e}", exc_info=True)
                 return []
 
-    def update_key_concept(self, key_concept_id: int, user_id: int, update_data: KeyConcept) -> Optional[KeyConceptORM]:
-        """Update a key concept's details, ensuring user ownership."""
+    def update_key_concept(self, key_concept_id: int, user_id: int, update_data: KeyConceptUpdate) -> Optional[KeyConceptORM]:
+        """Update a key concept's details from a Pydantic model, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
                 concept_orm = uow.session.query(KeyConceptORM).join(KeyConceptORM.file).filter(
@@ -82,12 +76,16 @@ class LearningMaterialRepository(BaseRepository):
                     logger.warning(f"Update failed: KeyConcept {key_concept_id} not found or user {user_id} lacks ownership.")
                     return None
 
-                # Update fields from the domain model
-                concept_orm.concept_title = update_data.concept_title
-                concept_orm.concept_explanation = update_data.concept_explanation
-                concept_orm.source_page_number = update_data.source_page_number
-                concept_orm.source_video_timestamp_start_seconds = update_data.source_video_timestamp_start_seconds
-                concept_orm.source_video_timestamp_end_seconds = update_data.source_video_timestamp_end_seconds
+                update_dict = update_data.dict(exclude_unset=True)
+                # Map schema fields to ORM fields safely
+                field_map = {
+                    'concept': 'concept_title',
+                    'explanation': 'concept_explanation',
+                    'source_link': 'source_link'
+                }
+                for schema_field, orm_field in field_map.items():
+                    if schema_field in update_dict:
+                        setattr(concept_orm, orm_field, update_dict[schema_field])
 
                 uow.session.commit()
                 uow.session.refresh(concept_orm)
@@ -123,23 +121,22 @@ class LearningMaterialRepository(BaseRepository):
 
     # --- Flashcard Methods ---
 
-    def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, is_custom: bool = False) -> Optional[int]:
-        """Add a new flashcard and return its ID."""
+    def add_flashcard(self, file_id: int, flashcard_data: FlashcardCreate) -> Optional[FlashcardORM]:
+        """Add a new flashcard from a Pydantic model and return the ORM instance."""
         with self.get_unit_of_work() as uow:
             try:
                 new_flashcard = FlashcardORM(
                     file_id=file_id,
-                    key_concept_id=key_concept_id,
-                    question=question,
-                    answer=answer,
-                    is_custom=is_custom
+                    question=flashcard_data.question,
+                    answer=flashcard_data.answer,
+                    key_concept_id=flashcard_data.key_concept_id,
+                    is_custom=flashcard_data.is_custom
                 )
                 uow.session.add(new_flashcard)
-                uow.session.flush()
-                new_flashcard_id = new_flashcard.id
                 uow.session.commit()
-                logger.info(f"Added flashcard for file {file_id}, id={new_flashcard_id}")
-                return new_flashcard_id
+                uow.session.refresh(new_flashcard)
+                logger.info(f"Successfully added flashcard for file {file_id}, id={new_flashcard.id}")
+                return new_flashcard
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error adding flashcard: {e}", exc_info=True)
@@ -160,8 +157,8 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             return uow.session.query(FlashcardORM).options(selectinload('*')).filter(FlashcardORM.id == flashcard_id).first()
 
-    def update_flashcard(self, flashcard_id: int, user_id: int, update_data: Flashcard) -> Optional[FlashcardORM]:
-        """Update a flashcard's details, ensuring user ownership."""
+    def update_flashcard(self, flashcard_id: int, user_id: int, update_data: FlashcardUpdate) -> Optional[FlashcardORM]:
+        """Update a flashcard's details from a Pydantic model, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
                 flashcard_orm = uow.session.query(FlashcardORM).join(FlashcardORM.file).filter(
@@ -173,8 +170,9 @@ class LearningMaterialRepository(BaseRepository):
                     logger.warning(f"Update failed: Flashcard {flashcard_id} not found or user {user_id} lacks ownership.")
                     return None
 
-                flashcard_orm.question = update_data.question
-                flashcard_orm.answer = update_data.answer
+                update_dict = update_data.dict(exclude_unset=True)
+                for key, value in update_dict.items():
+                    setattr(flashcard_orm, key, value)
 
                 uow.session.commit()
                 uow.session.refresh(flashcard_orm)
@@ -209,34 +207,26 @@ class LearningMaterialRepository(BaseRepository):
             
     # --- Quiz Question Methods ---
 
-    def add_quiz_question(
-        self, 
-        file_id: int,
-        question: str,
-        question_type: str,
-        correct_answer: str,
-        distractors: List[str],
-        key_concept_id: Optional[int] = None,
-        is_custom: bool = False
-    ) -> Optional[int]:
-        """Add a new quiz question and return its ID."""
+    def add_quiz_question(self, file_id: int, quiz_question_data: QuizQuestionCreate) -> Optional[QuizQuestionORM]:
+        """Add a new quiz question from a Pydantic model and return the ORM instance."""
         with self.get_unit_of_work() as uow:
             try:
                 new_quiz = QuizQuestionORM(
                     file_id=file_id,
-                    key_concept_id=key_concept_id,
-                    question=question,
-                    question_type=question_type,
-                    correct_answer=correct_answer,
-                    distractors=distractors,
-                    is_custom=is_custom
+                    key_concept_id=quiz_question_data.key_concept_id,
+                    question=quiz_question_data.question,
+                    question_type=quiz_question_data.question_type,
+                    correct_answer=quiz_question_data.correct_answer,
+                    distractors=quiz_question_data.distractors,
+                    explanation=quiz_question_data.explanation,
+                    difficulty=quiz_question_data.difficulty,
+                    is_custom=quiz_question_data.is_custom
                 )
                 uow.session.add(new_quiz)
-                uow.session.flush()
-                new_quiz_id = new_quiz.id
                 uow.session.commit()
-                logger.info(f"Added quiz question for file {file_id}, id={new_quiz_id}")
-                return new_quiz_id
+                uow.session.refresh(new_quiz)
+                logger.info(f"Added quiz question for file {file_id}, id={new_quiz.id}")
+                return new_quiz
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error adding quiz question: {e}", exc_info=True)
@@ -257,8 +247,8 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             return uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.id == quiz_question_id).first()
 
-    def update_quiz_question(self, quiz_question_id: int, user_id: int, update_data: QuizQuestion) -> Optional[QuizQuestionORM]:
-        """Update a quiz question's details, ensuring user ownership."""
+    def update_quiz_question(self, quiz_question_id: int, user_id: int, update_data: QuizQuestionUpdate) -> Optional[QuizQuestionORM]:
+        """Update a quiz question's details from a Pydantic model, ensuring user ownership."""
         with self.get_unit_of_work() as uow:
             try:
                 quiz_question_orm = uow.session.query(QuizQuestionORM).join(QuizQuestionORM.file).filter(
@@ -270,10 +260,10 @@ class LearningMaterialRepository(BaseRepository):
                     logger.warning(f"Update failed: QuizQuestion {quiz_question_id} not found or user {user_id} lacks ownership.")
                     return None
 
-                quiz_question_orm.question_text = update_data.question_text
-                quiz_question_orm.options = update_data.options
-                quiz_question_orm.correct_answer = update_data.correct_answer
-                quiz_question_orm.explanation = update_data.explanation
+                update_dict = update_data.dict(exclude_unset=True)
+                for key, value in update_dict.items():
+                    if hasattr(quiz_question_orm, key):
+                        setattr(quiz_question_orm, key, value)
 
                 uow.session.commit()
                 uow.session.refresh(quiz_question_orm)

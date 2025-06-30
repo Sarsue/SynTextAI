@@ -437,17 +437,10 @@ class FileRepository(BaseRepository):
         """
         with self.get_unit_of_work() as uow:
             try:
-                file = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
-                if not file:
-                    return None
-                    
-                return {
-                    'id': file.id,
-                    'user_id': file.user_id,
-                    'file_name': file.file_name,
-                    'file_url': file.file_url,
-                    'created_at': file.created_at.isoformat() if file.created_at else None
-                }
+                file_orm = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
+                if file_orm:
+                    return file_orm.to_dict()
+                return None
             except Exception as e:
                 logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
                 return None
@@ -482,3 +475,14 @@ class FileRepository(BaseRepository):
             except Exception as e:
                 logger.error(f"Error getting file by name: {e}", exc_info=True)
                 return None
+
+    def check_user_file_ownership(self, file_id: int, user_id: int) -> bool:
+        """Check if a user owns a specific file."""
+        with self.get_unit_of_work() as uow:
+            try:
+                # Efficiently check for the existence of a file with the given id and user_id
+                exists_query = uow.session.query(FileORM.id).filter_by(id=file_id, user_id=user_id)
+                return uow.session.query(exists_query.exists()).scalar()
+            except Exception as e:
+                logger.error(f"Error checking file ownership for file {file_id}, user {user_id}: {e}", exc_info=True)
+                return False
