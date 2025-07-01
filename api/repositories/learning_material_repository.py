@@ -223,7 +223,7 @@ class LearningMaterialRepository(BaseRepository):
                     question=quiz_question_data.question,
                     question_type=quiz_question_data.question_type,
                     correct_answer=quiz_question_data.correct_answer,
-                    distractors=quiz_question_data.distractors,
+                    distractors=quiz_question_data.distractors or [],
                     explanation=quiz_question_data.explanation,
                     difficulty=quiz_question_data.difficulty,
                     is_custom=quiz_question_data.is_custom

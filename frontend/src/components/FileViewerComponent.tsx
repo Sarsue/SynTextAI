@@ -104,8 +104,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
-            console.log(`Making API request to /api/v1/files/${fileId}/key_concepts`);
-            const response = await fetch(`/api/v1/files/${fileId}/key_concepts`, {
+            console.log(`Making API request to /api/v1/files/${fileId}/key-concepts`);
+            const response = await fetch(`/api/v1/files/${fileId}/key-concepts`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -512,7 +512,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
         try {
             const token = await user?.getIdToken();
-            const response = await fetch(`/api/v1/files/key_concepts/${conceptId}`, {
+            const response = await fetch(`/api/v1/files/key-concepts/${conceptId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -542,7 +542,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (window.confirm('Are you sure you want to delete this key concept?')) {
             try {
                 const token = await user?.getIdToken();
-                const response = await fetch(`/api/v1/files/key_concepts/${conceptId}`, {
+                const response = await fetch(`/api/v1/files/key-concepts/${conceptId}`, {
                     method: 'DELETE',
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -774,7 +774,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/key_concepts`, {
+            const response = await fetch(`/api/v1/files/${file.id}/key-concepts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',

@@ -100,7 +100,7 @@ class QuizQuestionResponse(BaseModel):
     question: str
     question_type: str = "MCQ"
     correct_answer: str = ""
-    distractors: List[str] = []
+    distractors: Optional[List[str]] = []
     answer_explanation: Optional[str] = Field(default="", alias="explanation")
     difficulty: Optional[str] = "medium"
     is_custom: bool = False
@@ -111,6 +111,8 @@ class QuizQuestionResponse(BaseModel):
 
     @field_validator('distractors', mode='before')
     def parse_distractors_from_json(cls, v):
+        if v is None:
+            return []
         if isinstance(v, str):
             try:
                 return json.loads(v)
