@@ -54,10 +54,13 @@ class LearningMaterialRepository(BaseRepository):
             return uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
 
     def get_key_concepts_for_file(self, file_id: int) -> List[KeyConceptResponse]:
-        """Get key concepts for a file."""
+        """Get key concepts for a file only if it has been processed."""
         with self.get_unit_of_work() as uow:
             try:
-                key_concepts_orm = uow.session.query(KeyConceptORM).filter(KeyConceptORM.file_id == file_id).all()
+                key_concepts_orm = uow.session.query(KeyConceptORM).join(File).filter(
+                    KeyConceptORM.file_id == file_id,
+                    File.processing_status == 'processed'
+                ).all()
                 return [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
             except Exception as e:
                 logger.error(f"ORM query for key concepts failed: {e}", exc_info=True)
@@ -143,11 +146,14 @@ class LearningMaterialRepository(BaseRepository):
                 return None
     
     def get_flashcards_for_file(self, file_id: int) -> List[FlashcardResponse]:
-        """Get flashcards for a file by ID."""
+        """Get flashcards for a file by ID, only if it has been processed."""
         with self.get_unit_of_work() as uow:
             try:
-                flashcards_orm = uow.session.query(FlashcardORM).filter(FlashcardORM.file_id == file_id).all()
-                return [FlashcardResponse.from_orm(fc) for fc in flashcards_orm]
+                flashcards_orm = uow.session.query(FlashcardORM).join(File).filter(
+                    FlashcardORM.file_id == file_id,
+                    File.processing_status == 'processed'
+                ).all()
+                return [FlashcardResponse.from_orm(f) for f in flashcards_orm]
             except Exception as e:
                 logger.error(f"ORM query for flashcards failed: {e}", exc_info=True)
                 return []
@@ -233,10 +239,13 @@ class LearningMaterialRepository(BaseRepository):
                 return None
 
     def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestionResponse]:
-        """Get quiz questions for a file by ID."""
+        """Get quiz questions for a file by ID, only if it has been processed."""
         with self.get_unit_of_work() as uow:
             try:
-                quiz_questions_orm = uow.session.query(QuizQuestionORM).filter(QuizQuestionORM.file_id == file_id).all()
+                quiz_questions_orm = uow.session.query(QuizQuestionORM).join(File).filter(
+                    QuizQuestionORM.file_id == file_id,
+                    File.processing_status == 'processed'
+                ).all()
                 return [QuizQuestionResponse.from_orm(q) for q in quiz_questions_orm]
             except Exception as e:
                 logger.error(f"ORM query for quiz questions failed: {e}", exc_info=True)

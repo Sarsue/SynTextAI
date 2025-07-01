@@ -6,8 +6,8 @@ import os
 import time
 import posthog
 from sqlalchemy.orm import Session
-from models.db import get_db
-from repositories.repository_manager import RepositoryManager
+from api.models.db import get_db
+from api.repositories.repository_manager import RepositoryManager
 from pydantic import BaseModel, Field
 
 # Initialize PostHog client

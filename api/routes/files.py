@@ -138,13 +138,14 @@ async def retrieve_files(
         # Construct the response to match the frontend's expectation
         response_items = [
             {
-                "id": f.id,
-                "file_name": f.file_name,
-                "file_url": f.file_url,
-                "created_at": f.created_at.isoformat() if f.created_at else None,
-                "file_type": f.file_type,
-                "status": f.status,
-            } for f in db_files
+                "id": f["id"],
+                "file_name": f["file_name"],
+                "file_url": f["file_url"],
+                "created_at": f.get("created_at"),
+                "file_type": f.get("file_type"),
+                "status": f.get("processing_status", "uploaded"),
+            }
+            for f in db_files
         ]
 
         return {
@@ -194,11 +195,11 @@ def check_ownership(file_id: int, user_id: int, store: RepositoryManager):
 
 # --- Flashcards ---
 
-@files_router.get("/{file_id}/flashcards", response_model=StandardResponse[FlashcardsListResponse])
-async def get_flashcards_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
+@files_router.get("/{file_id}/flashcards", response_model=StandardResponse)
+async def get_flashcards_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)) -> StandardResponse:
     check_ownership(file_id, user_data["user_id"], store)
     flashcards = store.learning_material_repo.get_flashcards_for_file(file_id)
-    return StandardResponse(data=FlashcardsListResponse(flashcards=flashcards), message="Flashcards retrieved successfully")
+    return StandardResponse(data={"flashcards": flashcards}, message="Flashcards retrieved successfully")
 
 @files_router.post("/{file_id}/flashcards", response_model=StandardResponse[FlashcardResponse], status_code=status.HTTP_201_CREATED)
 async def add_flashcard_for_file(file_id: int, flashcard_data: FlashcardCreate, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
@@ -224,11 +225,11 @@ async def delete_flashcard(flashcard_id: int, user_data: Dict = Depends(authenti
 
 # --- Quiz Questions ---
 
-@files_router.get("/{file_id}/quizzes", response_model=StandardResponse[QuizQuestionsListResponse])
-async def get_quiz_questions_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
+@files_router.get("/{file_id}/quizzes", response_model=StandardResponse)
+async def get_quiz_questions_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)) -> StandardResponse:
     check_ownership(file_id, user_data["user_id"], store)
     questions = store.learning_material_repo.get_quiz_questions_for_file(file_id)
-    return StandardResponse(data=QuizQuestionsListResponse(quizzes=questions), message="Quiz questions retrieved successfully.")
+    return StandardResponse(data=questions, message="Quizzes retrieved successfully")
 
 @files_router.post("/{file_id}/quizzes", response_model=StandardResponse[QuizQuestionResponse], status_code=status.HTTP_201_CREATED)
 async def add_quiz_question_for_file(file_id: int, quiz_question_data: QuizQuestionCreate, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
@@ -254,11 +255,11 @@ async def delete_quiz_question(quiz_question_id: int, user_data: Dict = Depends(
 
 # --- Key Concepts ---
 
-@files_router.get("/{file_id}/key_concepts", response_model=StandardResponse[KeyConceptsListResponse])
-async def get_key_concepts_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):
+@files_router.get("/{file_id}/key_concepts", response_model=StandardResponse)
+async def get_key_concepts_for_file(file_id: int, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)) -> StandardResponse:
     check_ownership(file_id, user_data["user_id"], store)
     concepts = store.learning_material_repo.get_key_concepts_for_file(file_id)
-    return StandardResponse(data=KeyConceptsListResponse(key_concepts=concepts), message="Key concepts retrieved successfully.")
+    return StandardResponse(data={"key_concepts": concepts}, message="Key concepts retrieved successfully")
 
 @files_router.post("/{file_id}/key-concepts", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
 async def add_key_concept_for_file(file_id: int, key_concept_data: KeyConceptCreate, user_data: Dict = Depends(authenticate_user), store: RepositoryManager = Depends(get_store)):

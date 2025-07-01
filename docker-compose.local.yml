@@ -16,7 +16,6 @@ services:
         - REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
         - REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
     container_name: syntextaiapp-local
-    working_dir: /app/api
     ports:
       - "3000:3000"
     env_file:
@@ -45,8 +44,8 @@ services:
         - REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
         - REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
     container_name: syntextai-worker-local
-    command: python worker.py
-    working_dir: /app/api
+    command: python -m api.worker
+    working_dir: /app
     volumes:
       - ./api:/app/api
     env_file:

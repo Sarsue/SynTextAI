@@ -194,7 +194,7 @@ class FileRepository(BaseRepository):
                         "name": file.file_name,
                         "file_url": file.file_url,
                         "publicUrl": file.file_url,
-                        "status": file.processing_status,
+                        "processing_status": file.processing_status,
                         "created_at": file.created_at.isoformat() if file.created_at else None,
                     }
                     items.append(file_dict)

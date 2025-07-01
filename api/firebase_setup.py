@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 def initialize_firebase():
     try:
         # First, check for credentials file
-        creds_path = './config/credentials.json'
+        # Use an absolute path to ensure the file is found inside the Docker container
+        creds_path = '/app/api/config/credentials.json'
         
         # Try to load from a file first
         cred = None

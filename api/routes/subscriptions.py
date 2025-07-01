@@ -6,9 +6,9 @@ import stripe
 import logging
 import os
 from dotenv import load_dotenv
-from utils import get_user_id
-from repositories.repository_manager import RepositoryManager
-from repositories.domain_models import Subscription
+from api.utils import get_user_id
+from api.repositories.repository_manager import RepositoryManager
+from api.repositories.domain_models import Subscription
 
 # Load environment variables
 load_dotenv()

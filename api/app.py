@@ -39,8 +39,16 @@ async def apply_posthog_middleware(request: Request, call_next):
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Initialize Firebase and Redis
-initialize_firebase()
+# Initialize Firebase on application startup
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initializes Firebase Admin SDK. This must be run before the app starts
+    accepting requests to ensure that authentication utilities are ready.
+    """
+    logger.info("Executing startup event: Initializing Firebase...")
+    initialize_firebase()
+    logger.info("Firebase initialized successfully.")
 
 database_config = {
     'dbname': os.getenv("DATABASE_NAME"),
@@ -110,16 +118,7 @@ app.include_router(analytics_router)
 # Define the build path for React app
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))
 
-# Define a route to serve the index.html for SPA routing
-@app.get("/", response_class=HTMLResponse)
-@app.get("/app/{rest_of_path:path}", response_class=HTMLResponse)
-async def serve_spa_routes(rest_of_path: str = ""):
-    index_path = os.path.join(build_path, "index.html")
-    if not os.path.exists(index_path):
-        raise HTTPException(status_code=404, detail="App not found. Build the App first.")
-    with open(index_path, "r") as f:
-        content = f.read()
-    return HTMLResponse(content=content)
+
 
 # Mount static files LAST - this ensures the above routes take precedence
 # Note: StaticFiles will only handle requests for files that exist

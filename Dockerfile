@@ -72,6 +72,9 @@ RUN apt-get update && \
 # Set working directory
 WORKDIR /app
 
+# Add the project root to the Python path
+ENV PYTHONPATH /app
+
 # Copy backend files
 COPY api/ ./api/
 
@@ -92,8 +95,5 @@ COPY --from=build-step /app/frontend/build ./frontend/build
 # Expose the application port
 EXPOSE 3000
 
-# Set the working directory to /app/api
-WORKDIR /app/api
-
-# Command to start FastAPI
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
+# Command to start FastAPI from the project root
+CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from pathlib import Path
-from models import File
+from api.models.orm_models import File
 
 # Add the parent directory to sys.path to fix imports
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -239,10 +239,14 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
         
         # Use a transaction to atomically fetch and update files
         with store.file_repo.get_unit_of_work() as uow:
-            from models import File
+            from api.models.orm_models import File
             
             # Find files that need processing
-            files_to_process = uow.session.query(File).filter(
+            from sqlalchemy.orm import joinedload
+
+            files_to_process = uow.session.query(File).options(
+                joinedload(File.user, innerjoin=True)
+            ).filter(
                 File.processing_status == 'uploaded'
             ).order_by(
                 File.created_at.asc()
@@ -258,23 +262,12 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
             # Convert files to list of dictionaries
             pending_files = []
             for file in files_to_process:
-                # Extract user_gc_id from file_url if it's not a YouTube URL
-                user_gc_id = ''
-                if file.file_url and not ('youtube.com' in file.file_url or 'youtu.be' in file.file_url):
-                    try:
-                        url_parts = file.file_url.split('/')
-                        if len(url_parts) >= 2:
-                            user_gc_id = url_parts[-2]  # Second-to-last part is gc_id
-                        logger.debug(f"Extracted user_gc_id '{user_gc_id}' from URL: {file.file_url}")
-                    except Exception as e:
-                        logger.error(f"Failed to extract user_gc_id from URL: {file.file_url}. Error: {e}")
-                
                 pending_files.append({
                     "id": file.id,
                     "file_name": file.file_name,
-                    "file_url": file.file_url, 
+                    "file_url": file.file_url,
                     "user_id": file.user_id,
-                    "user_gc_id": user_gc_id,
+                    "user_gc_id": file.user.user_gc_id if file.user else '',
                     "created_at": file.created_at
                 })
         

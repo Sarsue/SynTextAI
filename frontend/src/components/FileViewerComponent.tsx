@@ -258,23 +258,23 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     }, [user, fileId]); 
 
     useEffect(() => {
-        // Set file type immediately to avoid null values in logs and UI
-        const urlToTest = fileUrl || file.file_name; 
+        // This effect determines and sets the file type whenever the file changes.
+        const urlToTest = fileUrl || file.file_name;
         const type = getFileType(urlToTest) || 'unknown';
         
-        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'. File status: ${file.status}`);
+        console.log(`FileViewerComponent: Input to getFileType: '${urlToTest}'. Detected type: '${type}'.`);
         
-        // Set file type right away
         setFileType(type);
+    }, [fileUrl, file.file_name]);
 
-        if (type === 'unknown') {
+    useEffect(() => {
+        // This effect handles data fetching and error reporting based on fileType and status.
+        if (fileType === 'unknown' && (fileUrl || file.file_name)) {
             onError(`Unsupported file type or could not determine type for: ${file.file_name}`);
+            return;
         }
-        
-        // Only fetch data if user is logged in, file ID exists, and file is not yet processed
-        if (user && fileId) {
-            // If the file is processed, we only need to fetch data once
-            // If not processed, we continue polling for data
+
+        if (user && fileId && fileType !== 'unknown') {
             if (file.status !== 'processed') {
                 console.log(`File ${fileId} is not yet processed (status: ${file.status}). Fetching data...`);
                 fetchKeyConcepts();
@@ -282,13 +282,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 fetchQuizzes();
             } else {
                 console.log(`File ${fileId} is already processed. Fetching data once...`);
-                // Only fetch if we haven't loaded the data yet
                 if (keyConcepts.length === 0) fetchKeyConcepts();
                 if (flashcards.length === 0) fetchFlashcards();
                 if (quizzes.length === 0) fetchQuizzes();
             }
         }
-    }, [fileUrl, file.file_name, onError, file.status, user, fileId]); 
+    }, [fileType, file.status, user, fileId, keyConcepts.length, flashcards.length, quizzes.length, onError, fetchKeyConcepts, fetchFlashcards, fetchQuizzes, file.file_name, fileUrl]); 
 
     // We no longer need placeholder data since users can create their own content
 
@@ -755,18 +754,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const addKeyConcept = async () => {
         if (!user || newConceptTitle.trim() === '' || newConceptExplanation.trim() === '') return;
         
-        // Create source information based on file type
-        let sourcePage: number | null = null;
-        let sourceVideoStart: number | null = null;
-        let sourceVideoEnd: number | null = null;
-        
-        if (fileType === 'pdf' && newConceptSourcePage !== null) {
-            sourcePage = newConceptSourcePage;
-        } else if ((fileType === 'video' || fileType === 'youtube') && newConceptVideoStart !== null) {
-            sourceVideoStart = newConceptVideoStart;
-            sourceVideoEnd = newConceptVideoEnd; // May be null
-        }
-        
         // Create a structured source link
         let sourceLink = null;
         if (fileType === 'pdf' && newConceptSourcePage !== null) {
@@ -775,7 +762,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             sourceLink = JSON.stringify({ start: newConceptVideoStart, end: newConceptVideoEnd });
         }
 
-        // Create the concept object to send to the API, matching the KeyConceptCreate schema
         const conceptData = {
             concept: newConceptTitle,
             explanation: newConceptExplanation,
@@ -784,35 +770,30 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         };
         
         try {
-            // Show loading state
             setIsLoadingKeyConcepts(true);
-            
-            // Get authentication token
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            // Call the API to save the custom key concept
             const response = await fetch(`/api/v1/files/${file.id}/key_concepts`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
-                },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',
                 body: JSON.stringify(conceptData)
             });
             
             if (!response.ok) {
-                throw new Error(`Failed to save key concept: ${response.statusText}`);
+                const errorData = await response.json().catch(() => ({ detail: `Failed to save key concept: ${response.statusText}` }));
+                throw new Error(errorData.detail || `Failed to save key concept: ${response.statusText}`);
             }
             
-            // Get the saved concept with proper ID from the server
-            const savedConcept: KeyConcept = await response.json();
+            const responseData = await response.json();
+            if (responseData.status !== 'success' || !responseData.data) {
+                throw new Error(responseData.message || 'Failed to parse successful response from server.');
+            }
+            const savedConcept: KeyConcept = responseData.data;
             
-            // Add the saved concept to our local state
-            setCustomKeyConcepts([...customKeyConcepts, savedConcept]);
+            setCustomKeyConcepts(prev => [...prev, savedConcept]);
             
-            // Reset form
             setNewConceptTitle('');
             setNewConceptExplanation('');
             setNewConceptSourcePage(null);
@@ -820,11 +801,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             setNewConceptVideoEnd(null);
             setShowKeyConceptForm(false);
         } catch (err) {
-            // Handle errors
             console.error('Error saving custom key concept:', err);
             setError(err instanceof Error ? err.message : 'Failed to save key concept');
         } finally {
-            // Hide loading state
             setIsLoadingKeyConcepts(false);
         }
     };
@@ -852,7 +831,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 />
             </div>
             
-            {/* Source location fields based on file type */}
             {fileType === 'pdf' && (
                 <div className="form-group">
                     <label>Source Page Number:</label>
@@ -917,45 +895,39 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         };
         
         try {
-            // Show loading state
             setIsLoadingFlashcards(true);
             
-            // Get authentication token
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            // Call the API to save the custom flashcard
             const response = await fetch(`/api/v1/files/${file.id}/flashcards`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
-                },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',
                 body: JSON.stringify(flashcardData)
             });
             
             if (!response.ok) {
-                throw new Error(`Failed to save flashcard: ${response.statusText}`);
+                const errorData = await response.json().catch(() => ({ detail: `Failed to save flashcard: ${response.statusText}` }));
+                throw new Error(errorData.detail || `Failed to save flashcard: ${response.statusText}`);
             }
             
-            // Get the saved flashcard with proper ID from the server
-            const savedFlashcard: Flashcard = await response.json();
+            const responseData = await response.json();
+            if (responseData.status !== 'success' || !responseData.data) {
+                throw new Error(responseData.message || 'Failed to parse successful response from server.');
+            }
+            const savedFlashcard: Flashcard = responseData.data;
             
-            // Add the saved flashcard to our local state
             setFlashcards(prev => [...prev, savedFlashcard]);
             setCustomFlashcards(prev => [...prev, savedFlashcard]);
             
-            // Reset form
             setNewFlashcardQuestion('');
             setNewFlashcardAnswer('');
             setShowFlashcardForm(false);
         } catch (err) {
-            // Handle errors
             console.error('Error saving custom flashcard:', err);
             setFlashcardError(err instanceof Error ? err.message : 'Failed to save flashcard');
         } finally {
-            // Hide loading state
             setIsLoadingFlashcards(false);
         }
     };
