@@ -135,6 +135,7 @@ class KeyConcept(Base):
     source_video_timestamp_end_seconds = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_custom = Column(Boolean, default=False, nullable=False)
     
     # Relationships
     flashcards = relationship("Flashcard", back_populates="key_concept", cascade="all, delete-orphan")

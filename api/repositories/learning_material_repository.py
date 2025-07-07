@@ -31,21 +31,40 @@ class LearningMaterialRepository(BaseRepository):
         """Add a new key concept from a Pydantic model and return the ORM instance."""
         with self.get_unit_of_work() as uow:
             try:
+                # Log the incoming data for debugging
+                logger.info(f"[DEBUG] Adding key concept with data: {key_concept_data.dict()}")
+                
+                # Get the concept title and explanation, preferring the new field names
+                concept_title = key_concept_data.concept_title or key_concept_data.concept
+                concept_explanation = key_concept_data.concept_explanation or key_concept_data.explanation
+                
+                # Validate required fields
+                if not concept_title:
+                    raise ValueError("concept_title (or concept) is required")
+                if not concept_explanation:
+                    raise ValueError("concept_explanation (or explanation) is required")
+                
+                # Create the new concept with the provided data
                 new_concept = KeyConceptORM(
                     file_id=file_id,
-                    concept_title=key_concept_data.concept,  # Map from schema to ORM
-                    concept_explanation=key_concept_data.explanation,  # Map from schema to ORM
-                    source_link=key_concept_data.source_link,
+                    concept_title=concept_title,
+                    concept_explanation=concept_explanation,
+                    source_page_number=key_concept_data.source_page_number,
+                    source_video_timestamp_start_seconds=key_concept_data.source_video_timestamp_start_seconds,
+                    source_video_timestamp_end_seconds=key_concept_data.source_video_timestamp_end_seconds,
                     is_custom=key_concept_data.is_custom
                 )
+                
                 uow.session.add(new_concept)
                 uow.session.commit()
                 uow.session.refresh(new_concept)
+                
                 logger.info(f"Successfully added key concept for file {file_id}, id={new_concept.id}")
                 return new_concept
+                
             except Exception as e:
                 uow.session.rollback()
-                logger.error(f"Error adding key concept: {e}", exc_info=True)
+                logger.error(f"Error adding key concept: {str(e)}", exc_info=True)
                 return None
 
     def get_key_concept_by_id(self, key_concept_id: int) -> Optional[KeyConceptORM]:
@@ -55,48 +74,58 @@ class LearningMaterialRepository(BaseRepository):
 
     def get_key_concepts_for_file(self, file_id: int) -> List[KeyConceptResponse]:
         """Get key concepts for a file only if it has been processed."""
+        logger.info(f"[DEBUG] Starting get_key_concepts_for_file for file_id: {file_id}")
         with self.get_unit_of_work() as uow:
             try:
-                key_concepts_orm = uow.session.query(KeyConceptORM).join(File).filter(
-                    KeyConceptORM.file_id == file_id,
+                # First, verify the file exists and is processed
+                logger.info(f"[DEBUG] Checking file {file_id} status")
+                file = uow.session.query(File).filter(
+                    File.id == file_id,
                     File.processing_status == 'processed'
+                ).first()
+                
+                if not file:
+                    logger.warning(f"[DEBUG] File {file_id} not found or not processed")
+                    return []
+                
+                logger.info(f"[DEBUG] File {file_id} is processed. Querying key concepts...")
+                # Then get all key concepts for this file
+                key_concepts_orm = uow.session.query(KeyConceptORM).filter(
+                    KeyConceptORM.file_id == file_id
                 ).all()
-                return [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
+                
+                logger.info(f"[DEBUG] Raw key concepts query result: {key_concepts_orm}")
+                logger.info(f"[DEBUG] Found {len(key_concepts_orm)} key concepts for file {file_id}")
+                
+                # Convert to response models
+                result = [KeyConceptResponse.from_orm(kc) for kc in key_concepts_orm]
+                logger.info(f"[DEBUG] Converted to {len(result)} response models")
+                return result
+                
             except Exception as e:
-                logger.error(f"ORM query for key concepts failed: {e}", exc_info=True)
+                logger.error(f"[ERROR] ORM query for key concepts failed: {e}", exc_info=True)
                 return []
 
-    def update_key_concept(self, key_concept_id: int, user_id: int, update_data: KeyConceptUpdate) -> Optional[KeyConceptORM]:
-        """Update a key concept's details from a Pydantic model, ensuring user ownership."""
+    def update_key_concept(self, concept_id: int, update_data: KeyConceptUpdate) -> Optional[KeyConceptORM]:
+        """Update a key concept from a Pydantic model and return the updated ORM instance."""
         with self.get_unit_of_work() as uow:
             try:
-                concept_orm = uow.session.query(KeyConceptORM).join(KeyConceptORM.file).filter(
-                    KeyConceptORM.id == key_concept_id,
-                    File.user_id == user_id
-                ).first()
-
-                if not concept_orm:
-                    logger.warning(f"Update failed: KeyConcept {key_concept_id} not found or user {user_id} lacks ownership.")
+                concept = uow.session.get(KeyConceptORM, concept_id)
+                if not concept:
                     return None
-
+                
                 update_dict = update_data.dict(exclude_unset=True)
-                # Map schema fields to ORM fields safely
-                field_map = {
-                    'concept': 'concept_title',
-                    'explanation': 'concept_explanation',
-                    'source_link': 'source_link'
-                }
-                for schema_field, orm_field in field_map.items():
-                    if schema_field in update_dict:
-                        setattr(concept_orm, orm_field, update_dict[schema_field])
-
+                for key, value in update_dict.items():
+                    setattr(concept, key, value)
+                
+                uow.session.add(concept)
                 uow.session.commit()
-                uow.session.refresh(concept_orm)
-                logger.info(f"Successfully updated KeyConcept {key_concept_id} by user {user_id}.")
-                return concept_orm
+                uow.session.refresh(concept)
+                logger.info(f"Successfully updated KeyConcept {concept_id}.")
+                return concept
             except Exception as e:
                 uow.session.rollback()
-                logger.error(f"Error updating key concept {key_concept_id}: {e}", exc_info=True)
+                logger.error(f"Error updating key concept {concept_id}: {e}", exc_info=True)
                 return None
 
     def delete_key_concept(self, key_concept_id: int, user_id: int) -> bool:
@@ -163,8 +192,12 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             return uow.session.query(FlashcardORM).options(selectinload('*')).filter(FlashcardORM.id == flashcard_id).first()
 
-    def update_flashcard(self, flashcard_id: int, user_id: int, update_data: FlashcardUpdate) -> Optional[FlashcardORM]:
-        """Update a flashcard's details from a Pydantic model, ensuring user ownership."""
+    def update_flashcard(self, flashcard_id: int, user_id: int, update_data: FlashcardUpdate) -> Optional[Dict[str, Any]]:
+        """Update a flashcard's details from a Pydantic model, ensuring user ownership.
+        
+        Returns:
+            Dictionary with the updated flashcard data or None if not found
+        """
         with self.get_unit_of_work() as uow:
             try:
                 flashcard_orm = uow.session.query(FlashcardORM).join(FlashcardORM.file).filter(
@@ -183,7 +216,19 @@ class LearningMaterialRepository(BaseRepository):
                 uow.session.commit()
                 uow.session.refresh(flashcard_orm)
                 logger.info(f"Successfully updated Flashcard {flashcard_id} by user {user_id}.")
-                return flashcard_orm
+                
+                # Return a dictionary with the updated data before the session closes
+                return {
+                    "id": flashcard_orm.id,
+                    "question": flashcard_orm.question,
+                    "answer": flashcard_orm.answer,
+                    "file_id": flashcard_orm.file_id,
+                    "key_concept_id": flashcard_orm.key_concept_id,
+                    "is_custom": flashcard_orm.is_custom,
+                    "created_at": flashcard_orm.created_at,
+                    "updated_at": flashcard_orm.updated_at
+                }
+                
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error updating flashcard {flashcard_id}: {e}", exc_info=True)
@@ -217,38 +262,73 @@ class LearningMaterialRepository(BaseRepository):
         """Add a new quiz question from a Pydantic model and return the ORM instance."""
         with self.get_unit_of_work() as uow:
             try:
+                # Log the incoming data for debugging
+                logger.info(f"[DEBUG] Adding quiz question with data: {quiz_question_data.dict()}")
+                
+                # Validate required fields
+                if not quiz_question_data.question:
+                    raise ValueError("Question is required")
+                if not quiz_question_data.correct_answer:
+                    raise ValueError("Correct answer is required")
+                if quiz_question_data.distractors is None:
+                    quiz_question_data.distractors = []
+                
+                # Create the new quiz question
                 new_quiz = QuizQuestionORM(
                     file_id=file_id,
                     key_concept_id=quiz_question_data.key_concept_id,
                     question=quiz_question_data.question,
-                    question_type=quiz_question_data.question_type,
+                    question_type=quiz_question_data.question_type or "MCQ",
                     correct_answer=quiz_question_data.correct_answer,
-                    distractors=quiz_question_data.distractors or [],
-                    explanation=quiz_question_data.explanation,
-                    difficulty=quiz_question_data.difficulty,
+                    distractors=quiz_question_data.distractors,
+                    difficulty=quiz_question_data.difficulty or "medium",
                     is_custom=quiz_question_data.is_custom
                 )
+                
                 uow.session.add(new_quiz)
                 uow.session.commit()
                 uow.session.refresh(new_quiz)
-                logger.info(f"Added quiz question for file {file_id}, id={new_quiz.id}")
+                
+                logger.info(f"Successfully added quiz question for file {file_id}, id={new_quiz.id}")
                 return new_quiz
+                
             except Exception as e:
                 uow.session.rollback()
-                logger.error(f"Error adding quiz question: {e}", exc_info=True)
+                logger.error(f"Error adding quiz question: {str(e)}", exc_info=True)
                 return None
 
     def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestionResponse]:
         """Get quiz questions for a file by ID, only if it has been processed."""
+        logger.info(f"[DEBUG] Starting get_quiz_questions_for_file for file_id: {file_id}")
         with self.get_unit_of_work() as uow:
             try:
-                quiz_questions_orm = uow.session.query(QuizQuestionORM).join(File).filter(
-                    QuizQuestionORM.file_id == file_id,
+                # First, verify the file exists and is processed
+                logger.info(f"[DEBUG] Checking file {file_id} status")
+                file = uow.session.query(File).filter(
+                    File.id == file_id,
                     File.processing_status == 'processed'
+                ).first()
+                
+                if not file:
+                    logger.warning(f"[DEBUG] File {file_id} not found or not processed")
+                    return []
+                
+                logger.info(f"[DEBUG] File {file_id} is processed. Querying quiz questions...")
+                # Then get all quiz questions for this file
+                quiz_questions_orm = uow.session.query(QuizQuestionORM).filter(
+                    QuizQuestionORM.file_id == file_id
                 ).all()
-                return [QuizQuestionResponse.from_orm(q) for q in quiz_questions_orm]
+                
+                logger.info(f"[DEBUG] Raw quiz questions query result: {quiz_questions_orm}")
+                logger.info(f"[DEBUG] Found {len(quiz_questions_orm)} quiz questions for file {file_id}")
+                
+                # Convert to response models
+                result = [QuizQuestionResponse.from_orm(q) for q in quiz_questions_orm]
+                logger.info(f"[DEBUG] Converted to {len(result)} response models")
+                return result
+                
             except Exception as e:
-                logger.error(f"ORM query for quiz questions failed: {e}", exc_info=True)
+                logger.error(f"[ERROR] ORM query for quiz questions failed: {e}", exc_info=True)
                 return []
 
     def get_quiz_question_by_id(self, quiz_question_id: int) -> Optional[QuizQuestionORM]:

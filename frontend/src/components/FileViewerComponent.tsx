@@ -44,16 +44,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const [newConceptVideoEnd, setNewConceptVideoEnd] = useState<number | null>(null);
     const [tab, setTab] = useState<'Key Concepts' | 'Flashcards' | 'Quiz'>('Key Concepts');
     const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
+    const [customFlashcards, setCustomFlashcards] = useState<Flashcard[]>([]);
     const [quizzes, setQuizzes] = useState<QuizQuestion[]>([]);
+    const [forceUpdate, setForceUpdate] = useState<boolean>(false);
     const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
     const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(false);
     const [flashcardError, setFlashcardError] = useState<string | null>(null);
     const [quizError, setQuizError] = useState<string | null>(null);
     
     // State for custom flashcard and quiz creation
-    
     // State for custom flashcard creation
-    const [customFlashcards, setCustomFlashcards] = useState<Flashcard[]>([]);
     const [newFlashcardQuestion, setNewFlashcardQuestion] = useState('');
     const [newFlashcardAnswer, setNewFlashcardAnswer] = useState('');
     const [showFlashcardForm, setShowFlashcardForm] = useState(false);
@@ -122,13 +122,15 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             console.log(`Key concepts API response data:`, responseData);
             
             // Handle the standardized response format
-            if (!responseData || responseData.status !== 'success' || !responseData.data || !Array.isArray(responseData.data.key_concepts)) {
+            if (!responseData || responseData.status !== 'success' || !responseData.data) {
                 console.error("API response structure incorrect for key concepts:", responseData);
-                const errorMessage = responseData.message || 'API returned malformed data structure for key concepts';
+                const errorMessage = responseData?.message || 'API returned malformed data structure for key concepts';
                 throw new Error(errorMessage);
             }
 
-            const data: KeyConcept[] = responseData.data.key_concepts;
+            // The data is wrapped in a KeyConceptsListResponse with a key_concepts array
+            const keyConceptsData = responseData.data as { key_concepts: KeyConcept[] };
+            const data = keyConceptsData.key_concepts || [];
             console.log(`Parsed ${data.length} key concepts for file ID: ${fileId} (total count: ${responseData.count})`);
             
             // Debug logging to inspect the structure of key concepts
@@ -233,14 +235,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const responseData = await response.json();
             console.log(`Quizzes API response data:`, responseData);
             
-            // Handle the standardized response format
-            if (!responseData || responseData.status !== 'success' || !Array.isArray(responseData.data)) {
+            // A successful response can have an empty array of quizzes.
+            if (!responseData || responseData.status !== 'success' || !responseData.data) {
                 console.error("API response structure incorrect for quizzes:", responseData);
-                const errorMessage = responseData.message || 'API returned malformed data structure for quizzes';
+                const errorMessage = responseData?.message || 'API returned malformed data structure for quizzes';
                 throw new Error(errorMessage);
             }
 
-            const data: QuizQuestion[] = responseData.data;
+            // The data is wrapped in a QuizQuestionsListResponse with a quizzes array
+            const quizzesData = responseData.data as { quizzes: QuizQuestion[] };
+            const data = quizzesData.quizzes || [];
             console.log(`Parsed ${data.length} quizzes for file ID: ${fileId} (total count: ${responseData.count})`);
             
             if (data.length === 0) {
@@ -512,16 +516,28 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
         try {
             const token = await user?.getIdToken();
+            const updateData: any = {
+                concept_title: editingConcept.concept_title,
+                concept_explanation: editingConcept.concept_explanation,
+            };
+
+            // Handle source fields based on file type
+            if (fileType === 'pdf' && editingConcept.source_page_number !== null) {
+                updateData.source_page_number = editingConcept.source_page_number;
+            } else if ((fileType === 'video' || fileType === 'youtube') && editingConcept.source_video_timestamp_start_seconds !== null) {
+                updateData.source_video_timestamp_start_seconds = editingConcept.source_video_timestamp_start_seconds;
+                if (editingConcept.source_video_timestamp_end_seconds !== null) {
+                    updateData.source_video_timestamp_end_seconds = editingConcept.source_video_timestamp_end_seconds;
+                }
+            }
+
             const response = await fetch(`/api/v1/files/key-concepts/${conceptId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
                 },
-                body: JSON.stringify({
-                    concept_title: editingConcept.concept_title,
-                    concept_explanation: editingConcept.concept_explanation,
-                }),
+                body: JSON.stringify(updateData),
             });
 
             if (!response.ok) {
@@ -754,20 +770,22 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const addKeyConcept = async () => {
         if (!user || newConceptTitle.trim() === '' || newConceptExplanation.trim() === '') return;
         
-        // Create a structured source link
-        let sourceLink = null;
-        if (fileType === 'pdf' && newConceptSourcePage !== null) {
-            sourceLink = JSON.stringify({ page: newConceptSourcePage });
-        } else if ((fileType === 'video' || fileType === 'youtube') && newConceptVideoStart !== null) {
-            sourceLink = JSON.stringify({ start: newConceptVideoStart, end: newConceptVideoEnd });
-        }
-
-        const conceptData = {
-            concept: newConceptTitle,
-            explanation: newConceptExplanation,
-            source_link: sourceLink,
+        // Create source data based on file type
+        const conceptData: any = {
+            concept_title: newConceptTitle,
+            concept_explanation: newConceptExplanation,
             is_custom: true
         };
+
+        // Add source location based on file type
+        if (fileType === 'pdf' && newConceptSourcePage !== null) {
+            conceptData.source_page_number = newConceptSourcePage;
+        } else if ((fileType === 'video' || fileType === 'youtube') && newConceptVideoStart !== null) {
+            conceptData.source_video_timestamp_start_seconds = newConceptVideoStart;
+            if (newConceptVideoEnd !== null) {
+                conceptData.source_video_timestamp_end_seconds = newConceptVideoEnd;
+            }
+        }
         
         try {
             setIsLoadingKeyConcepts(true);
@@ -781,15 +799,44 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 body: JSON.stringify(conceptData)
             });
             
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `Failed to save key concept: ${response.statusText}` }));
-                throw new Error(errorData.detail || `Failed to save key concept: ${response.statusText}`);
+            let responseData;
+            try {
+                responseData = await response.json();
+            } catch (e) {
+                console.error('Failed to parse error response:', e);
+                throw new Error(`Failed to save key concept: ${response.statusText} (${response.status})`);
             }
             
-            const responseData = await response.json();
-            if (responseData.status !== 'success' || !responseData.data) {
-                throw new Error(responseData.message || 'Failed to parse successful response from server.');
+            if (!response.ok) {
+                console.error('Error response from server:', responseData);
+                let errorMessage = 'Failed to save key concept';
+                
+                // Handle different error response formats
+                if (Array.isArray(responseData.detail)) {
+                    // If detail is an array, join all error messages
+                    errorMessage = responseData.detail.map((err: any) => 
+                        typeof err === 'string' ? err : 
+                        err.msg ? `${err.msg} (${err.loc ? err.loc.join('.') : 'field'})` : 
+                        JSON.stringify(err)
+                    ).join('; ');
+                } else if (typeof responseData.detail === 'string') {
+                    errorMessage = responseData.detail;
+                } else if (responseData.message) {
+                    errorMessage = responseData.message;
+                } else if (responseData.error) {
+                    errorMessage = responseData.error;
+                } else {
+                    errorMessage = `${response.statusText} (${response.status})`;
+                }
+                
+                throw new Error(errorMessage);
             }
+            
+            if (responseData.status !== 'success' || !responseData.data) {
+                console.error('Invalid response format:', responseData);
+                throw new Error(responseData.message || 'Invalid response format from server');
+            }
+            
             const savedConcept: KeyConcept = responseData.data;
             
             setCustomKeyConcepts(prev => [...prev, savedConcept]);
@@ -907,15 +954,28 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 body: JSON.stringify(flashcardData)
             });
             
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `Failed to save flashcard: ${response.statusText}` }));
-                throw new Error(errorData.detail || `Failed to save flashcard: ${response.statusText}`);
+            let responseData;
+            try {
+                responseData = await response.json();
+            } catch (e) {
+                console.error('Failed to parse response:', e);
+                throw new Error(`Failed to save flashcard: ${response.statusText} (${response.status})`);
             }
             
-            const responseData = await response.json();
-            if (responseData.status !== 'success' || !responseData.data) {
-                throw new Error(responseData.message || 'Failed to parse successful response from server.');
+            if (!response.ok) {
+                console.error('Error response from server:', responseData);
+                const errorMessage = responseData.detail || 
+                                  responseData.message || 
+                                  responseData.error || 
+                                  `Failed to save flashcard: ${response.statusText} (${response.status})`;
+                throw new Error(errorMessage);
             }
+            
+            if (responseData.status !== 'success' || !responseData.data) {
+                console.error('Invalid response format:', responseData);
+                throw new Error(responseData.message || 'Invalid response format from server');
+            }
+            
             const savedFlashcard: Flashcard = responseData.data;
             
             setFlashcards(prev => [...prev, savedFlashcard]);
@@ -924,9 +984,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             setNewFlashcardQuestion('');
             setNewFlashcardAnswer('');
             setShowFlashcardForm(false);
+            
+            // Show success message
+            addToast('Flashcard added successfully!', 'success');
         } catch (err) {
-            console.error('Error saving custom flashcard:', err);
-            setFlashcardError(err instanceof Error ? err.message : 'Failed to save flashcard');
+            const errorMessage = err instanceof Error ? err.message : 'Failed to save flashcard';
+            console.error('Error saving custom flashcard:', errorMessage, err);
+            setFlashcardError(errorMessage);
+            addToast(errorMessage, 'error');
         } finally {
             setIsLoadingFlashcards(false);
         }
@@ -955,7 +1020,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             distractors: distractors,
             key_concept_id: 0, // Custom questions don't relate to specific key concepts
             is_custom: true,
-            // explanation and difficulty are intentionally omitted to avoid backend error
+            difficulty: 'medium' // Add default difficulty
         };
         
         try {
@@ -1075,36 +1140,79 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return;
         }
         try {
+            console.log('Updating flashcard with ID:', id, 'Data:', data);
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/flashcards/${id}`,
-                {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                    },
-                    body: JSON.stringify(data),
-                }
-            );
+            const response = await fetch(`/api/v1/files/flashcards/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify(data),
+            });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to update flashcard');
+            let responseData;
+            try {
+                responseData = await response.json();
+                console.log('Raw response data:', responseData);
+            } catch (e) {
+                console.error('Failed to parse response:', e);
+                throw new Error(`Failed to update flashcard: ${response.statusText} (${response.status})`);
             }
 
-            const updatedFlashcardResponse = await response.json();
-            const updatedFlashcard = updatedFlashcardResponse.data;
+            if (!response.ok) {
+                console.error('Error response from server:', responseData);
+                const errorMessage = responseData.detail || 
+                                  responseData.message || 
+                                  responseData.error || 
+                                  `Failed to update flashcard: ${response.statusText} (${response.status})`;
+                throw new Error(errorMessage);
+            }
 
-            setFlashcards(prev => prev.map(fc => (fc.id === id ? { ...fc, ...updatedFlashcard } : fc)));
-            setCustomFlashcards(prev => prev.map(fc => (fc.id === id ? { ...fc, ...updatedFlashcard } : fc)));
+            if (responseData.status !== 'success' || !responseData.data) {
+                console.error('Invalid response format:', responseData);
+                throw new Error(responseData.message || 'Invalid response format from server');
+            }
 
+            const updatedFlashcard = responseData.data;
+            console.log('Updated flashcard data from server:', updatedFlashcard);
+            
+            // Log current state before update
+            console.log('Current flashcards state before update:', flashcards);
+            console.log('Current customFlashcards state before update:', customFlashcards);
+            
+            // Update both flashcards and customFlashcards states
+            setFlashcards(prev => {
+                const updated = prev.map(fc => {
+                    if (fc.id === id) {
+                        console.log('Updating flashcard in flashcards state. ID:', id, 'Old:', fc, 'New:', { ...fc, ...updatedFlashcard });
+                        return { ...fc, ...updatedFlashcard };
+                    }
+                    return fc;
+                });
+                console.log('Updated flashcards state:', updated);
+                return updated;
+            });
+            
+            setCustomFlashcards(prev => {
+                const updated = prev.map(fc => {
+                    if (fc.id === id) {
+                        console.log('Updating flashcard in customFlashcards state. ID:', id, 'Old:', fc, 'New:', { ...fc, ...updatedFlashcard });
+                        return { ...fc, ...updatedFlashcard };
+                    }
+                    return fc;
+                });
+                console.log('Updated customFlashcards state:', updated);
+                return updated;
+            });
+            
+            // Force a re-render by toggling a dummy state
+            setForceUpdate(prev => !prev);
+            
             addToast("Flashcard updated successfully!", "success");
         } catch (error) {
             console.error("Error updating flashcard:", error);
-            let message = "An error occurred while updating the flashcard.";
-            if (error instanceof Error) {
-                message = error.message;
-            }
+            const message = error instanceof Error ? error.message : "An error occurred while updating the flashcard.";
             addToast(message, "error");
         }
     };
@@ -1180,13 +1288,28 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         try {
             const token = await user.getIdToken();
+            
+            // Ensure we're using the correct field names for the backend
+            const updateData: any = { ...data };
+            
+            // Handle case where frontend might be using 'answer' instead of 'correct_answer'
+            if ('answer' in updateData && !('correct_answer' in updateData)) {
+                updateData.correct_answer = updateData.answer;
+                delete updateData.answer;
+            }
+            
+            // Ensure we have a default difficulty if not provided
+            if (!('difficulty' in updateData)) {
+                updateData.difficulty = 'medium';
+            }
+            
             const response = await fetch(`/api/v1/files/quizzes/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
                 },
-                body: JSON.stringify(data),
+                body: JSON.stringify(updateData),
             });
 
             if (!response.ok) {
