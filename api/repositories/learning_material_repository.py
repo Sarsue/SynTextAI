@@ -28,11 +28,20 @@ class LearningMaterialRepository(BaseRepository):
     # --- Key Concept Methods ---
     
     def add_key_concept(self, file_id: int, key_concept_data: KeyConceptCreate) -> Optional[KeyConceptORM]:
-        """Add a new key concept from a Pydantic model and return the ORM instance."""
+        """
+        Add a new key concept from a Pydantic model and return the ORM instance.
+        
+        Args:
+            file_id: The ID of the file to associate with the key concept
+            key_concept_data: Pydantic model containing key concept data
+            
+        Returns:
+            KeyConceptORM: The newly created key concept ORM instance, or None if creation failed
+        """
         with self.get_unit_of_work() as uow:
             try:
                 # Log the incoming data for debugging
-                logger.info(f"[DEBUG] Adding key concept with data: {key_concept_data.dict()}")
+                logger.debug(f"Creating new key concept for file {file_id} with data: {key_concept_data.dict()}")
                 
                 # Get the concept title and explanation, preferring the new field names
                 concept_title = key_concept_data.concept_title or key_concept_data.concept
@@ -55,16 +64,22 @@ class LearningMaterialRepository(BaseRepository):
                     is_custom=key_concept_data.is_custom
                 )
                 
+                # Add to session and commit
                 uow.session.add(new_concept)
                 uow.session.commit()
+                
+                # Explicitly refresh to ensure we have all attributes
                 uow.session.refresh(new_concept)
                 
+                # Log success with the ID
                 logger.info(f"Successfully added key concept for file {file_id}, id={new_concept.id}")
+                
+                # Return the concept object - it's still attached to the session
                 return new_concept
                 
             except Exception as e:
                 uow.session.rollback()
-                logger.error(f"Error adding key concept: {str(e)}", exc_info=True)
+                logger.error(f"Error adding key concept: {e}", exc_info=True)
                 return None
 
     def get_key_concept_by_id(self, key_concept_id: int) -> Optional[KeyConceptORM]:
@@ -154,9 +169,21 @@ class LearningMaterialRepository(BaseRepository):
     # --- Flashcard Methods ---
 
     def add_flashcard(self, file_id: int, flashcard_data: FlashcardCreate) -> Optional[FlashcardORM]:
-        """Add a new flashcard from a Pydantic model and return the ORM instance."""
+        """
+        Add a new flashcard from a Pydantic model and return the ORM instance.
+        
+        Args:
+            file_id: The ID of the file to associate with the flashcard
+            flashcard_data: Pydantic model containing flashcard data
+            
+        Returns:
+            FlashcardORM: The newly created flashcard ORM instance, or None if creation failed
+        """
         with self.get_unit_of_work() as uow:
             try:
+                logger.debug(f"Creating new flashcard for file {file_id} with data: {flashcard_data.dict()}")
+                
+                # Create the new flashcard instance
                 new_flashcard = FlashcardORM(
                     file_id=file_id,
                     question=flashcard_data.question,
@@ -164,11 +191,20 @@ class LearningMaterialRepository(BaseRepository):
                     key_concept_id=flashcard_data.key_concept_id,
                     is_custom=flashcard_data.is_custom
                 )
+                
+                # Add to session and commit
                 uow.session.add(new_flashcard)
                 uow.session.commit()
+                
+                # Explicitly refresh to ensure we have all attributes
                 uow.session.refresh(new_flashcard)
+                
+                # Log success with the ID
                 logger.info(f"Successfully added flashcard for file {file_id}, id={new_flashcard.id}")
+                
+                # Return the flashcard object - it's still attached to the session
                 return new_flashcard
+                
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error adding flashcard: {e}", exc_info=True)
@@ -259,11 +295,20 @@ class LearningMaterialRepository(BaseRepository):
     # --- Quiz Question Methods ---
 
     def add_quiz_question(self, file_id: int, quiz_question_data: QuizQuestionCreate) -> Optional[QuizQuestionORM]:
-        """Add a new quiz question from a Pydantic model and return the ORM instance."""
+        """
+        Add a new quiz question from a Pydantic model and return the ORM instance.
+        
+        Args:
+            file_id: The ID of the file to associate with the quiz question
+            quiz_question_data: Pydantic model containing quiz question data
+            
+        Returns:
+            QuizQuestionORM: The newly created quiz question ORM instance, or None if creation failed
+        """
         with self.get_unit_of_work() as uow:
             try:
                 # Log the incoming data for debugging
-                logger.info(f"[DEBUG] Adding quiz question with data: {quiz_question_data.dict()}")
+                logger.debug(f"Creating new quiz question for file {file_id} with data: {quiz_question_data.dict()}")
                 
                 # Validate required fields
                 if not quiz_question_data.question:
@@ -281,20 +326,25 @@ class LearningMaterialRepository(BaseRepository):
                     question_type=quiz_question_data.question_type or "MCQ",
                     correct_answer=quiz_question_data.correct_answer,
                     distractors=quiz_question_data.distractors,
-                    difficulty=quiz_question_data.difficulty or "medium",
                     is_custom=quiz_question_data.is_custom
                 )
                 
+                # Add to session and commit
                 uow.session.add(new_quiz)
                 uow.session.commit()
+                
+                # Explicitly refresh to ensure we have all attributes
                 uow.session.refresh(new_quiz)
                 
+                # Log success with the ID
                 logger.info(f"Successfully added quiz question for file {file_id}, id={new_quiz.id}")
+                
+                # Return the quiz question object - it's still attached to the session
                 return new_quiz
                 
             except Exception as e:
                 uow.session.rollback()
-                logger.error(f"Error adding quiz question: {str(e)}", exc_info=True)
+                logger.error(f"Error adding quiz question: {e}", exc_info=True)
                 return None
 
     def get_quiz_questions_for_file(self, file_id: int) -> List[QuizQuestionResponse]:

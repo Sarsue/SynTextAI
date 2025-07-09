@@ -104,8 +104,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
-            console.log(`Making API request to /api/v1/files/${fileId}/key-concepts`);
-            const response = await fetch(`/api/v1/files/${fileId}/key-concepts`, {
+            console.log(`Making API request to /api/v1/files/${fileId}/key-concept`);
+            const response = await fetch(`/api/v1/files/${fileId}/key-concept`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -169,7 +169,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             if (!idToken) throw new Error('User token not available');
 
             console.log(`Making API request to /api/v1/files/${fileId}/flashcards`);
-            const response = await fetch(`/api/v1/files/${fileId}/flashcards`, {
+            const response = await fetch(`/api/v1/files/${fileId}/flashcard`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -219,7 +219,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             if (!idToken) throw new Error('User token not available');
 
             console.log(`Making API request to /api/v1/files/${fileId}/quizzes`);
-            const response = await fetch(`/api/v1/files/${fileId}/quizzes`, {
+            const response = await fetch(`/api/v1/files/${fileId}/quiz-question`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -531,7 +531,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 }
             }
 
-            const response = await fetch(`/api/v1/files/key-concepts/${conceptId}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/key-concept/${conceptId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -558,7 +558,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (window.confirm('Are you sure you want to delete this key concept?')) {
             try {
                 const token = await user?.getIdToken();
-                const response = await fetch(`/api/v1/files/key-concepts/${conceptId}`, {
+                const response = await fetch(`/api/v1/files/${file.id}/key-concept/${conceptId}`, {
                     method: 'DELETE',
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -770,33 +770,31 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const addKeyConcept = async () => {
         if (!user || newConceptTitle.trim() === '' || newConceptExplanation.trim() === '') return;
         
-        // Create source data based on file type
-        const conceptData: any = {
-            concept_title: newConceptTitle,
-            concept_explanation: newConceptExplanation,
+        // Create source data based on file type, only including fields that match the backend's KeyConceptCreate schema
+        const conceptData = {
+            concept_title: newConceptTitle.trim(),
+            concept_explanation: newConceptExplanation.trim(),
+            source_page_number: (fileType === 'pdf' && newConceptSourcePage) ? newConceptSourcePage : undefined,
+            source_video_timestamp_start_seconds: (fileType === 'youtube' && newConceptVideoStart) ? newConceptVideoStart : undefined,
+            source_video_timestamp_end_seconds: (fileType === 'youtube' && newConceptVideoEnd) ? newConceptVideoEnd : undefined,
             is_custom: true
         };
-
-        // Add source location based on file type
-        if (fileType === 'pdf' && newConceptSourcePage !== null) {
-            conceptData.source_page_number = newConceptSourcePage;
-        } else if ((fileType === 'video' || fileType === 'youtube') && newConceptVideoStart !== null) {
-            conceptData.source_video_timestamp_start_seconds = newConceptVideoStart;
-            if (newConceptVideoEnd !== null) {
-                conceptData.source_video_timestamp_end_seconds = newConceptVideoEnd;
-            }
-        }
+        
+        // Remove undefined values to avoid sending them in the request
+        const payload = Object.fromEntries(
+            Object.entries(conceptData).filter(([_, v]) => v !== undefined)
+        );
         
         try {
             setIsLoadingKeyConcepts(true);
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/key-concepts`, {
+            const response = await fetch(`/api/v1/files/${file.id}/key-concept`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',
-                body: JSON.stringify(conceptData)
+                body: JSON.stringify(payload)
             });
             
             let responseData;
@@ -930,14 +928,83 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         </div>
     );
     
+    // Handle updating or deleting a flashcard
+    const handleFlashcardAction = async (id: number, action: 'update' | 'delete', data?: { question?: string; answer?: string }) => {
+        if (!user) {
+            addToast("You must be logged in to update or delete a flashcard.", "error");
+            return false;
+        }
+        
+        try {
+            const idToken = await user.getIdToken();
+            if (!idToken) throw new Error('User token not available');
+            
+            const response = await fetch(`/api/v1/files/${file.id}/flashcard/${id}`, {
+                method: action === 'update' ? 'PATCH' : 'DELETE',
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${idToken}` 
+                },
+                mode: 'cors',
+                body: action === 'update' ? JSON.stringify(data) : undefined
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || `Failed to ${action} flashcard: ${response.statusText}`);
+            }
+            
+            if (action === 'update') {
+                const responseData = await response.json();
+                if (responseData.status !== 'success' || !responseData.data) {
+                    throw new Error(responseData.message || 'Failed to update flashcard');
+                }
+                
+                const updatedFlashcard: Flashcard = responseData.data;
+                
+                setFlashcards(prev => prev.map(fc => 
+                    fc.id === updatedFlashcard.id ? updatedFlashcard : fc
+                ));
+                
+                setCustomFlashcards(prev => prev.map(fc => 
+                    fc.id === updatedFlashcard.id ? updatedFlashcard : fc
+                ));
+                
+                // Force a re-render by toggling a dummy state
+                setForceUpdate(prev => !prev);
+                
+                addToast('Flashcard updated successfully!', 'success');
+            } else {
+                setFlashcards(prev => prev.filter(fc => fc.id !== id));
+                setCustomFlashcards(prev => prev.filter(fc => fc.id !== id));
+                
+                // Force a re-render by toggling a dummy state
+                setForceUpdate(prev => !prev);
+                
+                addToast('Flashcard deleted successfully!', 'success');
+            }
+            
+            return true;
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Failed to update or delete flashcard';
+            console.error('Error in flashcard operation:', err);
+            // Force a re-render by toggling a dummy state
+            setForceUpdate(prev => !prev);
+            
+            addToast(errorMessage, 'error');
+            return false;
+        }
+    };
+    
     // Add a new custom flashcard to the collection with backend persistence
     const addFlashcard = async () => {
         if (!user || newFlashcardQuestion.trim() === '' || newFlashcardAnswer.trim() === '') return;
         
         const flashcardData = {
             file_id: file.id,
-            question: newFlashcardQuestion,
-            answer: newFlashcardAnswer,
+            question: newFlashcardQuestion.trim(),
+            answer: newFlashcardAnswer.trim(),
+            key_concept_id: null, // Explicitly set to null for custom flashcards
             is_custom: true
         };
         
@@ -947,7 +1014,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/flashcards`, {
+            const response = await fetch(`/api/v1/files/${file.id}/flashcard`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',
@@ -1018,9 +1085,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             question_type: newQuizType,
             correct_answer: newQuizAnswer,
             distractors: distractors,
-            key_concept_id: 0, // Custom questions don't relate to specific key concepts
-            is_custom: true,
-            difficulty: 'medium' // Add default difficulty
+            key_concept_id: null, // Set to null for custom questions
+            is_custom: true
         };
         
         try {
@@ -1029,7 +1095,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/quizzes`, {
+            const response = await fetch(`/api/v1/files/${file.id}/quiz-question`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1142,7 +1208,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         try {
             console.log('Updating flashcard with ID:', id, 'Data:', data);
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/flashcards/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/flashcard/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1255,7 +1321,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         try {
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/flashcards/${id}`,
+            const response = await fetch(`/api/v1/files/${file.id}/flashcard/${id}`,
                 {
                     method: 'DELETE',
                     headers: {
@@ -1303,7 +1369,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 updateData.difficulty = 'medium';
             }
             
-            const response = await fetch(`/api/v1/files/quizzes/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/quiz-question/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1341,7 +1407,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         try {
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/quizzes/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/quiz-question/${id}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -1398,8 +1464,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                                 ) : (
                                     <FlashcardViewer 
                                         flashcards={allFlashcards}
-                                        onUpdateFlashcard={handleUpdateFlashcard}
-                                        onDeleteFlashcard={handleDeleteFlashcard}
+                                        onUpdateFlashcard={(id, data) => handleFlashcardAction(id, 'update', data)}
+                                        onDeleteFlashcard={(id) => handleFlashcardAction(id, 'delete')}
                                     />
                                 )}
                             </>

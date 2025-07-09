@@ -120,13 +120,20 @@ class QuizQuestionUpdate(BaseModel):
 
 class QuizQuestionResponse(BaseModel):
     id: int
+    file_id: int
+    key_concept_id: Optional[int] = None
     question: str
     question_type: str
     correct_answer: str
-    distractors: Optional[List[str]] = []
+    distractors: List[str] = []
+    is_custom: bool = False
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
 
     @field_validator('distractors', mode='before')
     def parse_distractors_from_json(cls, v):

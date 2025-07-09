@@ -1,15 +1,6 @@
 import React, { useState } from 'react';
+import { Flashcard } from './types';
 import './FlashcardViewer.css';
-
-interface Flashcard {
-  id: number;
-  file_id: number;
-  key_concept_id: number;
-  question: string;
-  answer: string;
-  is_custom: boolean;
-  status?: 'unseen' | 'known' | 'needs_review';
-}
 
 interface FlashcardViewerProps {
   flashcards: Flashcard[];
@@ -26,6 +17,11 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateF
   const [cardStatus, setCardStatus] = useState<{ [id: number]: 'known' | 'needs_review' | 'unseen' }>(
     Object.fromEntries(flashcards.map(fc => [fc.id, 'unseen']))
   );
+  
+  // Track review status locally since it's not stored in the database
+  const [reviewStatus, setReviewStatus] = useState<{ [id: number]: 'known' | 'needs_review' | 'unseen' }>(
+    Object.fromEntries(flashcards.map(fc => [fc.id, 'unseen']))
+  );
 
   const total = flashcards.length;
   const reviewed = Object.values(cardStatus).filter(s => s !== 'unseen').length;
@@ -40,14 +36,16 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateF
     setCurrent(i => (i - 1 >= 0 ? i - 1 : i));
   };
   const markCard = (status: 'known' | 'needs_review') => {
-    setCardStatus(s => ({ ...s, [flashcards[current].id]: status }));
-    handleNext();
+    if (flashcards[current]) {
+      setReviewStatus(s => ({ ...s, [flashcards[current].id]: status }));
+      handleNext();
+    }
   };
 
   if (!flashcards.length) return <div>No flashcards available.</div>;
 
   const card = flashcards[current];
-  const status = card ? cardStatus[card.id] : 'unseen';
+  const status = card ? reviewStatus[card.id] || 'unseen' : 'unseen';
 
   const handleEdit = () => {
     if (!card) return;

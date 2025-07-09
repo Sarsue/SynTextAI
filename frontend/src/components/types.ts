@@ -27,14 +27,14 @@ export interface UploadedFile {
 export interface KeyConcept {
     id: number;
     file_id: number;
-    concept_title?: string | null;
-    concept_explanation?: string | null;
-    display_order?: number | null;
-    source_page_number?: number | null;
-    source_video_timestamp_start_seconds?: number | null;
-    source_video_timestamp_end_seconds?: number | null;
+    concept_title: string | null;
+    concept_explanation: string | null;
+    display_order: number | null;
+    source_page_number: number | null;
+    source_video_timestamp_start_seconds: number | null;
+    source_video_timestamp_end_seconds: number | null;
     created_at: string;
-    is_custom?: boolean;
+    is_custom: boolean;
 }
 
 export interface Message {
@@ -67,22 +67,23 @@ export interface Persona {
 export interface Flashcard {
     id: number;
     file_id: number;
-    key_concept_id: number;
+    key_concept_id: number | null;
     question: string;
     answer: string;
     is_custom: boolean;
-    status?: 'unseen' | 'known' | 'needs_review';
+    created_at?: string;
 }
 
 export interface QuizQuestion {
     id: number;
     file_id: number;
-    key_concept_id: number;
+    key_concept_id: number | null;
     question: string;
     question_type: 'MCQ' | 'TF';
     correct_answer: string;
     distractors: string[];
-    is_custom?: boolean;
+    is_custom: boolean;
+    created_at?: string;
 }
 
 export interface PaginationState {
