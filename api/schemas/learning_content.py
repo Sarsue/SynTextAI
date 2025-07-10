@@ -148,7 +148,7 @@ class QuizQuestionResponse(BaseModel):
         return v
 
 class QuizQuestionsListResponse(BaseModel):
-    quizzes: List[QuizQuestionResponse] = Field(alias='quizzes')
+    quizzes: List[QuizQuestionResponse]
 
 
 # --- Request-specific Update Models ---

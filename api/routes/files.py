@@ -241,7 +241,7 @@ async def add_flashcard_for_file(file_id: int, flashcard_data: FlashcardCreate, 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@files_router.put("/{file_id}/flashcard/{flashcard_id}", response_model=StandardResponse[FlashcardResponse])
+@files_router.put("/{file_id}/flashcards/{flashcard_id}", response_model=StandardResponse[FlashcardResponse])
 async def update_flashcard(
     file_id: int,
     flashcard_id: int, 
@@ -262,7 +262,7 @@ async def update_flashcard(
         message="Flashcard updated successfully."
     )
 
-@files_router.delete("/{file_id}/flashcard/{flashcard_id}", status_code=status.HTTP_204_NO_CONTENT)
+@files_router.delete("/{file_id}/flashcards/{flashcard_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_flashcard(
     file_id: int,
     flashcard_id: int, 
@@ -280,7 +280,7 @@ async def delete_flashcard(
 
 # --- Quiz Questions ---
 
-@files_router.get("/{file_id}/quiz-question", response_model=StandardResponse)
+@files_router.get("/{file_id}/quiz-questions", response_model=StandardResponse)
 async def get_quiz_questions_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
@@ -291,11 +291,11 @@ async def get_quiz_questions_for_file(
     check_ownership(file_id, user_data["user_id"], store)
     quiz_questions = store.learning_material_repo.get_quiz_questions_for_file(file_id)
     return StandardResponse(
-        data=QuizQuestionListResponse(quiz_questions=quiz_questions).model_dump(),
+        data=QuizQuestionsListResponse(quizzes=quiz_questions).model_dump(),
         message="Quiz questions retrieved successfully"
     )
 
-@files_router.post("/{file_id}/quiz-question", response_model=StandardResponse[QuizQuestionResponse], status_code=status.HTTP_201_CREATED)
+@files_router.post("/{file_id}/quiz-questions", response_model=StandardResponse[QuizQuestionResponse], status_code=status.HTTP_201_CREATED)
 async def add_quiz_question(
     file_id: int, 
     quiz_question_data: QuizQuestionCreate, 
@@ -318,7 +318,7 @@ async def add_quiz_question(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@files_router.put("/{file_id}/quiz-question/{quiz_question_id}", response_model=StandardResponse[QuizQuestionResponse])
+@files_router.put("/{file_id}/quiz-questions/{quiz_question_id}", response_model=StandardResponse[QuizQuestionResponse])
 async def update_quiz_question(
     file_id: int,
     quiz_question_id: int, 
@@ -339,7 +339,7 @@ async def update_quiz_question(
         message="Quiz question updated successfully."
     )
 
-@files_router.delete("/{file_id}/quiz-question/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
+@files_router.delete("/{file_id}/quiz-questions/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_quiz_question(
     file_id: int,
     quiz_question_id: int, 
@@ -357,7 +357,7 @@ async def delete_quiz_question(
 
 # --- Key Concepts ---
 
-@files_router.get("/{file_id}/key-concept", response_model=StandardResponse)
+@files_router.get("/{file_id}/key-concepts", response_model=StandardResponse)
 async def get_key_concepts_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
@@ -372,7 +372,7 @@ async def get_key_concepts_for_file(
         message="Key concepts retrieved successfully"
     )
 
-@files_router.post("/{file_id}/key-concept", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
+@files_router.post("/{file_id}/key-concepts", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
 async def add_key_concept(
     key_concept_data: KeyConceptCreate,
     file_id: int = Path(..., gt=0, description="The ID of the file to add the key concept to"), 
@@ -444,7 +444,7 @@ async def add_key_concept(
             detail="An error occurred while adding the key concept."
         )
 
-@files_router.put("/{file_id}/key-concept/{key_concept_id}", response_model=StandardResponse[KeyConceptResponse])
+@files_router.put("/{file_id}/key-concepts/{key_concept_id}", response_model=StandardResponse[KeyConceptResponse])
 async def update_key_concept(
     file_id: int,
     key_concept_id: int, 
@@ -465,7 +465,7 @@ async def update_key_concept(
         message="Key concept updated successfully."
     )
 
-@files_router.delete("/{file_id}/key-concept/{key_concept_id}", status_code=status.HTTP_204_NO_CONTENT)
+@files_router.delete("/{file_id}/key-concepts/{key_concept_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_key_concept(
     file_id: int,
     key_concept_id: int, 

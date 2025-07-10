@@ -105,7 +105,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             if (!idToken) throw new Error('User token not available');
 
             console.log(`Making API request to /api/v1/files/${fileId}/key-concept`);
-            const response = await fetch(`/api/v1/files/${fileId}/key-concept`, {
+            const response = await fetch(`/api/v1/files/${fileId}/key-concepts`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -128,19 +128,21 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 throw new Error(errorMessage);
             }
 
-            // The data is wrapped in a KeyConceptsListResponse with a key_concepts array
-            const keyConceptsData = responseData.data as { key_concepts: KeyConcept[] };
-            const data = keyConceptsData.key_concepts || [];
-            console.log(`Parsed ${data.length} key concepts for file ID: ${fileId} (total count: ${responseData.count})`);
+            // The data is directly in the response data field as an array of key concepts
+            const data = Array.isArray(responseData.data) ? responseData.data : [];
+            console.log(`Parsed ${data.length} key concepts for file ID: ${fileId}`);
             
             // Debug logging to inspect the structure of key concepts
             if (data.length > 0) {
                 console.log('First key concept complete structure:', data[0]);
                 console.log('Key concept field values check:', {
-                    hasConceptTitle: data.some(kc => kc.concept_title && kc.concept_title.length > 0),
-                    conceptTitles: data.map(kc => kc.concept_title),
-                    hasConceptExplanation: data.some(kc => kc.concept_explanation && kc.concept_explanation.length > 0),
-                    conceptExplanations: data.map(kc => kc.concept_explanation?.substring(0, 20))
+                    hasConceptTitle: data.some((kc: KeyConcept) => kc.concept_title && kc.concept_title.length > 0),
+                    conceptTitles: data.map((kc: KeyConcept) => kc.concept_title || (kc as any).concept), // Support both field names
+                    hasConceptExplanation: data.some((kc: KeyConcept) => {
+                        const explanation = kc.concept_explanation || (kc as any).explanation;
+                        return explanation && explanation.length > 0;
+                    }),
+                    conceptExplanations: data.map((kc: KeyConcept) => (kc.concept_explanation || (kc as any).explanation || '').substring(0, 20))
                 });
             }
             
@@ -169,7 +171,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             if (!idToken) throw new Error('User token not available');
 
             console.log(`Making API request to /api/v1/files/${fileId}/flashcards`);
-            const response = await fetch(`/api/v1/files/${fileId}/flashcard`, {
+            const response = await fetch(`/api/v1/files/${fileId}/flashcards`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -218,8 +220,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
-            console.log(`Making API request to /api/v1/files/${fileId}/quizzes`);
-            const response = await fetch(`/api/v1/files/${fileId}/quiz-question`, {
+            console.log(`Making API request to /api/v1/files/${fileId}/quiz-questions`);
+            const response = await fetch(`/api/v1/files/${fileId}/quiz-questions`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -531,7 +533,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 }
             }
 
-            const response = await fetch(`/api/v1/files/${file.id}/key-concept/${conceptId}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/key-concepts/${conceptId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -558,7 +560,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (window.confirm('Are you sure you want to delete this key concept?')) {
             try {
                 const token = await user?.getIdToken();
-                const response = await fetch(`/api/v1/files/${file.id}/key-concept/${conceptId}`, {
+                const response = await fetch(`/api/v1/files/${file.id}/key-concepts/${conceptId}`, {
                     method: 'DELETE',
                     headers: {
                         'Authorization': `Bearer ${token}`,
@@ -790,7 +792,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/key-concept`, {
+            const response = await fetch(`/api/v1/files/${file.id}/key-concepts`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',
@@ -939,7 +941,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/flashcard/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/flashcards/${id}`, {
                 method: action === 'update' ? 'PATCH' : 'DELETE',
                 headers: { 
                     'Content-Type': 'application/json', 
@@ -1014,7 +1016,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/flashcard`, {
+            const response = await fetch(`/api/v1/files/${file.id}/flashcards`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
                 mode: 'cors',
@@ -1208,7 +1210,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         try {
             console.log('Updating flashcard with ID:', id, 'Data:', data);
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/${file.id}/flashcard/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/flashcards/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1321,7 +1323,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         try {
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/${file.id}/flashcard/${id}`,
+            const response = await fetch(`/api/v1/files/${file.id}/flashcards/${id}`,
                 {
                     method: 'DELETE',
                     headers: {
