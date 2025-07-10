@@ -27,15 +27,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const [fileType, setFileType] = useState<string>('unknown');
     const [currentPage, setCurrentPage] = useState<number>(1);
     const [keyConcepts, setKeyConcepts] = useState<KeyConcept[]>([]);
-    const [isLoadingKeyConcepts, setIsLoadingKeyConcepts] = useState(false);
+    const [isLoadingKeyConcepts, setIsLoadingKeyConcepts] = useState<boolean>(false);
+    const [isKeyConceptsLoaded, setIsKeyConceptsLoaded] = useState<boolean>(false);
+    const [hasKeyConceptsFailed, setHasKeyConceptsFailed] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [expandedConcepts, setExpandedConcepts] = useState<Set<number>>(new Set());
     const [highlightedConceptId, setHighlightedConceptId] = useState<number | null>(null);
     const [sortOrder, setSortOrder] = useState<'default' | 'alphabetical' | 'chronological'>('default');
     const [editingConcept, setEditingConcept] = useState<KeyConcept | null>(null);
-    
-    // Custom key concepts state
-    const [customKeyConcepts, setCustomKeyConcepts] = useState<KeyConcept[]>([]);
     const [showKeyConceptForm, setShowKeyConceptForm] = useState(false);
     const [newConceptTitle, setNewConceptTitle] = useState('');
     const [newConceptExplanation, setNewConceptExplanation] = useState('');
@@ -93,8 +92,22 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         return null; 
     };
 
+    // Track in-flight requests to prevent duplicates
+    const inFlightRequests = useRef<{[key: string]: boolean}>({});
+
     const fetchKeyConcepts = useCallback(async () => {
         if (!user || !fileId) return;
+        
+        // Create a unique key for this request
+        const requestKey = `key-concepts-${fileId}`;
+        
+        // If there's already a request in flight for this file, don't start another one
+        if (inFlightRequests.current[requestKey]) {
+            console.log(`Request for ${requestKey} already in progress, skipping duplicate`);
+            return;
+        }
+        
+        inFlightRequests.current[requestKey] = true;
         setIsLoadingKeyConcepts(true);
         setError(null);
         
@@ -104,8 +117,10 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
 
-            console.log(`Making API request to /api/v1/files/${fileId}/key-concept`);
-            const response = await fetch(`/api/v1/files/${fileId}/key-concepts`, {
+            const url = `/api/v1/files/${fileId}/key-concepts`;
+            console.log(`Making API request to ${url}`);
+            
+            const response = await fetch(url, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${idToken}` },
                 mode: 'cors',
@@ -124,40 +139,26 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             // Handle the standardized response format
             if (!responseData || responseData.status !== 'success' || !responseData.data) {
                 console.error("API response structure incorrect for key concepts:", responseData);
-                const errorMessage = responseData?.message || 'API returned malformed data structure for key concepts';
-                throw new Error(errorMessage);
+                throw new Error('Invalid response format from server');
             }
 
-            // The data is directly in the response data field as an array of key concepts
-            const data = Array.isArray(responseData.data) ? responseData.data : [];
+            const data = responseData.data.key_concepts || [];
             console.log(`Parsed ${data.length} key concepts for file ID: ${fileId}`);
             
-            // Debug logging to inspect the structure of key concepts
-            if (data.length > 0) {
-                console.log('First key concept complete structure:', data[0]);
-                console.log('Key concept field values check:', {
-                    hasConceptTitle: data.some((kc: KeyConcept) => kc.concept_title && kc.concept_title.length > 0),
-                    conceptTitles: data.map((kc: KeyConcept) => kc.concept_title || (kc as any).concept), // Support both field names
-                    hasConceptExplanation: data.some((kc: KeyConcept) => {
-                        const explanation = kc.concept_explanation || (kc as any).explanation;
-                        return explanation && explanation.length > 0;
-                    }),
-                    conceptExplanations: data.map((kc: KeyConcept) => (kc.concept_explanation || (kc as any).explanation || '').substring(0, 20))
-                });
-            }
-            
             if (data.length === 0) {
-                console.warn(`No key concepts found for file ID: ${fileId}, type: ${fileType}`);
+                console.warn(`No key concepts found for file ID: ${fileId}`);
             }
             
             setKeyConcepts(data);
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : 'An unknown error occurred';
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : 'An unknown error occurred';
             console.error(`Failed to fetch key concepts for file ID: ${fileId}, type: ${fileType}:`, errorMsg);
+            console.error('Error fetching key concepts:', error);
             setError(errorMsg);
-            onError(errorMsg); 
         } finally {
             setIsLoadingKeyConcepts(false);
+            // Clean up the in-flight request flag
+            delete inFlightRequests.current[`key-concepts-${fileId}`];
         }
     }, [user, fileId, fileType, onError]); 
 
@@ -604,14 +605,11 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             );
         }
         
-        // Combine API-fetched key concepts with custom user-created ones
-        const allKeyConcepts = [...keyConcepts, ...customKeyConcepts];
-        
         if (showKeyConceptForm) {
             return renderKeyConceptForm();
         }
         
-        if (!allKeyConcepts || allKeyConcepts.length === 0) {
+        if (!keyConcepts || keyConcepts.length === 0) {
             // Add more specific messaging for YouTube videos
             if (fileType === 'youtube') {
                 return (
@@ -643,7 +641,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
 
         // Apply sorting based on user selection
-        const sortedConcepts = sortKeyConcepts(allKeyConcepts);
+        const sortedConcepts = sortKeyConcepts(keyConcepts);
 
         return (
             <div className="key-concepts-container">
@@ -692,7 +690,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                                     <div className="concept-header" onClick={() => expandConcept(concept.id)}>
                                         <h4>
                                             {concept.concept_title || 'Untitled Concept'}
-                                            {concept.is_custom && <span className="custom-badge">Custom</span>}
+                                            {concept.is_custom === true && <span className="custom-badge">Custom</span>}
                                         </h4>
                                         <div className="key-concept-actions">
                                             <button onClick={(e) => {e.stopPropagation(); handleEditConcept(concept);}} className="action-btn edit-btn">
@@ -768,9 +766,23 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     
     // This SourceLink function was duplicated, removing the second instance
     
+    // Track if a submission is in progress to prevent multiple submissions
+    const isSubmittingRef = useRef(false);
+    // Track the last submission time to prevent rapid submissions
+    const lastSubmissionTime = useRef(0);
+    
     // Add a new custom key concept with backend persistence
     const addKeyConcept = async () => {
+        // Prevent multiple submissions
+        const now = Date.now();
+        if (isSubmittingRef.current || (now - lastSubmissionTime.current < 2000)) {
+            console.log('Prevented duplicate or rapid submission');
+            return;
+        }
+        
         if (!user || newConceptTitle.trim() === '' || newConceptExplanation.trim() === '') return;
+        
+        console.log('Adding new key concept with title:', newConceptTitle.trim());
         
         // Create source data based on file type, only including fields that match the backend's KeyConceptCreate schema
         const conceptData = {
@@ -787,10 +799,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             Object.entries(conceptData).filter(([_, v]) => v !== undefined)
         );
         
+        // Set submitting flag and timestamp to prevent duplicate/rapid submissions
+        isSubmittingRef.current = true;
+        lastSubmissionTime.current = now;
+        setIsLoadingKeyConcepts(true);
+        
         try {
-            setIsLoadingKeyConcepts(true);
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
+            
+            console.log('Sending key concept to server:', payload);
             
             const response = await fetch(`/api/v1/files/${file.id}/key-concepts`, {
                 method: 'POST',
@@ -802,6 +820,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             let responseData;
             try {
                 responseData = await response.json();
+                console.log('Server response:', responseData);
             } catch (e) {
                 console.error('Failed to parse error response:', e);
                 throw new Error(`Failed to save key concept: ${response.statusText} (${response.status})`);
@@ -838,53 +857,85 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             }
             
             const savedConcept: KeyConcept = responseData.data;
+            console.log('Successfully saved key concept:', savedConcept);
             
-            setCustomKeyConcepts(prev => [...prev, savedConcept]);
-            
+            // Reset form
             setNewConceptTitle('');
             setNewConceptExplanation('');
             setNewConceptSourcePage(null);
             setNewConceptVideoStart(null);
             setNewConceptVideoEnd(null);
-            setShowKeyConceptForm(false);
-        } catch (err) {
-            console.error('Error saving custom key concept:', err);
-            setError(err instanceof Error ? err.message : 'Failed to save key concept');
-        } finally {
+            
+            // Show success message
+            addToast('Key concept added successfully!', 'success');
+            
+            // Refresh the key concepts list from the server
+            await fetchKeyConcepts();
+            
+            // Reset submission state after successful operation
+            isSubmittingRef.current = false;
             setIsLoadingKeyConcepts(false);
+            
+            // Hide the form after successful submission
+            setShowKeyConceptForm(false);
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : 'Failed to save key concept';
+            console.error('Error saving custom key concept:', error);
+            setError(errorMsg);
+            addToast(errorMsg, 'error');
+            
+            // If there's an error, we still want to reset the submission state
+            // so the user can try again
+            isSubmittingRef.current = false;
+            setIsLoadingKeyConcepts(false);
+            
+            // Clear the last submission time to prevent blocking the next attempt
+            lastSubmissionTime.current = 0;
         }
     };
     
+    // Handle form submission for key concept creation
+    const handleKeyConceptSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (isSubmittingRef.current) return;
+        await addKeyConcept();
+    };
+
     // Render key concept creation form
     const renderKeyConceptForm = () => (
-        <div className="creation-form">
+        <form onSubmit={handleKeyConceptSubmit} className="creation-form">
             <h3>Create New Key Concept</h3>
             <div className="form-group">
-                <label>Concept Title:</label>
+                <label htmlFor="concept-title">Concept Title:</label>
                 <input 
+                    id="concept-title"
                     type="text"
                     value={newConceptTitle}
                     onChange={(e) => setNewConceptTitle(e.target.value)}
                     placeholder="Enter concept title..."
+                    required
                 />
             </div>
             <div className="form-group">
-                <label>Explanation:</label>
+                <label htmlFor="concept-explanation">Explanation:</label>
                 <textarea 
+                    id="concept-explanation"
                     value={newConceptExplanation}
                     onChange={(e) => setNewConceptExplanation(e.target.value)}
                     placeholder="Enter explanation..."
                     rows={4}
+                    required
                 />
             </div>
             
             {fileType === 'pdf' && (
                 <div className="form-group">
-                    <label>Source Page Number:</label>
+                    <label htmlFor="source-page">Source Page Number:</label>
                     <input 
+                        id="source-page"
                         type="number"
                         min="1"
-                        value={newConceptSourcePage || ''}
+                        value={newConceptSourcePage ?? ''}
                         onChange={(e) => setNewConceptSourcePage(e.target.value ? parseInt(e.target.value) : null)}
                         placeholder="Page number"
                     />
@@ -894,23 +945,25 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             {(fileType === 'video' || fileType === 'youtube') && (
                 <>
                     <div className="form-group">
-                        <label>Video Start Time (seconds):</label>
+                        <label htmlFor="video-start">Video Start Time (seconds):</label>
                         <input 
+                            id="video-start"
                             type="number"
                             min="0"
                             step="0.1"
-                            value={newConceptVideoStart || ''}
+                            value={newConceptVideoStart ?? ''}
                             onChange={(e) => setNewConceptVideoStart(e.target.value ? parseFloat(e.target.value) : null)}
                             placeholder="Start time in seconds"
                         />
                     </div>
                     <div className="form-group">
-                        <label>Video End Time (seconds, optional):</label>
+                        <label htmlFor="video-end">Video End Time (seconds, optional):</label>
                         <input 
+                            id="video-end"
                             type="number"
                             min="0"
                             step="0.1"
-                            value={newConceptVideoEnd || ''}
+                            value={newConceptVideoEnd ?? ''}
                             onChange={(e) => setNewConceptVideoEnd(e.target.value ? parseFloat(e.target.value) : null)}
                             placeholder="End time in seconds"
                         />
@@ -919,15 +972,16 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             )}
             
             <div className="form-buttons">
-                <button onClick={() => setShowKeyConceptForm(false)}>Cancel</button>
+                <button type="button" onClick={() => setShowKeyConceptForm(false)}>Cancel</button>
                 <button 
-                    onClick={addKeyConcept} 
-                    disabled={!newConceptTitle.trim() || !newConceptExplanation.trim()}
+                    type="submit"
+                    disabled={!newConceptTitle.trim() || !newConceptExplanation.trim() || isSubmittingRef.current || isLoadingKeyConcepts}
+                    aria-disabled={isSubmittingRef.current || isLoadingKeyConcepts}
                 >
-                    Add Key Concept
+                    {(isSubmittingRef.current || isLoadingKeyConcepts) ? 'Adding...' : 'Add Key Concept'}
                 </button>
             </div>
-        </div>
+        </form>
     );
     
     // Handle updating or deleting a flashcard

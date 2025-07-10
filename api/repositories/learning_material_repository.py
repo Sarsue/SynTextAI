@@ -27,7 +27,7 @@ class LearningMaterialRepository(BaseRepository):
         
     # --- Key Concept Methods ---
     
-    def add_key_concept(self, file_id: int, key_concept_data: KeyConceptCreate) -> Optional[KeyConceptORM]:
+    def add_key_concept(self, file_id: int, key_concept_data: KeyConceptCreate) -> Optional[dict]:
         """
         Add a new key concept from a Pydantic model and return the ORM instance.
         
@@ -71,11 +71,27 @@ class LearningMaterialRepository(BaseRepository):
                 # Explicitly refresh to ensure we have all attributes
                 uow.session.refresh(new_concept)
                 
+                # Create a dictionary of the data we need before the session closes
+                concept_data = {
+                    'id': new_concept.id,
+                    'file_id': new_concept.file_id,
+                    'concept_title': new_concept.concept_title,
+                    'concept': new_concept.concept_title,  # For backward compatibility
+                    'concept_explanation': new_concept.concept_explanation,
+                    'explanation': new_concept.concept_explanation,  # For backward compatibility
+                    'source_page_number': new_concept.source_page_number,
+                    'source_video_timestamp_start_seconds': new_concept.source_video_timestamp_start_seconds,
+                    'source_video_timestamp_end_seconds': new_concept.source_video_timestamp_end_seconds,
+                    'is_custom': new_concept.is_custom,
+                    'created_at': new_concept.created_at,
+                    'updated_at': new_concept.updated_at
+                }
+                
                 # Log success with the ID
                 logger.info(f"Successfully added key concept for file {file_id}, id={new_concept.id}")
                 
-                # Return the concept object - it's still attached to the session
-                return new_concept
+                # Return the data dictionary instead of the ORM object
+                return concept_data
                 
             except Exception as e:
                 uow.session.rollback()

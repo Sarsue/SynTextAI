@@ -397,31 +397,21 @@ async def add_key_concept(
             log_data['explanation'] = '[REDACTED]' if log_data['explanation'] else None
         logger.debug(f"[API] Key concept data: {log_data}")
         
-        # Add the key concept and get the ORM instance
-        new_concept = store.learning_material_repo.add_key_concept(
+        # Add the key concept and get the concept data as a dictionary
+        concept_data = store.learning_material_repo.add_key_concept(
             file_id=file_id, 
             key_concept_data=key_concept_data
         )
         
-        if not new_concept:
+        if not concept_data:
             logger.error(f"[API] Failed to create key concept for file {file_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail="Failed to create key concept in the database."
             )
         
-        # Create a response model with the data we need before the session closes
-        response_data = KeyConceptResponse(
-            id=new_concept.id,
-            concept_title=new_concept.concept_title,
-            concept_explanation=new_concept.concept_explanation,
-            source_page_number=new_concept.source_page_number,
-            source_video_timestamp_start_seconds=new_concept.source_video_timestamp_start_seconds,
-            source_video_timestamp_end_seconds=new_concept.source_video_timestamp_end_seconds,
-            is_custom=new_concept.is_custom,
-            created_at=new_concept.created_at,
-            updated_at=new_concept.updated_at
-        )
+        # Create response data from the dictionary
+        response_data = KeyConceptResponse(**concept_data)
         
         logger.info(f"[API] Successfully created key concept {response_data.id} for file {file_id}")
         return StandardResponse(
@@ -452,16 +442,25 @@ async def update_key_concept(
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
 ):
-    check_ownership(file_id, user_data["user_id"], store)
+    # First verify the concept exists and belongs to this file
+    existing_concept = store.learning_material_repo.get_key_concept_by_id(key_concept_id)
+    if not existing_concept or existing_concept.file_id != file_id:
+        raise HTTPException(status_code=404, detail="Key concept not found or access denied.")
+    
+    # Update the concept
     updated_concept = store.learning_material_repo.update_key_concept(
-        key_concept_id=key_concept_id, 
-        user_id=user_data["user_id"], 
+        concept_id=key_concept_id,
         update_data=key_concept_update_data
     )
+    
     if not updated_concept:
-        raise HTTPException(status_code=404, detail="Key concept not found or user does not have permission.")
+        raise HTTPException(status_code=500, detail="Failed to update key concept.")
+        
+    # Convert to response model before session is closed
+    response_data = KeyConceptResponse.model_validate(updated_concept)
+        
     return StandardResponse(
-        data=KeyConceptResponse.model_validate(updated_concept), 
+        data=response_data, 
         message="Key concept updated successfully."
     )
 
