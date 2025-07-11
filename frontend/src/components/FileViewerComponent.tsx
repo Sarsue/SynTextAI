@@ -535,7 +535,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             }
 
             const response = await fetch(`/api/v1/files/${file.id}/key-concepts/${conceptId}`, {
-                method: 'PUT',
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
@@ -547,10 +547,14 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 throw new Error('Failed to save concept');
             }
 
-            const updatedConcept = (await response.json()).data;
-            setKeyConcepts(keyConcepts.map(c => c.id === updatedConcept.id ? updatedConcept : c));
-            setEditingConcept(null);
-            addToast('Key concept saved!', 'success');
+            const responseData = await response.json();
+            if (responseData.status === 'success' && responseData.data) {
+                setKeyConcepts(keyConcepts.map(c => c.id === responseData.data.id ? responseData.data : c));
+                setEditingConcept(null);
+                addToast(responseData.message || 'Key concept saved!', 'success');
+            } else {
+                throw new Error(responseData.message || 'Failed to save concept');
+            }
         } catch (error) {
             console.error('Save error:', error);
             addToast('Error saving concept', 'error');
@@ -1151,7 +1155,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             const idToken = await user.getIdToken();
             if (!idToken) throw new Error('User token not available');
             
-            const response = await fetch(`/api/v1/files/${file.id}/quiz-question`, {
+            const response = await fetch(`/api/v1/files/${file.id}/quiz-questions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1425,7 +1429,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 updateData.difficulty = 'medium';
             }
             
-            const response = await fetch(`/api/v1/files/${file.id}/quiz-question/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/quiz-questions/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1463,7 +1467,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         try {
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/${file.id}/quiz-question/${id}`, {
+            const response = await fetch(`/api/v1/files/${file.id}/quiz-questions/${id}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`,

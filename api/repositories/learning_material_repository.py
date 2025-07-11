@@ -137,23 +137,50 @@ class LearningMaterialRepository(BaseRepository):
                 logger.error(f"[ERROR] ORM query for key concepts failed: {e}", exc_info=True)
                 return []
 
-    def update_key_concept(self, concept_id: int, update_data: KeyConceptUpdate) -> Optional[KeyConceptORM]:
-        """Update a key concept from a Pydantic model and return the updated ORM instance."""
+    def update_key_concept(self, concept_id: int, update_data: KeyConceptUpdate) -> Optional[dict]:
+        """
+        Update a key concept from a Pydantic model and return the updated data as a dictionary.
+        
+        Args:
+            concept_id: The ID of the key concept to update
+            update_data: Pydantic model containing the updates
+            
+        Returns:
+            dict: The updated key concept data, or None if the update failed
+        """
         with self.get_unit_of_work() as uow:
             try:
-                concept = uow.session.get(KeyConceptORM, concept_id)
+                # Get the concept with all its relationships loaded
+                concept = uow.session.query(KeyConceptORM).filter_by(id=concept_id).first()
                 if not concept:
                     return None
                 
+                # Update the concept with the new data
                 update_dict = update_data.dict(exclude_unset=True)
                 for key, value in update_dict.items():
                     setattr(concept, key, value)
                 
+                # Save changes
                 uow.session.add(concept)
                 uow.session.commit()
-                uow.session.refresh(concept)
+                
+                # Convert to dictionary before the session is closed
+                result = {
+                    'id': concept.id,
+                    'file_id': concept.file_id,
+                    'concept_title': concept.concept_title,
+                    'concept_explanation': concept.concept_explanation,
+                    'source_page_number': concept.source_page_number,
+                    'source_video_timestamp_start_seconds': concept.source_video_timestamp_start_seconds,
+                    'source_video_timestamp_end_seconds': concept.source_video_timestamp_end_seconds,
+                    'is_custom': concept.is_custom,
+                    'created_at': concept.created_at,
+                    'updated_at': concept.updated_at
+                }
+                
                 logger.info(f"Successfully updated KeyConcept {concept_id}.")
-                return concept
+                return result
+                
             except Exception as e:
                 uow.session.rollback()
                 logger.error(f"Error updating key concept {concept_id}: {e}", exc_info=True)
