@@ -11,18 +11,35 @@
   font-size: 14px;
   font-weight: 500;
   color: #444;
-  margin: 0 auto 20px;
+  margin: 0 auto 15px;
   background-color: #f8f9fa;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border-radius: 20px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   transition: all 0.3s ease;
-  min-width: 220px;
+  min-width: 200px;
+  max-width: 100%;
   justify-content: center;
   border: 1px solid #e9ecef;
+  box-sizing: border-box;
+  text-align: center;
+  line-height: 1.4;
+}
+
+@media (max-width: 480px) {
+  .progress-indicator {
+    font-size: 13px;
+    padding: 6px 12px;
+    min-width: 180px;
+    gap: 6px;
+  }
+  
+  .progress-indicator .divider {
+    margin: 0 2px;
+  }
 }
 
 .progress-indicator .card-position {
@@ -74,11 +91,19 @@
 
 .flashcard {
   width: 100%;
-  max-width: 400px;
+  max-width: 100%;
   height: 200px;
   perspective: 1000px;
   cursor: pointer;
   margin: 10px 0;
+  padding: 0 10px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 480px) {
+  .flashcard {
+    height: 180px;
+  }
 }
 
 .flashcard-inner {

@@ -72,6 +72,7 @@
     gap: 15px;
     height: 100%; /* Added for consistency with document-view-container */
     min-height: 0; /* Added for flex sizing */
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
 }
 
 .dark-mode .key-concepts-panel {
@@ -588,6 +589,7 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
 
     .document-view-container {
         flex: 1; /* Takes available space above key concepts */
+        min-height: 50vh; /* Ensure document view gets enough space */
     }
 
     .key-concepts-panel {
@@ -597,17 +599,48 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
         border-left: none;
         border-top: 1px solid #ccc;
         min-width: unset; /* Override desktop min-width */
+        padding: 10px;
+    }
+
+    .key-concept-item {
+        padding: 15px;
+        margin-bottom: 15px;
+    }
+
+    .key-concept-item h4 {
+        font-size: 1.1em;
+        margin-bottom: 10px;
+    }
+
+    .key-concept-item p {
+        font-size: 0.95em;
+        line-height: 1.5;
+    }
+
+    .key-concept-actions {
+        margin-top: 12px;
+    }
+
+    .key-concept-actions button {
+        padding: 8px 12px;
+        font-size: 0.9em;
+        margin-right: 8px;
     }
 
     .dark-mode .key-concepts-panel {
         border-top-color: #555;
     }
 
-    /* Adjust header toolbar for mobile if it existed - currently no top toolbar in new layout */
-    /* .viewer-header-toolbar { ... } */
-
     .viewer-controls-bottom {
-        padding: 8px;
+        padding: 12px 8px;
+        position: sticky;
+        bottom: 0;
+        background-color: #f8f9fa;
+        z-index: 10;
+    }
+
+    .dark-mode .viewer-controls-bottom {
+        background-color: #2c2c2c;
     }
 
     .toolbar-button.close-button-bottom {
