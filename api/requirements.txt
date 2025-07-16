@@ -172,4 +172,4 @@ ffmpeg-python
 websockets
 youtube-transcript-api
 yt-dlp
-posthog
+posthog==3.5.0
