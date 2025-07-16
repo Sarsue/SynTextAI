@@ -439,7 +439,17 @@ class FileRepository(BaseRepository):
             try:
                 file_orm = uow.session.query(FileORM).filter(FileORM.id == file_id).first()
                 if file_orm:
-                    return file_orm.to_dict()
+                    # Convert SQLAlchemy model instance to dictionary
+                    file_dict = {
+                        'id': file_orm.id,
+                        'file_name': file_orm.file_name,
+                        'file_url': file_orm.file_url,
+                        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None,
+                        'user_id': file_orm.user_id,
+                        'file_type': file_orm.file_type,
+                        'processing_status': file_orm.processing_status
+                    }
+                    return file_dict
                 return None
             except Exception as e:
                 logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)

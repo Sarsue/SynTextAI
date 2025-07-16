@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './QuizInterface.css';
 import { QuizQuestion } from './types';
 
@@ -20,6 +20,7 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
 
   const total = questions.length;
   const progress = Object.keys(answered).length;
+  const progressPercentage = total > 0 ? Math.round((progress / total) * 100) : 0;
 
   if (!questions.length) return <div>No quiz questions available.</div>;
 
@@ -74,13 +75,20 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
     setShowFeedback(false);
     setSelected(null);
     setIsCorrect(null);
-    setCurrent(i => (i + 1 < total ? i + 1 : i));
+    setCurrent(prevCurrent => {
+      const next = prevCurrent + 1 < total ? prevCurrent + 1 : prevCurrent;
+      return next;
+    });
   };
+
   const handlePrev = () => {
     setShowFeedback(false);
     setSelected(null);
     setIsCorrect(null);
-    setCurrent(i => (i - 1 >= 0 ? i - 1 : i));
+    setCurrent(prevCurrent => {
+      const prev = prevCurrent - 1 >= 0 ? prevCurrent - 1 : prevCurrent;
+      return prev;
+    });
   };
   const handleRestart = () => {
     setShowFeedback(false);
@@ -129,7 +137,18 @@ const QuizInterface: React.FC<QuizInterfaceProps> = ({ questions, onUpdateQuiz, 
   return (
     <div className="quiz-interface">
       <div className="progress-indicator">
-        {progress}/{total} questions answered | Score: {score}
+        <span className="position">Question {current + 1} of {total}</span>
+        <span className="divider">•</span>
+        <span className="progress">
+          <span className="progress-number">{progress}</span> answered
+          {total > 0 && (
+            <span className="progress-percentage">({progressPercentage}%)</span>
+          )}
+        </span>
+        <span className="divider">•</span>
+        <span className="score">
+          Score: <span className="score-number">{score}</span>/{progress || '0'}
+        </span>
       </div>
       <div className="quiz-question">
         <div className="question-text">{q.question}</div>

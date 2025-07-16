@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
+from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session, joinedload
 from redis.exceptions import RedisError
 from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
@@ -14,7 +15,7 @@ from ..schemas.learning_content import (
     StandardResponse,
     KeyConceptCreate, KeyConceptResponse, KeyConceptsListResponse, KeyConceptUpdate,
     FlashcardCreate, FlashcardResponse, FlashcardsListResponse, FlashcardUpdateRequest,
-    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdateRequest
+    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
 )
 from ..models import KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM, File
 
@@ -198,7 +199,7 @@ def check_ownership(file_id: int, user_id: int, store: RepositoryManager):
 
 # --- Flashcards ---
 
-@files_router.get("/{file_id}/flashcards", response_model=StandardResponse)
+@files_router.get("/{file_id}/flashcards", response_model=StandardResponse[Dict[str, List[FlashcardResponse]]])
 async def get_flashcards_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
@@ -214,12 +215,35 @@ async def get_flashcards_for_file(
     - **page_size**: Number of items per page (default: 10, max: 100)
     """
     try:
+        logger.info(f"[API] Getting flashcards for file {file_id} (page {page}, size {page_size})")
+        
+        # Check file ownership
         check_ownership(file_id, user_data["user_id"], store)
+        
+        # Get the flashcards
         flashcards = store.learning_material_repo.get_flashcards_for_file(file_id, page, page_size)
-        return StandardResponse(
-            data={"flashcards": [flashcard.dict() for flashcard in flashcards]},
+        
+        logger.info(f"[API] Found {len(flashcards)} flashcards for file {file_id}")
+        
+        # Convert ORM objects to Pydantic models first
+        flashcard_responses = [
+            FlashcardResponse(
+                id=fc.id,
+                file_id=fc.file_id,
+                question=fc.question,
+                answer=fc.answer,
+                is_custom=fc.is_custom,
+                created_at=fc.created_at,
+                difficulty=getattr(fc, 'difficulty', 'medium')
+            ) for fc in flashcards
+        ]
+        
+        return StandardResponse[Dict[str, List[FlashcardResponse]]](
+            data={"flashcards": [fc.dict() for fc in flashcard_responses]},
             message="Flashcards retrieved successfully"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting flashcards for file {file_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -227,13 +251,13 @@ async def get_flashcards_for_file(
             detail="Failed to retrieve flashcards"
         )
 
-@files_router.post("/{file_id}/flashcards", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
+@files_router.post("/{file_id}/flashcards", response_model=StandardResponse[FlashcardResponse], status_code=status.HTTP_201_CREATED)
 async def add_flashcard_for_file(
     file_id: int, 
     flashcard_data: FlashcardCreate, 
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
-):
+) -> StandardResponse[FlashcardResponse]:
     """
     Add a new flashcard to a file.
     
@@ -241,65 +265,64 @@ async def add_flashcard_for_file(
     - **flashcard_data**: The flashcard data to add
     """
     try:
-        logger.info(f"[API] Adding flashcard for file {file_id} by user {user_data['user_id']}")
+        logger.info(f"[API] Adding flashcard to file {file_id} by user {user_data['user_id']}")
         
-        # Check ownership and validate input
+        # Check file ownership and processing status
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Validate required fields
-        if not flashcard_data.question:
-            raise ValueError("Question is a required field.")
-        if not flashcard_data.answer:
-            raise ValueError("Answer is a required field.")
+        # Create a dictionary with the flashcard data to pass to the repository
+        flashcard_dict = flashcard_data.dict()
         
-        # Add the flashcard
-        new_flashcard = store.learning_material_repo.add_flashcard(
-            file_id=file_id, 
+        # Add the flashcard and get the new flashcard ID
+        flashcard_id = store.learning_material_repo.add_flashcard(
+            file_id=file_id,
             flashcard_data=flashcard_data
         )
         
-        if not new_flashcard:
+        if not flashcard_id:
             logger.error(f"[API] Failed to create flashcard for file {file_id}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-                detail="Failed to create flashcard in the database."
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create flashcard in the database"
             )
         
-        # Convert to response model
+        logger.info(f"[API] Successfully created flashcard {flashcard_id} for file {file_id}")
+        
+        # Convert to response model using the data we already have
         response_data = FlashcardResponse(
-            id=new_flashcard.id,
-            file_id=new_flashcard.file_id,
-            question=new_flashcard.question,
-            answer=new_flashcard.answer,
-            difficulty=new_flashcard.difficulty,
-            is_custom=new_flashcard.is_custom,
-            created_at=new_flashcard.created_at,
-            updated_at=new_flashcard.updated_at
+            id=flashcard_id,
+            file_id=file_id,
+            question=flashcard_dict['question'],
+            answer=flashcard_dict['answer'],
+            key_concept_id=flashcard_dict.get('key_concept_id'),
+            is_custom=flashcard_dict.get('is_custom', False),
+            created_at=datetime.utcnow(),
+            difficulty=flashcard_dict.get('difficulty', 'medium')
         )
         
-        return StandardResponse(
-            data={"flashcard": response_data.model_dump()},
+        return StandardResponse[FlashcardResponse](
+            data=response_data.dict(),
             message="Flashcard created successfully",
             status_code=status.HTTP_201_CREATED
         )
         
-    except ValueError as ve:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error adding flashcard: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while adding the flashcard"
+            detail="An unexpected error occurred while adding the flashcard"
         )
 
-@files_router.put("/{file_id}/flashcards/{flashcard_id}", response_model=StandardResponse)
+@files_router.put("/{file_id}/flashcards/{flashcard_id}", response_model=StandardResponse[FlashcardResponse])
 async def update_flashcard(
     file_id: int,
     flashcard_id: int, 
     flashcard_update_data: FlashcardUpdateRequest, 
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
-):
+) -> StandardResponse[FlashcardResponse]:
     """
     Update an existing flashcard.
     
@@ -310,18 +333,10 @@ async def update_flashcard(
     try:
         logger.info(f"[API] Updating flashcard {flashcard_id} for file {file_id} by user {user_data['user_id']}")
         
-        # Check ownership
+        # Check file ownership first
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Get the existing flashcard to ensure it exists and belongs to the file
-        existing_flashcard = store.learning_material_repo.get_flashcard_by_id(flashcard_id)
-        if not existing_flashcard or existing_flashcard.file_id != file_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Flashcard not found or does not belong to the specified file"
-            )
-        
-        # Update the flashcard
+        # Update the flashcard - the repository will verify it belongs to the user
         updated_flashcard = store.learning_material_repo.update_flashcard(
             flashcard_id=flashcard_id,
             user_id=user_data["user_id"],
@@ -331,9 +346,11 @@ async def update_flashcard(
         if not updated_flashcard:
             logger.error(f"[API] Failed to update flashcard {flashcard_id} for file {file_id}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-                detail="Failed to update flashcard in the database."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Flashcard not found or does not belong to the specified file"
             )
+        
+        logger.info(f"[API] Successfully updated flashcard {flashcard_id} for file {file_id}")
         
         # Convert to response model
         response_data = FlashcardResponse(
@@ -341,14 +358,15 @@ async def update_flashcard(
             file_id=updated_flashcard['file_id'],
             question=updated_flashcard['question'],
             answer=updated_flashcard['answer'],
-            difficulty=updated_flashcard['difficulty'],
+            key_concept_id=updated_flashcard['key_concept_id'],
             is_custom=updated_flashcard['is_custom'],
             created_at=updated_flashcard['created_at'],
-            updated_at=updated_flashcard['updated_at']
+            updated_at=updated_flashcard['updated_at'],
+            difficulty=updated_flashcard.get('difficulty', 'medium')
         )
         
-        return StandardResponse(
-            data={"flashcard": response_data.model_dump()},
+        return StandardResponse[FlashcardResponse](
+            data=response_data.dict(),
             message="Flashcard updated successfully"
         )
         
@@ -360,10 +378,10 @@ async def update_flashcard(
         logger.error(f"Error updating flashcard: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while updating the flashcard"
+            detail="An unexpected error occurred while updating the flashcard"
         )
 
-@files_router.delete("/{file_id}/flashcards/{flashcard_id}", response_model=StandardResponse)
+@files_router.delete("/{file_id}/flashcards/{flashcard_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_flashcard(
     file_id: int,
     flashcard_id: int,
@@ -379,18 +397,10 @@ async def delete_flashcard(
     try:
         logger.info(f"[API] Deleting flashcard {flashcard_id} for file {file_id} by user {user_data['user_id']}")
         
-        # Check ownership
+        # Check file ownership first
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Check if the flashcard exists and belongs to the file
-        existing_flashcard = store.learning_material_repo.get_flashcard_by_id(flashcard_id)
-        if not existing_flashcard or existing_flashcard.file_id != file_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Flashcard not found or does not belong to the specified file"
-            )
-        
-        # Delete the flashcard
+        # Delete the flashcard - the repository will verify it belongs to the user
         success = store.learning_material_repo.delete_flashcard(
             flashcard_id=flashcard_id,
             user_id=user_data["user_id"]
@@ -399,13 +409,11 @@ async def delete_flashcard(
         if not success:
             logger.error(f"[API] Failed to delete flashcard {flashcard_id} for file {file_id}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete flashcard from the database."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Flashcard not found or does not belong to the specified file"
             )
         
-        return StandardResponse(
-            message="Flashcard deleted successfully"
-        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
         
     except HTTPException:
         raise
@@ -413,7 +421,7 @@ async def delete_flashcard(
         logger.error(f"Error deleting flashcard: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the flashcard"
+            detail="An unexpected error occurred while deleting the flashcard"
         )
 
 # --- Quiz Questions ---
@@ -423,9 +431,9 @@ async def get_quiz_questions_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
-    user_data: Dict = Depends(authenticate_user), 
+    user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
-):
+) -> StandardResponse:
     """
     Get all quiz questions for a specific file.
     
@@ -434,125 +442,119 @@ async def get_quiz_questions_for_file(
     - **page_size**: Number of items per page (default: 10, max: 100)
     """
     try:
-        # Check ownership
+        logger.info(f"[API] Getting quiz questions for file {file_id} (page {page}, size {page_size})")
+        
+        # Check file ownership
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Get paginated quiz questions using the repository
-        quiz_questions = store.learning_material_repo.get_quiz_questions_for_file(
-            file_id=file_id,
-            page=page,
-            page_size=page_size
-        )
+        # Get the quiz questions
+        quiz_questions = store.learning_material_repo.get_quiz_questions_for_file(file_id, page, page_size)
         
-        # Get total count for pagination
-        total = store.learning_material_repo.count_quiz_questions_for_file(file_id)
+        logger.info(f"[API] Found {len(quiz_questions)} quiz questions for file {file_id}")
         
-        # Convert to response models
-        quiz_question_responses = [
+        # Convert ORM objects to Pydantic models
+        question_responses = [
             QuizQuestionResponse(
                 id=q.id,
                 file_id=q.file_id,
                 question=q.question,
-                options=q.options,
+                distractors=q.distractors or [],
                 correct_answer=q.correct_answer,
-                explanation=q.explanation,
+                explanation=getattr(q, 'explanation', ''),
+                key_concept_id=q.key_concept_id,
                 is_custom=q.is_custom,
                 created_at=q.created_at,
-                updated_at=q.updated_at
+                difficulty=getattr(q, 'difficulty', 'medium'),
+                question_type=getattr(q, 'question_type', 'MCQ')
             ) for q in quiz_questions
         ]
         
         return StandardResponse(
-            data={
-                "quiz_questions": [q.dict() for q in quiz_question_responses],
-                "total": total,
-                "page": page,
-                "page_size": page_size
-            },
+            data={"quizzes": [q.dict() for q in question_responses]},
             message="Quiz questions retrieved successfully"
         )
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving quiz questions: {e}", exc_info=True)
+        logger.error(f"Error getting quiz questions for file {file_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while retrieving quiz questions"
+            detail="Failed to retrieve quiz questions"
         )
 
 @files_router.post("/{file_id}/quiz-questions", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
-async def add_quiz_question(
+async def add_quiz_question_for_file(
     file_id: int, 
-    quiz_question_data: QuizQuestionCreate, 
+    question_data: QuizQuestionCreate, 
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
-):
+) -> StandardResponse:
     """
     Add a new quiz question to a file.
     
     - **file_id**: The ID of the file to add the quiz question to
-    - **quiz_question_data**: The quiz question data to add
+    - **question_data**: The quiz question data to add
     """
     try:
-        logger.info(f"[API] Adding quiz question for file {file_id} by user {user_data['user_id']}")
+        logger.info(f"[API] Adding quiz question to file {file_id} by user {user_data['user_id']}")
         
-        # Check ownership
+        # Check file ownership
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Validate required fields
-        if not quiz_question_data.question:
-            raise ValueError("Question is a required field.")
-        if not quiz_question_data.options or len(quiz_question_data.options) < 2:
-            raise ValueError("At least two options are required for a quiz question.")
-        if quiz_question_data.correct_answer is None or quiz_question_data.correct_answer < 0 or quiz_question_data.correct_answer >= len(quiz_question_data.options):
-            raise ValueError("Invalid correct answer index.")
+        # Create a dictionary with the question data to pass to the repository
+        question_dict = question_data.dict()
         
-        # Add the quiz question
-        new_quiz_question = store.learning_material_repo.add_quiz_question(
+        # Add the quiz question and get the new question ID
+        question_id = store.learning_material_repo.add_quiz_question(
             file_id=file_id,
-            quiz_question_data=quiz_question_data
+            quiz_question_data=question_data
         )
         
-        if not new_quiz_question:
+        if not question_id:
             logger.error(f"[API] Failed to create quiz question for file {file_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create quiz question in the database."
+                detail="Failed to create quiz question in the database"
             )
         
-        # Convert to response model
+        logger.info(f"[API] Successfully created quiz question {question_id} for file {file_id}")
+        
+        # Convert to response model using the data we already have
         response_data = QuizQuestionResponse(
-            id=new_quiz_question.id,
-            file_id=new_quiz_question.file_id,
-            question=new_quiz_question.question,
-            options=new_quiz_question.options,
-            correct_answer=new_quiz_question.correct_answer,
-            explanation=new_quiz_question.explanation,
-            is_custom=new_quiz_question.is_custom,
-            created_at=new_quiz_question.created_at,
-            updated_at=new_quiz_question.updated_at
+            id=question_id,
+            file_id=file_id,
+            question=question_dict['question'],
+            distractors=question_dict.get('distractors', []) or [],
+            correct_answer=question_dict['correct_answer'],
+            question_type=question_dict.get('question_type', 'MCQ'),
+            key_concept_id=question_dict.get('key_concept_id'),
+            is_custom=question_dict.get('is_custom', True),
+            created_at=datetime.utcnow()
         )
         
         return StandardResponse(
-            data={"quiz_question": response_data.model_dump()},
+            data=response_data.dict(),
             message="Quiz question created successfully",
             status_code=status.HTTP_201_CREATED
         )
         
-    except ValueError as ve:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error adding quiz question: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while adding the quiz question"
+        )
+
+@files_router.put("/{file_id}/quiz-questions/{quiz_question_id}", response_model=StandardResponse)
 async def update_quiz_question(
     file_id: int,
     quiz_question_id: int, 
-    quiz_question_update_data: QuizQuestionUpdateRequest, 
+    quiz_question_data: QuizQuestionUpdate, 
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
-):
+) -> StandardResponse:
     """
     Update an existing quiz question.
     
@@ -563,46 +565,41 @@ async def update_quiz_question(
     try:
         logger.info(f"[API] Updating quiz question {quiz_question_id} for file {file_id} by user {user_data['user_id']}")
         
-        # Check ownership
+        # Check file ownership first
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Get the existing quiz question to ensure it exists and belongs to the file
-        existing_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not existing_question or existing_question.file_id != file_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Quiz question not found or does not belong to the specified file"
-            )
-        
-        # Update the quiz question
+        # Update the quiz question - the repository will verify it belongs to the user
         updated_question = store.learning_material_repo.update_quiz_question(
             quiz_question_id=quiz_question_id,
             user_id=user_data["user_id"],
-            update_data=quiz_question_update_data
+            update_data=quiz_question_data
         )
         
         if not updated_question:
             logger.error(f"[API] Failed to update quiz question {quiz_question_id} for file {file_id}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update quiz question in the database."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Quiz question not found or does not belong to the specified file"
             )
+        
+        logger.info(f"[API] Successfully updated quiz question {quiz_question_id} for file {file_id}")
         
         # Convert to response model
         response_data = QuizQuestionResponse(
             id=updated_question['id'],
             file_id=updated_question['file_id'],
             question=updated_question['question'],
-            options=updated_question['options'],
+            distractors=updated_question.get('distractors', []) or [],
             correct_answer=updated_question['correct_answer'],
-            explanation=updated_question.get('explanation'),
-            is_custom=updated_question['is_custom'],
+            question_type=updated_question.get('question_type', 'MCQ'),
+            key_concept_id=updated_question.get('key_concept_id'),
+            is_custom=updated_question.get('is_custom', True),
             created_at=updated_question['created_at'],
             updated_at=updated_question['updated_at']
         )
         
         return StandardResponse(
-            data={"quiz_question": response_data.model_dump()},
+            data=response_data.dict(),
             message="Quiz question updated successfully"
         )
         
@@ -614,14 +611,14 @@ async def update_quiz_question(
         logger.error(f"Error updating quiz question: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while updating the quiz question"
+            detail="An unexpected error occurred while updating the quiz question"
         )
 
-@files_router.delete("/{file_id}/quiz-questions/{quiz_question_id}", response_model=StandardResponse)
+@files_router.delete("/{file_id}/quiz-questions/{quiz_question_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_quiz_question(
     file_id: int,
-    quiz_question_id: int, 
-    user_data: Dict = Depends(authenticate_user), 
+    quiz_question_id: int,
+    user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     """
@@ -633,18 +630,10 @@ async def delete_quiz_question(
     try:
         logger.info(f"[API] Deleting quiz question {quiz_question_id} for file {file_id} by user {user_data['user_id']}")
         
-        # Check ownership
+        # Check file ownership first
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Check if the quiz question exists and belongs to the file
-        existing_question = store.learning_material_repo.get_quiz_question_by_id(quiz_question_id)
-        if not existing_question or existing_question.file_id != file_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Quiz question not found or does not belong to the specified file"
-            )
-        
-        # Delete the quiz question
+        # Delete the quiz question - the repository will verify it belongs to the user
         success = store.learning_material_repo.delete_quiz_question(
             quiz_question_id=quiz_question_id,
             user_id=user_data["user_id"]
@@ -653,13 +642,11 @@ async def delete_quiz_question(
         if not success:
             logger.error(f"[API] Failed to delete quiz question {quiz_question_id} for file {file_id}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete quiz question from the database."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Quiz question not found or does not belong to the specified file"
             )
         
-        return StandardResponse(
-            message="Quiz question deleted successfully"
-        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
         
     except HTTPException:
         raise
@@ -667,7 +654,7 @@ async def delete_quiz_question(
         logger.error(f"Error deleting quiz question: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the quiz question"
+            detail="An unexpected error occurred while deleting the quiz question"
         )
 
 # --- Key Concepts ---
@@ -681,12 +668,11 @@ async def get_key_concepts_for_file(
     store: RepositoryManager = Depends(get_store)
 ) -> StandardResponse:
     check_ownership(file_id, user_data["user_id"], store)
-    concepts = store.learning_material_repo.get_key_concepts_for_file(file_id)
+    concepts = store.learning_material_repo.get_key_concepts_for_file(file_id, page, page_size)
     return StandardResponse(
         data=KeyConceptsListResponse(key_concepts=concepts).model_dump(),
         message="Key concepts retrieved successfully"
     )
-
 @files_router.post("/{file_id}/key-concepts", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
 async def add_key_concept(
     key_concept_data: KeyConceptCreate,
@@ -694,12 +680,6 @@ async def add_key_concept(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
-    """
-    Add a new key concept to a file.
-    
-    - **file_id**: The ID of the file to add the key concept to (must be a positive integer)
-    - **key_concept_data**: The key concept data to add
-    """
     try:
         logger.info(f"[API] Adding key concept for file {file_id} by user {user_data['user_id']}")
         
@@ -709,12 +689,6 @@ async def add_key_concept(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found or you don't have permission to access it."
             )
-        
-        # Log the incoming data for debugging (excluding any sensitive data)
-        log_data = key_concept_data.dict()
-        if 'explanation' in log_data:
-            log_data['explanation'] = '[REDACTED]' if log_data['explanation'] else None
-        logger.debug(f"[API] Key concept data: {log_data}")
         
         # Add the key concept through the repository
         new_concept = store.learning_material_repo.add_key_concept(
@@ -745,7 +719,7 @@ async def add_key_concept(
         
         logger.info(f"[API] Successfully created key concept {response_data.id} for file {file_id}")
         return StandardResponse(
-            data={"key_concept": response_data.model_dump()},
+            data=response_data.model_dump(),
             message="Key concept added successfully.",
             status_code=status.HTTP_201_CREATED
         )

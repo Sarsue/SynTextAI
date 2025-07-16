@@ -88,11 +88,19 @@ class FlashcardUpdate(BaseModel):
 
 class FlashcardResponse(BaseModel):
     id: int
+    file_id: int
     question: str
     answer: str
+    difficulty: Optional[str] = None
+    is_custom: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
 
 class FlashcardsListResponse(BaseModel):
     flashcards: List[FlashcardResponse]

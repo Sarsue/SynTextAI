@@ -274,6 +274,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         setFileType(type);
     }, [fileUrl, file.file_name]);
 
+    // Use refs to track if we've already fetched data
+    const hasFetchedRef = useRef({
+        keyConcepts: false,
+        flashcards: false,
+        quizzes: false
+    });
+
     useEffect(() => {
         // This effect handles data fetching and error reporting based on fileType and status.
         if (fileType === 'unknown' && (fileUrl || file.file_name)) {
@@ -289,12 +296,21 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 fetchQuizzes();
             } else {
                 console.log(`File ${fileId} is already processed. Fetching data once...`);
-                if (keyConcepts.length === 0) fetchKeyConcepts();
-                if (flashcards.length === 0) fetchFlashcards();
-                if (quizzes.length === 0) fetchQuizzes();
+                if (!hasFetchedRef.current.keyConcepts && keyConcepts.length === 0) {
+                    fetchKeyConcepts();
+                    hasFetchedRef.current.keyConcepts = true;
+                }
+                if (!hasFetchedRef.current.flashcards && flashcards.length === 0) {
+                    fetchFlashcards();
+                    hasFetchedRef.current.flashcards = true;
+                }
+                if (!hasFetchedRef.current.quizzes && quizzes.length === 0) {
+                    fetchQuizzes();
+                    hasFetchedRef.current.quizzes = true;
+                }
             }
         }
-    }, [fileType, file.status, user, fileId, keyConcepts.length, flashcards.length, quizzes.length, onError, fetchKeyConcepts, fetchFlashcards, fetchQuizzes, file.file_name, fileUrl]); 
+    }, [fileType, file.status, user, fileId, onError, fetchKeyConcepts, fetchFlashcards, fetchQuizzes, file.file_name, fileUrl]);
 
     // We no longer need placeholder data since users can create their own content
 
@@ -1000,7 +1016,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             if (!idToken) throw new Error('User token not available');
             
             const response = await fetch(`/api/v1/files/${file.id}/flashcards/${id}`, {
-                method: action === 'update' ? 'PATCH' : 'DELETE',
+                method: action === 'update' ? 'PUT' : 'DELETE',
                 headers: { 
                     'Content-Type': 'application/json', 
                     'Authorization': `Bearer ${idToken}` 
@@ -1022,24 +1038,20 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 
                 const updatedFlashcard: Flashcard = responseData.data;
                 
-                setFlashcards(prev => prev.map(fc => 
-                    fc.id === updatedFlashcard.id ? updatedFlashcard : fc
-                ));
+                // Use functional updates to ensure we're working with the latest state
+                setFlashcards(prev => 
+                    prev.map(fc => fc.id === updatedFlashcard.id ? updatedFlashcard : fc)
+                );
                 
-                setCustomFlashcards(prev => prev.map(fc => 
-                    fc.id === updatedFlashcard.id ? updatedFlashcard : fc
-                ));
-                
-                // Force a re-render by toggling a dummy state
-                setForceUpdate(prev => !prev);
+                setCustomFlashcards(prev => 
+                    prev.map(fc => fc.id === updatedFlashcard.id ? updatedFlashcard : fc)
+                );
                 
                 addToast('Flashcard updated successfully!', 'success');
             } else {
+                // For delete, just remove the flashcard from both states
                 setFlashcards(prev => prev.filter(fc => fc.id !== id));
                 setCustomFlashcards(prev => prev.filter(fc => fc.id !== id));
-                
-                // Force a re-render by toggling a dummy state
-                setForceUpdate(prev => !prev);
                 
                 addToast('Flashcard deleted successfully!', 'success');
             }
@@ -1105,8 +1117,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             
             const savedFlashcard: Flashcard = responseData.data;
             
-            setFlashcards(prev => [...prev, savedFlashcard]);
-            setCustomFlashcards(prev => [...prev, savedFlashcard]);
+            // Only add to customFlashcards since we combine them when rendering
+            setCustomFlashcards(prev => {
+                // Check if flashcard already exists to prevent duplicates
+                const exists = prev.some(fc => fc.id === savedFlashcard.id);
+                return exists ? prev : [...prev, savedFlashcard];
+            });
             
             setNewFlashcardQuestion('');
             setNewFlashcardAnswer('');
@@ -1173,18 +1189,21 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             
             const responseData = await response.json();
             if (responseData.status !== 'success' || !responseData.data) {
-                throw new Error(responseData.message || 'Failed to parse successful response from server.');
+                throw new Error(responseData.message || 'Failed to save quiz question');
             }
+            
             const savedQuiz: QuizQuestion = responseData.data;
             
-            addToast('Quiz question added successfully!', 'success');
-            setQuizzes(prevQuizzes => [...prevQuizzes, savedQuiz]);
+            // Only add to customQuizzes since we combine them when rendering
+            setCustomQuizzes(prev => [...prev, savedQuiz]);
             
             setNewQuizQuestion('');
             setNewQuizAnswer('');
             setNewQuizDistractors('');
             setNewQuizType('MCQ');
             setShowQuizForm(false);
+            
+            addToast('Quiz question added successfully!', 'success');
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
             console.error('Error saving custom quiz:', err);
@@ -1381,28 +1400,66 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         try {
             const token = await user.getIdToken();
-            const response = await fetch(`/api/v1/files/${file.id}/flashcards/${id}`,
-                {
-                    method: 'DELETE',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                    },
-                }
-            );
+            console.log('Deleting flashcard with ID:', id);
+            
+            const response = await fetch(`/api/v1/files/${file.id}/flashcards/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+            });
+
+            let responseData;
+            try {
+                responseData = await response.json();
+                console.log('Delete response:', responseData);
+            } catch (e) {
+                console.error('Failed to parse delete response:', e);
+                throw new Error(`Failed to delete flashcard: ${response.statusText} (${response.status})`);
+            }
 
             if (!response.ok) {
-                throw new Error(`Failed to delete flashcard. Server responded with ${response.status}`);
+                console.error('Error response from server:', responseData);
+                const errorMessage = responseData.detail || 
+                                  responseData.message || 
+                                  responseData.error || 
+                                  `Failed to delete flashcard: ${response.statusText} (${response.status})`;
+                throw new Error(errorMessage);
             }
 
-            setFlashcards(prev => prev.filter(fc => fc.id !== id));
-            setCustomFlashcards(prev => prev.filter(fc => fc.id !== id));
-            addToast("Flashcard deleted successfully!", "success");
+            if (responseData.status !== 'success') {
+                console.error('Invalid response format:', responseData);
+                throw new Error(responseData.message || 'Invalid response format from server');
+            }
+
+            // Log current states before update
+            console.log('Current flashcards before delete:', flashcards);
+            console.log('Current customFlashcards before delete:', customFlashcards);
+
+            // Update both flashcards and customFlashcards states
+            setFlashcards(prev => {
+                const updated = prev.filter(fc => fc.id !== id);
+                console.log('Updated flashcards state after delete:', updated);
+                return updated;
+            });
+            
+            setCustomFlashcards(prev => {
+                const updated = prev.filter(fc => fc.id !== id);
+                console.log('Updated customFlashcards state after delete:', updated);
+                return updated;
+            });
+            
+            // Force a re-render
+            setForceUpdate(prev => !prev);
+            
+            // Refresh the flashcards to ensure consistency
+            await fetchFlashcards();
+            
+            addToast(responseData.message || "Flashcard deleted successfully!", "success");
         } catch (error) {
             console.error("Error deleting flashcard:", error);
-            let message = "An error occurred while deleting the flashcard.";
-            if (error instanceof Error) {
-                message = error.message;
-            }
+            const message = error instanceof Error ? error.message : "An error occurred while deleting the flashcard.";
             addToast(message, "error");
         }
     };

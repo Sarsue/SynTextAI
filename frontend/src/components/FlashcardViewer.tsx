@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Flashcard } from './types';
 import './FlashcardViewer.css';
 
@@ -14,31 +14,65 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateF
   const [isEditing, setIsEditing] = useState(false);
   const [editedQuestion, setEditedQuestion] = useState('');
   const [editedAnswer, setEditedAnswer] = useState('');
-  const [cardStatus, setCardStatus] = useState<{ [id: number]: 'known' | 'needs_review' | 'unseen' }>(
-    Object.fromEntries(flashcards.map(fc => [fc.id, 'unseen']))
-  );
   
-  // Track review status locally since it's not stored in the database
+  // Track review status for each card
   const [reviewStatus, setReviewStatus] = useState<{ [id: number]: 'known' | 'needs_review' | 'unseen' }>(
-    Object.fromEntries(flashcards.map(fc => [fc.id, 'unseen']))
+    () => Object.fromEntries(flashcards.map(fc => [fc.id, 'unseen']))
   );
 
   const total = flashcards.length;
-  const reviewed = Object.values(cardStatus).filter(s => s !== 'unseen').length;
+  const reviewed = Object.values(reviewStatus).filter(s => s !== 'unseen').length;
+  
+  // Update review status when flashcards prop changes
+  useEffect(() => {
+    setReviewStatus(prev => {
+      const newStatus = { ...prev };
+      // Add any new flashcards that aren't in the status yet
+      flashcards.forEach(fc => {
+        if (!(fc.id in newStatus)) {
+          newStatus[fc.id] = 'unseen';
+        }
+      });
+      return newStatus;
+    });
+  }, [flashcards]);
 
   const handleFlip = () => setFlipped(f => !f);
   const handleNext = () => {
     setFlipped(false);
-    setCurrent(i => (i + 1 < total ? i + 1 : i));
+    setCurrent(prevCurrent => {
+      const next = prevCurrent + 1 < total ? prevCurrent + 1 : prevCurrent;
+      // Update review status for the current card if it's being viewed for the first time
+      if (next !== prevCurrent && card && reviewStatus[card.id] === 'unseen') {
+        setReviewStatus(prev => ({ ...prev, [card.id]: 'unseen' }));
+      }
+      return next;
+    });
   };
+
   const handlePrev = () => {
     setFlipped(false);
-    setCurrent(i => (i - 1 >= 0 ? i - 1 : i));
+    setCurrent(prevCurrent => {
+      const prev = prevCurrent - 1 >= 0 ? prevCurrent - 1 : prevCurrent;
+      // Update review status for the current card if it's being viewed for the first time
+      if (prev !== prevCurrent && card && reviewStatus[card.id] === 'unseen') {
+        setReviewStatus(prev => ({ ...prev, [card.id]: 'unseen' }));
+      }
+      return prev;
+    });
   };
   const markCard = (status: 'known' | 'needs_review') => {
     if (flashcards[current]) {
-      setReviewStatus(s => ({ ...s, [flashcards[current].id]: status }));
-      handleNext();
+      const currentCardId = flashcards[current].id;
+      setReviewStatus(prev => ({
+        ...prev,
+        [currentCardId]: status
+      }));
+      
+      // If this was the last card, don't auto-advance
+      if (current < flashcards.length - 1) {
+        handleNext();
+      }
     }
   };
 
@@ -75,10 +109,22 @@ const FlashcardViewer: React.FC<FlashcardViewerProps> = ({ flashcards, onUpdateF
     }
   };
 
+  const currentCard = flashcards[current];
+  const currentStatus = currentCard ? reviewStatus[currentCard.id] || 'unseen' : 'unseen';
+
   return (
     <div className="flashcard-viewer">
       <div className="progress-indicator">
-        {reviewed}/{total} cards reviewed
+        <span className="card-position">Card {current + 1} of {total}</span>
+        <span className="divider">•</span>
+        <span className="reviewed-count">
+          <span className="reviewed-number">{reviewed}</span> reviewed
+          {total > 0 && (
+            <span className="reviewed-percentage">
+              ({Math.round((reviewed / total) * 100)}%)
+            </span>
+          )}
+        </span>
       </div>
 
       {isEditing ? (

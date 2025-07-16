@@ -674,36 +674,47 @@ class RepositoryManager:
     def add_quiz_question(
         self, 
         file_id: int, 
-        key_concept_id: Optional[int], 
-        question: str, 
-        question_type: str, 
-        correct_answer: str, 
-        distractors: Optional[List[str]] = None
+        key_concept_id: Optional[int] = None, 
+        question: str = None, 
+        question_type: str = 'MCQ', 
+        correct_answer: str = None, 
+        distractors: Optional[List[str]] = None,
+        quiz_question_data: Optional[Dict] = None
     ) -> Optional[int]:
         """Add a new quiz question linked to a file and optionally a key concept."""
-        return self.learning_material_repo.add_quiz_question(
-            file_id, 
-            question, 
-            question_type, 
-            correct_answer, 
-            distractors,
-            key_concept_id
-        )
+        if quiz_question_data is not None:
+            # New style call with quiz_question_data
+            if not isinstance(quiz_question_data, dict):
+                quiz_question_data = quiz_question_data.dict()
+            return self.learning_material_repo.add_quiz_question(
+                file_id=file_id,
+                quiz_question_data=quiz_question_data
+            )
+        else:
+            # Old style call with individual parameters
+            return self.learning_material_repo.add_quiz_question(
+                file_id,
+                key_concept_id=key_concept_id,
+                question=question,
+                question_type=question_type,
+                correct_answer=correct_answer,
+                distractors=distractors or []
+            )
         
     async def add_quiz_question_async(
         self, 
         file_id: int, 
-        question: str, 
-        question_type: str, 
-        correct_answer: str, 
+        question: str = None, 
+        question_type: str = 'MCQ', 
+        correct_answer: str = None, 
         distractors: Optional[List[str]] = None,
         key_concept_id: Optional[int] = None,
-        is_custom: bool = False
+        is_custom: bool = False,
+        quiz_question_data: Optional[Dict] = None
     ) -> Optional[int]:
         """Async wrapper for add_quiz_question.
         
-        IMPORTANT: The parameter order here doesn't match the underlying method.
-        We need to re-map the parameters in the correct order when calling add_quiz_question.
+        Supports both the new style (with quiz_question_data) and old style (individual parameters).
         """
         try:
             # Validate parameter types to catch common errors
@@ -714,32 +725,56 @@ class RepositoryManager:
                     logger.error(f"Invalid file_id: {file_id}, must be an integer")
                     return None
             
-            # Most critical validation: key_concept_id must be an integer or None
-            if key_concept_id is not None:
-                if not isinstance(key_concept_id, int):
+            # If using quiz_question_data, validate it
+            if quiz_question_data is not None:
+                if not isinstance(quiz_question_data, dict):
+                    quiz_question_data = quiz_question_data.dict()
+                
+                # Validate question_type if provided
+                if 'question_type' in quiz_question_data and quiz_question_data['question_type'] not in ["MCQ", "TrueFalse"]:
+                    logger.warning(f"Unusual question_type: {quiz_question_data['question_type']}, expected 'MCQ' or 'TrueFalse'")
+                
+                # Validate key_concept_id if provided
+                if 'key_concept_id' in quiz_question_data and quiz_question_data['key_concept_id'] is not None:
+                    try:
+                        if not isinstance(quiz_question_data['key_concept_id'], int):
+                            if isinstance(quiz_question_data['key_concept_id'], str) and quiz_question_data['key_concept_id'].isdigit():
+                                quiz_question_data['key_concept_id'] = int(quiz_question_data['key_concept_id'])
+                            else:
+                                logger.error(f"Invalid key_concept_id: {quiz_question_data['key_concept_id']}, must be an integer or None")
+                                return None
+                    except (ValueError, TypeError) as e:
+                        logger.error(f"Error processing key_concept_id: {e}")
+                        return None
+            else:
+                # Old style parameters - validate them
+                if question_type not in ["MCQ", "TrueFalse"]:
+                    logger.warning(f"Unusual question_type: {question_type}, expected 'MCQ' or 'TrueFalse'")
+                
+                if key_concept_id is not None and not isinstance(key_concept_id, int):
                     if isinstance(key_concept_id, str) and key_concept_id.isdigit():
-                        # Convert string numeric ID to int
                         key_concept_id = int(key_concept_id)
                     else:
-                        # This is the critical error we're seeing - reject invalid types
                         logger.error(f"Invalid key_concept_id: {key_concept_id}, must be an integer or None")
                         return None
-            
-            # Ensure that question_type is a valid string            
-            if question_type not in ["MCQ", "TrueFalse"]:
-                logger.warning(f"Unusual question_type: {question_type}, expected 'MCQ' or 'TrueFalse'")
+                
+                # Create quiz_question_data dict for consistent processing
+                quiz_question_data = {
+                    'question': question,
+                    'question_type': question_type,
+                    'correct_answer': correct_answer,
+                    'distractors': distractors or [],
+                    'key_concept_id': key_concept_id,
+                    'is_custom': is_custom
+                }
             
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
                 result = await loop.run_in_executor(
                     pool,
                     lambda: self.add_quiz_question(
-                        file_id,
-                        key_concept_id,  # This is the 2nd param in add_quiz_question 
-                        question,        # This is the 3rd param in add_quiz_question
-                        question_type,   # This is the 4th param in add_quiz_question
-                        correct_answer,  # This is the 5th param in add_quiz_question
-                        distractors      # This is the 6th param in add_quiz_question
+                        file_id=file_id,
+                        quiz_question_data=quiz_question_data
                     )
                 )
                 return result
