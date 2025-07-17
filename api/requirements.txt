@@ -28,7 +28,7 @@ frozenlist==1.4.1
 fsspec==2024.5.0
 google-api-core
 google-api-python-client
-google-auth
+google-auth==2.40.3
 google-auth-httplib2
 google-cloud-core==2.4.1
 google-cloud-firestore
@@ -43,7 +43,7 @@ grpcio-tools
 google-generativeai
 faster-whisper==1.1.0
 flask
-firebase-admin
+firebase-admin==6.8.0
 flask-cors
 flask-sse==1.0.0
 pdfminer.six
@@ -51,6 +51,7 @@ Pillow
 pytesseract
 PyMuPDF==1.23.7
 psycopg2-binary==2.9.9
+python-jose==3.3.0
 gunicorn
 gpt4all
 mistralai
@@ -155,7 +156,7 @@ wasabi==1.1.2
 weasel==0.3.4
 wrapt==1.16.0
 yarl==1.9.4
-redis>=4.0.0,<5.0.0
+redis==4.6.0
 celery==5.3.6
 openai-whisper
 ffmpeg-python
@@ -163,12 +164,15 @@ duckduckgo_search==7.2.0
 markdownify==0.14.1
 pgvector==0.3.6
 supervisor
-fastapi
-uvicorn
+fastapi==0.116.1
+uvicorn==0.28.1
 google-generativeai
-python-multipart
+python-multipart==0.0.20
 ffmpeg-python
 websockets==15.0.1
-youtube-transcript-api
-yt-dlp
+youtube-transcript-api==1.1.1
+yt-dlp==2025.6.30
 posthog==3.25.0
+ctranslate2==4.6.0
+av==15.0.0
+loguru==0.7.2
