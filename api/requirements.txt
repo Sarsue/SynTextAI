@@ -168,7 +168,7 @@ uvicorn
 google-generativeai
 python-multipart
 ffmpeg-python
-websockets
+websockets==15.0.1
 youtube-transcript-api
 yt-dlp
-posthog
+posthog==3.25.0
