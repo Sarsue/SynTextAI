@@ -1,99 +1,106 @@
-# Stage 1: Build the frontend
-FROM node:18-alpine AS build-step
-
-# Define build arguments for environment variables
-ARG REACT_APP_FIREBASE_API_KEY
-ARG REACT_APP_FIREBASE_AUTH_DOMAIN
-ARG REACT_APP_FIREBASE_PROJECT_ID
-ARG REACT_APP_FIREBASE_STORAGE_BUCKET
-ARG REACT_APP_FIREBASE_MESSAGING_SENDER_ID
-ARG REACT_APP_FIREBASE_APP_ID
-ARG REACT_APP_STRIPE_API_KEY
-ARG REACT_APP_STRIPE_SECRET
-ARG REACT_APP_STRIPE_ENDPOINT_SECRET
-
-# Set as environment variables for the build
-ENV REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
-ENV REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
-ENV REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
-ENV REACT_APP_FIREBASE_STORAGE_BUCKET=${REACT_APP_FIREBASE_STORAGE_BUCKET}
-ENV REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
-ENV REACT_APP_FIREBASE_APP_ID=${REACT_APP_FIREBASE_APP_ID}
-ENV REACT_APP_STRIPE_API_KEY=${REACT_APP_STRIPE_API_KEY}
-ENV REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
-ENV REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
-
-WORKDIR /app/frontend
-
-# Copy only package files first to leverage caching
-COPY frontend/package.json frontend/package-lock.json ./
-
-# Install dependencies (including dev dependencies needed for build)
-RUN npm ci
-
-# Copy the remaining files and build
-COPY frontend/ ./
-RUN npm run build && npm cache clean --force
-
-# Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
+# Stage 1: Base image with system dependencies
 FROM python:3.10-slim AS base
 
-# Define build arguments for Firebase credentials
-ARG FIREBASE_PROJECT_ID
-ARG FIREBASE_PRIVATE_KEY
-ARG FIREBASE_CLIENT_EMAIL
-ARG FIREBASE_PRIVATE_KEY_ID
-ARG FIREBASE_CLIENT_ID
-ARG FIREBASE_CLIENT_CERT_URL
-ARG FIREBASE_AUTH_URI
-ARG FIREBASE_TOKEN_URI
-ARG FIREBASE_AUTH_PROVIDER_CERT_URL
-
-# Set as environment variables
-ENV FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-ENV FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-ENV FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-ENV FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
-ENV FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
-ENV FIREBASE_CLIENT_CERT_URL=${FIREBASE_CLIENT_CERT_URL}
-ENV FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
-ENV FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
-ENV FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
-
-# Install system dependencies including FFmpeg
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
     ffmpeg \
     libsndfile1 \
-    curl \
-    supervisor && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    git \
+    libpq-dev \
+    python3-dev \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgl1-mesa-glx \
+    libsndfile1-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libtiff5-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libwebp-dev \
+    libopenblas-dev \
+    liblapack-dev \
+    gfortran \
+    postgresql-server-dev-all \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Add the project root to the Python path
-ENV PYTHONPATH /app
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=100 \
+    VENV_PATH="/app/.venv" \
+    WHISPER_CACHE_DIR=/root/.cache/whisper
 
-# Copy backend files
-COPY api/ ./api/
+# Install Python dependencies in multiple steps for better caching
+COPY api/requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r ./api/requirements.txt
+# Install pip-tools first
+RUN pip install --upgrade pip && \
+    pip install pip-tools
 
-# Set environment variable for Whisper model directory
-ENV WHISPER_CACHE_DIR=/app/models
+# Install Python dependencies with retries
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Download the Whisper model and store it in the image
-RUN mkdir -p $WHISPER_CACHE_DIR && \
-    pip install faster-whisper && \
+# Download the Whisper model
+RUN mkdir -p "$WHISPER_CACHE_DIR" && \
     python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
 
-# Copy the frontend build from the first stage
-COPY --from=build-step /app/frontend/build ./frontend/build
+# Copy application code
+COPY api/ ./api/
+
+# Set environment variables for production
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Stage 2: Frontend build
+FROM node:18-alpine AS frontend-builder
+
+# Set working directory
+WORKDIR /app/frontend
+
+# Copy package files first for better caching
+COPY frontend/package.json frontend/package-lock.json ./
+
+# Install dependencies
+RUN npm ci --prefer-offline --no-audit --progress=false
+
+# Copy remaining frontend files and build
+COPY frontend/ ./
+RUN npm run build && \
+    npm cache clean --force && \
+    rm -rf node_modules
+
+# Final stage
+FROM base
+
+# Copy frontend build
+COPY --from=frontend-builder /app/frontend/build ./frontend/build
+
+# Set environment variables for Firebase (will be overridden by docker-compose if needed)
+ENV FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth \
+    FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token \
+    FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
 
 # Expose the application port
 EXPOSE 3000
 
-# Command to start FastAPI from the project root
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Command to run the application
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

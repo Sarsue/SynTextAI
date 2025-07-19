@@ -1,11 +1,11 @@
-version: '3.8'
-
 services:
   syntextaiapp:
     build:
       context: .
       dockerfile: Dockerfile
       args:
+        # Frontend environment variables
+        - NODE_ENV=development
         - REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
         - REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
         - REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
@@ -15,6 +15,7 @@ services:
         - REACT_APP_STRIPE_API_KEY=${REACT_APP_STRIPE_API_KEY}
         - REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
         - REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
+    
     container_name: syntextaiapp-local
     ports:
       - "3000:3000"
@@ -22,18 +23,32 @@ services:
       - .env
     volumes:
       - ./api:/app/api
+      - ./.env:/app/.env
     networks:
       - syntextai_network
+    
+    # Resource limits and health check
     deploy:
       resources:
         limits:
+          cpus: '2'
           memory: 4G
+        reservations:
+          memory: 2G
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   worker:
     build:
       context: .
       dockerfile: Dockerfile
       args:
+        - NODE_ENV=development
         - REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
         - REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
         - REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
@@ -43,22 +58,38 @@ services:
         - REACT_APP_STRIPE_API_KEY=${REACT_APP_STRIPE_API_KEY}
         - REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
         - REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
+    
     container_name: syntextai-worker-local
     command: python -m api.worker
     working_dir: /app
-    volumes:
-      - ./api:/app/api
     env_file:
       - .env
     environment:
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
+      - WHISPER_CACHE_DIR=/root/.cache/whisper
+    volumes:
+      - ./api:/app/api
+      - ./.env:/app/.env
     networks:
       - syntextai_network
+    
+    # Resource limits and restart policy
     deploy:
       resources:
         limits:
+          cpus: '1'
           memory: 2G
+        reservations:
+          memory: 1G
+    
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python -m api.worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
     restart: unless-stopped
 
   searxng:
@@ -68,10 +99,28 @@ services:
       - "8080:8080"
     volumes:
       - ./searxng:/etc/searxng
+    user: "1000:1000"
     environment:
       - INSTANCE_NAME=SyntextAI
     networks:
       - syntextai_network
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          memory: 512M
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
     restart: unless-stopped
 
 networks:
