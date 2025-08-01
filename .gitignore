@@ -15,7 +15,11 @@ searxng/uwsgi.ini.new
 
 persona.json 
 prompts/
-prompts.txt
+
+# To:
+prompts/*
+!prompts/agents/
+!prompts/agents/*.json
 # misc
 .DS_Store
 .env
