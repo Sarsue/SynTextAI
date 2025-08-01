@@ -1,13 +1,27 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request, Response
+import asyncio
+import json
+import logging
+import os
+from typing import Optional, Dict, Any
+
+from dotenv import load_dotenv
+from fastapi import (
+    FastAPI, 
+    WebSocket, 
+    WebSocketDisconnect, 
+    Depends, 
+    HTTPException, 
+    Request, 
+    Response,
+    status
+)
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
 from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
-from dotenv import load_dotenv
 from .firebase_setup import initialize_firebase
-import os
-import logging
 from .utils import decode_firebase_token
 # Load environment variables
 load_dotenv()
@@ -73,30 +87,99 @@ def get_store(request: Request):
 # WebSocket endpoint
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
-    await websocket.accept()
+    """
+    WebSocket endpoint for real-time communication with clients.
+    
+    Handles:
+    - Authentication
+    - Connection management
+    - Message routing
+    - Heartbeats
+    """
+    logger.info(f"WebSocket connection attempt for user {user_id}")
+    
     try:
-        # Authenticate the user
-        data = await websocket.receive_json()
-        if data.get("type") != "auth":
-            await websocket.close(code=1008)
-            return
-
-        token = data.get("token")
-        success, user_info = decode_firebase_token(token)
-        if not success:
-            await websocket.close(code=1008)
-            websocket_manager.disconnect(user_id)
-            return
-
-        # Add the WebSocket connection to the manager
-        await websocket_manager.connect(user_id, websocket)
-
-        # Keep the connection alive
-        while True:
-            message = await websocket.receive_text()
-            # Handle the message (e.g., broadcast to other clients)
-    except WebSocketDisconnect:
-        websocket_manager.disconnect(user_id)
+        # Accept the WebSocket connection
+        await websocket.accept()
+        
+        # Wait for authentication message
+        try:
+            data = await websocket.receive_json()
+            if data.get("type") != "auth":
+                logger.warning(f"WebSocket connection rejected: missing or invalid auth message")
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+                
+            token = data.get("token")
+            success, user_info = decode_firebase_token(token)
+            
+            if not success or str(user_info.get('user_id')) != user_id:
+                logger.warning(f"WebSocket authentication failed for user {user_id}")
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+                
+            logger.info(f"WebSocket authenticated for user {user_id} ({user_info.get('email')})")
+            
+            # Register the connection
+            await websocket_manager.connect(user_id, websocket)
+            
+            # Send connection confirmation
+            await websocket.send_json({
+                "event": "connection_established",
+                "data": {
+                    "message": "Connected to WebSocket server",
+                    "user_id": user_id
+                }
+            })
+            
+            # Main message loop
+            while True:
+                try:
+                    # Wait for a message with timeout
+                    try:
+                        message = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
+                    except asyncio.TimeoutError:
+                        # Send a ping to keep the connection alive
+                        await websocket.send_json({"event": "ping"})
+                        continue
+                        
+                    # Handle different message types
+                    message_type = message.get("type")
+                    
+                    if message_type == "ping":
+                        # Respond to pings
+                        await websocket.send_json({"event": "pong"})
+                        
+                    elif message_type == "subscribe":
+                        # Handle subscription requests (e.g., to specific channels)
+                        channel = message.get("channel")
+                        # TODO: Implement channel subscription logic
+                        await websocket.send_json({
+                            "event": "subscribed",
+                            "data": {"channel": channel}
+                        })
+                        
+                    # Add more message handlers as needed
+                    
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON received from user {user_id}")
+                    await websocket.send_json({
+                        "event": "error",
+                        "error": "Invalid JSON format"
+                    })
+                    
+        except WebSocketDisconnect as e:
+            logger.info(f"WebSocket disconnected for user {user_id}: {e}")
+            
+    except Exception as e:
+        logger.error(f"WebSocket error for user {user_id}: {str(e)}", exc_info=True)
+        try:
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        except:
+            pass
+    finally:
+        # Ensure the connection is properly cleaned up
+        websocket_manager.disconnect(websocket)
         logger.info(f"User {user_id} disconnected")
 
 # Import routers after app is set up

@@ -1,21 +1,23 @@
 import os
+import re
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
-from typing import List, Dict, Optional, Any
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path, BackgroundTasks
+from typing import List, Dict, Optional, Any, TypeVar
 from sqlalchemy.orm import Session, joinedload
 from redis.exceptions import RedisError
 from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
-from typing import Dict, List, Optional, TypeVar
 from ..repositories.repository_manager import RepositoryManager
 from fastapi.responses import JSONResponse
 from ..dependencies import get_store, authenticate_user
+from ..services.agent_service import agent_service
 from pydantic import BaseModel, Field
 from ..schemas.learning_content import (
     StandardResponse,
     KeyConceptCreate, KeyConceptResponse, KeyConceptsListResponse, KeyConceptUpdate,
     FlashcardCreate, FlashcardResponse, FlashcardsListResponse, FlashcardUpdateRequest,
-    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
+    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate,
+    KeyConceptUpdateRequest
 )
 from ..models import KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM, File
 
@@ -64,39 +66,112 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
         logger.exception("Error during user authentication")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
+async def process_file_with_ingestion_agent(
+    file_id: int,
+    file_path: str,
+    file_type: str,
+    language: str,
+    comprehension_level: str,
+    user_id: str,
+    store: RepositoryManager
+):
+    """Process an uploaded file using the IngestionAgent."""
+    try:
+        # Use the IngestionAgent to process the file
+        result = await agent_service.process_content(
+            agent_name="ingestion",
+            content={
+                "file_path": file_path,
+                "file_type": file_type,
+                "language": language,
+                "comprehension_level": comprehension_level,
+                "user_id": user_id
+            },
+            content_type="json"
+        )
+        
+        # Update file status to processed
+        store.update_file(file_id, {"status": "processed"})
+        
+        # Store the processing results (key concepts, etc.)
+        if result.get("key_concepts"):
+            for concept in result["key_concepts"]:
+                store.add_key_concept(
+                    file_id=file_id,
+                    title=concept["title"],
+                    explanation=concept["explanation"],
+                    source_page=concept.get("page"),
+                    source_timestamp_start=concept.get("timestamp_start"),
+                    source_timestamp_end=concept.get("timestamp_end")
+                )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing file with IngestionAgent: {e}", exc_info=True)
+        store.update_file(file_id, {"status": "failed", "error": str(e)})
+        raise
+
 # Route to save file
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=UploadResponse)
 async def save_file(
     request: Request,
-    language: str = Query(default="English", description="Language of the file content"),
-    comprehension_level: str = Query(default="Beginner", description="Comprehension level of the file content"),
+    background_tasks: BackgroundTasks,
+    language: str = Query(default="en", description="Language code (e.g., 'en', 'es')"),
+    comprehension_level: str = Query(default="beginner", description="Comprehension level (beginner, intermediate, advanced)"),
     files: Optional[List[UploadFile]] = FastAPIFile(None, description="List of files to upload"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
+    """Handle file uploads and process them using the IngestionAgent."""
     try:
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
-
+        
         content_type = request.headers.get("content-type", "")
+        
+        # Handle YouTube URL
         if content_type.startswith("application/json"):
             data = await request.json()
             if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
                 raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
+                
             url = data.get("url", "")
-
             youtube_regex = re.compile(r"^(https?://)?(www\\.)?(youtube\\.com|youtu\\.be)/")
             if not url or not youtube_regex.match(url):
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             
-            file_record = store.add_file(user_id=user_id, file_name=url, file_url=url)
+            # Create file record
+            file_record = store.add_file(
+                user_id=user_id,
+                file_name=url,
+                file_url=url,
+                file_type="youtube",
+                status="processing"
+            )
+            
             if not file_record:
                 raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
-
-            task_name = 'tasks.process_youtube_url'
-            request.app.state.celery_app.send_task(task_name, args=[file_record['id'], url, language, comprehension_level])
-            return UploadResponse(files=[FileResponse.model_validate(file_record)])
-
+            
+            # Process in background
+            background_tasks.add_task(
+                process_file_with_ingestion_agent,
+                file_id=file_record["id"],
+                file_path=url,
+                file_type="youtube",
+                language=language,
+                comprehension_level=comprehension_level,
+                user_id=user_id,
+                store=store
+            )
+            
+            return UploadResponse(
+                message="YouTube URL processing started",
+                file_id=file_record["id"],
+                file_name=url
+            )
+            
+        # Handle file upload
         elif content_type.startswith("multipart/form-data"):
             if not files:
                 raise HTTPException(status_code=400, detail="No files were uploaded.")
@@ -199,16 +274,16 @@ def check_ownership(file_id: int, user_id: int, store: RepositoryManager):
 
 # --- Flashcards ---
 
-@files_router.get("/{file_id}/flashcards", response_model=StandardResponse[Dict[str, List[FlashcardResponse]]])
+@files_router.get("/{file_id}/flashcards", response_model=StandardResponse)
 async def get_flashcards_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
-) -> StandardResponse:
+):
     """
-    Get all flashcards for a specific file.
+    Get all flashcards for a specific file using the FlashcardAgent.
     
     - **file_id**: The ID of the file to get flashcards for
     - **page**: Page number for pagination (default: 1)
@@ -220,26 +295,39 @@ async def get_flashcards_for_file(
         # Check file ownership
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Get the flashcards
-        flashcards = store.learning_material_repo.get_flashcards_for_file(file_id, page, page_size)
+        # Get file details for context
+        file = store.get_file_by_id(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
         
-        logger.info(f"[API] Found {len(flashcards)} flashcards for file {file_id}")
+        # Use FlashcardAgent to get or generate flashcards
+        flashcard_data = await agent_service.process_content(
+            agent_name="flashcard",
+            content={
+                "action": "get_flashcards",
+                "file_id": file_id,
+                "file_content": file.get('content', ''),
+                "key_concepts": [kc.dict() for kc in store.learning_material_repo.get_key_concepts_for_file(file_id)]
+            },
+            content_type="json"
+        )
         
-        # Convert ORM objects to Pydantic models first
+        # Convert flashcard data to response format
         flashcard_responses = [
             FlashcardResponse(
-                id=fc.id,
-                file_id=fc.file_id,
-                question=fc.question,
-                answer=fc.answer,
-                is_custom=fc.is_custom,
-                created_at=fc.created_at,
-                difficulty=getattr(fc, 'difficulty', 'medium')
-            ) for fc in flashcards
+                id=card.get('id', idx),
+                file_id=file_id,
+                question=card['question'],
+                answer=card['answer'],
+                key_concept_id=card.get('key_concept_id'),
+                is_custom=False,
+                created_at=datetime.utcnow(),
+                difficulty=card.get('difficulty', 'medium')
+            ) for idx, card in enumerate(flashcard_data.get('flashcards', []), 1)
         ]
         
-        return StandardResponse[Dict[str, List[FlashcardResponse]]](
-            data={"flashcards": [fc.dict() for fc in flashcard_responses]},
+        return StandardResponse(
+            data={"flashcards": [card.dict() for card in flashcard_responses]},
             message="Flashcards retrieved successfully"
         )
     except HTTPException:
@@ -249,6 +337,94 @@ async def get_flashcards_for_file(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve flashcards"
+        )
+
+@files_router.post("/{file_id}/flashcards/generate", status_code=status.HTTP_200_OK, response_model=StandardResponse[FlashcardsListResponse])
+async def generate_flashcards(
+    file_id: int,
+    count: int = Query(5, ge=1, le=20, description="Number of flashcards to generate"),
+    difficulty: str = Query("medium", description="Difficulty level (easy, medium, hard)"),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
+):
+    """
+    Generate flashcards for a file using the FlashcardAgent.
+    
+    - **file_id**: The ID of the file to generate flashcards for
+    - **count**: Number of flashcards to generate (1-20)
+    - **difficulty**: Difficulty level of flashcards
+    """
+    try:
+        logger.info(f"[API] Generating {count} flashcards for file {file_id}")
+        
+        # Check file ownership
+        check_ownership(file_id, user_data["user_id"], store)
+        
+        # Get file and key concepts for context
+        file = store.get_file_by_id(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        key_concepts = [
+            {"id": kc.id, "title": kc.title, "explanation": kc.explanation}
+            for kc in store.learning_material_repo.get_key_concepts_for_file(file_id)
+        ]
+        
+        # Use FlashcardAgent to generate flashcards
+        flashcard_data = await agent_service.process_content(
+            agent_name="flashcard",
+            content={
+                "action": "generate_flashcards",
+                "file_id": file_id,
+                "file_content": file.get('content', ''),
+                "key_concepts": key_concepts,
+                "count": count,
+                "difficulty": difficulty
+            },
+            content_type="json"
+        )
+        
+        # Store generated flashcards
+        saved_flashcards = []
+        for card in flashcard_data.get('flashcards', []):
+            flashcard = store.learning_material_repo.add_flashcard(
+                file_id=file_id,
+                user_id=user_data["user_id"],
+                question=card['question'],
+                answer=card['answer'],
+                key_concept_id=card.get('key_concept_id'),
+                is_custom=False,
+                difficulty=card.get('difficulty', difficulty)
+            )
+            if flashcard:
+                saved_flashcards.append(flashcard)
+        
+        # Convert to response models
+        flashcard_responses = [
+            FlashcardResponse(
+                id=card['id'],
+                file_id=card['file_id'],
+                question=card['question'],
+                answer=card['answer'],
+                key_concept_id=card.get('key_concept_id'),
+                is_custom=False,
+                created_at=card['created_at'],
+                difficulty=card.get('difficulty', 'medium')
+            ) for card in saved_flashcards
+        ]
+        
+        return StandardResponse(
+            data={"flashcards": [card.dict() for card in flashcard_responses]},
+            message=f"Successfully generated {len(flashcard_responses)} flashcards"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating flashcards for file {file_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate flashcards"
         )
 
 @files_router.post("/{file_id}/flashcards", response_model=StandardResponse[FlashcardResponse], status_code=status.HTTP_201_CREATED)
@@ -421,19 +597,21 @@ async def delete_flashcard(
         logger.error(f"Error deleting flashcard: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while deleting the flashcard"
+            detail="An error occurred while deleting the flashcard"
         )
 
-# --- Quiz Questions ---
-
-@files_router.get("/{file_id}/quiz-questions", response_model=StandardResponse)
+@files_router.get(
+    "/{file_id}/quiz-questions",
+    response_model=StandardResponse[QuizQuestionsListResponse],
+    tags=["Quiz Questions"]
+)
 async def get_quiz_questions_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
-) -> StandardResponse:
+):
     """
     Get all quiz questions for a specific file.
     
@@ -447,32 +625,45 @@ async def get_quiz_questions_for_file(
         # Check file ownership
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Get the quiz questions
-        quiz_questions = store.learning_material_repo.get_quiz_questions_for_file(file_id, page, page_size)
+        # Get file details for context
+        file = store.get_file_by_id(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
         
-        logger.info(f"[API] Found {len(quiz_questions)} quiz questions for file {file_id}")
+        # Use QuizAgent to generate or retrieve questions
+        quiz_data = await agent_service.process_content(
+            agent_name="quiz",
+            content={
+                "action": "get_questions",
+                "file_id": file_id,
+                "file_content": file.get('content', ''),
+                "key_concepts": [kc.dict() for kc in store.learning_material_repo.get_key_concepts_for_file(file_id)]
+            },
+            content_type="json"
+        )
         
-        # Convert ORM objects to Pydantic models
+        # Convert quiz data to response format
         question_responses = [
             QuizQuestionResponse(
-                id=q.id,
-                file_id=q.file_id,
-                question=q.question,
-                distractors=q.distractors or [],
-                correct_answer=q.correct_answer,
-                explanation=getattr(q, 'explanation', ''),
-                key_concept_id=q.key_concept_id,
-                is_custom=q.is_custom,
-                created_at=q.created_at,
-                difficulty=getattr(q, 'difficulty', 'medium'),
-                question_type=getattr(q, 'question_type', 'MCQ')
-            ) for q in quiz_questions
+                id=q.get('id', idx),
+                file_id=file_id,
+                question=q['question'],
+                distractors=q.get('distractors', []),
+                correct_answer=q['correct_answer'],
+                explanation=q.get('explanation', ''),
+                key_concept_id=q.get('key_concept_id'),
+                is_custom=False,
+                created_at=datetime.utcnow(),
+                difficulty=q.get('difficulty', 'medium'),
+                question_type=q.get('question_type', 'MCQ')
+            ) for idx, q in enumerate(quiz_data.get('questions', []), 1)
         ]
         
         return StandardResponse(
             data={"quizzes": [q.dict() for q in question_responses]},
             message="Quiz questions retrieved successfully"
         )
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -482,65 +673,98 @@ async def get_quiz_questions_for_file(
             detail="Failed to retrieve quiz questions"
         )
 
-@files_router.post("/{file_id}/quiz-questions", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
-async def add_quiz_question_for_file(
-    file_id: int, 
-    question_data: QuizQuestionCreate, 
-    user_data: Dict = Depends(authenticate_user), 
+@files_router.post("/{file_id}/quizzes/generate", status_code=status.HTTP_200_OK, response_model=StandardResponse[QuizQuestionsListResponse])
+async def generate_quiz_questions(
+    file_id: int,
+    count: int = Query(5, ge=1, le=10, description="Number of questions to generate"),
+    difficulty: str = Query("medium", description="Difficulty level (easy, medium, hard)"),
+    question_types: List[str] = Query(["MCQ"], description="Types of questions to generate"),
+    user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
-) -> StandardResponse:
+):
     """
-    Add a new quiz question to a file.
+    Generate quiz questions for a file using the QuizAgent.
     
-    - **file_id**: The ID of the file to add the quiz question to
-    - **question_data**: The quiz question data to add
+    - **file_id**: The ID of the file to generate questions for
+    - **count**: Number of questions to generate (1-10)
+    - **difficulty**: Difficulty level of questions
+    - **question_types**: Types of questions to generate (MCQ, True/False, etc.)
     """
     try:
-        logger.info(f"[API] Adding quiz question to file {file_id} by user {user_data['user_id']}")
+        logger.info(f"[API] Generating {count} quiz questions for file {file_id}")
         
         # Check file ownership
         check_ownership(file_id, user_data["user_id"], store)
         
-        # Create a dictionary with the question data to pass to the repository
-        question_dict = question_data.dict()
+        # Get file and key concepts for context
+        file = store.get_file_by_id(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        key_concepts = [
+            {"id": kc.id, "title": kc.title, "explanation": kc.explanation}
+            for kc in store.learning_material_repo.get_key_concepts_for_file(file_id)
+        ]
         
-        # Add the quiz question and get the new question ID
-        question_id = store.learning_material_repo.add_quiz_question(
-            file_id=file_id,
-            quiz_question_data=question_data
+        # Use QuizAgent to generate questions
+        quiz_data = await agent_service.process_content(
+            agent_name="quiz",
+            content={
+                "action": "generate_questions",
+                "file_id": file_id,
+                "file_content": file.get('content', ''),
+                "key_concepts": key_concepts,
+                "count": count,
+                "difficulty": difficulty,
+                "question_types": question_types
+            },
+            content_type="json"
         )
         
-        if not question_id:
-            logger.error(f"[API] Failed to create quiz question for file {file_id}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create quiz question in the database"
+        # Store generated questions
+        saved_questions = []
+        for q in quiz_data.get('questions', []):
+            question = store.learning_material_repo.add_quiz_question(
+                file_id=file_id,
+                user_id=user_data["user_id"],
+                question=q['question'],
+                distractors=q.get('distractors', []),
+                correct_answer=q['correct_answer'],
+                explanation=q.get('explanation', ''),
+                key_concept_id=q.get('key_concept_id'),
+                is_custom=False,
+                difficulty=q.get('difficulty', difficulty),
+                question_type=q.get('question_type', 'MCQ')
             )
+            if question:
+                saved_questions.append(question)
         
-        logger.info(f"[API] Successfully created quiz question {question_id} for file {file_id}")
-        
-        # Convert to response model using the data we already have
-        response_data = QuizQuestionResponse(
-            id=question_id,
-            file_id=file_id,
-            question=question_dict['question'],
-            distractors=question_dict.get('distractors', []) or [],
-            correct_answer=question_dict['correct_answer'],
-            question_type=question_dict.get('question_type', 'MCQ'),
-            key_concept_id=question_dict.get('key_concept_id'),
-            is_custom=question_dict.get('is_custom', True),
-            created_at=datetime.utcnow()
-        )
+        # Convert to response models
+        question_responses = [
+            QuizQuestionResponse(
+                id=q['id'],
+                file_id=q['file_id'],
+                question=q['question'],
+                distractors=q.get('distractors', []),
+                correct_answer=q['correct_answer'],
+                explanation=q.get('explanation', ''),
+                key_concept_id=q.get('key_concept_id'),
+                is_custom=False,
+                created_at=q['created_at'],
+                difficulty=q.get('difficulty', 'medium'),
+                question_type=q.get('question_type', 'MCQ')
+            ) for q in saved_questions
+        ]
         
         return StandardResponse(
-            data=response_data.dict(),
-            message="Quiz question created successfully",
-            status_code=status.HTTP_201_CREATED
+            data={"quizzes": [q.dict() for q in question_responses]},
+            message=f"Successfully generated {len(question_responses)} quiz questions"
         )
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error generating quiz questions for file {file_id}: {e}", exc_info=True)
         logger.error(f"Error adding quiz question: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -659,24 +883,154 @@ async def delete_quiz_question(
 
 # --- Key Concepts ---
 
-@files_router.get("/{file_id}/key-concepts", response_model=StandardResponse)
+@files_router.post(
+    "/{file_id}/key-concepts",
+    status_code=status.HTTP_201_CREATED,
+    response_model=StandardResponse[KeyConceptResponse],
+    tags=["Key Concepts"]
+)
+async def add_key_concept(
+    file_id: int,
+    key_concept_data: KeyConceptCreate,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
+) -> StandardResponse[KeyConceptResponse]:
+    """
+    Add a new key concept to a file.
+    
+    - **file_id**: The ID of the file to add the key concept to
+    - **key_concept_data**: The key concept data to add
+    """
+    try:
+        logger.info(f"[API] Adding key concept to file {file_id}")
+        
+        # Verify file ownership through repository
+        if not store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found or you don't have permission to access it."
+            )
+        
+        # Add the key concept through the repository
+        new_concept = store.learning_material_repo.add_key_concept(
+            file_id=file_id, 
+            key_concept_data=key_concept_data
+        )
+        
+        if not new_concept:
+            logger.error(f"[API] Failed to create key concept for file {file_id}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                detail="Failed to create key concept in the database."
+            )
+        
+        # Convert to response model
+        response_data = KeyConceptResponse(
+            id=new_concept['id'],
+            file_id=new_concept['file_id'],
+            concept_title=new_concept['concept_title'],
+            concept_explanation=new_concept['concept_explanation'],
+            source_page_number=new_concept['source_page_number'],
+            source_video_timestamp_start_seconds=new_concept['source_video_timestamp_start_seconds'],
+            source_video_timestamp_end_seconds=new_concept['source_video_timestamp_end_seconds'],
+            is_custom=new_concept['is_custom'],
+            created_at=new_concept['created_at'],
+            updated_at=new_concept['updated_at']
+        )
+        
+        logger.info(f"[API] Successfully created key concept {response_data.id} for file {file_id}")
+        return StandardResponse(
+            data=response_data.model_dump(),
+            message="Key concept added successfully.",
+            status_code=status.HTTP_201_CREATED
+        )
+        
+    except ValueError as ve:
+        logger.warning(f"[API] Validation error adding key concept: {ve}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] Error adding key concept: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while adding the key concept"
+        )
+
+@files_router.get(
+    "/{file_id}/key-concepts",
+    response_model=StandardResponse[KeyConceptsListResponse],
+    tags=["Key Concepts"]
+)
 async def get_key_concepts_for_file(
     file_id: int,
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(10, ge=1, le=100, description="Items per page"),
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
-) -> StandardResponse:
-    check_ownership(file_id, user_data["user_id"], store)
-    concepts = store.learning_material_repo.get_key_concepts_for_file(file_id, page, page_size)
-    return StandardResponse(
-        data=KeyConceptsListResponse(key_concepts=concepts).model_dump(),
-        message="Key concepts retrieved successfully"
-    )
-@files_router.post("/{file_id}/key-concepts", response_model=StandardResponse[KeyConceptResponse], status_code=status.HTTP_201_CREATED)
-async def add_key_concept(
-    key_concept_data: KeyConceptCreate,
-    file_id: int = Path(..., gt=0, description="The ID of the file to add the key concept to"),
+) -> StandardResponse[KeyConceptsListResponse]:
+    """
+    Get all key concepts for a specific file.
+    
+    - **file_id**: The ID of the file to get key concepts for
+    - **page**: Page number for pagination (default: 1)
+    - **page_size**: Number of items per page (default: 10, max: 100)
+    """
+    try:
+        logger.info(f"[API] Getting key concepts for file {file_id}")
+        
+        # Check file ownership
+        if not store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found or you don't have permission to access it."
+            )
+            
+        # Get paginated key concepts
+        concepts = store.learning_material_repo.get_key_concepts_for_file(
+            file_id=file_id,
+            page=page,
+            page_size=page_size
+        )
+        
+        # Convert to response models with frontend-compatible format
+        concept_responses = [
+            {
+                "id": concept["id"],
+                "file_id": concept["file_id"],
+                "concept_title": concept["concept_title"],
+                "concept_explanation": concept["concept_explanation"],
+                "display_order": None,  # Frontend expects this field
+                "source_page_number": concept["source_page_number"],
+                "source_video_timestamp_start_seconds": concept["source_video_timestamp_start_seconds"],
+                "source_video_timestamp_end_seconds": concept["source_video_timestamp_end_seconds"],
+                "is_custom": concept["is_custom"],
+                "created_at": concept["created_at"].isoformat() if concept["created_at"] else None,
+                "updated_at": concept["updated_at"].isoformat() if concept["updated_at"] else None
+            } for concept in concepts
+        ]
+        
+        logger.info(f"[API] Successfully retrieved {len(concept_responses)} key concepts for file {file_id}")
+        return StandardResponse(
+            data={"key_concepts": [c.model_dump() for c in concept_responses]},
+            message="Key concepts retrieved successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] Error getting key concepts: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while retrieving key concepts"
+        )
+
+@files_router.get("/{file_id}/quizzes", response_model=StandardResponse)
+async def get_quizzes(
+    file_id: int = Path(..., gt=0, description="The ID of the file to retrieve quizzes for"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -774,22 +1128,23 @@ async def update_key_concept(
                 detail="Key concept not found or doesn't belong to the specified file."
             )
         
-        # Convert to response model
-        response_data = KeyConceptResponse(
-            id=updated_concept['id'],
-            file_id=updated_concept['file_id'],
-            concept_title=updated_concept['concept_title'],
-            concept_explanation=updated_concept['concept_explanation'],
-            source_page_number=updated_concept['source_page_number'],
-            source_video_timestamp_start_seconds=updated_concept['source_video_timestamp_start_seconds'],
-            source_video_timestamp_end_seconds=updated_concept['source_video_timestamp_end_seconds'],
-            is_custom=updated_concept['is_custom'],
-            created_at=updated_concept['created_at'],
-            updated_at=updated_concept['updated_at']
-        )
+        # Convert to frontend-compatible response format
+        response_data = {
+            "id": updated_concept['id'],
+            "file_id": updated_concept['file_id'],
+            "concept_title": updated_concept['concept_title'],
+            "concept_explanation": updated_concept['concept_explanation'],
+            "display_order": None,  # Frontend expects this field
+            "source_page_number": updated_concept['source_page_number'],
+            "source_video_timestamp_start_seconds": updated_concept['source_video_timestamp_start_seconds'],
+            "source_video_timestamp_end_seconds": updated_concept['source_video_timestamp_end_seconds'],
+            "is_custom": updated_concept['is_custom'],
+            "created_at": updated_concept['created_at'].isoformat() if updated_concept['created_at'] else None,
+            "updated_at": updated_concept['updated_at'].isoformat() if updated_concept['updated_at'] else None
+        }
         
         return StandardResponse(
-            data=response_data.model_dump(),
+            data=response_data,
             message="Key concept updated successfully.",
             status_code=status.HTTP_200_OK
         )

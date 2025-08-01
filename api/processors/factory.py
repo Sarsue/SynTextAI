@@ -9,7 +9,9 @@ from typing import Optional, Dict, Any, Type
 from api.processors.base_processor import FileProcessor
 from api.processors.youtube_processor import YouTubeProcessor
 from api.processors.pdf_processor import PDFProcessor
+from api.processors.url_processor import URLProcessor
 from api.repositories.repository_manager import RepositoryManager
+from api.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +20,16 @@ class FileProcessingFactory:
     Factory class that determines and returns the appropriate file processor based on file type.
     """
     
-    def __init__(self, store: RepositoryManager):
+    def __init__(self, store: RepositoryManager, embedding_service: Optional[EmbeddingService] = None):
         """
         Initialize the factory.
         
         Args:
             store: Repository manager instance for database operations
+            embedding_service: Optional embedding service instance
         """
         self.store = store
+        self.embedding_service = embedding_service or EmbeddingService()
         
     def get_processor(self, filename: str) -> Optional[FileProcessor]:
         """
@@ -37,14 +41,16 @@ class FileProcessingFactory:
         Returns:
             An instance of the appropriate FileProcessor subclass, or None if no suitable processor found
         """
-        # Handle YouTube links
+        # Handle URLs
         if filename and isinstance(filename, str) and filename.startswith('http'):
+            # First check for specific URL types with dedicated processors
             if 'youtube.com' in filename or 'youtu.be' in filename:
                 logger.info(f"Selected YouTubeProcessor for: {filename}")
                 return YouTubeProcessor(self.store)
-            else:
-                logger.info(f"URL detected but not YouTube: {filename}")
-                # Could add other URL-based processors here in the future
+            
+            # Use the generic URL processor for all other URLs
+            logger.info(f"Selected URLProcessor for: {filename}")
+            return URLProcessor(embedding_service=self.embedding_service)
         
         # Handle files by extension
         try:

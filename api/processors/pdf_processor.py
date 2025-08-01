@@ -20,7 +20,7 @@ import re
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.utils import chunk_text
-from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
+from ..llm_compat import get_text_embeddings_in_batches, generate_key_concepts_dspy
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 
 # Import PDF extraction tools

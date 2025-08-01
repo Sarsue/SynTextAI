@@ -1,5 +1,42 @@
 """
-Repository for managing learning materials like key concepts, flashcards, and quizzes.
+Learning Material Repository
+===========================
+
+This module provides a repository pattern implementation for managing learning materials
+including key concepts, flashcards, and quiz questions. It serves as an abstraction layer
+between the database and the application's business logic.
+
+Key Features:
+- CRUD operations for key concepts, flashcards, and quiz questions
+- Support for file-based organization of learning materials
+- Pagination for efficient data retrieval
+- Transaction management for data consistency
+- Comprehensive error handling and logging
+
+Dependencies:
+- SQLAlchemy for ORM operations
+- Pydantic for data validation and serialization
+- Logging for operation tracking
+
+Example Usage:
+    ```python
+    from api.repositories.learning_material_repository import LearningMaterialRepository
+    from api.schemas.learning_content import KeyConceptCreate
+    
+    # Initialize the repository
+    repo = LearningMaterialRepository()
+    
+    # Add a new key concept
+    concept_data = KeyConceptCreate(
+        concept_title="Machine Learning",
+        concept_explanation="A field of AI that enables systems to learn from data.",
+        source_page_number=42
+    )
+    new_concept = repo.add_key_concept(file_id=1, key_concept_data=concept_data)
+    
+    # Retrieve key concepts for a file
+    concepts = repo.get_key_concepts_for_file(file_id=1, page=1, page_size=10)
+    ```
 """
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -22,23 +59,101 @@ logger = logging.getLogger(__name__)
 
 
 class LearningMaterialRepository(BaseRepository):
-    """Repository for learning material operations."""
+    """
+    A repository class that provides an interface for managing learning materials.
     
-    def __repr__(self):
+    This class handles all database operations related to learning materials including
+    key concepts, flashcards, and quiz questions. It provides a clean separation
+    between the database layer and the business logic.
+    
+    Key Features:
+    - CRUD operations for key concepts, flashcards, and quiz questions
+    - Support for pagination and filtering
+    - Transaction management
+    - Comprehensive error handling and logging
+    
+    The repository uses SQLAlchemy's Unit of Work pattern for managing database
+    sessions and transactions. All database operations are wrapped in transactions
+    that are automatically committed on success or rolled back on failure.
+    
+    Example:
+        ```python
+        # Initialize the repository
+        repo = LearningMaterialRepository()
+        
+        # Add a new flashcard
+        flashcard_data = FlashcardCreate(
+            front="What is machine learning?",
+            back="A field of AI that enables systems to learn from data.",
+            source_page_number=42
+        )
+        new_flashcard = repo.add_flashcard(file_id=1, flashcard_data=flashcard_data)
+        
+        # Get flashcards with pagination
+        flashcards = repo.get_flashcards_for_file(file_id=1, page=1, page_size=10)
+        ```
+    """
+    
+    def __repr__(self) -> str:
+        """
+        Return a string representation of the repository.
+        
+        Returns:
+            str: A string containing the repository class name and database URL
+        """
         return f"<LearningMaterialRepository({self.database_url})>"
         
     # --- Key Concept Methods ---
     
     def add_key_concept(self, file_id: int, key_concept_data: KeyConceptCreate) -> Optional[dict]:
         """
-        Add a new key concept from a Pydantic model and return the ORM instance.
+        Add a new key concept to the database and return its details.
+        
+        This method creates a new key concept record in the database, associating it with
+        the specified file. It handles both the new field names (concept_title, concept_explanation)
+        and maintains backward compatibility with the old field names (concept, explanation).
         
         Args:
-            file_id: The ID of the file to associate with the key concept
-            key_concept_data: Pydantic model containing key concept data
+            file_id: The ID of the file to associate with the key concept.
+                     Must be a valid file ID that exists in the database.
+            key_concept_data: A Pydantic model (KeyConceptCreate) containing the key concept data.
+                            Should include at minimum either (concept_title or concept) and
+                            (concept_explanation or explanation).
             
         Returns:
-            KeyConceptORM: The newly created key concept ORM instance, or None if creation failed
+            Optional[dict]: A dictionary containing the created key concept data if successful,
+                         or None if the operation fails.
+                         
+                         The returned dictionary includes:
+                         - id: The unique identifier of the key concept
+                         - file_id: The associated file ID
+                         - concept_title/concept: The title of the concept
+                         - concept_explanation/explanation: Detailed explanation of the concept
+                         - source_page_number: Page number where the concept appears (if applicable)
+                         - source_video_timestamp_start_seconds: Start timestamp for video content (if applicable)
+                         - source_video_timestamp_end_seconds: End timestamp for video content (if applicable)
+                         - is_custom: Boolean indicating if the concept was manually created
+                         - created_at: Timestamp of creation
+                         - updated_at: Timestamp of last update
+        
+        Raises:
+            ValueError: If required fields (concept_title/concept or 
+                       concept_explanation/explanation) are missing or empty.
+            SQLAlchemyError: If there's an error during database operations.
+            
+        Example:
+            ```python
+            from api.schemas.learning_content import KeyConceptCreate
+            
+            # Create a new key concept
+            concept_data = KeyConceptCreate(
+                concept_title="Neural Networks",
+                concept_explanation="Computing systems inspired by biological neural networks...",
+                source_page_number=42,
+                is_custom=False
+            )
+            result = repo.add_key_concept(file_id=123, key_concept_data=concept_data)
+            ```
         """
         with self.get_unit_of_work() as uow:
             try:

@@ -1,0 +1,137 @@
+"""
+MCP Agent Framework for SynTextAI.
+
+This package provides the base classes and utilities for creating and managing
+modular agents that handle different aspects of content processing.
+"""
+
+import logging
+from typing import Type, Dict, Any, Optional
+
+from .base_agent import BaseAgent, AgentConfig, AgentError
+from .agent_factory import AgentFactory
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Agent registry with metadata
+AGENT_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+def register_agent(
+    name: str,
+    agent_class: Type[BaseAgent],
+    config_class: Type[AgentConfig],
+    description: str,
+    is_dspy_agent: bool = False,
+    version: str = "1.0.0"
+) -> None:
+    """Register a single agent with the AgentFactory."""
+    try:
+        # Create default config instance
+        default_config = {}
+        if hasattr(config_class, "model_fields"):
+            default_config = {
+                name: field.default
+                for name, field in config_class.model_fields.items()
+                if field.default is not None
+            }
+        
+        # Register the agent
+        AgentFactory.register(
+            name=name,
+            agent_class=agent_class,
+            default_config=default_config,
+            is_dspy_agent=is_dspy_agent,
+            description=description,
+            version=version
+        )
+        
+        # Add to registry
+        AGENT_REGISTRY[name] = {
+            "class": agent_class,
+            "config_class": config_class,
+            "description": description,
+            "is_dspy_agent": is_dspy_agent,
+            "version": version
+        }
+        
+        logger.info(f"Registered agent: {name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to register agent {name}: {str(e)}", exc_info=True)
+        raise
+
+def register_agents() -> None:
+    """Register all agents with the AgentFactory."""
+    # Import agents here to avoid circular imports
+    from .ingestion_agent import IngestionAgent, IngestionConfig
+    from .summarization_agent import SummarizationAgent, SummarizationConfig
+    from .quiz_agent import QuizAgent, QuizConfig
+    from .qa_agent import QAAgent, QAConfig
+    from .study_scheduler_agent import StudySchedulerAgent, StudySchedulerConfig
+    from .integration_agent import IntegrationAgent, IntegrationAgentConfig, IntegrationType
+    
+    # Register each agent
+    register_agent(
+        name="ingestion",
+        agent_class=IngestionAgent,
+        config_class=IngestionConfig,
+        description="Handles content ingestion from various sources",
+        is_dspy_agent=False
+    )
+    
+    register_agent(
+        name="summarization",
+        agent_class=SummarizationAgent,
+        config_class=SummarizationConfig,
+        description="Generates summaries of content",
+        is_dspy_agent=True
+    )
+    
+    register_agent(
+        name="quiz",
+        agent_class=QuizAgent,
+        config_class=QuizConfig,
+        description="Generates quizzes from content",
+        is_dspy_agent=True
+    )
+    
+    register_agent(
+        name="qa",
+        agent_class=QAAgent,
+        config_class=QAConfig,
+        description="Answers questions about content",
+        is_dspy_agent=True
+    )
+    
+    register_agent(
+        name="study_scheduler",
+        agent_class=StudySchedulerAgent,
+        config_class=StudySchedulerConfig,
+        description="Schedules study sessions with spaced repetition",
+        is_dspy_agent=False
+    )
+    
+    register_agent(
+        name="integration",
+        agent_class=IntegrationAgent,
+        config_class=IntegrationAgentConfig,
+        description="Manages external service integrations",
+        is_dspy_agent=False
+    )
+
+# Initialize the agent factory
+agent_factory = AgentFactory()
+
+# Export commonly used classes and functions
+__all__ = [
+    'BaseAgent',
+    'AgentConfig',
+    'AgentError',
+    'AgentFactory',
+    'agent_factory',
+    'register_agent',
+    'register_agents',
+    'IntegrationType'
+]

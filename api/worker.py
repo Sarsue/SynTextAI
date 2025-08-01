@@ -125,158 +125,261 @@ def get_repository_manager():
     return RepositoryManager(database_url=database_url)
 
 async def update_file_status(file_id: int, status: str, error: str = None) -> None:
-    """Update file status in the database using SQLAlchemy ORM"""
-    try:
-        from sqlalchemy.exc import SQLAlchemyError
-        from models import File
-        
-        store = get_repository_manager()
-        
-        with store.file_repo.get_unit_of_work() as uow:
-            try:
-                file = uow.session.query(File).filter(
-                    File.id == file_id
-                ).with_for_update().first()
-                
-                if not file:
-                    logger.error(f"File with ID {file_id} not found")
+    """
+    Update file status in the database using SQLAlchemy ORM with proper session handling.
+    
+    Args:
+        file_id: The ID of the file to update
+        status: The new status to set
+        error: Optional error message to store
+    """
+    store = None
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            from sqlalchemy.exc import SQLAlchemyError, OperationalError
+            from models import File
+            
+            store = get_repository_manager()
+            
+            with store.file_repo.get_unit_of_work() as uow:
+                try:
+                    # Get the file with row-level locking to prevent concurrent updates
+                    file = uow.session.query(File).filter(
+                        File.id == file_id
+                    ).with_for_update(skip_locked=True).first()
+                    
+                    if not file:
+                        logger.error(f"File with ID {file_id} not found")
+                        return
+                    
+                    # Update status and error message if provided
+                    file.processing_status = status
+                    if error is not None:
+                        file.error_message = error
+                    
+                    # Update the updated_at timestamp
+                    file.updated_at = datetime.utcnow()
+                    
+                    uow.session.commit()
+                    logger.info(f"Successfully updated file {file_id} status to {status}")
                     return
+                    
+                except (SQLAlchemyError, OperationalError) as e:
+                    uow.session.rollback()
+                    if attempt == max_retries - 1:  # Last attempt
+                        logger.error(f"Database error updating file {file_id} status after {max_retries} attempts: {str(e)}")
+                        raise
+                    
+                    # Exponential backoff before retry
+                    sleep_time = retry_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Database error updating file {file_id} status (attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {sleep_time}s. Error: {str(e)}"
+                    )
+                    await asyncio.sleep(sleep_time)
                 
-                file.processing_status = status
-                if error:
-                    file.error_message = error
-                
-                uow.session.commit()
-                logger.info(f"Successfully updated file {file_id} status to {status}")
-                
-            except SQLAlchemyError as e:
-                uow.session.rollback()
-                logger.error(f"Database error updating file {file_id} status: {str(e)}")
-                raise
-                
-    except Exception as e:
-        logger.exception(f"Error updating file {file_id} status: {str(e)}")
-        raise
+                except Exception as e:
+                    if attempt == max_retries - 1:  # Last attempt
+                        logger.exception(f"Failed to update file {file_id} status after {max_retries} attempts: {str(e)}")
+                        # Re-raise only on the last attempt
+                        raise
+                    continue
+        finally:
+            # Clean up resources
+            if store and hasattr(store, 'close'):
+                try:
+                    store.close()
+                except Exception as e:
+                    logger.warning(f"Error cleaning up repository manager in update_file_status: {str(e)}")
 
 async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
                      file_url: str, language: str = "English", 
-                     comprehension_level: str = "Beginner") -> None:
-    """Process a single file with concurrency control"""
-    logger.info(f"[TRACE] Starting process_file for file_id: {file_id}, filename: {filename}")
+                     comprehension_level: str = "Beginner") -> Optional[Dict[str, Any]]:
+    """
+    Process a single file with concurrency control and proper resource management.
+    
+    Args:
+        file_id: The ID of the file to process
+        user_id: The ID of the user who owns the file
+        user_gc_id: The Google Cloud ID of the user
+        filename: The name of the file
+        file_url: The URL where the file is stored
+        language: The language of the file content (default: "English")
+        comprehension_level: The user's comprehension level (default: "Beginner")
+        
+    Returns:
+        Optional[Dict[str, Any]]: The processing result if successful, None otherwise
+    """
+    # Acquire semaphore to limit concurrent processing
+    await semaphore.acquire()
+    logger.info(f"Acquired semaphore for file {file_id}")
+    
+    # Initialize result and track resources
+    result = None
+    store = None
     
     try:
-        # Use a semaphore to limit concurrent processing
-        async with semaphore:
-            if shutdown_event.is_set():
-                logger.info(f"[TRACE] Shutdown requested, skipping processing of file {file_id}")
-                return
-                
-            # Determine if this is a YouTube URL
-            is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
-            logger.info(f"[TRACE] File type detection - is_youtube: {is_youtube}")
-                
-            # Update status to PROCESSING and notify frontend
-            await update_file_status(file_id, "processing")
-            await send_notification_to_api(user_gc_id, 'file_status_update', {
-                'file_id': file_id,
-                'status': 'processing',
-                'progress': 10,
-            })
-
-            try:
-                # Process the file
-                from api.tasks import process_file_data
-                await process_file_data(
-                    user_gc_id=user_gc_id,
-                    user_id=str(user_id),
-                    file_id=str(file_id),
-                    filename=filename,
-                    file_url=file_url,
-                    is_youtube=is_youtube,
-                    language=language,
-                    comprehension_level=comprehension_level
-                )
-
-                # Update status to PROCESSED and notify frontend
-                await update_file_status(file_id, "processed")
-                await send_notification_to_api(user_gc_id, 'file_status_update', {
-                    'file_id': file_id,
-                    'status': 'processed',
-                    'progress': 100,
-                })
-                logger.info(f"Successfully completed processing file {filename} (ID: {file_id})")
-
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Error processing file {file_id}: {error_msg}", exc_info=True)
-                # Update status to FAILED and notify frontend
-                await update_file_status(file_id, "failed", error=error_msg)
-                await send_notification_to_api(user_gc_id, 'file_status_update', {
-                    'file_id': file_id,
-                    'status': 'failed',
-                    'error': error_msg,
-                })
-                # Re-raise the original error to allow retry logic to work
-                raise
-                
+        # Get repository manager with proper session handling
+        store = get_repository_manager()
+        
+        # Update status to processing
+        await update_file_status(
+            file_id=file_id,
+            status='processing',
+            error=None
+        )
+        
+        # Determine if this is a YouTube URL
+        is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
+        logger.info(f"Processing {'YouTube' if is_youtube else 'file'}: {filename}")
+        
+        # Process the file based on its type
+        if is_youtube:
+            from api.tasks import process_youtube_video
+            result = await process_youtube_video(
+                user_gc_id=user_gc_id,
+                user_id=str(user_id),
+                file_id=str(file_id),
+                video_url=file_url,
+                language=language,
+                comprehension_level=comprehension_level
+            )
+        else:
+            from api.tasks import process_uploaded_file
+            result = await process_uploaded_file(
+                user_gc_id=user_gc_id,
+                user_id=str(user_id),
+                file_id=str(file_id),
+                filename=filename,
+                file_url=file_url,
+                language=language,
+                comprehension_level=comprehension_level
+            )
+        
+        # Update status to completed
+        await update_file_status(
+            file_id=file_id,
+            status='completed',
+            error=None
+        )
+        
+        logger.info(f"Successfully processed file {filename} (ID: {file_id})")
+        return result
+        
     except Exception as e:
-        logger.error(f"[FATAL] Unhandled error in process_file for file {file_id}: {str(e)}", exc_info=True)
-        # Make one final attempt to mark as failed
+        error_msg = f"Error processing file {file_id}: {str(e)}"
+        logger.exception(error_msg)
+        
+        # Update status to failed
         try:
-            await update_file_status(file_id, "failed")
-        except Exception as final_err:
-            logger.error(f"[FATAL] Failed final status update for file {file_id}: {str(final_err)}")
-        raise
+            await update_file_status(
+                file_id=file_id,
+                status='failed',
+                error=error_msg[:500]  # Truncate error message to avoid DB issues
+            )
+        except Exception as update_err:
+            logger.error(f"Failed to update file status to failed: {str(update_err)}")
+        
+        # Send error notification
+        try:
+            await send_notification_to_api(
+                user_gc_id=user_gc_id,
+                event_type="file_processing_failed",
+                data={
+                    "file_id": file_id,
+                    "filename": filename,
+                    "error": str(e)[:500]  # Truncate error message
+                }
+            )
+        except Exception as notify_err:
+            logger.error(f"Failed to send error notification: {str(notify_err)}")
+        
+        return None
+        
+    finally:
+        # Always release the semaphore
+        semaphore.release()
+        logger.info(f"Released semaphore for file {file_id}")
+        
+        # Clean up resources
+        if store and hasattr(store, 'close'):
+            try:
+                store.close()
+            except Exception as e:
+                logger.warning(f"Error cleaning up repository manager: {str(e)}")
 
 
 async def fetch_pending_files() -> List[Dict[str, Any]]:
-    """Fetch files with 'uploaded' status from the database and mark them as processing"""
+    """
+    Fetch files with 'uploaded' status from the database and mark them as processing.
+    Uses a transaction to ensure atomicity and proper connection handling.
+    """
+    from api.models.orm_models import File, User
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import func
+    
+    pending_files = []
+    
     try:
-        from sqlalchemy import text
-        
-        # Use the shared repository manager function
+        # Use the shared repository manager with proper session handling
         store = get_repository_manager()
         
-        # Use a transaction to atomically fetch and update files
+        # Get a new session
         with store.file_repo.get_unit_of_work() as uow:
-            from api.models.orm_models import File
-            
-            # Find files that need processing
-            from sqlalchemy.orm import joinedload
-
-            files_to_process = uow.session.query(File).options(
-                joinedload(File.user, innerjoin=True)
-            ).filter(
-                File.processing_status == 'uploaded'
-            ).order_by(
-                File.created_at.asc()
-            ).with_for_update(skip_locked=True).limit(10).all()
-            
-            # Update status to processing
-            for file in files_to_process:
-                file.processing_status = 'processing'
-            
-            # Commit the transaction to release the lock
-            uow.session.commit()
-            
-            # Convert files to list of dictionaries
-            pending_files = []
-            for file in files_to_process:
-                pending_files.append({
-                    "id": file.id,
-                    "file_name": file.file_name,
-                    "file_url": file.file_url,
-                    "user_id": file.user_id,
-                    "user_gc_id": file.user.user_gc_id if file.user else '',
-                    "created_at": file.created_at
-                })
-        
-        
-        return pending_files
-        
+            try:
+                # Start a transaction
+                files_to_process = uow.session.query(File).options(
+                    joinedload(File.user, innerjoin=True)
+                ).filter(
+                    File.processing_status == 'uploaded'
+                ).order_by(
+                    File.created_at.asc()
+                ).with_for_update(
+                    skip_locked=True,
+                    of=File  # Only lock the files table
+                ).limit(10).all()
+                
+                if not files_to_process:
+                    return []
+                
+                # Update status to processing
+                file_ids = [f.id for f in files_to_process]
+                uow.session.query(File).filter(File.id.in_(file_ids)).update(
+                    {File.processing_status: 'processing'},
+                    synchronize_session=False
+                )
+                
+                # Convert files to list of dictionaries
+                for file in files_to_process:
+                    pending_files.append({
+                        "id": file.id,
+                        "file_name": file.file_name,
+                        "file_url": file.file_url,
+                        "user_id": file.user_id,
+                        "user_gc_id": file.user.user_gc_id if file.user else '',
+                        "created_at": file.created_at.isoformat() if file.created_at else None
+                    })
+                
+                # Commit the transaction
+                uow.session.commit()
+                logger.info(f"Fetched {len(pending_files)} files for processing")
+                
+            except Exception as e:
+                # Rollback on error
+                uow.session.rollback()
+                logger.error(f"Error in transaction while fetching files: {str(e)}", exc_info=True)
+                # Re-raise to be handled by the outer try/except
+                raise
+                
     except Exception as e:
-        logger.exception(f"Error fetching pending files: {str(e)}")
+        logger.exception(f"Error in fetch_pending_files: {str(e)}")
+        # Return empty list to continue processing
         return []
+    
+    return pending_files
 
 
 async def worker_loop() -> None:

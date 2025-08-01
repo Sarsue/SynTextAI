@@ -9,6 +9,7 @@ import React, {
     ReactNode,
     useContext,
 } from 'react';
+import { useWebSocket } from './hooks/useWebSocket';
 import { UploadedFile, PaginationState } from './components/types';
 import { useToast } from './contexts/ToastContext';
 import { User as FirebaseUser, getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -82,18 +83,95 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
     const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
-    const [socket, setSocket] = useState<WebSocket | null>(null);
-    const [webSocketStatus, setWebSocketStatus] = useState<WebSocketStatus>('disconnected');
-    
     // File state
     const [files, setFiles] = useState<UploadedFile[]>([]);
+    
+    // WebSocket state
+    const [socket, setSocket] = useState<WebSocket | null>(null);
     const [filePagination, setFilePagination] = useState<PaginationState>({ page: 1, pageSize: 10, totalItems: 0 });
     const [isLoadingFiles, setIsLoadingFiles] = useState<boolean>(false);
     const [fileError, setFileError] = useState<string | null>(null);
 
-    const socketRef = useRef<WebSocket | null>(null);
-    const reconnectionAttempts = useRef(0);
-    const reconnectTimeoutId = useRef<NodeJS.Timeout | null>(null);
+// WebSocket message handler
+    const handleWebSocketMessage = useCallback((message: KnownWebSocketMessage) => {
+        try {
+            switch (message.event) {
+                case 'file_processed': {
+                    const updatedFile = message.result as UploadedFile;
+                    setFiles(prevFiles => prevFiles.map(f => (f.id === updatedFile.id ? updatedFile : f)));
+                    addToast(`File "${updatedFile.file_name}" has been processed.`, 'success');
+                    break;
+                }
+
+                case 'file_status_update': {
+                    const data = message.data as FileStatusUpdatePayload;
+                    setFiles(prevFiles =>
+                        prevFiles.map(file =>
+                            file.id === data.file_id
+                                ? {
+                                    ...file,
+                                    status: data.status,
+                                    error_message: data.error_message,
+                                }
+                                : file
+                        )
+                    );
+
+                    if (data.status === 'failed') {
+                        addToast(`Error processing file: ${data.error_message || 'Unknown error'}`, 'error');
+                    }
+                    break;
+                }
+
+                case 'file_status_error': {
+                    const data = message.data as FileStatusUpdatePayload;
+                    setFiles(prevFiles =>
+                        prevFiles.map(file =>
+                            file.id === data.file_id
+                                ? {
+                                    ...file,
+                                    status: 'failed',
+                                    error_message: data.error_message,
+                                }
+                                : file
+                        )
+                    );
+                    addToast(`Error processing file: ${data.error_message}`, 'error');
+                    break;
+                }
+
+                case 'file_deleted': {
+                    const data = message.data as { file_id: number };
+                    setFiles(prevFiles => prevFiles.filter(f => f.id !== data.file_id));
+                    addToast('File was deleted.', 'info');
+                    break;
+                }
+            }
+        } catch (error) {
+            console.error('Error handling WebSocket message:', error);
+        }
+    }, [addToast]);
+
+    // Initialize WebSocket
+    const { status: webSocketStatus, send: sendWebSocketMessage } = useWebSocket(
+        user?.uid,
+        handleWebSocketMessage,
+        (status) => {
+            console.log('WebSocket status changed:', status);
+            if (status === 'connected') {
+                addToast('Real-time connection established.', 'success');
+            } else if (status === 'reconnecting') {
+                addToast('Connection lost. Reconnecting...', 'warning');
+            } else if (status === 'disconnected' && user) {
+                addToast('Could not establish real-time connection. Some features may be limited.', 'error');
+            }
+        }
+    );
+
+    // Keep socket in sync with the context
+    useEffect(() => {
+        setSocket(sendWebSocketMessage ? { send: sendWebSocketMessage } as unknown as WebSocket : null);
+    }, [sendWebSocketMessage]);
 
     const toggleDarkMode = () => setDarkMode((prev) => !prev);
 
@@ -145,125 +223,25 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [_callApiWithTokenInternal]);
     
-    const disconnectWebSocket = useCallback(() => {
-        setWebSocketStatus('disconnected');
-        if (reconnectTimeoutId.current) {
-            clearTimeout(reconnectTimeoutId.current);
-            reconnectTimeoutId.current = null;
-        }
-        if (socketRef.current) {
-            socketRef.current.onclose = null; 
-            socketRef.current.close();
-            socketRef.current = null;
-            setSocket(null);
-        }
+    // Initialize WebSocket when user is authenticated
+    useEffect(() => {
+        // The useWebSocket hook handles connection management automatically
+        return () => {
+            // Cleanup is handled by the useWebSocket hook
+        };
+    }, [user]);
+
+    // Initialize WebSocket function for backward compatibility
+    const initializeWebSocket = useCallback(async () => {
+        // No-op as connection is managed by useWebSocket hook
+        console.log('WebSocket initialization is now handled automatically');
     }, []);
 
-    const initializeWebSocket = useCallback(async () => {
-        setWebSocketStatus('connecting');
-        if (!user || socketRef.current) return;
-
-        const token = await user.getIdToken();
-        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const wsUrl = `${protocol}://${window.location.host}/ws/${user.uid}`;
-        
-        const ws = new WebSocket(wsUrl);
-        socketRef.current = ws;
-        setSocket(ws);
-
-        ws.onopen = () => {
-            setWebSocketStatus('connected');
-            console.log('WebSocket connection established.');
-            addToast('Real-time connection established.', 'success');
-            reconnectionAttempts.current = 0;
-            if (reconnectTimeoutId.current) clearTimeout(reconnectTimeoutId.current);
-            ws.send(JSON.stringify({ type: 'auth', token }));
-        };
-
-        ws.onmessage = (event) => {
-            try {
-                const parsedMessage: KnownWebSocketMessage = JSON.parse(event.data);
-
-                switch (parsedMessage.event) {
-                    case 'file_processed': {
-                        const updatedFile = parsedMessage.result as UploadedFile;
-                        setFiles(prevFiles => prevFiles.map(f => (f.id === updatedFile.id ? updatedFile : f)));
-                        addToast(`File "${updatedFile.file_name}" has been processed.`, 'success');
-                        break;
-                    }
-
-                    case 'file_status_update': {
-                        const data = parsedMessage.data as FileStatusUpdatePayload;
-                        setFiles(prevFiles =>
-                            prevFiles.map(file =>
-                                file.id === data.file_id
-                                    ? {
-                                        ...file,
-                                        status: data.status,
-                                        error_message: data.error_message, // Will be undefined if not present, which is fine
-                                    }
-                                    : file
-                            )
-                        );
-
-                        if (data.status === 'failed') {
-                            addToast(`Error processing file: ${data.error_message || 'Unknown error'}`, 'error');
-                        }
-                        break;
-                    }
-
-                    case 'file_status_error': { // This is likely redundant but handled for safety
-                        const data = parsedMessage.data as FileStatusUpdatePayload;
-                        setFiles(prevFiles =>
-                            prevFiles.map(file =>
-                                file.id === data.file_id
-                                    ? {
-                                        ...file,
-                                        status: 'failed',
-                                        error_message: data.error_message,
-                                    }
-                                    : file
-                            )
-                        );
-                        addToast(`Error processing file: ${data.error_message}`, 'error');
-                        break;
-                    }
-
-                    case 'file_deleted': {
-                        const data = parsedMessage.data as { file_id: number };
-                        setFiles(prevFiles => prevFiles.filter(f => f.id !== data.file_id));
-                        addToast(`File was deleted.`, 'info');
-                        break;
-                    }
-                }
-            } catch (error) {
-                console.error("Error processing WebSocket message:", error);
-            }
-        };
-
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            addToast('WebSocket connection error.', 'error');
-        };
-
-        ws.onclose = () => {
-            if (!socketRef.current) return;
-            
-            socketRef.current = null;
-            setSocket(null);
-
-            if (reconnectionAttempts.current < MAX_RECONNECT_ATTEMPTS) {
-                setWebSocketStatus('reconnecting');
-                reconnectionAttempts.current++;
-                const delay = Math.pow(2, reconnectionAttempts.current) * 1000;
-                addToast(`Connection lost. Reconnecting...`, 'warning');
-                reconnectTimeoutId.current = setTimeout(initializeWebSocket, delay);
-            } else {
-                setWebSocketStatus('disconnected');
-                addToast('Could not re-establish real-time connection. Please refresh the page.', 'error');
-            }
-        };
-    }, [user, addToast]);
+    // Disconnect WebSocket function for backward compatibility
+    const disconnectWebSocket = useCallback(() => {
+        // No-op as disconnection is managed by useWebSocket hook
+        console.log('WebSocket disconnection is now handled automatically');
+    }, []);
 
     const fetchSubscriptionStatus = useCallback(async () => {
         if (!user) return;
@@ -316,21 +294,13 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             } else {
                 setUser(null);
                 setFiles([]);
-                disconnectWebSocket();
             }
             setAuthLoading(false);
         });
         return () => unsubscribe();
     }, [registerUserInBackend, fetchSubscriptionStatus, loadUserFiles, disconnectWebSocket]);
 
-    useEffect(() => {
-        if (user) {
-            initializeWebSocket();
-        } else {
-            disconnectWebSocket();
-        }
-        return () => disconnectWebSocket();
-    }, [user, initializeWebSocket, disconnectWebSocket]);
+    // WebSocket connection is now managed by the useWebSocket hook
 
     const contextValue: UserContextType = {
         user,

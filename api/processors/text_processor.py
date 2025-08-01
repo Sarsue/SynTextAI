@@ -7,7 +7,7 @@ import base64
 from typing import Dict, List, Any, Optional
 
 from processors.base_processor import FileProcessor
-from llm_service import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy
+from ..llm_compat import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy
 from utils import chunk_text
 
 logger = logging.getLogger(__name__)

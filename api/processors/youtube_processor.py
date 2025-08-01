@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
-from api.llm_service import generate_key_concepts_dspy, get_text_embeddings_in_batches
+from ..llm_compat import generate_key_concepts_dspy, get_text_embeddings_in_batches
 
 logger = logging.getLogger(__name__)
 
