@@ -1,105 +1,96 @@
+"""
+Background tasks for SynTextAI processing pipeline.
+
+This module handles the orchestration of background tasks for processing user uploads,
+including file processing, transcription, and content analysis. It serves as the main
+entry point for all asynchronous operations in the application.
+
+Key Responsibilities:
+- File processing orchestration
+- Status updates and error handling
+- Integration with various processing services
+- WebSocket notifications
+
+Note: This module should only contain high-level orchestration logic. All business
+logic should be delegated to specialized services.
+"""
+
+from __future__ import annotations
+
+# Standard library imports
+import asyncio
+import gc
+import json
 import logging
 import os
+import shutil
 import tempfile
+import time
+import uuid
 from contextlib import contextmanager
-import asyncio
-import yt_dlp
-from typing import Optional, Dict, List, Tuple, Any, Union
-import json
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
-# Internal imports
-from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
-from repositories.repository_manager import RepositoryManager
-from .services.agent_service import agent_service
+# Third-party imports
 import stripe
-from websocket_manager import websocket_manager
-from dotenv import load_dotenv
-from fastapi import BackgroundTasks, HTTPException
-import gc
-from datetime import datetime
-from urllib.parse import urlparse
+import yt_dlp
+from fastapi import HTTPException, status
+from pydantic import BaseModel, Field, validator
 
-# Load environment variables
-load_dotenv()
-
-# MCP service will handle model loading and management
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Local imports
+from .core.config import settings
+from .core.constants import (
+    DEFAULT_PAGINATION,
+    ERROR_MESSAGES,
+    LANGUAGE_CODE_MAP,
+    MAX_FILE_SIZES,
+    PROCESSING_TIMEOUTS,
+    SUPPORTED_FILE_EXTENSIONS,
+)
+from .core.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    FileProcessingError,
+    InvalidInputError,
+    ResourceNotFoundError,
+    ServiceUnavailableError,
+)
+from .models import File, ProcessingError, ProcessingStatus, User, db
+from .processors import get_processor_for_file
+from .processors.pdf_processor import PDFProcessor
+from .processors.text_processor import TextProcessor
+from .processors.youtube_processor import YouTubeProcessor
+from .repositories.repository_manager import RepositoryManager
+from .services.agent_service import agent_service
+from .services.llm_service import LLMService
+from .services.repository_service import RepositoryService
+from .services.websocket_service import websocket_service
+from .models.transcription import (
+    TranscriptSegment,
+    TranscriptionInfo,
+    WordSegment,
+)
+from utils import delete_from_gcs
+# Configure logging
 logger = logging.getLogger(__name__)
 
-LANGUAGE_CODE_MAP = {
-    "english": "en",
-    "spanish": "es",
-    "french": "fr",
-    "german": "de",
-    "portuguese": "pt",
-    "italian": "it",
-    "dutch": "nl",
-    "russian": "ru",
-    "japanese": "ja",
-    "korean": "ko",
-    "chinese": "zh",
-    # Add more as needed. The youtube_transcript_api might also accept full names.
-}
+# Initialize repository manager with settings from config
+store = RepositoryManager(database_url=settings.DATABASE_URL)
 
-# Initialize Stripe
-stripe.api_key = os.getenv('STRIPE_SECRET')
+# Initialize Stripe if API key is available
+if settings.STRIPE_SECRET:
+    stripe.api_key = settings.STRIPE_SECRET
 
-# Initialize DocSynthStore and SyntextAgent
-
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT"),
-}
-
-DATABASE_URL = (
-    f"postgresql://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-)
-
-store = RepositoryManager(database_url=DATABASE_URL)
-syntext = SyntextAgent()
-
-# MCP service manages model lifecycle
-
-
-
-from typing import TypedDict, List, Optional, Dict, Any
-from pathlib import Path
-
-class WordSegment(TypedDict):
-    """Represents a single word in the transcription with timing information."""
-    word: str
-    start: float
-    end: float
-    probability: float
-
-class TranscriptSegment(TypedDict):
-    """Represents a segment of transcribed text with timing and word-level details."""
-    start: float
-    end: float
-    text: str
-    words: List[WordSegment]
-
-class TranscriptionInfo(TypedDict, total=False):
-    """Metadata about the transcription process and results."""
-    language: str
-    language_probability: float
-    duration: float
-    all_language_probs: Optional[Dict[str, float]]
-    error: Optional[str]
+# Models have been moved to models/transcription.py
 
 async def transcribe_audio_chunked(
-    file_path: str, 
-    language: str = "en", 
-    chunk_duration_ms: int = 30000, 
+    file_path: str,
+    language: str = "en",
+    chunk_duration_ms: int = 30000,
     overlap_ms: int = 5000,
     timeout_seconds: int = 300,
-) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[List[TranscriptSegment], TranscriptionInfo]:
     """Transcribe audio using the MCP service with enhanced error handling and type safety.
     
     This function handles the entire transcription pipeline including input validation,
@@ -127,8 +118,10 @@ async def transcribe_audio_chunked(
         Exception: For any errors during the MCP service call or result processing
     """
     start_time = time.time()
+    file_size = 0
     
-    def log_duration():
+    def log_duration() -> str:
+        """Helper to log the duration of the transcription process."""
         duration = time.time() - start_time
         return f"(took {duration:.2f}s)"
     
@@ -145,14 +138,22 @@ async def transcribe_audio_chunked(
             logger.error(error_msg)
             raise ValueError(error_msg)
             
-        if language and (not isinstance(language, str) or len(language) != 2):
+        if language and (not isinstance(language, str) or len(language.strip()) != 2):
             error_msg = "Language must be a valid ISO 639-1 language code (e.g., 'en', 'es')"
             logger.error(error_msg)
             raise ValueError(error_msg)
 
-        logger.info(f"Starting transcription of {file_path} (size: {file_size/1024/1024:.2f}MB) with language: {language}")
+        logger.info(
+            "Starting transcription of %s (size: %.2fMB) with language: %s",
+            file_path,
+            file_size / (1024 * 1024),
+            language
+        )
         
-        # Prepare input for MCP service with enhanced parameters
+        # Import agent service here to avoid circular imports
+        from .services.agent_service import agent_service
+        
+        # Prepare input for transcription service
         input_data: Dict[str, Any] = {
             'audio_file': file_path,
             'language': language.lower() if language else None,
@@ -168,22 +169,22 @@ async def transcribe_audio_chunked(
             'max_audio_length': 60 * 30  # 30 minutes max by default
         }
         
-        logger.debug(f"Calling MCP service with input: {input_data}")
+        logger.debug("Calling transcription service with input: %s", input_data)
         
-        # Call MCP service for transcription with timeout
+        # Call transcription service with timeout
         try:
             result = await asyncio.wait_for(
-                mcp_service.process("speech_to_text", input_data),
+                agent_service.process("speech_to_text", input_data),
                 timeout=timeout_seconds
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as te:
             error_msg = f"Transcription timed out after {timeout_seconds} seconds"
-            logger.error(f"{error_msg} {log_duration()}")
-            raise asyncio.TimeoutError(error_msg) from None
+            logger.error("%s %s", error_msg, log_duration())
+            raise asyncio.TimeoutError(error_msg) from te
             
         if not result or not isinstance(result, dict):
-            error_msg = f"Invalid response format from MCP service: {result}"
-            logger.error(f"{error_msg} {log_duration()}")
+            error_msg = f"Invalid response format from transcription service: {result}"
+            logger.error("%s %s", error_msg, log_duration())
             raise ValueError(error_msg)
         
         # Extract and validate segments and info
@@ -191,15 +192,15 @@ async def transcribe_audio_chunked(
         info: Dict[str, Any] = result.get('info', {})
         
         if not segments:
-            logger.warning(f"No transcription segments returned for {file_path}")
+            logger.warning("No transcription segments returned for %s", file_path)
         else:
-            logger.debug(f"Received {len(segments)} segments from MCP service")
+            logger.debug("Received %d segments from transcription service", len(segments))
         
         # Convert segments to the expected format with validation
         processed_segments = adapt_whisper_segments_to_transcript_data(segments)
         
         # Prepare response with type-safe structure
-        response_info = {
+        response_info: TranscriptionInfo = {
             'language': info.get('language', language or 'unknown'),
             'language_probability': float(info.get('language_probability', 0.0)),
             'duration': float(info.get('duration', 0.0)),
@@ -212,113 +213,130 @@ async def transcribe_audio_chunked(
         
         # Log success with detailed information
         logger.info(
-            f"Transcription completed for {os.path.basename(file_path)} {log_duration()}. "
-            f"Language: {response_info['language']} (confidence: {response_info['language_probability']:.2f}), "
-            f"Duration: {response_info['duration']:.2f}s, "
-            f"Segments: {len(processed_segments)}"
+            "Transcription completed for %s %s. Language: %s (confidence: %.2f), "
+            "Duration: %.2fs, Segments: %d",
+            os.path.basename(file_path),
+            log_duration(),
+            response_info['language'],
+            response_info['language_probability'],
+            response_info['duration'],
+            len(processed_segments)
         )
         
         return processed_segments, response_info
         
     except asyncio.CancelledError:
-        logger.warning(f"Transcription of {file_path} was cancelled {log_duration()}")
+        logger.warning("Transcription of %s was cancelled %s", file_path, log_duration())
         raise
         
     except Exception as e:
         error_msg = f"Error during transcription of {file_path}: {str(e)}"
-        logger.error(f"{error_msg} {log_duration()}", exc_info=True)
+        logger.error("%s %s", error_msg, log_duration(), exc_info=True)
         
         # Return minimal error information with type safety
-        return [], {
+        error_info: TranscriptionInfo = {
             'language': language or 'unknown',
             'language_probability': 0.0,
             'duration': 0.0,
             'all_language_probs': None,
             'error': error_msg,
             'processing_time': time.time() - start_time,
-            'file_size': file_size if 'file_size' in locals() else 0,
+            'file_size': file_size,
             'segment_count': 0
         }
+        return [], error_info
 
-def adapt_whisper_segments_to_transcript_data(whisper_segments: list) -> list:
+def adapt_whisper_segments_to_transcript_data(whisper_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Converts Whisper segments to the format expected by downstream processing.
     
+    This function takes the raw segments from the Whisper transcription service and
+    transforms them into a standardized format with proper typing and validation.
+    
     Args:
-        whisper_segments: List of segment dictionaries from MCP service
-        
+        whisper_segments: List of segment dictionaries from the transcription service.
+            Each segment should contain at least 'start', 'end', and 'text' keys,
+            and optionally a 'words' list with word-level timing information.
+            
     Returns:
-        List of segments in the expected format
+        List of segments in the standardized format with the following structure:
+        [
+            {
+                'start': float,       # Start time in seconds
+                'end': float,         # End time in seconds
+                'text': str,          # Transcribed text (stripped of whitespace)
+                'words': [            # Optional list of word-level details
+                    {
+                        'word': str,          # The word text
+                        'start': float,       # Word start time in seconds
+                        'end': float,         # Word end time in seconds
+                        'probability': float  # Confidence score (0.0 to 1.0)
+                    },
+                    ...
+                ]
+            },
+            ...
+        ]
+        
+    Raises:
+        TypeError: If whisper_segments is not a list or contains invalid items
+        ValueError: If required fields are missing or have invalid types
     """
+    if not isinstance(whisper_segments, list):
+        raise TypeError(f"Expected list of segments, got {type(whisper_segments).__name__}")
+    
     if not whisper_segments:
         return []
-        
-    return [
-        {
-            "start": segment.get("start", 0.0),
-            "end": segment.get("end", 0.0),
-            "text": segment.get("text", "").strip(),
-            "words": [
-                {
-                    "word": word.get("word", ""),
-                    "start": word.get("start", 0.0),
-                    "end": word.get("end", 0.0),
-                    "probability": word.get("probability", 1.0),
-                }
-                for word in segment.get("words", [])
-            ],
-        }
-        for segment in whisper_segments
-    ]
-
-def download_youtube_audio_segment(video_id: str, language_code_for_whisper: Optional[str] = None) -> Optional[str]:
-    """Downloads audio from a YouTube video, trying to get an audio track that matches the language if possible."""
-    output_dir = tempfile.mkdtemp()
-    output_template = os.path.join(output_dir, '%(id)s.%(ext)s')
     
-    ydl_opts = {
-        'format': 'bestaudio/best', # Prioritize best audio quality
-        'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True, # Sometimes helps with SSL issues
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3', # Or 'wav', 'm4a'
-            'preferredquality': '192', # Standard quality
-        }],
-    }
-
-    # If a language code is provided, try to get audio for that language (if available as separate track)
-    # This is more relevant for multi-language videos, often not the case.
-    # if language_code_for_whisper:
-    #     ydl_opts['format'] = f'bestaudio[language={language_code_for_whisper}]/bestaudio/best'
-
-    logger.info(f"Attempting to download audio for YouTube video ID: {video_id} with options: {ydl_opts}")
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=True)
-            downloaded_file = ydl.prepare_filename(info_dict)
-            # yt-dlp might add .webm or other extension before ffmpeg converts it.
-            # The actual output file will be what ffmpeg creates (e.g., .mp3)
-            base, _ = os.path.splitext(downloaded_file)
-            expected_mp3_file = base + '.mp3'
-            if os.path.exists(expected_mp3_file):
-                logger.info(f"Audio successfully downloaded and converted to: {expected_mp3_file}")
-                return expected_mp3_file
-            else:
-                # Fallback check if the original downloaded file (before potential conversion) exists
-                # This might happen if ffmpeg postprocessor is not found or fails silently
-                if os.path.exists(downloaded_file):
-                    logger.warning(f"FFmpeg postprocessing to MP3 might have failed. Using original download: {downloaded_file}")
-                    return downloaded_file
-                logger.error(f"Audio download for {video_id} seemed to complete, but expected file {expected_mp3_file} not found.")
-                return None
-    except yt_dlp.utils.DownloadError as de:
-        logger.error(f"yt-dlp DownloadError for video ID {video_id}: {de}")
-        return None
-    except Exception as e:
-        logger.error(f"Error downloading YouTube audio for video ID {video_id}: {e}", exc_info=True)
-        return None
+    result = []
+    
+    for i, segment in enumerate(whisper_segments, 1):
+        if not isinstance(segment, dict):
+            logger.warning("Skipping invalid segment at index %d: not a dictionary", i)
+            continue
+            
+        try:
+            # Extract and validate segment data
+            segment_data = {
+                'start': float(segment.get('start', 0.0)),
+                'end': float(segment.get('end', 0.0)),
+                'text': str(segment.get('text', '')).strip(),
+                'words': []
+            }
+            
+            # Process word-level data if available
+            if 'words' in segment and isinstance(segment['words'], list):
+                for word_idx, word in enumerate(segment['words'], 1):
+                    if not isinstance(word, dict):
+                        logger.warning(
+                            "Skipping invalid word at index %d in segment %d: not a dictionary",
+                            word_idx, i
+                        )
+                        continue
+                        
+                    try:
+                        word_data = {
+                            'word': str(word.get('word', '')),
+                            'start': float(word.get('start', 0.0)),
+                            'end': float(word.get('end', 0.0)),
+                            'probability': float(word.get('probability', 1.0))
+                        }
+                        segment_data['words'].append(word_data)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(
+                            "Skipping invalid word data at index %d in segment %d: %s",
+                            word_idx, i, str(e)
+                        )
+            
+            result.append(segment_data)
+            
+        except (TypeError, ValueError) as e:
+            logger.warning("Skipping invalid segment at index %d: %s", i, str(e))
+            continue
+    
+    if not result and whisper_segments:
+        logger.warning("No valid segments found in the provided input")
+    
+    return result
 
 async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, language: str = "en", comprehension_level: str = "beginner"):
     """Process an uploaded file using the MCP service.
@@ -343,8 +361,8 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     logger.info(f"========== STARTING PROCESSING FOR FILE: {filename} (ID: {file_id}) ===========")
     logger.info(f"Processing details - User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level}")
     
-    # Initialize MCP service
-    from .services.agent_service import agent_service
+    # Initialize services
+    repository_service = RepositoryService(store)
     
     # Helper function to send WebSocket updates
     async def send_ws_update(event_type: str, data: Dict[str, Any] = None, progress: float = None):
@@ -360,7 +378,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
             data['progress'] = progress
             
         try:
-            await websocket_manager.send_message(
+            await websocket_service.send_message(
                 user_id=str(user_id),
                 event_type=event_type,
                 data=data
@@ -874,22 +892,17 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                         )
                         
                         # Save to database
-                        await send_ws_update(
-                            event_type="saving_results",
-                            data={
-                                "filename": filename,
-                                "status": "saving_to_database"
-                            },
-                            progress=0.95
-                        )
-                        
-                        await save_processing_results(
-                            store=store,
+                        await repository_service.save_processing_results(
                             file_id=file_id,
                             user_id=user_id,
                             concepts=concepts,
                             study_results=study_results,
-                            metadata=metadata
+                            metadata={
+                                'language': language,
+                                'comprehension_level': comprehension_level,
+                                'processing_time': time.time() - start_time,
+                                'is_youtube': is_youtube
+                            }
                         )
                         
                         # Update status to COMPLETED
@@ -950,74 +963,6 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     # We've either had a fatal error or processing has completed
     return
 
-async def process_query_data(user_id: str, history_id: str, message: str, language: str, comprehension_level: str):
-    """
-    Processes a user query and generates a response using QAAgent with RAG.
-    
-    Args:
-        user_id: ID of the user making the query
-        history_id: ID of the chat history (optional)
-        message: User's query message
-        language: Language code for the response
-        comprehension_level: User's comprehension level
-        
-    Returns:
-        Dict containing the response, sources, and history ID
-    """
-    logger.info(f"Processing query from user {user_id}: {message}")
-    try:
-        # Get repository manager
-        store = get_repository_manager()
-        
-        # Get chat history if history_id is provided
-        chat_history = []
-        if history_id:
-            chat_history = await store.chat_repo.get_chat_history(history_id)
-        
-        # Format history for context
-        formatted_history = "\n".join([
-            f"User: {msg.user_message}\nAssistant: {msg.assistant_message}" 
-            for msg in chat_history
-        ])
-        
-        # Process the query using the QA agent
-        response = await agent_service.process_content(
-            agent_name="qa",
-            content=message,
-            content_type="query",
-            language=language,
-            comprehension_level=comprehension_level,
-            chat_history=formatted_history,
-            user_id=user_id
-        )
-        
-        # Save the interaction to chat history
-        chat_message = {
-            'user_id': user_id,
-            'history_id': history_id or str(uuid.uuid4()),
-            'user_message': message,
-            'assistant_message': response.get('answer', 'I could not generate a response.'),
-            'context': response.get('context', ''),
-            'metadata': {
-                'model': 'qa_agent',
-                'language': language,
-                'comprehension_level': comprehension_level,
-                'sources': response.get('sources', [])
-            }
-        }
-        
-        await store.chat_repo.add_chat_message(chat_message)
-        
-        return {
-            'response': response.get('answer', 'I could not generate a response.'),
-            'sources': response.get('sources', []),
-            'history_id': chat_message['history_id']
-        }
-            
-    except Exception as e:
-        logger.error(f"Error processing query: {e}")
-        await websocket_manager.send_message(id, "message_received", {"status": "error", "error": str(e)})
-        raise HTTPException(status_code=500, detail="Query processing failed")
 
 async def delete_user_task(user_id: str, user_gc_id: str):
     """Deletes a user's account, subscription, and associated files."""
@@ -1052,93 +997,3 @@ async def delete_user_task(user_id: str, user_gc_id: str):
     except Exception as e:
         logger.error(f"Error during user deletion: {e}")
         raise HTTPException(status_code=500, detail="User deletion failed")
-
-
-
-
-
-# New adapter functions to bridge the gap between the processor and the existing functions
-
-async def save_processing_results(
-    store: RepositoryManager,
-    file_id: Union[str, int],
-    user_id: Union[str, int],
-    concepts: List[Dict[str, Any]],
-    study_results: Dict[str, List[Dict[str, Any]]],
-    metadata: Dict[str, Any]
-) -> None:
-    """
-    Save processing results to the database using the repository pattern.
-    
-    Args:
-        store: Repository manager instance
-        file_id: ID of the file being processed
-        user_id: ID of the user who owns the file
-        concepts: List of concept dictionaries to save
-        study_results: Dictionary containing flashcards and quizzes
-        metadata: Additional metadata about the processing
-    """
-    try:
-        # Convert IDs to integers if they're strings
-        file_id = int(file_id)
-        user_id = int(user_id)
-        
-        # Save concepts
-        for concept in concepts:
-            store.concept_repo.create_concept(
-                file_id=file_id,
-                user_id=user_id,
-                title=concept.get('title', ''),
-                explanation=concept.get('explanation', ''),
-                metadata={
-                    'source_page': concept.get('source_page'),
-                    'start_time': concept.get('start_time'),
-                    'end_time': concept.get('end_time'),
-                    **metadata
-                }
-            )
-        
-        # Save flashcards
-        for flashcard in study_results.get('flashcards', []):
-            store.flashcard_repo.create_flashcard(
-                file_id=file_id,
-                user_id=user_id,
-                front=flashcard.get('front', ''),
-                back=flashcard.get('back', ''),
-                metadata={
-                    'concept': flashcard.get('concept'),
-                    'difficulty': flashcard.get('difficulty'),
-                    **metadata
-                }
-            )
-        
-        # Save quizzes
-        for quiz in study_results.get('quizzes', []):
-            store.quiz_repo.create_quiz(
-                file_id=file_id,
-                user_id=user_id,
-                question=quiz.get('question', ''),
-                options=quiz.get('options', []),
-                correct_answer=quiz.get('correct_answer', ''),
-                explanation=quiz.get('explanation', ''),
-                quiz_type=quiz.get('type', 'multiple_choice'),
-                metadata={
-                    **metadata
-                }
-            )
-        
-        # Commit the transaction
-        if hasattr(store, 'session'):
-            store.session.commit()
-        elif hasattr(store, 'file_repo') and hasattr(store.file_repo, 'session'):
-            store.file_repo.session.commit()
-            
-        logger.info(f"Successfully saved processing results for file {file_id}")
-        
-    except Exception as e:
-        logger.error(f"Error in save_processing_results: {str(e)}", exc_info=True)
-        if hasattr(store, 'session'):
-            store.session.rollback()
-        elif hasattr(store, 'file_repo') and hasattr(store.file_repo, 'session'):
-            store.file_repo.session.rollback()
-        raise

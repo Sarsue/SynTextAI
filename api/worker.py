@@ -4,8 +4,9 @@ SynText AI File Processing Worker
 
 This standalone worker script processes files asynchronously by:
 1. Querying the database for files with 'uploaded' status
-2. Processing files in parallel with controlled concurrency
+2. Processing files in parallel with controlled concurrency using the Agent Service
 3. Updating file statuses to track progress
+4. Sending real-time notifications via WebSocket
 
 Run this worker in a separate process from the API server
 for scalable background processing.
@@ -19,13 +20,36 @@ import sys
 import signal
 import time
 import aiohttp
-from sqlalchemy import text
-from typing import Dict, Any, Optional
+import traceback
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
 from pathlib import Path
-from api.models.orm_models import File
+from typing import Dict, Any, List, Optional, Tuple, Union
+from dotenv import load_dotenv
+
+# Add the parent directory to sys.path to fix imports
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, base_dir)
+
+# Load environment variables from .env file in the project root
+env_path = os.path.join(base_dir, '.env')
+if os.path.exists(env_path):
+    load_dotenv(dotenv_path=env_path)
+    print(f"Loaded environment variables from {env_path}")
+else:
+    print(f"Warning: .env file not found at {env_path}")
+    # Try to load from default location as fallback
+    load_dotenv()
+
+# Import after environment setup
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
+
+from api.models.orm_models import File, User
+from api.repositories.repository_manager import RepositoryManager
+from api.services.agent_service import AgentService
+from api.services.llm_service import LLMService
+from api.services.embedding_service import EmbeddingService
+from api.websocket.websocket_manager import WebSocketManager
 
 # Add the parent directory to sys.path to fix imports
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,16 +88,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger('syntextai-worker')
 
-# Maximum number of concurrent file processing tasks
+# Configuration
 MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "3"))
-
-# Polling configuration
 INITIAL_POLL_INTERVAL = 10  # Start with 10 seconds
 MAX_POLL_INTERVAL = 300     # 5 minutes maximum
 POLL_BACKOFF_FACTOR = 1.5   # 1.5x backoff factor
-
-# API configuration for notifications
 API_NOTIFY_URL = os.getenv("API_NOTIFY_URL", "http://syntextaiapp:3000/api/v1/internal/notify-client")
+
+# Initialize services
+llm_service = LLMService()
+embedding_service = EmbeddingService()
+agent_service = AgentService(llm_service=llm_service, embedding_service=embedding_service)
+websocket_manager = WebSocketManager()
 
 async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
     """Send a notification to the main API via HTTP POST"""
@@ -195,11 +221,24 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                 except Exception as e:
                     logger.warning(f"Error cleaning up repository manager in update_file_status: {str(e)}")
 
-async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
-                     file_url: str, language: str = "English", 
-                     comprehension_level: str = "Beginner") -> Optional[Dict[str, Any]]:
+async def process_file(
+    file_id: int, 
+    user_id: int, 
+    user_gc_id: str, 
+    filename: str,
+    file_url: str, 
+    language: str = "English", 
+    comprehension_level: str = "Beginner"
+) -> Optional[Dict[str, Any]]:
     """
-    Process a single file with concurrency control and proper resource management.
+    Process a single file using the Agent Service.
+    
+    This function handles the complete file processing pipeline including:
+    - Status updates
+    - File type detection
+    - Agent-based processing
+    - Error handling and notifications
+    - Resource cleanup
     
     Args:
         file_id: The ID of the file to process
@@ -232,42 +271,64 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
             error=None
         )
         
+        # Send processing started notification
+        await websocket_manager.broadcast(
+            user_gc_id,
+            "file_processing_started",
+            {"file_id": file_id, "filename": filename}
+        )
+        
         # Determine if this is a YouTube URL
         is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
         logger.info(f"Processing {'YouTube' if is_youtube else 'file'}: {filename}")
         
-        # Process the file based on its type
-        if is_youtube:
-            from api.tasks import process_youtube_video
-            result = await process_youtube_video(
-                user_gc_id=user_gc_id,
-                user_id=str(user_id),
-                file_id=str(file_id),
-                video_url=file_url,
-                language=language,
-                comprehension_level=comprehension_level
+        # Process the file using the agent service
+        try:
+            if is_youtube:
+                result = await agent_service.process_youtube_video(
+                    user_id=user_id,
+                    user_gc_id=user_gc_id,
+                    file_id=file_id,
+                    video_url=file_url,
+                    language=language,
+                    comprehension_level=comprehension_level
+                )
+            else:
+                result = await agent_service.process_uploaded_file(
+                    user_id=user_id,
+                    user_gc_id=user_gc_id,
+                    file_id=file_id,
+                    filename=filename,
+                    file_url=file_url,
+                    language=language,
+                    comprehension_level=comprehension_level
+                )
+            
+            # Update status to completed
+            await update_file_status(
+                file_id=file_id,
+                status='completed',
+                error=None
             )
-        else:
-            from api.tasks import process_uploaded_file
-            result = await process_uploaded_file(
-                user_gc_id=user_gc_id,
-                user_id=str(user_id),
-                file_id=str(file_id),
-                filename=filename,
-                file_url=file_url,
-                language=language,
-                comprehension_level=comprehension_level
+            
+            # Send success notification
+            await websocket_manager.broadcast(
+                user_gc_id,
+                "file_processing_completed",
+                {
+                    "file_id": file_id,
+                    "filename": filename,
+                    "result": {"status": "success"}
+                }
             )
-        
-        # Update status to completed
-        await update_file_status(
-            file_id=file_id,
-            status='completed',
-            error=None
-        )
-        
-        logger.info(f"Successfully processed file {filename} (ID: {file_id})")
-        return result
+            
+            logger.info(f"Successfully processed file {filename} (ID: {file_id})")
+            return result
+            
+        except Exception as proc_error:
+            error_msg = f"Error in agent service processing: {str(proc_error)}"
+            logger.exception(error_msg)
+            raise proc_error
         
     except Exception as e:
         error_msg = f"Error processing file {file_id}: {str(e)}"
@@ -280,23 +341,20 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
                 status='failed',
                 error=error_msg[:500]  # Truncate error message to avoid DB issues
             )
-        except Exception as update_err:
-            logger.error(f"Failed to update file status to failed: {str(update_err)}")
-        
-        # Send error notification
-        try:
-            await send_notification_to_api(
-                user_gc_id=user_gc_id,
-                event_type="file_processing_failed",
-                data={
+            
+            # Send error notification
+            await websocket_manager.broadcast(
+                user_gc_id,
+                "file_processing_failed",
+                {
                     "file_id": file_id,
                     "filename": filename,
                     "error": str(e)[:500]  # Truncate error message
                 }
             )
-        except Exception as notify_err:
-            logger.error(f"Failed to send error notification: {str(notify_err)}")
-        
+        except Exception as update_err:
+            logger.error(f"Failed to update file status to failed: {str(update_err)}")
+            
         return None
         
     finally:

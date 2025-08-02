@@ -1,15 +1,46 @@
 """
-Quiz Agent for generating and managing quizzes from content.
+Quiz Agent for generating and managing quizzes and flashcards from content.
 
-This agent handles the generation of quiz questions from content, supporting
-multiple question types and difficulty levels. It's designed to work with the
-files API to generate and store quiz questions for specific files.
+This module provides the QuizAgent class which is responsible for generating
+interactive quizzes and flashcards from document content in the SynTextAI system.
+It supports multiple question types, difficulty levels, and integrates with the
+files API to generate and store assessment materials.
 
 Key Features:
 - Generates multiple question types (MCQ, True/False, short answer)
-- Supports different difficulty levels
-- Includes explanations for answers
-- Tracks source content for each question
+- Creates various flashcard formats (basic, MCQ, true/false)
+- Supports configurable difficulty levels
+- Includes detailed explanations for answers
+- Tracks source content and key concepts for each question
+- Integrates with the database for persistent storage
+
+Example Usage:
+    ```python
+    # Initialize the agent
+    agent = QuizAgent()
+    
+    # Generate quiz questions
+    quiz_result = await agent.process({
+        "action": "generate_questions",
+        "file_id": 123,
+        "file_content": "Content to generate questions from...",
+        "count": 5,
+        "difficulty": "medium",
+        "question_types": ["MCQ", "true_false"]
+    })
+    
+    # Generate flashcards
+    flashcard_result = await agent.process({
+        "action": "generate_flashcards",
+        "file_id": 123,
+        "count": 10,
+        "flashcard_types": ["basic", "mcq"]
+    })
+    
+    # Access the results
+    questions = quiz_result.get("questions", [])
+    flashcards = flashcard_result.get("flashcards", [])
+    ```
 """
 from typing import Dict, Any, List, Optional, Union, cast
 import json
@@ -32,25 +63,43 @@ from ..models.orm_models import KeyConcept
 logger = logging.getLogger(__name__)
 
 class QuizConfig(AgentConfig):
-    """Configuration for the Quiz Agent.
+    """
+    Configuration for the Quiz Agent.
+    
+    This configuration class controls how the QuizAgent generates quizzes and flashcards,
+    including question types, difficulty levels, and output formats.
     
     Attributes:
-        num_questions: Number of questions to generate (1-20)
-        difficulty: Difficulty level (easy, medium, hard)
-        question_types: List of question types to generate
-        include_explanations: Whether to include answer explanations
-        max_flashcards: Maximum number of flashcards to generate
-        flashcard_types: Types of flashcards to generate (basic, mcq, true_false)
+        max_flashcards: Maximum number of flashcards to generate in a single request.
+                      Range: 1-50
+                      Default: 10
+        flashcard_types: Types of flashcards to generate. Each type has different formats:
+                       - 'basic': Simple Q&A format
+                       - 'mcq': Multiple-choice questions
+                       - 'true_false': True/False statements
+                       Default: ["basic", "mcq", "true_false"]
+        num_questions: Number of quiz questions to generate per request.
+                     Range: 1-20
+                     Default: 5
+        difficulty: Difficulty level of generated questions.
+                  One of: "easy", "medium", "hard"
+                  Default: "medium"
+        question_types: Types of quiz questions to generate.
+                      Supported types: "MCQ", "true_false", "short_answer"
+                      Default: ["MCQ", "true_false", "short_answer"]
+        include_explanations: Whether to include detailed explanations for answers.
+                            Default: True
     """
     max_flashcards: int = Field(
         default=10,
-        description="Maximum number of flashcards to generate",
+        description="Maximum number of flashcards to generate in a single request",
         ge=1,
         le=50
     )
     flashcard_types: List[str] = Field(
         default_factory=lambda: ["basic", "mcq", "true_false"],
-        description="Types of flashcards to generate"
+        description="Types of flashcards to generate (basic, mcq, true_false)",
+        example=["basic", "mcq"]
     )
     num_questions: int = Field(
         default=5,
@@ -65,7 +114,8 @@ class QuizConfig(AgentConfig):
     )
     question_types: List[str] = Field(
         default_factory=lambda: ["MCQ", "true_false", "short_answer"],
-        description="Types of questions to include in the quiz"
+        description="Types of questions to include in the quiz",
+        example=["MCQ", "true_false"]
     )
     include_explanations: bool = Field(
         default=True,
@@ -73,19 +123,59 @@ class QuizConfig(AgentConfig):
     )
 
 class QuizQuestion(BaseModel):
-    """Model representing a single quiz question.
-    
-    This matches the expected format in the database and frontend.
     """
-    question: str
-    question_type: str = "MCQ"  # Default to MCQ for backward compatibility
-    options: List[str] = Field(default_factory=list, alias="distractors")
-    correct_answer: str
-    explanation: str = ""
-    difficulty: str = "medium"
-    key_concept_id: Optional[int] = None
-    source_page: Optional[int] = None
-    source_text: Optional[str] = None
+    Model representing a single quiz question or flashcard.
+    
+    This model defines the structure of assessment items generated by the QuizAgent.
+    It's designed to be compatible with both the database schema and frontend expectations.
+    
+    Attributes:
+        question: The question text or flashcard front side.
+        question_type: Type of question/flashcard. One of: "MCQ", "true_false", "short_answer".
+                     Default: "MCQ"
+        options: List of answer choices (for MCQ questions).
+               Aliased as 'distractors' for backward compatibility.
+        correct_answer: The correct answer to the question.
+        explanation: Detailed explanation of the correct answer.
+        difficulty: Difficulty level ("easy", "medium", "hard").
+                  Default: "medium"
+        key_concept_id: Optional reference to the related key concept in the database.
+        source_page: Page number in the source document (for PDFs).
+        source_text: The original text from which the question was generated.
+    """
+    question: str = Field(..., description="The question text or flashcard front side")
+    question_type: str = Field(
+        default="MCQ",
+        description="Type of question/flashcard (MCQ, true_false, short_answer)",
+        example="MCQ"
+    )
+    options: List[str] = Field(
+        default_factory=list,
+        alias="distractors",
+        description="List of answer choices (for MCQ questions)"
+    )
+    correct_answer: str = Field(..., description="The correct answer to the question")
+    explanation: str = Field(
+        default="",
+        description="Detailed explanation of the correct answer"
+    )
+    difficulty: str = Field(
+        default="medium",
+        description="Difficulty level (easy, medium, hard)",
+        example="medium"
+    )
+    key_concept_id: Optional[int] = Field(
+        default=None,
+        description="Reference to the related key concept in the database"
+    )
+    source_page: Optional[int] = Field(
+        default=None,
+        description="Page number in the source document (for PDFs)"
+    )
+    source_text: Optional[str] = Field(
+        default=None,
+        description="Original text from which the question was generated"
+    )
     
     class Config:
         allow_population_by_field_name = True
@@ -107,11 +197,54 @@ class QuizResult(BaseModel):
     estimated_time_minutes: int
 
 class QuizAgent(BaseAgent[QuizConfig]):
-    """Agent for generating and managing quizzes from content.
+    """
+    Agent for generating and managing quizzes and flashcards from content.
     
-    This agent handles the generation of quiz questions from document content,
-    supporting multiple question types and difficulty levels. It's designed to
-    work with the files API to generate and store quiz questions.
+    The QuizAgent is a core component of SynTextAI that transforms educational
+    content into interactive assessment materials. It supports multiple question
+    formats, difficulty levels, and integrates with the system's key concept
+    framework to create pedagogically sound assessments.
+    
+    Key Features:
+    - Generates multiple question types (MCQ, True/False, short answer)
+    - Creates various flashcard formats (basic, MCQ, true/false)
+    - Supports configurable difficulty levels
+    - Includes detailed explanations for answers
+    - Tracks source content and key concepts
+    - Integrates with the database for persistent storage
+    
+    The agent follows a two-step process:
+    1. Extracts key concepts from the content (or uses provided ones)
+    2. Generates assessment items based on the concepts and configuration
+    
+    Example:
+        ```python
+        # Initialize with custom configuration
+        config = QuizConfig(
+            num_questions=10,
+            difficulty="hard",
+            question_types=["MCQ", "true_false"],
+            max_flashcards=20,
+            flashcard_types=["basic", "mcq"]
+        )
+        agent = QuizAgent(config)
+        
+        # Generate quiz questions
+        quiz_result = await agent.process({
+            "action": "generate_questions",
+            "file_id": 123,
+            "file_content": "Educational content...",
+            "count": 5,
+            "difficulty": "medium"
+        })
+        
+        # Generate flashcards
+        flashcard_result = await agent.process({
+            "action": "generate_flashcards",
+            "file_id": 123,
+            "count": 10
+        })
+        ```
     """
     
     @classmethod

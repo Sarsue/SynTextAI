@@ -1,8 +1,36 @@
 """
-Summarization Agent for generating structured summaries and key concepts.
+Summarization Agent for generating structured summaries and key concept extraction.
 
-This agent processes content chunks and generates comprehensive summaries,
-extracts key concepts, and provides structured outputs for further analysis.
+This module provides the SummarizationAgent class which is responsible for processing
+content and generating comprehensive summaries, extracting key concepts, and providing
+structured outputs for further analysis in the SynTextAI system.
+
+The agent handles:
+- Content summarization at different comprehension levels
+- Key concept extraction with metadata
+- Language support for multiple languages
+- Integration with the DSPy framework for advanced NLP tasks
+- Structured output generation for downstream processing
+
+Example Usage:
+    ```python
+    # Initialize the agent
+    agent = SummarizationAgent()
+    
+    # Summarize content with custom settings
+    result = await agent.process({
+        "content": "Long form content to summarize...",
+        "file_id": "doc-123",
+        "language": "english",
+        "comprehension_level": "intermediate",
+        "max_summary_length": 1000,
+        "max_concepts": 10
+    })
+    
+    # Access the results
+    summary = result["summary"]
+    key_concepts = result["key_concepts"]
+    ```
 """
 import logging
 from typing import Dict, Any, List, Optional
@@ -18,14 +46,38 @@ from ..models.orm_models import KeyConcept
 logger = logging.getLogger(__name__)
 
 class SummarizationConfig(AgentConfig):
-    """Configuration for the Summarization Agent."""
+    """
+    Configuration for the Summarization Agent.
+    
+    This configuration class controls how the SummarizationAgent processes content
+    and generates summaries and key concepts.
+    
+    Attributes:
+        max_summary_length: Maximum length of the generated summary in characters.
+                           Default: 1000
+        max_concepts: Maximum number of key concepts to extract.
+                     Default: 10
+        language: Default language for summarization.
+                 Default: "English"
+        comprehension_level: Target comprehension level for the summary.
+                           One of: "beginner", "intermediate", "advanced"
+                           Default: "intermediate"
+        include_bullet_points: Whether to include bullet points in the summary.
+                             Default: True
+        include_citations: Whether to include citations in the summary.
+                         Default: True
+        temperature: Controls randomness in the LLM output.
+                   Lower values make outputs more deterministic.
+                   Range: 0.0 to 2.0
+                   Default: 0.3 (more focused, deterministic outputs)
+    """
     max_summary_length: int = 1000
     max_concepts: int = 10
     language: str = "English"
-    comprehension_level: str = "intermediate"  # beginner, intermediate, advanced
+    comprehension_level: str = "intermediate"
     include_bullet_points: bool = True
     include_citations: bool = True
-    temperature: float = 0.3  # Lower temperature for more focused, deterministic outputs
+    temperature: float = 0.3
 
 @agent("summarization", {
     "max_summary_length": 1000,
@@ -35,10 +87,46 @@ class SummarizationConfig(AgentConfig):
 })
 class SummarizationAgent(BaseAgent[SummarizationConfig]):
     """
-    Agent responsible for generating structured summaries and key concepts.
+    Agent for generating structured summaries and extracting key concepts from content.
     
-    This agent processes content chunks and generates comprehensive summaries,
-    extracts key concepts, and provides structured outputs for further analysis.
+    The SummarizationAgent is a core component of SynTextAI that processes content
+    and generates comprehensive summaries at different comprehension levels while
+    extracting and structuring key concepts for enhanced learning and analysis.
+    
+    Key Features:
+    - Multi-level summarization (beginner, intermediate, advanced)
+    - Key concept extraction with relevance scoring
+    - Support for multiple languages
+    - Integration with DSPy for advanced NLP capabilities
+    - Configurable output formatting
+    
+    The agent uses a two-step process:
+    1. Generates a comprehensive summary of the input content
+    2. Extracts and structures key concepts with metadata
+    
+    Example:
+        ```python
+        # Initialize with custom configuration
+        config = SummarizationConfig(
+            max_summary_length=1500,
+            max_concepts=15,
+            language="english",
+            comprehension_level="intermediate",
+            temperature=0.3
+        )
+        agent = SummarizationAgent(config)
+        
+        # Process content
+        result = await agent.process({
+            "content": "Long form content to analyze...",
+            "file_id": "doc-123",
+            "metadata": {"title": "Sample Content"}
+        })
+        
+        # Access results
+        summary = result["summary"]
+        concepts = result["key_concepts"]
+        ```
     """
     
     def __init__(self, config: Optional[SummarizationConfig] = None):
@@ -48,19 +136,52 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
     
     async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
         """
-        Process the input content and generate a structured summary.
+        Process the input content and generate a structured summary with key concepts.
+        
+        This is the main entry point for the SummarizationAgent. It processes the input
+        content, generates a summary at the specified comprehension level, and extracts
+        key concepts with metadata.
         
         Args:
             input_data: Dictionary containing:
-                - content: The content to summarize (string or list of chunks)
-                - file_id: Optional ID of the file these concepts belong to
-                - language: Optional language override
-                - comprehension_level: Optional level override
-                - Additional metadata
-            db: Optional SQLAlchemy session for database operations
+                content (str|List[str]): The content to summarize. Can be a single string
+                                       or a list of content chunks.
+                file_id (str, optional): ID of the file these concepts belong to.
+                language (str, optional): Language code for the summary (e.g., "english",
+                                        "spanish"). Overrides the default from config.
+                comprehension_level (str, optional): Target comprehension level.
+                                                   One of: "beginner", "intermediate", "advanced".
+                                                   Overrides the default from config.
+                max_summary_length (int, optional): Maximum length of the summary in characters.
+                                                  Overrides the default from config.
+                max_concepts (int, optional): Maximum number of key concepts to extract.
+                                            Overrides the default from config.
+                metadata (dict, optional): Additional metadata about the content.
                 
+            db (Session, optional): SQLAlchemy session for database operations.
+                                  Required if storing concepts in the database.
+                                  
         Returns:
-            Dictionary containing the structured summary and key concepts
+            Dict[str, Any]: A dictionary containing:
+                - status (str): "success" or "error"
+                - summary (dict): Generated summary with metadata
+                - key_concepts (list): Extracted key concepts with metadata
+                - file_id (str): The file ID if provided in input
+                - error (str, optional): Error message if processing failed
+                
+        Raises:
+            AgentError: If input validation fails or processing encounters an error
+            
+        Example:
+            ```python
+            result = await agent.process({
+                "content": "Long form content...",
+                "file_id": "doc-123",
+                "language": "english",
+                "comprehension_level": "intermediate",
+                "metadata": {"title": "Sample Document"}
+            })
+            ```
         """
         try:
             # Validate input

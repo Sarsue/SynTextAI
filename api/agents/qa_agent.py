@@ -1,10 +1,39 @@
 """
-Q&A Agent for answering questions about content.
+Q&A Agent for answering questions about content with source citations.
 
-This agent handles question answering by:
-1. Retrieving relevant chunks from the database
-2. Optionally searching the web for additional context
-3. Using LLM to generate accurate, source-cited answers
+This module provides the QAAgent class which is responsible for generating
+accurate, source-cited answers to user questions by combining information
+from multiple sources including the document database and web search results.
+
+Key Features:
+- Semantic search for relevant document chunks
+- Web search integration for additional context
+- Source citation with page numbers and confidence scores
+- Follow-up question suggestions
+- Configurable search parameters and response generation
+
+Example Usage:
+    ```python
+    # Initialize the agent
+    qa_agent = QAAgent()
+    
+    # Answer a question about a specific document
+    result = await qa_agent.process(
+        question="What are the key findings in this document?",
+        file_id="doc_123",
+        store=db_store
+    )
+    
+    if result["status"] == "success":
+        answer = result["result"]
+        print(f"Answer: {answer.answer}")
+        print(f"Confidence: {answer.confidence:.1%}")
+        print("\nSources:")
+        for source in answer.sources:
+            print(f"- {source['title']} (page {source.get('page', 'N/A')})")
+    else:
+        print(f"Error: {result['error']}")
+    ```
 """
 from typing import Dict, Any, List, Optional, Tuple, Union
 import json
@@ -23,50 +52,92 @@ from ..services.web_search_service import web_search_service
 logger = logging.getLogger(__name__)
 
 class QAConfig(AgentConfig):
-    """Configuration for the Q&A Agent."""
+    """
+    Configuration for the Q&A Agent.
+    
+    This configuration class controls how the QAAgent generates answers,
+    including search parameters, source inclusion, and response formatting.
+    
+    Attributes:
+        max_tokens: Maximum length of generated answers in tokens.
+                   Range: 50-4000
+                   Default: 1000
+        temperature: Controls randomness in response generation.
+                    0.0 = deterministic, 1.0 = creative.
+                    Range: 0.0-1.0
+                    Default: 0.3
+        include_sources: Whether to include source citations in answers.
+                       Default: True
+        max_sources: Maximum number of sources to cite in responses.
+                   Range: 1-10
+                   Default: 5
+        max_web_results: Maximum web search results to include as context.
+                       Set to 0 to disable web search.
+                       Range: 0-10
+                       Default: 3
+        similarity_threshold: Minimum relevance score for including content chunks.
+                            Higher values make the search more strict.
+                            Range: 0.0-1.0
+                            Default: 0.7
+        use_web_search: Whether to augment answers with web search results.
+                       Can be overridden per query.
+                       Default: True
+        max_chunks: Maximum number of content chunks to include in context.
+                   More chunks provide more context but increase token usage.
+                   Range: 1-50
+                   Default: 10
+    """
     max_tokens: int = Field(
         default=1000,
         description="Maximum number of tokens for the answer",
         ge=50,
-        le=4000
+        le=4000,
+        example=1000
     )
     temperature: float = Field(
         default=0.3,
-        description="Temperature for response generation",
+        description="Temperature for response generation (0.0-1.0)",
         ge=0.0,
-        le=1.0
+        le=1.0,
+        example=0.3
     )
     include_sources: bool = Field(
         default=True,
-        description="Whether to include source citations in the answer"
+        description="Whether to include source citations in the answer",
+        example=True
     )
     max_sources: int = Field(
         default=5,
-        description="Maximum number of sources to include",
+        description="Maximum number of sources to include (1-10)",
         ge=1,
-        le=10
+        le=10,
+        example=5
     )
     max_web_results: int = Field(
         default=3,
-        description="Maximum number of web search results to include",
+        description="Maximum web search results to include (0-10)",
         ge=0,
-        le=10
+        le=10,
+        example=3
     )
     similarity_threshold: float = Field(
         default=0.7,
-        description="Minimum similarity score for including a chunk",
+        description="Minimum similarity score for including a chunk (0.0-1.0)",
         ge=0.0,
-        le=1.0
+        le=1.0,
+        example=0.7
     )
     use_web_search: bool = Field(
         default=True,
-        description="Whether to use web search for additional context"
+        description="Whether to use web search for additional context",
+        example=True
     )
     max_chunks: int = Field(
         default=10,
-        description="Maximum number of chunks to include in context",
+        description="Maximum number of chunks to include in context (1-50)",
         ge=1,
-        le=50
+        le=50,
+        example=10
     )
     
     @validator('temperature')
@@ -76,24 +147,63 @@ class QAConfig(AgentConfig):
         return v
 
 class QAResult(BaseModel):
-    """Model representing a Q&A response."""
-    answer: str = Field(..., description="The generated answer to the question")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score of the answer")
+    """
+    Model representing a Q&A response with metadata and sources.
+    
+    This model structures the response from the QAAgent, including the generated
+    answer, confidence score, source citations, and related information.
+    
+    Attributes:
+        answer: The generated answer to the question, formatted in Markdown.
+        confidence: Confidence score of the answer (0.0-1.0).
+        sources: List of source documents or web pages used to generate the answer.
+               Each source includes metadata like title, URL, and page number.
+        suggested_questions: List of follow-up questions that might provide
+                          additional relevant information.
+        search_queries: The actual search queries used to retrieve information.
+        generated_at: ISO 8601 timestamp of when the answer was generated.
+    """
+    answer: str = Field(
+        ...,
+        description="The generated answer to the question (Markdown formatted)",
+        example="The key findings indicate that regular exercise can reduce the risk of..."
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score of the answer (0.0-1.0)",
+        example=0.92
+    )
     sources: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="List of sources used to generate the answer"
+        description="List of sources used to generate the answer with metadata",
+        example=[
+            {
+                "title": "The Effects of Exercise on Health",
+                "url": "https://example.com/exercise-health",
+                "page": 42,
+                "source_type": "document"
+            }
+        ]
     )
     suggested_questions: List[str] = Field(
         default_factory=list,
-        description="List of follow-up questions suggested by the model"
+        description="List of follow-up questions suggested by the model",
+        example=[
+            "What are the specific health benefits mentioned?",
+            "Are there any recommended exercise routines?"
+        ]
     )
     search_queries: List[str] = Field(
         default_factory=list,
-        description="Search queries used to find relevant information"
+        description="Search queries used to find relevant information",
+        example=["effects of exercise on health benefits"]
     )
     generated_at: str = Field(
         default_factory=lambda: datetime.utcnow().isoformat(),
-        description="Timestamp when the answer was generated"
+        description="ISO 8601 timestamp when the answer was generated",
+        example="2025-08-01T23:25:57.123456"
     )
     
     class Config:
@@ -120,13 +230,63 @@ class QAResult(BaseModel):
 
 class QAAgent(BaseAgent[QAConfig]):
     """
-    Agent for answering questions using content from the database and web search.
+    Agent for answering questions with source citations and context awareness.
     
-    This agent:
-    1. Retrieves relevant content chunks from the database using semantic search
-    2. Optionally searches the web for additional context
-    3. Generates accurate, source-cited answers using the LLM
-    4. Provides follow-up questions and source references
+    The QAAgent provides accurate, well-sourced answers to user questions by:
+    1. Performing semantic search across document chunks
+    2. Augmenting with web search results when beneficial
+    3. Generating clear, well-structured responses with proper citations
+    4. Suggesting relevant follow-up questions
+    
+    Key Features:
+    - Semantic understanding of questions and content
+    - Multi-source evidence gathering
+    - Confidence scoring for answers
+    - Source citation with page numbers
+    - Follow-up question generation
+    - Configurable search and generation parameters
+    
+    The agent follows a multi-step process to ensure high-quality answers:
+    1. Question analysis and query generation
+    2. Content retrieval from multiple sources
+    3. Context preparation and evidence synthesis
+    4. Answer generation with proper attribution
+    5. Confidence scoring and source citation
+    
+    Example:
+        ```python
+        # Initialize with custom configuration
+        config = QAConfig(
+            max_tokens=1500,
+            temperature=0.2,
+            max_sources=3,
+            use_web_search=True
+        )
+        qa_agent = QAAgent(config)
+        
+        # Answer a question with context
+        result = await qa_agent.process(
+            question="What are the main benefits of the proposed solution?",
+            file_id="doc_456",
+            store=db_store,
+            context={"user_id": "user_123"}
+        )
+        
+        # Process the result
+        if result["status"] == "success":
+            answer = result["result"]
+            print(f"Answer: {answer.answer}")
+            print(f"Confidence: {answer.confidence:.1%}")
+            
+            if answer.sources:
+                print("\nSources:")
+                for i, source in enumerate(answer.sources, 1):
+                    print(f"{i}. {source.get('title', 'Untitled')}")
+                    if 'url' in source:
+                        print(f"   URL: {source['url']}")
+                    if 'page' in source:
+                        print(f"   Page: {source['page']}")
+        ```
     """
     
     @classmethod
@@ -140,7 +300,10 @@ class QAAgent(BaseAgent[QAConfig]):
         file_id: Optional[str] = None,
         store: Optional[Any] = None,
         context: Optional[Dict[str, Any]] = None,
-        use_web_search: Optional[bool] = None
+        use_web_search: Optional[bool] = None,
+        chat_history: Optional[str] = None,
+        user_id: Optional[str] = None,
+        history_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Answer a question using content from the database and optionally the web.
@@ -151,13 +314,17 @@ class QAAgent(BaseAgent[QAConfig]):
             store: Database store instance
             context: Additional context for the question
             use_web_search: Override the default web search setting
+            chat_history: Formatted chat history as a string
+            user_id: ID of the user making the query
+            history_id: ID of the chat history (generated if not provided)
             
         Returns:
             Dictionary containing the answer and related information:
             {
                 "status": "success"|"error",
                 "result": QAResult if success else None,
-                "error": str if error else None
+                "error": str if error else None,
+                "history_id": str  # ID of the chat history
             }
         """
         try:
@@ -165,51 +332,89 @@ class QAAgent(BaseAgent[QAConfig]):
                 raise ValueError("Question cannot be empty")
             
             logger.info(f"Processing question: {question}")
-            
-            # Step 1: Retrieve relevant chunks from the database
-            chunks = []
-            if file_id and store:
-                chunks = await self._retrieve_relevant_chunks(question, file_id, store)
-            
-            # Step 2: Search the web for additional context if enabled
-            web_results = []
-            search_queries = []
-            
-            # Determine if we should use web search
-            should_use_web_search = (
-                use_web_search if use_web_search is not None 
-                else self.config.use_web_search
-            )
-            
-            if should_use_web_search:
-                web_results, search_queries = await self._search_web(question)
-            
-            # Step 3: Prepare context from all sources
-            prepared_context = await self._prepare_context(
-                question=question,
-                chunks=chunks,
-                web_results=web_results,
-                additional_context=context or {}
-            )
-            
-            # Add search queries to context for the prompt
-            if search_queries:
-                prepared_context["search_queries"] = search_queries
-            
-            # Step 4: Generate answer using LLM
-            answer = await self._generate_answer(question, prepared_context)
-            
-            # Ensure search queries are included in the result
-            if search_queries and hasattr(answer, 'search_queries'):
-                answer.search_queries = search_queries
-            
-            return {
-                "status": "success",
-                "result": answer.model_dump() if hasattr(answer, 'model_dump') else answer
-            }
+            try:
+                # Step 1: Get relevant chunks from the database
+                chunks = []
+                if file_id and store:
+                    chunks = await self._retrieve_relevant_chunks(question, file_id, store)
+                
+                # Step 2: Get web search results if enabled
+                web_results = []
+                search_queries = []
+                if (use_web_search if use_web_search is not None else self.config.use_web_search):
+                    web_results, search_queries = await self._search_web(question)
+                
+                # Step 3: Prepare context for the LLM
+                prepared_context = await self._prepare_context(
+                    question=question,
+                    chunks=chunks,
+                    web_results=web_results,
+                    additional_context={
+                        **(context or {}),
+                        "chat_history": chat_history or "",
+                        "user_id": user_id or ""
+                    }
+                )
+                
+                # Add search queries to context for the prompt
+                if search_queries:
+                    prepared_context["search_queries"] = search_queries
+                
+                # Step 4: Generate answer using LLM
+                answer = await self._generate_answer(question, prepared_context)
+                
+                # Ensure search queries are included in the result
+                if search_queries and hasattr(answer, 'search_queries'):
+                    answer.search_queries = search_queries
+                
+                # Convert answer to dict if it's a Pydantic model
+                answer_dict = answer.model_dump() if hasattr(answer, 'model_dump') else answer
+                
+                # Handle chat history if store is provided
+                if store and hasattr(store, 'chat_repo'):
+                    # Generate history_id if not provided
+                    history_id = history_id or str(uuid.uuid4())
+                    
+                    # Save the interaction to chat history
+                    chat_message = {
+                        'user_id': user_id,
+                        'history_id': history_id,
+                        'user_message': question,
+                        'assistant_message': answer_dict.get('answer', 'I could not generate a response.'),
+                        'context': json.dumps(answer_dict.get('context', {})),
+                        'metadata': {
+                            'model': 'qa_agent',
+                            'language': context.get('language', 'en') if context else 'en',
+                            'comprehension_level': context.get('comprehension_level', 'intermediate') if context else 'intermediate',
+                            'sources': answer_dict.get('sources', [])
+                        }
+                    }
+                    
+                    try:
+                        await store.chat_repo.add_chat_message(chat_message)
+                    except Exception as e:
+                        logger.error(f"Failed to save chat message: {e}")
+                    
+                    # Include history_id in the response
+                    answer_dict['history_id'] = history_id
+                
+                return {
+                    "status": "success",
+                    "result": answer_dict,
+                    "history_id": history_id if 'history_id' in locals() else None
+                }
+                
+            except Exception as e:
+                logger.error(f"Error generating answer: {str(e)}", exc_info=True)
+                return {
+                    "status": "error",
+                    "result": None,
+                    "error": str(e),
+                    "history_id": None
+                }
             
         except Exception as e:
-            logger.error(f"Error generating answer: {str(e)}", exc_info=True)
+            logger.error(f"Error processing question: {str(e)}", exc_info=True)
             return {
                 "status": "error",
                 "error": str(e),

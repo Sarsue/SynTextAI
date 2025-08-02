@@ -1,8 +1,39 @@
 """
-Ingestion Agent for processing various content types.
+Ingestion Agent for processing and normalizing various content types.
 
-This agent handles the ingestion of different content types (PDF, YouTube, text, URLs)
-and converts them into a standardized format for further processing.
+This module provides the IngestionAgent class which is responsible for ingesting content
+from various sources (PDFs, YouTube videos, text, and URLs) and converting them into a
+standardized format suitable for further processing by other agents in the SynTextAI system.
+
+The agent handles:
+- PDF document processing and text extraction
+- YouTube video metadata and transcript retrieval
+- Text content normalization
+- Web page content extraction from URLs
+- Chunking of large documents
+- Optional embedding generation
+- Integration with the SummarizationAgent for content analysis
+
+Example Usage:
+    ```python
+    # Initialize the agent
+    agent = IngestionAgent()
+    
+    # Process a PDF file
+    result = await agent.process({
+        "source_type": "pdf",
+        "file_path": "/path/to/document.pdf",
+        "file_id": "unique-file-id",
+        "metadata": {"title": "Sample Document"}
+    })
+    
+    # Process a YouTube video
+    result = await agent.process({
+        "source_type": "youtube",
+        "url": "https://www.youtube.com/watch?v=example",
+        "file_id": "unique-youtube-id"
+    })
+    ```
 """
 import logging
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Union
@@ -24,22 +55,76 @@ from ..services.llm_service import llm_service
 logger = logging.getLogger(__name__)
 
 class IngestionConfig(AgentConfig):
-    """Configuration for the Ingestion Agent."""
+    """
+    Configuration for the Ingestion Agent.
+    
+    This configuration class defines parameters that control how the IngestionAgent
+    processes different types of content.
+    
+    Attributes:
+        max_chunk_size: Maximum size (in characters) for each content chunk.
+                        Default: 4000
+        chunk_overlap: Number of characters to overlap between chunks.
+                      Default: 200
+        supported_types: List of supported content types.
+                       Default: ["pdf", "youtube", "text", "url"]
+        timeout: Maximum processing time in seconds before timing out.
+                Default: 300 (5 minutes)
+        generate_embeddings: Whether to generate embeddings during ingestion.
+                           Default: True
+        embedding_provider: Specific embedding provider to use ('mistral', 'google').
+                          If None, uses the default provider.
+                          Default: None
+        embedding_batch_size: Number of chunks to process in each embedding batch.
+                            Default: 10
+    """
     max_chunk_size: int = 4000
     chunk_overlap: int = 200
     supported_types: list = ["pdf", "youtube", "text", "url"]
     timeout: int = 300  # 5 minutes timeout for ingestion
-    generate_embeddings: bool = True  # Whether to generate embeddings during ingestion
-    embedding_provider: Optional[str] = None  # Force specific embedding provider (mistral, google)
-    embedding_batch_size: int = 10  # Number of chunks to process in each embedding batch
+    generate_embeddings: bool = True
+    embedding_provider: Optional[str] = None
+    embedding_batch_size: int = 10
 
 @agent("ingestion", {"max_chunk_size": 4000, "chunk_overlap": 200})
 class IngestionAgent(BaseAgent[IngestionConfig]):
     """
-    Agent responsible for ingesting content from various sources.
+    Agent responsible for ingesting and normalizing content from various sources.
     
-    This agent handles different content types and processes them into a
-    standardized format for further analysis and processing.
+    The IngestionAgent serves as the entry point for all content processing in SynTextAI.
+    It handles different content types (PDFs, YouTube videos, text, and URLs) and
+    converts them into a standardized format suitable for further processing by
+    specialized agents (e.g., SummarizationAgent, QuizAgent).
+    
+    Key Features:
+    - Content type detection and routing
+    - Document chunking with configurable size and overlap
+    - Metadata extraction and normalization
+    - Optional embedding generation
+    - Integration with external services (YouTube API, web scrapers, etc.)
+    - Progress tracking and error handling
+    
+    The agent maintains a registry of processor functions for different content types
+    and automatically selects the appropriate one based on the input source_type.
+    
+    Example:
+        ```python
+        # Initialize with custom configuration
+        config = IngestionConfig(
+            max_chunk_size=3000,
+            chunk_overlap=300,
+            generate_embeddings=True
+        )
+        agent = IngestionAgent(config)
+        
+        # Process content
+        result = await agent.process({
+            "source_type": "pdf",
+            "file_path": "document.pdf",
+            "file_id": "doc-123",
+            "metadata": {"title": "Sample Document"}
+        })
+        ```
     """
     
     def __init__(self, config: Optional[IngestionConfig] = None):
@@ -53,65 +138,137 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
         # Initialize SummarizationAgent with default config
         self.summarization_agent = SummarizationAgent(SummarizationConfig())
     
+    async def _process_pdf_new(self, file_path: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        New implementation of PDF processing with explicit file path.
+        
+        Args:
+            file_path: Path to the PDF file
+            metadata: Dictionary containing metadata about the PDF
+                
+        Returns:
+            Dictionary containing processed content with chunks and metadata
+        """
+        try:
+            # Use existing process_pdf utility with the new signature
+            result = await process_pdf(
+                content=file_path,
+                chunk_size=self.config.max_chunk_size,
+                chunk_overlap=self.config.chunk_overlap
+            )
+            
+            # Ensure metadata is properly set
+            if 'metadata' not in result:
+                result['metadata'] = {}
+                
+            result['metadata'].update({
+                'source_type': 'pdf',
+                'original_filename': metadata.get('filename', 'document.pdf')
+            })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in _process_pdf_new: {str(e)}")
+            raise AgentError(f"Failed to process PDF: {str(e)}")
+
+    async def _process_youtube_new(self, video_url: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        New implementation of YouTube processing with explicit URL.
+        
+        Args:
+            video_url: URL of the YouTube video
+            metadata: Dictionary containing metadata about the video
+                
+        Returns:
+            Dictionary containing processed content with chunks and metadata
+        """
+        try:
+            # Use existing process_youtube utility with the new signature
+            result = await process_youtube(
+                video_url=video_url,
+                chunk_size=self.config.max_chunk_size,
+                chunk_overlap=self.config.chunk_overlap
+            )
+            
+            # Ensure metadata is properly set
+            if 'metadata' not in result:
+                result['metadata'] = {}
+                
+            result['metadata'].update({
+                'source_type': 'youtube',
+                'source_url': video_url
+            })
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in _process_youtube_new: {str(e)}")
+            raise AgentError(f"Failed to process YouTube video: {str(e)}")
+
     async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
         """
-        Process the input data based on its source type.
+        Process the input data based on source type.
+        
+        Supports both old-style (dictionary input) and new-style (explicit args) calls.
         
         Args:
             input_data: Dictionary containing:
                 - source_type: Type of the source (pdf, youtube, text, url)
-                - content: The content to process
-                - file_id: Optional ID of the file being processed (required for database storage)
-                - Additional metadata specific to the source type
+                - content: The content to process (for old style)
+                - file_path: Path to the file (for new style PDF processing)
+                - url: YouTube URL (for new style YouTube processing)
+                - file_id: Optional ID of the file being processed
+                - metadata: Optional dictionary of metadata
             db: Optional SQLAlchemy session for database operations
                 
         Returns:
             Dictionary containing the processed content and metadata
         """
-        source_type = input_data.get("source_type", "").lower()
-        file_id = input_data.get("file_id")
-        
-        if source_type not in self.config.supported_types:
-            raise AgentError(
-                f"Unsupported source type: {source_type}. "
-                f"Supported types: {', '.join(self.config.supported_types)}"
-            )
-        
-        logger.info(f"Processing {source_type} content")
-        processor = self._processors.get(source_type)
-        if not processor:
-            raise AgentError(f"No processor found for source type: {source_type}")
-        
         try:
-            # Process the content using the appropriate processor
-            result = await processor(input_data)
+            source_type = input_data.get("source_type")
+            file_id = input_data.get("file_id")
+            
+            if not source_type:
+                raise AgentError("No source_type specified in input data")
+                
+            # Handle new-style calls first
+            if source_type == "pdf" and "file_path" in input_data:
+                result = await self._process_pdf_new(
+                    file_path=input_data["file_path"],
+                    metadata=input_data.get("metadata", {})
+                )
+            elif source_type == "youtube" and "url" in input_data:
+                result = await self._process_youtube_new(
+                    video_url=input_data["url"],
+                    metadata=input_data.get("metadata", {})
+                )
+            else:
+                # Fall back to original processor for other cases
+                if source_type not in self.config.supported_types:
+                    raise AgentError(f"Unsupported source type: {source_type}")
+                    
+                processor = self._processors[source_type]
+                result = await processor(input_data)
             
             # Generate embeddings if enabled
-            if self.config.generate_embeddings and isinstance(result, dict) and 'chunks' in result:
-                chunks = result['chunks']
-                if chunks and isinstance(chunks, list) and len(chunks) > 0:
-                    await self._generate_chunk_embeddings(chunks)
+            if self.config.generate_embeddings and "chunks" in result:
+                await self._generate_chunk_embeddings(result["chunks"])
             
-            # Process text content with SummarizationAgent if available
-            if isinstance(result, dict) and 'text' in result:
-                context = {
-                    'source_type': source_type,
-                    'title': result.get('metadata', {}).get('title', ''),
-                    'language': input_data.get('language', 'english'),
-                    'comprehension_level': input_data.get('comprehension_level', 'intermediate')
-                }
-                
-                # Prepare input for summarization agent
+            # Generate summary and key concepts if we have content
+            content = input_data.get("content") or input_data.get("file_path") or input_data.get("url")
+            if content:
+                # Prepare summarization input with required fields
                 summarization_input = {
-                    'content': result['text'],
-                    'file_id': file_id,
-                    'language': context['language'],
-                    'comprehension_level': context['comprehension_level']
+                    "content": content,
+                    "source_type": source_type,
+                    "language": input_data.get("language", "english"),
+                    "comprehension_level": input_data.get("comprehension_level", "intermediate"),
+                    "metadata": input_data.get("metadata", {})
                 }
                 
-                # Process with SummarizationAgent
                 summarization_result = await self.summarization_agent.process(
-                    summarization_input,
+                    input_data=summarization_input,
                     db=db
                 )
                 

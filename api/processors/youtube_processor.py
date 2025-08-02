@@ -5,7 +5,13 @@ import asyncio
 import logging
 import os
 import re
+import tempfile
+import time
+import shutil
 from typing import Dict, List, Any, Optional, Tuple
+
+# Third-party imports
+import yt_dlp
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
@@ -291,14 +297,14 @@ class YouTubeProcessor(FileProcessor):
         Returns:
             List of transcript segments or None if failed
         """
-        from ..tasks import download_youtube_audio_segment, transcribe_audio_chunked, adapt_whisper_segments_to_transcript_data
+        from ..tasks import transcribe_audio_chunked, adapt_whisper_segments_to_transcript_data
         
         temp_audio_file_path = None
         try:
             logger.info(f"Attempting fallback to local Whisper transcription for video ID: {video_id}")
             
             # Download YouTube audio
-            temp_audio_file_path = download_youtube_audio_segment(video_id, language_code_for_whisper=target_lang_code)
+            temp_audio_file_path = await self._download_youtube_audio_segment(video_id, target_lang_code)
             if not temp_audio_file_path:
                 logger.error(f"Failed to download audio for video ID {video_id}.")
                 return None
