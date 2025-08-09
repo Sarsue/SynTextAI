@@ -26,44 +26,56 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 from dotenv import load_dotenv
 
-# Add the parent directory to sys.path to fix imports
-base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, base_dir)
+# Configure Python path and environment variables
+try:
+    # First try to import setup_paths normally
+    import setup_paths  # noqa: F401
+except ImportError:
+    # If that fails, try adding the project root to the path
+    import sys
+    import os
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    print(f"[DEBUG] setup_paths import failed, adding {project_root} to sys.path")
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    
+    # Try importing again
+    try:
+        import setup_paths  # noqa: F401
+        print("[DEBUG] Successfully imported setup_paths after path adjustment")
+    except ImportError as e:
+        print(f"[WARNING] Could not import setup_paths: {e}")
+        print("[WARNING] Continuing without setup_paths, environment variables may not be loaded")
 
-# Load environment variables from .env file in the project root
-env_path = os.path.join(base_dir, '.env')
-if os.path.exists(env_path):
-    load_dotenv(dotenv_path=env_path)
-    print(f"Loaded environment variables from {env_path}")
-else:
-    print(f"Warning: .env file not found at {env_path}")
-    # Try to load from default location as fallback
-    load_dotenv()
+# Standard library imports
+import asyncio
+import json
+import logging
+import os
+import signal
+import sys
+import time
+import traceback
+from datetime import datetime, timedelta
 
-# Import after environment setup
+# Third-party imports
+import aiohttp
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
+# Application imports
 from api.models.orm_models import File, User
 from api.repositories.repository_manager import RepositoryManager
 from api.services.agent_service import AgentService
 from api.services.llm_service import LLMService
 from api.services.embedding_service import EmbeddingService
-from api.websocket.websocket_manager import WebSocketManager
 
-# Add the parent directory to sys.path to fix imports
-base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, base_dir)
-
-# Load environment variables from .env file in the project root
-env_path = os.path.join(base_dir, '.env')
-if os.path.exists(env_path):
-    load_dotenv(dotenv_path=env_path)
-    print(f"Loaded environment variables from {env_path}")
-else:
-    print(f"Warning: .env file not found at {env_path}")
-    # Try to load from default location as fallback
-    load_dotenv()
+# WebSocket imports
+try:
+    from api.websocket.websocket_manager import WebSocketManager
+except ImportError:
+    print("Warning: WebSocket manager not found. Real-time updates will be disabled.")
+    WebSocketManager = None
 
 # Verify required database configuration
 required_db_vars = [
@@ -98,8 +110,17 @@ API_NOTIFY_URL = os.getenv("API_NOTIFY_URL", "http://syntextaiapp:3000/api/v1/in
 # Initialize services
 llm_service = LLMService()
 embedding_service = EmbeddingService()
-agent_service = AgentService(llm_service=llm_service, embedding_service=embedding_service)
-websocket_manager = WebSocketManager()
+agent_service = AgentService()
+
+# WebSocket manager is optional
+websocket_manager = None
+try:
+    from api.websocket.websocket_manager import WebSocketManager
+    websocket_manager = WebSocketManager()
+    logger.info("WebSocket manager initialized successfully")
+except (ImportError, Exception) as e:
+    logger.warning(f"WebSocket manager not available: {str(e)}. Real-time updates will be disabled.")
+    websocket_manager = None
 
 async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
     """Send a notification to the main API via HTTP POST"""

@@ -56,8 +56,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p "$WHISPER_CACHE_DIR" && \
     python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
 
-# Copy application code
+# Copy setup files and install the package in development mode
+COPY setup.py .
+COPY setup_paths.py .
 COPY api/ ./api/
+RUN pip install -e .
 
 # Set environment variables for production
 ENV PYTHONPATH=/app \

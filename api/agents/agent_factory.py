@@ -110,7 +110,7 @@ class AgentFactory:
         return f"{name}:{config_hash}"
     
     @classmethod
-    def get_agent(
+    async def get_agent(
         cls, 
         name: str, 
         config: Optional[Dict[str, Any]] = None,
@@ -134,13 +134,26 @@ class AgentFactory:
         # Try to import the agent module if not registered
         if name not in cls._registry:
             try:
-                module_name = f"api.agents.{name}_agent"
-                importlib.import_module(module_name)
+                # Try with and without _agent suffix
+                module_names = [
+                    f"api.agents.{name}",
+                    f"api.agents.{name}_agent"
+                ]
+                
+                for module_name in module_names:
+                    try:
+                        importlib.import_module(module_name)
+                        if name in cls._registry:
+                            break
+                    except ImportError:
+                        continue
+                
                 if name not in cls._registry:
                     raise ValueError(f"Agent {name} not found after importing module")
-            except ImportError as e:
-                logger.error(f"Failed to import agent {name}: {str(e)}")
-                raise ValueError(f"Unknown agent: {name}") from e
+                    
+            except Exception as e:
+                logger.error(f"Failed to import agent {name}: {str(e)}", exc_info=True)
+                raise ValueError(f"Failed to load agent {name}: {str(e)}") from e
         
         # Get agent metadata
         metadata = cls._registry.get(name)
@@ -171,7 +184,13 @@ class AgentFactory:
                     validated_config = final_config
                 
                 # Create and store the instance
-                cls._instances[instance_key] = metadata.agent_class(config=validated_config)
+                agent_instance = metadata.agent_class(config=validated_config)
+                
+                # Initialize the agent if it has an async initialize method
+                if hasattr(agent_instance, 'initialize') and callable(getattr(agent_instance, 'initialize')):
+                    await agent_instance.initialize()
+                
+                cls._instances[instance_key] = agent_instance
                 cls._instance_configs[instance_key] = final_config
                 
                 logger.debug(

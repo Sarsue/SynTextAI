@@ -6,8 +6,8 @@ handling input validation, agent invocation, and response formatting.
 """
 from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, status
-from ...api.agents.agent_factory import AgentFactory
-from ...api.agents.base_agent import AgentConfig
+from api.agents.agent_factory import AgentFactory
+from api.agents.base_agent import AgentConfig
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,14 +42,26 @@ class AgentService:
             
         Returns:
             Dict containing the processing results
+            
+        Raises:
+            HTTPException: If there's an error processing the content
         """
         try:
-            # Get the appropriate agent
-            agent = await self.agent_factory.create_agent(agent_name)
-            if not agent:
+            logger.info(f"Initializing agent: {agent_name}")
+            # Get the appropriate agent asynchronously
+            try:
+                agent = await self.agent_factory.get_agent(agent_name)
+                if not agent:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Unsupported agent type: {agent_name}"
+                    )
+                logger.info(f"Successfully initialized agent: {agent_name}")
+            except Exception as e:
+                logger.error(f"Failed to initialize agent {agent_name}: {str(e)}", exc_info=True)
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Unsupported agent type: {agent_name}"
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to initialize agent {agent_name}: {str(e)}"
                 )
             
             # Prepare input data for the agent
@@ -62,19 +74,32 @@ class AgentService:
                 **kwargs
             }
             
-            # Process the content
-            result = await agent.process(input_data)
-            
-            # Ensure the result has the expected structure
-            if not isinstance(result, dict) or "status" not in result:
-                raise ValueError("Invalid response format from agent")
+            logger.debug(f"Processing content with {agent_name} agent")
+            # Process the content asynchronously
+            try:
+                result = await agent.process(input_data)
                 
-            return result
+                # Ensure the result has the expected structure
+                if not isinstance(result, dict) or "status" not in result:
+                    logger.warning(f"Unexpected response format from {agent_name} agent")
+                    result = {
+                        "status": "success",
+                        "result": result
+                    }
+                
+                return result
+                
+            except Exception as e:
+                logger.error(f"Error in {agent_name} agent processing: {str(e)}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Agent processing error: {str(e)}"
+                )
             
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error processing content with {agent_name} agent: {str(e)}", exc_info=True)
+            logger.error(f"Unexpected error in process_content: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error processing content: {str(e)}"

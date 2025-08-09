@@ -57,6 +57,7 @@ class KeyConceptUpdate(BaseModel):
 
 class KeyConceptResponse(BaseModel):
     id: int
+    file_id: int  # Added missing field
     concept_title: str = Field(alias='concept_title')
     concept_explanation: str = Field(alias='concept_explanation')
     # Add aliases for backward compatibility with frontend
@@ -65,6 +66,9 @@ class KeyConceptResponse(BaseModel):
     source_page_number: Optional[int] = None
     source_video_timestamp_start_seconds: Optional[int] = None
     source_video_timestamp_end_seconds: Optional[int] = None
+    is_custom: bool = False  # Added missing field
+    created_at: Optional[datetime] = None  # Added missing field
+    updated_at: Optional[datetime] = None  # Added missing field
 
     class Config:
         from_attributes = True
@@ -91,6 +95,7 @@ class FlashcardResponse(BaseModel):
     file_id: int
     question: str
     answer: str
+    key_concept_id: Optional[int] = None
     difficulty: Optional[str] = None
     is_custom: bool = False
     created_at: Optional[datetime] = None

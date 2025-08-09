@@ -287,8 +287,13 @@ class LearningMaterialRepository(BaseRepository):
                 return result
                 
             except Exception as e:
-                logger.error(f"[ERROR] ORM query for key concepts failed: {e}", exc_info=True)
+                logger.error(f"Error getting key concepts for file {file_id}: {e}", exc_info=True)
                 return []
+
+    def get_key_concept_by_id(self, key_concept_id: int) -> Optional[KeyConceptORM]:
+        """Get a single key concept by its ID."""
+        with self.get_unit_of_work() as uow:
+            return uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == key_concept_id).first()
 
     def update_key_concept(self, concept_id: int, update_data: KeyConceptUpdate) -> Optional[dict]:
         """
@@ -304,21 +309,13 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             try:
                 # Get the concept with all its relationships loaded
-                concept = uow.session.query(KeyConceptORM).filter_by(id=concept_id).first()
+                concept = uow.session.query(KeyConceptORM).filter(KeyConceptORM.id == concept_id).one_or_none()
                 if not concept:
+                    logger.warning(f"Update failed: KeyConcept {concept_id} not found.")
                     return None
                 
-                # Update the concept with the new data
-                update_dict = update_data.dict(exclude_unset=True)
-                for key, value in update_dict.items():
-                    setattr(concept, key, value)
-                
-                # Save changes
-                uow.session.add(concept)
-                uow.session.commit()
-                
-                # Convert to dictionary before the session is closed
-                result = {
+                # Store current values before updating
+                current_values = {
                     'id': concept.id,
                     'file_id': concept.file_id,
                     'concept_title': concept.concept_title,
@@ -328,6 +325,23 @@ class LearningMaterialRepository(BaseRepository):
                     'source_video_timestamp_end_seconds': concept.source_video_timestamp_end_seconds,
                     'is_custom': concept.is_custom,
                     'created_at': concept.created_at,
+                    'updated_at': concept.updated_at
+                }
+                
+                # Update fields from the update_data model
+                update_dict = update_data.dict(exclude_unset=True)
+                for key, value in update_dict.items():
+                    setattr(concept, key, value)
+                
+                concept.updated_at = datetime.utcnow()
+                uow.session.commit()
+                
+                # Create result from current values and updates to ensure we don't access detached objects
+                result = {
+                    **current_values,
+                    **update_dict,
+                    'concept': update_dict.get('concept_title', current_values['concept_title']),  # For backward compatibility
+                    'explanation': update_dict.get('concept_explanation', current_values['concept_explanation']),  # For backward compatibility
                     'updated_at': concept.updated_at
                 }
                 
@@ -344,7 +358,7 @@ class LearningMaterialRepository(BaseRepository):
         with self.get_unit_of_work() as uow:
             try:
                 # Join with File to check ownership
-                concept_orm = uow.session.query(KeyConceptORM).join(KeyConceptORM.file).filter(
+                concept_orm = uow.session.query(KeyConceptORM).join(File).filter(
                     KeyConceptORM.id == key_concept_id,
                     File.user_id == user_id
                 ).first()
@@ -364,16 +378,16 @@ class LearningMaterialRepository(BaseRepository):
 
     # --- Flashcard Methods ---
 
-    def add_flashcard(self, file_id: int, flashcard_data: FlashcardCreate) -> Optional[FlashcardORM]:
+    def add_flashcard(self, file_id: int, flashcard_data: FlashcardCreate) -> Optional[Dict[str, Any]]:
         """
-        Add a new flashcard from a Pydantic model and return the ORM instance.
+        Add a new flashcard from a Pydantic model and return the flashcard data as a dictionary.
         
         Args:
             file_id: The ID of the file to associate with the flashcard
             flashcard_data: Pydantic model containing flashcard data
             
         Returns:
-            FlashcardORM: The newly created flashcard ORM instance, or None if creation failed
+            dict: A dictionary containing the flashcard data, or None if creation failed
         """
         with self.get_unit_of_work() as uow:
             try:
@@ -395,12 +409,25 @@ class LearningMaterialRepository(BaseRepository):
                 # Explicitly refresh to ensure we have all attributes
                 uow.session.refresh(new_flashcard)
                 
-                # Get the ID before the session is closed
-                flashcard_id = new_flashcard.id
-                logger.info(f"Successfully added flashcard for file {file_id}, id={flashcard_id}")
+                logger.info(f"Successfully added flashcard for file {file_id}, id={new_flashcard.id}")
                 
-                # Return the flashcard ID instead of the ORM object
-                return flashcard_id
+                # Return the flashcard data as a dictionary to avoid session detachment issues
+                # Only include fields that exist in the Flashcard model
+                flashcard_dict = {
+                    'id': new_flashcard.id,
+                    'file_id': new_flashcard.file_id,
+                    'question': new_flashcard.question,
+                    'answer': new_flashcard.answer,
+                    'key_concept_id': new_flashcard.key_concept_id,
+                    'is_custom': new_flashcard.is_custom,
+                    'created_at': new_flashcard.created_at
+                }
+                
+                # Add updated_at only if it exists
+                if hasattr(new_flashcard, 'updated_at'):
+                    flashcard_dict['updated_at'] = new_flashcard.updated_at
+                    
+                return flashcard_dict
                 
             except Exception as e:
                 uow.session.rollback()
@@ -539,16 +566,8 @@ class LearningMaterialRepository(BaseRepository):
                     if hasattr(flashcard, key):
                         setattr(flashcard, key, value)
                 
-                # Always update the updated_at timestamp
-                flashcard.updated_at = datetime.utcnow()
-                
-                uow.session.commit()
-                uow.session.refresh(flashcard)
-                
-                logger.info(f"Successfully updated flashcard {flashcard_id} by user {user_id}")
-                
-                # Return the updated flashcard data
-                return {
+                # Store current values before updating
+                current_values = {
                     'id': flashcard.id,
                     'file_id': flashcard.file_id,
                     'question': flashcard.question,
@@ -556,8 +575,21 @@ class LearningMaterialRepository(BaseRepository):
                     'key_concept_id': flashcard.key_concept_id,
                     'is_custom': flashcard.is_custom,
                     'created_at': flashcard.created_at,
-                    'updated_at': flashcard.updated_at,
+                    'updated_at': datetime.utcnow(),  # Use the new timestamp
                     'difficulty': getattr(flashcard, 'difficulty', 'medium')
+                }
+                
+                # Update the updated_at timestamp
+                flashcard.updated_at = current_values['updated_at']
+                
+                uow.session.commit()
+                
+                logger.info(f"Successfully updated flashcard {flashcard_id} by user {user_id}")
+                
+                # Return the updated flashcard data using the stored values
+                return {
+                    **current_values,
+                    **update_data.dict(exclude_unset=True)  # Include any updated fields
                 }
                 
             except Exception as e:
@@ -671,8 +703,15 @@ class LearningMaterialRepository(BaseRepository):
                     raise ValueError("Question is required")
                 if not quiz_question_data.correct_answer:
                     raise ValueError("Correct answer is required")
+                
+                # Ensure distractors is a list and handle None/empty cases
                 if quiz_question_data.distractors is None:
                     quiz_question_data.distractors = []
+                elif not isinstance(quiz_question_data.distractors, list):
+                    logger.warning(f"Invalid distractors format: {quiz_question_data.distractors}. Converting to empty list.")
+                    quiz_question_data.distractors = []
+                    
+                logger.debug(f"Processed distractors: {quiz_question_data.distractors}")
                 
                 # Create the new quiz question
                 new_quiz = QuizQuestionORM(

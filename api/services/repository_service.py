@@ -101,3 +101,7 @@ class RepositoryService:
             elif hasattr(self.store, 'file_repo') and hasattr(self.store.file_repo, 'session'):
                 self.store.file_repo.session.rollback()
             return False
+
+# Create a singleton instance of the repository service
+# Note: This needs to be initialized with a store instance before use
+repository_service = None

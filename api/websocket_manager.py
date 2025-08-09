@@ -36,6 +36,10 @@ class WebSocketManager:
             del self.connection_map[conn_id]
             logger.info(f"WebSocket disconnected for user {user_id}")
 
+    def active_connections_count(self) -> int:
+        """Return the total number of active WebSocket connections across all users"""
+        return sum(len(connections) for connections in self.active_connections.values())
+        
     async def send_message(self, user_id: str, event_type: str, data: dict):
         """Send a message to all connections for a specific user"""
         if user_id not in self.active_connections:

@@ -29,11 +29,26 @@ database_config = {
     'port': os.getenv("DATABASE_PORT"),
 }
 
-# Connection pool settings
-POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
-MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
-POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
-POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # Recycle connections after 1 hour
+# Connection pool settings - optimized for DigitalOcean Managed Databases
+# Conservative settings to prevent connection leaks
+POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "3"))  # Base number of connections
+MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))  # Max overflow connections
+POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "5"))  # Connection timeout in seconds
+POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "180"))  # Recycle connections after 3 minutes
+MAX_USAGE = int(os.getenv("DB_MAX_USAGE", "500"))  # Maximum number of times a connection can be used
+POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"  # Enable connection health checks
+POOL_USE_LIFO = True  # Use LIFO to better utilize connection pooling
+POOL_RESET_ON_RETURN = 'commit'  # Reset connections when returned to pool
+
+# Log pool configuration
+logger.info(
+    f"Database connection pool - size: {POOL_SIZE}, "
+    f"max_overflow: {MAX_OVERFLOW}, "
+    f"timeout: {POOL_TIMEOUT}s, "
+    f"recycle: {POOL_RECYCLE}s, "
+    f"pre_ping: {POOL_PRE_PING}, "
+    f"max_usage: {MAX_USAGE}s"
+)
 
 DATABASE_URL = (
     f"postgresql://{database_config['user']}:{database_config['password']}"
@@ -48,9 +63,31 @@ engine = create_engine(
     max_overflow=MAX_OVERFLOW,
     pool_timeout=POOL_TIMEOUT,
     pool_recycle=POOL_RECYCLE,
-    pool_pre_ping=True,
-    echo=os.getenv("SQL_ECHO", "false").lower() == "true"
+    pool_pre_ping=POOL_PRE_PING,
+    pool_use_lifo=POOL_USE_LIFO,  # Use last-in-first-out for better connection reuse
+    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+    echo_pool=os.getenv("SQL_ECHO_POOL", "false").lower() == "true",
+    hide_parameters=os.getenv("SQL_HIDE_PARAMETERS", "true").lower() == "true",
+    # Connection settings
+    connect_args={
+        "connect_timeout": 10,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5
+    },
+    # Set statement timeout using the connect event
+    execution_options={
+        "isolation_level": "READ COMMITTED"
+    }
 )
+
+# Set statement timeout for all connections
+@event.listens_for(engine, 'connect')
+def set_statement_timeout(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("SET statement_timeout = 30000")  # 30 seconds
+    cursor.close()
 
 # Create a thread-safe session factory
 SessionLocal = scoped_session(
@@ -66,7 +103,7 @@ SessionLocal = scoped_session(
 Base = declarative_base()
 Base.query = SessionLocal.query_property()
 
-# Optional: Add event listeners for connection tracking
+# Connection event listeners for better tracking and cleanup
 @event.listens_for(engine, 'checkout')
 def on_checkout(dbapi_connection, connection_record, connection_proxy):
     logger.debug(f"Connection checked out from pool: {id(dbapi_connection)}")
@@ -78,6 +115,21 @@ def on_checkin(dbapi_connection, connection_record):
 @event.listens_for(engine, 'close')
 def on_close(dbapi_connection, connection_record):
     logger.debug(f"Connection closed: {id(dbapi_connection)}")
+
+@event.listens_for(engine, 'close')
+def on_engine_close(engine):
+    logger.info("Engine closed. Cleaning up connection pool...")
+
+# Ensure connections are properly closed when the app shuts down
+import atexit
+
+def cleanup():
+    logger.info("Application shutdown: Cleaning up database connections...")
+    SessionLocal.remove()
+    engine.dispose()
+    logger.info("Database connections cleaned up.")
+
+atexit.register(cleanup)
 
 # Context manager for database sessions
 @contextmanager

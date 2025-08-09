@@ -1,11 +1,27 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './FileViewerComponent.css';
-import { UploadedFile, KeyConcept, Flashcard, QuizQuestion } from './types';
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
-
+import { UploadedFile, KeyConcept, Flashcard, QuizQuestion } from './types';
 import FlashcardViewer from './FlashcardViewer';
 import QuizInterface from './QuizInterface';
+
+interface KeyConceptUpdateData {
+    concept_title?: string;
+    concept_explanation?: string;
+    source_page_number?: number;
+    source_video_timestamp_start_seconds?: number;
+    source_video_timestamp_end_seconds?: number;
+};
+
+interface KeyConceptCreateData {
+    concept_title: string;
+    concept_explanation: string;
+    source_page_number?: number;
+    source_video_timestamp_start_seconds?: number;
+    source_video_timestamp_end_seconds?: number;
+    is_custom: boolean;
+};
 
 interface FileViewerComponentProps {
     file: UploadedFile;
@@ -535,45 +551,67 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
         try {
             const token = await user?.getIdToken();
-            const updateData: any = {
-                concept_title: editingConcept.concept_title,
-                concept_explanation: editingConcept.concept_explanation,
-            };
-
-            // Handle source fields based on file type
-            if (fileType === 'pdf' && editingConcept.source_page_number !== null) {
-                updateData.source_page_number = editingConcept.source_page_number;
-            } else if ((fileType === 'video' || fileType === 'youtube') && editingConcept.source_video_timestamp_start_seconds !== null) {
-                updateData.source_video_timestamp_start_seconds = editingConcept.source_video_timestamp_start_seconds;
-                if (editingConcept.source_video_timestamp_end_seconds !== null) {
-                    updateData.source_video_timestamp_end_seconds = editingConcept.source_video_timestamp_end_seconds;
-                }
+            if (!token) {
+                throw new Error('Authentication required');
             }
 
+            // Create typed update data with null checks
+            const updateData: KeyConceptUpdateData = {
+                ...(editingConcept.concept_title !== null && { concept_title: editingConcept.concept_title }),
+                ...(editingConcept.concept_explanation !== null && { concept_explanation: editingConcept.concept_explanation }),
+                ...(fileType === 'pdf' && editingConcept.source_page_number !== null && { 
+                    source_page_number: editingConcept.source_page_number 
+                }),
+                ...((fileType === 'video' || fileType === 'youtube') && editingConcept.source_video_timestamp_start_seconds !== null && {
+                    source_video_timestamp_start_seconds: editingConcept.source_video_timestamp_start_seconds
+                }),
+                ...((fileType === 'video' || fileType === 'youtube') && editingConcept.source_video_timestamp_end_seconds !== null && {
+                    source_video_timestamp_end_seconds: editingConcept.source_video_timestamp_end_seconds
+                })
+            };
+
+            // Remove undefined values
+            const payload = Object.fromEntries(
+                Object.entries(updateData).filter(([_, v]) => v !== undefined)
+            );
+
             const response = await fetch(`/api/v1/files/${file.id}/key-concepts/${conceptId}`, {
-                method: 'PATCH',
+                method: 'PUT',  // Changed from PATCH to PUT
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
                 },
-                body: JSON.stringify(updateData),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
-                throw new Error('Failed to save concept');
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || 'Failed to update concept');
             }
 
             const responseData = await response.json();
+            
             if (responseData.status === 'success' && responseData.data) {
-                setKeyConcepts(keyConcepts.map(c => c.id === responseData.data.id ? responseData.data : c));
+                // Update the local state with the returned data
+                setKeyConcepts(keyConcepts.map(c => 
+                    c.id === responseData.data.id ? {
+                        ...responseData.data,
+                        // Ensure we maintain the concept alias for backward compatibility
+                        concept: responseData.data.concept_title,
+                        explanation: responseData.data.concept_explanation
+                    } : c
+                ));
                 setEditingConcept(null);
-                addToast(responseData.message || 'Key concept saved!', 'success');
+                addToast(responseData.message || 'Key concept updated successfully!', 'success');
             } else {
-                throw new Error(responseData.message || 'Failed to save concept');
+                throw new Error(responseData.message || 'Failed to update concept');
             }
         } catch (error) {
-            console.error('Save error:', error);
-            addToast('Error saving concept', 'error');
+            console.error('Error saving concept:', error);
+            addToast(
+                error instanceof Error ? error.message : 'An error occurred while saving the concept',
+                'error'
+            );
         }
     };
 
@@ -710,7 +748,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                                     <div className="concept-header" onClick={() => expandConcept(concept.id)}>
                                         <h4>
                                             {concept.concept_title || 'Untitled Concept'}
-                                            {concept.is_custom === true && <span className="custom-badge">Custom</span>}
                                         </h4>
                                         <div className="key-concept-actions">
                                             <button onClick={(e) => {e.stopPropagation(); handleEditConcept(concept);}} className="action-btn edit-btn">
@@ -804,15 +841,24 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         
         console.log('Adding new key concept with title:', newConceptTitle.trim());
         
-        // Create source data based on file type, only including fields that match the backend's KeyConceptCreate schema
-        const conceptData = {
+        // Create typed concept data
+        const conceptData: KeyConceptCreateData = {
             concept_title: newConceptTitle.trim(),
             concept_explanation: newConceptExplanation.trim(),
-            source_page_number: (fileType === 'pdf' && newConceptSourcePage) ? newConceptSourcePage : undefined,
-            source_video_timestamp_start_seconds: (fileType === 'youtube' && newConceptVideoStart) ? newConceptVideoStart : undefined,
-            source_video_timestamp_end_seconds: (fileType === 'youtube' && newConceptVideoEnd) ? newConceptVideoEnd : undefined,
             is_custom: true
         };
+
+        // Add source data conditionally based on file type
+        if (fileType === 'pdf' && newConceptSourcePage) {
+            conceptData.source_page_number = newConceptSourcePage;
+        } else if (fileType === 'youtube' || fileType === 'video') {
+            if (newConceptVideoStart) {
+                conceptData.source_video_timestamp_start_seconds = newConceptVideoStart;
+            }
+            if (newConceptVideoEnd) {
+                conceptData.source_video_timestamp_end_seconds = newConceptVideoEnd;
+            }
+        }
         
         // Remove undefined values to avoid sending them in the request
         const payload = Object.fromEntries(
@@ -1141,15 +1187,35 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     };
 
     // Add a new custom quiz question to the collection with backend persistence
-    const addQuiz = async () => {
-        if (!user || newQuizQuestion.trim() === '' || newQuizAnswer.trim() === '') return;
+    const addQuiz = async (): Promise<boolean> => {
+        if (!user) {
+            addToast("You must be logged in to add a quiz question.", "error");
+            return false;
+        }
+        
+        // Validate inputs
+        if (!newQuizQuestion.trim()) {
+            addToast("Question cannot be empty.", "error");
+            return false;
+        }
+        
+        if (!newQuizAnswer.trim()) {
+            addToast("Please provide a correct answer.", "error");
+            return false;
+        }
 
         let distractors: string[] = [];
         if (newQuizType === 'MCQ') {
             distractors = newQuizDistractors.split(',').map(d => d.trim()).filter(d => d !== '');
             if (distractors.length === 0) {
                 addToast('MCQ questions must have at least one distractor.', 'error');
-                return; 
+                return false; 
+            }
+            
+            // Check if correct answer is in distractors for MCQ
+            if (distractors.includes(newQuizAnswer.trim())) {
+                addToast('The correct answer cannot be in the distractors for MCQ questions.', 'error');
+                return false;
             }
         } else if (newQuizType === 'TF') {
             distractors = [newQuizAnswer === 'True' ? 'False' : 'True'];
@@ -1157,46 +1223,65 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         
         const quizData = {
             file_id: file.id,
-            question: newQuizQuestion,
+            question: newQuizQuestion.trim(),
             question_type: newQuizType,
-            correct_answer: newQuizAnswer,
+            correct_answer: newQuizAnswer.trim(),
             distractors: distractors,
+            difficulty: 'medium', // Default difficulty
             key_concept_id: null, // Set to null for custom questions
             is_custom: true
         };
         
         try {
             setIsLoadingQuizzes(true);
+            setQuizError(null);
             
-            const idToken = await user.getIdToken();
-            if (!idToken) throw new Error('User token not available');
+            const token = await user.getIdToken();
+            if (!token) {
+                throw new Error('Authentication token not available. Please try logging in again.');
+            }
             
             const response = await fetch(`/api/v1/files/${file.id}/quiz-questions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
+                    'Authorization': `Bearer ${token}`
                 },
-                mode: 'cors',
                 body: JSON.stringify(quizData)
             });
             
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: `Failed to save quiz: ${response.statusText}` }));
-                console.error("Error saving custom quiz:", errorData);
-                throw new Error(errorData.detail || `Failed to save quiz: ${response.statusText}`);
+            let responseData;
+            try {
+                responseData = await response.json();
+            } catch (e) {
+                console.error('Failed to parse response:', e);
+                throw new Error(`Server returned an invalid response: ${response.statusText}`);
             }
             
-            const responseData = await response.json();
+            if (!response.ok) {
+                console.error('Error response from server:', responseData);
+                const errorMessage = responseData.detail || 
+                                  responseData.message || 
+                                  responseData.error || 
+                                  `Failed to save quiz: ${response.statusText} (${response.status})`;
+                throw new Error(errorMessage);
+            }
+            
             if (responseData.status !== 'success' || !responseData.data) {
-                throw new Error(responseData.message || 'Failed to save quiz question');
+                console.error('Invalid response format:', responseData);
+                throw new Error(responseData.message || 'Invalid response format from server');
             }
             
             const savedQuiz: QuizQuestion = responseData.data;
             
-            // Only add to customQuizzes since we combine them when rendering
-            setCustomQuizzes(prev => [...prev, savedQuiz]);
+            // Update state with the new quiz question
+            setCustomQuizzes(prev => {
+                // Check if quiz already exists to prevent duplicates
+                const exists = prev.some(q => q.id === savedQuiz.id);
+                return exists ? prev : [...prev, savedQuiz];
+            });
             
+            // Reset form
             setNewQuizQuestion('');
             setNewQuizAnswer('');
             setNewQuizDistractors('');
@@ -1204,11 +1289,13 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             setShowQuizForm(false);
             
             addToast('Quiz question added successfully!', 'success');
+            return true;
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-            console.error('Error saving custom quiz:', err);
-            addToast(`Error saving custom quiz: ${errorMessage}`, 'error');
+            console.error('Error saving quiz question:', err);
             setQuizError(errorMessage);
+            addToast(`Error: ${errorMessage}`, 'error');
+            return false;
         } finally {
             setIsLoadingQuizzes(false);
         }
@@ -1464,13 +1551,23 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
     };
 
-    const handleUpdateQuiz = async (id: number, data: Partial<QuizQuestion>) => {
+    const handleUpdateQuiz = async (id: number, data: Partial<QuizQuestion>): Promise<boolean> => {
         if (!user) {
             addToast("You must be logged in to update a quiz question.", "error");
-            return;
+            return false;
         }
+        
         try {
-            const token = await user.getIdToken();
+            // Validate input data
+            if (data.question && !data.question.trim()) {
+                addToast("Question cannot be empty.", "error");
+                return false;
+            }
+            
+            if ('correct_answer' in data && !data.correct_answer?.trim()) {
+                addToast("Please provide a correct answer.", "error");
+                return false;
+            }
             
             // Ensure we're using the correct field names for the backend
             const updateData: any = { ...data };
@@ -1486,6 +1583,11 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 updateData.difficulty = 'medium';
             }
             
+            const token = await user.getIdToken();
+            if (!token) {
+                throw new Error('Authentication token not available. Please try logging in again.');
+            }
+            
             const response = await fetch(`/api/v1/files/${file.id}/quiz-questions/${id}`, {
                 method: 'PUT',
                 headers: {
@@ -1494,57 +1596,131 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 },
                 body: JSON.stringify(updateData),
             });
+            
+            let responseData;
+            try {
+                responseData = await response.json();
+            } catch (e) {
+                console.error('Failed to parse response:', e);
+                throw new Error(`Server returned an invalid response: ${response.statusText}`);
+            }
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || 'Failed to update quiz question');
+                console.error('Error response from server:', responseData);
+                const errorMessage = responseData.detail || 
+                                  responseData.message || 
+                                  responseData.error || 
+                                  `Failed to update quiz: ${response.statusText} (${response.status})`;
+                throw new Error(errorMessage);
+            }
+            
+            if (responseData.status !== 'success' || !responseData.data) {
+                console.error('Invalid response format:', responseData);
+                throw new Error(responseData.message || 'Invalid response format from server');
             }
 
-            const updatedQuizResponse = await response.json();
-            const updatedQuizQuestion = updatedQuizResponse.data;
-
-            setQuizzes((prev: QuizQuestion[]) => prev.map(q => (q.id === id ? { ...q, ...updatedQuizQuestion } : q)));
-            setCustomQuizzes((prev: QuizQuestion[]) => prev.map(q => (q.id === id ? { ...q, ...updatedQuizQuestion } : q)));
+            const updatedQuizQuestion = responseData.data;
+            
+            // Optimistic UI update
+            const updateQuizInState = (prev: QuizQuestion[]) => 
+                prev.map(q => q.id === id ? { ...q, ...updatedQuizQuestion } : q);
+                
+            setQuizzes(updateQuizInState);
+            setCustomQuizzes(updateQuizInState);
 
             addToast("Quiz question updated successfully!", "success");
+            return true;
         } catch (error) {
             console.error("Error updating quiz question:", error);
-            let message = "An error occurred while updating the quiz question.";
-            if (error instanceof Error) {
-                message = error.message;
-            }
+            const message = error instanceof Error ? error.message : "An error occurred while updating the quiz question.";
             addToast(message, "error");
+            
+            // Refresh the quizzes to ensure consistency with server
+            if (user) {
+                try {
+                    await fetchQuizzes();
+                } catch (refreshError) {
+                    console.error("Failed to refresh quizzes:", refreshError);
+                }
+            }
+            
+            return false;
         }
     };
 
-    const handleDeleteQuiz = async (id: number) => {
+    const handleDeleteQuiz = async (id: number): Promise<boolean> => {
         if (!user) {
             addToast("You must be logged in to delete a quiz question.", "error");
-            return;
+            return false;
         }
+        
         try {
             const token = await user.getIdToken();
+            if (!token) {
+                throw new Error('Authentication token not available. Please try logging in again.');
+            }
+            
             const response = await fetch(`/api/v1/files/${file.id}/quiz-questions/${id}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                 },
             });
-
-            if (!response.ok) {
-                throw new Error(`Failed to delete quiz question. Server responded with ${response.status}`);
+            
+            // Handle 204 No Content response
+            if (response.status === 204) {
+                // Optimistic UI update
+                setQuizzes(prev => prev.filter(q => q.id !== id));
+                setCustomQuizzes(prev => prev.filter(q => q.id !== id));
+                addToast("Quiz question deleted successfully!", "success");
+                return true;
             }
-
-            setQuizzes((prev: QuizQuestion[]) => prev.filter(q => q.id !== id));
-            setCustomQuizzes((prev: QuizQuestion[]) => prev.filter(q => q.id !== id));
+            
+            // For non-204 responses, try to parse JSON
+            let responseData;
+            try {
+                responseData = await response.json();
+            } catch (e) {
+                console.error('Failed to parse response:', e);
+                throw new Error(`Server returned an invalid response: ${response.statusText}`);
+            }
+            
+            if (!response.ok) {
+                console.error('Error response from server:', responseData);
+                const errorMessage = responseData.detail || 
+                                  responseData.message || 
+                                  responseData.error || 
+                                  `Failed to delete quiz: ${response.statusText} (${response.status})`;
+                throw new Error(errorMessage);
+            }
+            
+            // If we get here, response was successful but not 204
+            if (responseData.status !== 'success') {
+                console.error('Unexpected response format:', responseData);
+                throw new Error(responseData.message || 'Unexpected response from server');
+            }
+            
+            // Update UI if not already done
+            setQuizzes(prev => prev.filter(q => q.id !== id));
+            setCustomQuizzes(prev => prev.filter(q => q.id !== id));
             addToast("Quiz question deleted successfully!", "success");
+            return true;
+            
         } catch (error) {
             console.error("Error deleting quiz question:", error);
-            let message = "An error occurred while deleting the quiz question.";
-            if (error instanceof Error) {
-                message = error.message;
-            }
+            const message = error instanceof Error ? error.message : "An error occurred while deleting the quiz question.";
             addToast(message, "error");
+            
+            // Refresh the quizzes to ensure consistency with server
+            if (user) {
+                try {
+                    await fetchQuizzes();
+                } catch (refreshError) {
+                    console.error("Failed to refresh quizzes:", refreshError);
+                }
+            }
+            
+            return false;
         }
     };
 

@@ -47,13 +47,10 @@ import json
 import logging
 import random
 from pydantic import BaseModel, Field, validator
-
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional, Union, cast
-import json
-import logging
-import random
-from pydantic import BaseModel, Field, validator
+
+# Import agent decorator from agent_factory
+from .agent_factory import agent
 
 from .base_agent import BaseAgent, AgentConfig
 from .prompt_loader import PromptLoader
@@ -196,6 +193,40 @@ class QuizResult(BaseModel):
     total_questions: int
     estimated_time_minutes: int
 
+@agent(
+    "quiz",
+    config={
+        "max_flashcards": 10,
+        "flashcard_types": ["basic", "mcq", "true_false"],
+        "num_questions": 5,
+        "difficulty": "medium",
+        "question_types": ["MCQ", "true_false", "short_answer"],
+        "include_explanations": True
+    },
+    description="Generates quizzes and flashcards from educational content",
+    version="1.0.0",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["generate_questions", "generate_flashcards"]},
+            "file_id": {"type": "integer"},
+            "file_content": {"type": "string"},
+            "key_concepts": {"type": "array", "items": {"type": "object"}},
+            "count": {"type": "integer", "minimum": 1, "maximum": 20},
+            "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]},
+            "question_types": {"type": "array", "items": {"type": "string"}},
+            "flashcard_types": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["action", "file_id"]
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "questions": {"type": "array", "items": {"type": "object"}},
+            "flashcards": {"type": "array", "items": {"type": "object"}}
+        }
+    }
+)
 class QuizAgent(BaseAgent[QuizConfig]):
     """
     Agent for generating and managing quizzes and flashcards from content.

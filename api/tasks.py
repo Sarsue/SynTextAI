@@ -629,37 +629,32 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 )
                 
                 try:
-                    # Download file from URL
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(file_url) as response:
-                            if response.status != 200:
-                                error_msg = f"Failed to download file: HTTP {response.status}"
-                                await send_ws_update(
-                                    event_type="document_download_error",
-                                    data={
-                                        "filename": filename,
-                                        "error": error_msg
-                                    },
-                                    progress=0.2
-                                )
-                                raise Exception(error_msg)
-                            
-                            # Get file size for progress tracking
-                            total_size = int(response.headers.get('content-length', 0))
-                            downloaded_size = 0
-                            
-                            with open(file_path, 'wb') as f:
-                                while True:
-                                    chunk = await response.content.read(8192)
-                                    if not chunk:
-                                        break
-                                    f.write(chunk)
-                                    downloaded_size += len(chunk)
-                                    
-                                    # Update progress every 1MB or when done
-                                    if downloaded_size % (1024 * 1024) < 8192 or downloaded_size == total_size:
-                                        progress = 0.2 + (0.2 * (downloaded_size / max(total_size, 1)))
-                                        await update_status("downloading", progress=progress)
+                    # Download file from GCS using the existing utility
+                    from utils import download_from_gcs
+                    
+                    # Extract the filename from the GCS URL
+                    gcs_filename = file_url.split('/')[-1]
+                    
+                    # Download the file
+                    file_data = download_from_gcs(user_gc_id, gcs_filename)
+                    if not file_data:
+                        error_msg = "Failed to download file from GCS"
+                        await send_ws_update(
+                            event_type="document_download_error",
+                            data={
+                                "filename": filename,
+                                "error": error_msg
+                            },
+                            progress=0.2
+                        )
+                        raise Exception(error_msg)
+                    
+                    # Save the file locally
+                    with open(file_path, 'wb') as f:
+                        f.write(file_data)
+                    
+                    # Update progress
+                    await update_status("downloading", progress=0.4)
                     
                     # Notify about successful download
                     file_size_mb = os.path.getsize(file_path) / (1024 * 1024)

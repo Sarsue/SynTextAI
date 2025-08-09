@@ -4,30 +4,15 @@ Base classes and interfaces for MCP (Modular Content Processing) agents.
 This module provides the foundational components for creating specialized agents that handle
 different aspects of content processing in the SynTextAI system. All agents should inherit
 from the BaseAgent class and implement the required interfaces.
-
-Key Components:
-    - AgentConfig: Base configuration model for all agents
-    - AgentError: Base exception for agent-related errors
-    - BaseAgent: Abstract base class that defines the agent interface
-
-Example:
-    ```python
-    class MyAgent(BaseAgent):
-        """Example agent implementation."""
-        
-        class Config(AgentConfig):
-            """Agent-specific configuration."""
-            my_setting: str = "default"
-            
-        async def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-            """Process input data and return results."""
-            # Implementation here
-            return {"result": "success"}
-    ```
 """
+
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, TypeVar, Generic, Type
 from pydantic import BaseModel, Field
+import logging
+
+# Type variable for configuration
+TConfig = TypeVar('TConfig', bound='AgentConfig')
 import logging
 from datetime import datetime
 import json

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import atexit
 from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
@@ -15,19 +16,32 @@ from fastapi import (
     Response,
     status
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import decode_firebase_token
+from .models.db import SessionLocal, engine, Base
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Load environment variables
 load_dotenv()
 
 # Initialize FastAPI
-app = FastAPI(max_request_body_size= 2 * 1024 * 1024 * 1024)
+app = FastAPI(
+    title="SynTextAI API",
+    description="API for SynTextAI - AI-powered learning assistant",
+    version="1.0.0",
+    max_request_body_size=2 * 1024 * 1024 * 1024
+)
 
 # Middleware to add COOP and COEP headers
 @app.middleware("http")
@@ -186,6 +200,40 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 from .routes.files import files_router
 from .routes.histories import histories_router
 from .routes.messages import messages_router
+
+# Register shutdown event handler
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Handle application shutdown."""
+    logger.info("Shutting down application...")
+    # Clean up WebSocket connections
+    await websocket_manager.disconnect_all()
+    # Clean up database connections
+    SessionLocal.remove()
+    engine.dispose()
+    logger.info("Application shutdown complete.")
+
+# Health check endpoint
+@app.get("/health", status_code=status.HTTP_200_OK)
+async def health_check():
+    """Health check endpoint for monitoring and container health checks."""
+    try:
+        # Test database connection
+        with SessionLocal() as session:
+            session.execute(text("SELECT 1"))
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "websockets": {
+                "active_connections": websocket_manager.active_connections_count()
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "unhealthy", "error": str(e)}
+        )
 from .routes.subscriptions import subscriptions_router
 from .routes.users import users_router
 from .routes.analytics import router as analytics_router, posthog_middleware
