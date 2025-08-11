@@ -6,7 +6,7 @@ modular agents that handle different aspects of content processing.
 """
 
 import logging
-from typing import Type, Dict, Any, Optional
+from typing import Type, Dict, Any
 
 from .base_agent import BaseAgent, AgentConfig, AgentError
 from .agent_factory import AgentFactory
@@ -70,7 +70,7 @@ def register_agents() -> None:
     from .quiz_agent import QuizAgent, QuizConfig
     from .qa_agent import QAAgent, QAConfig
     from .study_scheduler_agent import StudySchedulerAgent, StudySchedulerConfig
-    from .integration_agent import IntegrationAgent, IntegrationAgentConfig, IntegrationType
+    from .integration_agent import IntegrationAgent, IntegrationAgentConfig
     
     # Register each agent
     register_agent(

@@ -4,7 +4,7 @@ These abstract base classes define the contract that concrete implementations mu
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Tuple, Optional
 
 
 class QueryProcessorInterface(ABC):
@@ -22,7 +22,6 @@ class QueryProcessorInterface(ABC):
         Returns:
             tuple: (processed_query, expanded_terms)
         """
-        pass
 
 
 class SearchEngineInterface(ABC):
@@ -41,7 +40,6 @@ class SearchEngineInterface(ABC):
         Returns:
             list: Combined and ranked search results
         """
-        pass
 
 
 class ReRankerInterface(ABC):
@@ -60,7 +58,6 @@ class ReRankerInterface(ABC):
         Returns:
             list: Re-ranked list of documents
         """
-        pass
 
 
 class ChunkSelectorInterface(ABC):
@@ -79,4 +76,3 @@ class ChunkSelectorInterface(ABC):
         Returns:
             list: Selected chunks that fit within token budget
         """
-        pass

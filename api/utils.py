@@ -1,7 +1,4 @@
 from firebase_admin import auth
-import base64
-import re
-import hashlib
 from google.cloud import storage
 import logging
 from fastapi import UploadFile

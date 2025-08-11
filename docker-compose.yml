@@ -20,12 +20,13 @@ services:
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
-    command: python -m api.worker
+    command: sh -c "export PYTHONPATH=/app && python -m api.worker"
     env_file:
       - .env
     environment:
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
+      - PYTHONPATH=/app
     volumes:
       - ./api/config:/app/api/config
     networks:

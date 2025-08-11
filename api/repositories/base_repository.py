@@ -1,11 +1,10 @@
 """
 Base Repository interface defining common methods and db connection handling.
 """
-from abc import ABC, abstractmethod
+from abc import ABC
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import logging
-from typing import Callable, TypeVar, Generic, Optional, Any
 
 from .unit_of_work import UnitOfWork, transactional_session
 
@@ -36,10 +35,6 @@ class BaseRepository(ABC):
         )
         self.Session = sessionmaker(bind=self.engine)
     
-    def get_session(self):
-        """Get a new database session."""
-        return self.Session()
-    
     def get_unit_of_work(self):
         """Get a new unit of work for transaction management.
         
@@ -60,53 +55,3 @@ class BaseRepository(ABC):
                 # No need for commit/rollback/close
         """
         return transactional_session(self.Session)
-    
-    def commit_and_close(self, session, operation_name: str):
-        """Commit changes and close the session, with error handling.
-        
-        Args:
-            session: The SQLAlchemy session
-            operation_name: Name of the operation for logging purposes
-        
-        Returns:
-            bool: Success status of the operation
-        
-        Note:
-            This method is maintained for backward compatibility.
-            New code should prefer the unit_of_work or transactional_session pattern.
-        """
-        try:
-            session.commit()
-            return True
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error during {operation_name}: {e}", exc_info=True)
-            return False
-        finally:
-            session.close()
-    
-    def execute_transactional(self, operation_func: Callable, operation_name: str = "operation"):
-        """Execute a function within a transaction boundary.
-        
-        Args:
-            operation_func: Function that takes a session parameter and performs DB operations
-            operation_name: Name of operation for logging purposes
-            
-        Returns:
-            The result of operation_func, or None if an exception occurred
-            
-        Example:
-            def add_entity(session, entity):
-                session.add(entity)
-                return entity.id
-                
-            result = repo.execute_transactional(lambda session: add_entity(session, new_entity))
-        """
-        with self.get_unit_of_work() as uow:
-            try:
-                result = operation_func(uow.session)
-                logger.debug(f"Successfully executed {operation_name}")
-                return result
-            except Exception as e:
-                logger.error(f"Error during {operation_name}: {e}", exc_info=True)
-                return None

@@ -13,18 +13,13 @@ for scalable background processing.
 """
 
 import asyncio
-import json
 import logging
 import os
 import sys
 import signal
-import time
 import aiohttp
-import traceback
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Union
-from dotenv import load_dotenv
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 
 # Configure Python path and environment variables
 try:
@@ -49,23 +44,16 @@ except ImportError:
 
 # Standard library imports
 import asyncio
-import json
 import logging
 import os
 import signal
 import sys
-import time
-import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Third-party imports
 import aiohttp
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
 # Application imports
-from api.models.orm_models import File, User
-from api.repositories.repository_manager import RepositoryManager
 from api.services.agent_service import AgentService
 from api.services.llm_service import LLMService
 from api.services.embedding_service import EmbeddingService
@@ -242,15 +230,40 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                 except Exception as e:
                     logger.warning(f"Error cleaning up repository manager in update_file_status: {str(e)}")
 
+# Import using absolute path since this file is run as a script
+
 async def process_file(
     file_id: int, 
     user_id: int, 
-    user_gc_id: str, 
     filename: str,
-    file_url: str, 
+    file_url: str,
+    user_gc_id: Optional[str] = None,
+    firebase_token: Optional[str] = None,
     language: str = "English", 
     comprehension_level: str = "Beginner"
 ) -> Optional[Dict[str, Any]]:
+    """
+    Process a file in the background.
+    
+    Args:
+        file_id: ID of the file to process
+        user_id: ID of the user who owns the file
+        filename: Name of the file
+        file_url: URL of the file in storage
+        user_gc_id: Google Cloud user ID (optional, will be fetched from token if not provided)
+        firebase_token: Firebase authentication token (required if user_gc_id is not provided)
+        language: Language for processing
+        comprehension_level: User's comprehension level
+        
+    Returns:
+        Dictionary with processing results or None if processing failed
+    """
+    # Since all uploads require authentication, user_gc_id should always be available
+    if not user_gc_id:
+        error_msg = "User authentication information is missing. This should not happen for authenticated uploads."
+        logger.error(f"{error_msg} File ID: {file_id}, User ID: {user_id}")
+        await update_file_status(file_id, "failed", error_msg)
+        return None
     """
     Process a single file using the Agent Service.
     
@@ -396,9 +409,8 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
     Fetch files with 'uploaded' status from the database and mark them as processing.
     Uses a transaction to ensure atomicity and proper connection handling.
     """
-    from api.models.orm_models import File, User
+    from api.models.orm_models import File
     from sqlalchemy.orm import joinedload
-    from sqlalchemy import func
     
     pending_files = []
     
@@ -432,13 +444,14 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
                 )
                 
                 # Convert files to list of dictionaries
+                # Note: user_gc_id will be None here and will be set when processing the file
+                # by looking up the user's token in the session
                 for file in files_to_process:
                     pending_files.append({
                         "id": file.id,
                         "file_name": file.file_name,
                         "file_url": file.file_url,
                         "user_id": file.user_id,
-                        "user_gc_id": file.user.user_gc_id if file.user else '',
                         "created_at": file.created_at.isoformat() if file.created_at else None
                     })
                 
@@ -486,9 +499,8 @@ async def worker_loop() -> None:
                         process_file(
                             file_id=file["id"],
                             user_id=file["user_id"],
-                            user_gc_id=file["user_gc_id"],
                             filename=file["file_name"],
-                            file_url=file["file_url"],
+                            file_url=file["file_url"]
                         )
                     )
                     tasks.append(task)

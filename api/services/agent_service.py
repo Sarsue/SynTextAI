@@ -7,7 +7,6 @@ handling input validation, agent invocation, and response formatting.
 from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, status
 from api.agents.agent_factory import AgentFactory
-from api.agents.base_agent import AgentConfig
 import logging
 
 logger = logging.getLogger(__name__)

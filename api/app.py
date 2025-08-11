@@ -2,31 +2,25 @@ import asyncio
 import json
 import logging
 import os
-import atexit
-from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI, 
     WebSocket, 
     WebSocketDisconnect, 
-    Depends, 
-    HTTPException, 
     Request, 
-    Response,
     status
 )
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import decode_firebase_token
-from .models.db import SessionLocal, engine, Base
+from .models.db import SessionLocal, engine
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

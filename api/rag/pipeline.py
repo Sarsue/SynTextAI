@@ -3,7 +3,7 @@ Main RAG pipeline implementation - demonstrates how to use the components togeth
 """
 
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional
 
 from .interfaces import (
     QueryProcessorInterface, 

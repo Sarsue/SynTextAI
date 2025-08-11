@@ -7,7 +7,7 @@ from the BaseAgent class and implement the required interfaces.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, TypeVar, Generic, Type
+from typing import Dict, Any, Optional, TypeVar, Generic
 from pydantic import BaseModel, Field
 import logging
 
@@ -223,7 +223,6 @@ class BaseAgent(ABC, Generic[TConfig]):
         Returns:
             Dictionary containing the processing result
         """
-        pass
     
     async def validate_input(self, input_data: Dict[str, Any]) -> bool:
         """

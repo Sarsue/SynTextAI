@@ -3,7 +3,7 @@ Factory for creating and configuring RAG components.
 """
 
 import logging
-from typing import Dict, Any, Optional, Type
+from typing import Dict, Any, Type
 
 from .interfaces import (
     QueryProcessorInterface, 

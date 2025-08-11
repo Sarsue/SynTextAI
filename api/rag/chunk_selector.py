@@ -3,7 +3,7 @@ Chunk selection components for RAG systems.
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict
 
 from .interfaces import ChunkSelectorInterface
 

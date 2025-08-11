@@ -1,9 +1,7 @@
-import os
 import re
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path, BackgroundTasks
-from typing import List, Dict, Optional, Any, TypeVar
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, BackgroundTasks
+from typing import List, Dict, Optional, TypeVar
 from redis.exceptions import RedisError
 from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
@@ -11,21 +9,26 @@ from ..repositories.repository_manager import RepositoryManager
 from fastapi.responses import JSONResponse
 from ..dependencies import get_store, authenticate_user
 from ..services.agent_service import agent_service
-from pydantic import BaseModel, Field
+from ..tasks import process_file_data
+from pydantic import BaseModel
 from ..schemas.learning_content import (
     StandardResponse,
-    KeyConceptCreate, KeyConceptResponse, KeyConceptsListResponse, KeyConceptUpdate,
-    FlashcardCreate, FlashcardResponse, FlashcardsListResponse, FlashcardUpdateRequest,
-    QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate,
-    KeyConceptUpdateRequest
+    KeyConceptCreate, KeyConceptResponse, KeyConceptUpdate, FlashcardCreate,
+    FlashcardResponse, FlashcardsListResponse, FlashcardUpdateRequest, QuizQuestionCreate,
+    QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
 )
-from ..models import KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM, File
 
 class FileUploadResponse(BaseModel):
     id: int
     file_name: str
     file_url: str
     status: str
+
+class YouTubeURLRequest(BaseModel):
+    url: str
+    type: str = "youtube"
+    language: Optional[str] = "en"
+    comprehension_level: Optional[str] = "beginner"
 
 class UploadResponse(BaseModel):
     message: str
@@ -124,9 +127,10 @@ async def process_file_with_ingestion_agent(
 async def save_file(
     request: Request,
     background_tasks: BackgroundTasks,
+    youtube_data: Optional[YouTubeURLRequest] = None,
     language: str = Query("en", description="Language code (e.g., 'en', 'es')"),
     comprehension_level: str = Query("beginner", description="Comprehension level (beginner, intermediate, advanced)"),
-    files: List[UploadFile] = FastAPIFile(..., description="List of files to upload"),
+    files: List[UploadFile] = FastAPIFile(None, description="List of files to upload"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -136,63 +140,100 @@ async def save_file(
         user_gc_id = user_data["user_gc_id"]
         
         content_type = request.headers.get("content-type", "")
+        is_json = "application/json" in content_type
+        is_multipart = "multipart/form-data" in content_type
         
-        # Handle YouTube URL
-        if content_type.startswith("application/json"):
-            data = await request.json()
-            if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
-                raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
+        # Handle YouTube URL (can come from JSON or form data)
+        if youtube_data or (is_json and not is_multipart):
+            try:
+                # Get the YouTube URL from either the JSON body or form data
+                if youtube_data:
+                    url = youtube_data.url.strip()
+                    language = youtube_data.language or language
+                    comprehension_level = youtube_data.comprehension_level or comprehension_level
+                else:
+                    # Try to parse JSON body
+                    try:
+                        body = await request.json()
+                        url = body.get('url', '').strip()
+                        language = body.get('language', language)
+                        comprehension_level = body.get('comprehension_level', comprehension_level)
+                    except Exception as e:
+                        logger.error(f"Error parsing JSON body: {e}")
+                        raise HTTPException(status_code=400, detail="Invalid JSON body")
                 
-            url = data.get("url", "").strip()
-            # Support formats:
-            # - https://www.youtube.com/watch?v=...
-            # - https://youtu.be/...
-            # - www.youtube.com/watch?v=...
-            # - youtube.com/watch?v=...
-            # - youtu.be/...
-            youtube_regex = re.compile(
-                r'^(https?://)?(www\.)?'
-                r'(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/|youtube\.com/e/|youtube\.com/\?v=)'
-                r'([^&\n?#]+)'
-            )
-            
-            if not url or not youtube_regex.search(url):
-                logger.error(f"Invalid YouTube URL: {url}")
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Invalid YouTube URL. Please use a valid YouTube URL (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...)"
+                # Support formats:
+                # - https://www.youtube.com/watch?v=...
+                # - https://youtu.be/...
+                # - www.youtube.com/watch?v=...
+                # - youtube.com/watch?v=...
+                # - youtu.be/...
+                youtube_regex = re.compile(
+                    r'^(https?://)?(www\.)?'
+                    r'(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/|youtube\.com/e/|youtube\.com/\?v=)'
+                    r'([^&\n?#]+)'
                 )
-            
-            # Create file record
-            file_record = store.add_file(
-                user_id=user_id,
-                file_name=url,
-                file_url=url,
-                file_type="youtube",
-                status="processing"
-            )
-            
-            if not file_record:
-                raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
-            
-            # Process in background
-            background_tasks.add_task(
-                process_file_data,
-                user_gc_id=user_gc_id,
-                user_id=user_id,
-                file_id=file_record["id"],
-                filename=url,
-                file_url=url,
-                is_youtube=True,  # Mark as YouTube video
-                language=language,
-                comprehension_level=comprehension_level
-            )
-            
-            return UploadResponse(
-                message="YouTube URL processing started",
-                file_id=file_record["id"],
-                file_name=url
-            )
+                
+                if not url or not youtube_regex.search(url):
+                    logger.error(f"Invalid YouTube URL: {url}")
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="Invalid YouTube URL. Please use a valid YouTube URL (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...)"
+                    )
+                
+                # Create file record
+                file_id = store.add_file(
+                    user_id=user_id,
+                    file_name=url,
+                    file_url=url,
+                    file_type="youtube"
+                )
+                
+                if not file_id:
+                    raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
+                
+                # Get the file record to include in the response
+                file_record = store.get_file_by_id(file_id)
+                if not file_record:
+                    raise HTTPException(status_code=500, detail="Failed to retrieve file record after creation.")
+                
+                # Get the Firebase token from the Authorization header
+                auth_header = request.headers.get('Authorization')
+                firebase_token = None
+                if auth_header and auth_header.startswith('Bearer '):
+                    firebase_token = auth_header.split(' ')[1]
+                
+                # Process in background
+                background_tasks.add_task(
+                    process_file_data,
+                    user_gc_id=user_gc_id,
+                    user_id=user_id,
+                    file_id=file_id,
+                    filename=url,
+                    file_url=url,
+                    is_youtube=True,  # Mark as YouTube video
+                    language=language,
+                    comprehension_level=comprehension_level,
+                    firebase_token=firebase_token  # Pass the token for background processing
+                )
+                
+                return UploadResponse(
+                    message="YouTube URL processing started",
+                    file_id=file_id,
+                    file_name=url,
+                    files=[{
+                        "id": file_id,
+                        "file_name": url,
+                        "file_url": url,
+                        "status": "processing"
+                    }]
+                )
+                
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Error processing YouTube URL: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
             
         # Handle file upload
         elif content_type.startswith("multipart/form-data"):
@@ -201,40 +242,73 @@ async def save_file(
             
             uploaded_files_responses = []
             for file in files:
-                # Upload file to GCS
-                gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
-                if not gcs_url:
-                    logger.error(f"Failed to upload file to GCS: {file.filename}")
+                try:
+                    # Upload file to GCS
+                    gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
+                    if not gcs_url:
+                        logger.error(f"Failed to upload file to GCS: {file.filename}")
+                        continue
+                    
+                    # Determine file type from content type
+                    file_type = 'pdf'  # Default to PDF
+                    if file.content_type:
+                        if 'pdf' in file.content_type.lower():
+                            file_type = 'pdf'
+                        elif any(x in file.content_type.lower() for x in ['image', 'jpeg', 'png', 'gif']):
+                            file_type = 'image'
+                        elif 'text' in file.content_type.lower():
+                            file_type = 'text'
+                    
+                    # Add file record to database
+                    file_id = store.add_file(
+                        user_id=user_id,
+                        file_name=file.filename,
+                        file_url=gcs_url,
+                        file_type=file_type
+                    )
+                    
+                    if not file_id:
+                        logger.error(f"Failed to create file record for {file.filename}")
+                        continue
+                    
+                    # Get the file record to include in the response
+                    file_record = store.get_file_by_id(file_id)
+                    if not file_record:
+                        logger.error(f"Failed to retrieve file record after creation for {file.filename}")
+                        continue
+                    
+                    # Get the Firebase token from the Authorization header
+                    auth_header = request.headers.get('Authorization')
+                    firebase_token = None
+                    if auth_header and auth_header.startswith('Bearer '):
+                        firebase_token = auth_header.split(' ')[1]
+                    
+                    # Start background processing
+                    background_tasks.add_task(
+                        process_file_data,
+                        user_gc_id=user_gc_id,
+                        user_id=user_id,
+                        file_id=file_id,
+                        filename=file.filename,
+                        file_url=gcs_url,
+                        is_youtube=False,
+                        language=language,
+                        comprehension_level=comprehension_level,
+                        firebase_token=firebase_token  # Pass the token for background processing
+                    )
+                    
+                    # Add to response
+                    file_response = {
+                        "id": file_id,
+                        "file_name": file.filename,
+                        "file_url": gcs_url,
+                        "status": "processing"
+                    }
+                    uploaded_files_responses.append(file_response)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing file {file.filename}: {e}", exc_info=True)
                     continue
-
-                # Add file record to database
-                file_record = store.file_repo.add_file(
-                    user_id=user_id,
-                    file_name=file.filename,
-                    file_url=gcs_url,
-                    file_type=file.content_type or 'application/octet-stream',
-                    status='processing'
-                )
-                
-                if not file_record:
-                    logger.error(f"Failed to create file record for {file.filename}")
-                    continue
-
-                # Start background processing
-                task_name = 'tasks.process_uploaded_file'
-                request.app.state.celery_app.send_task(
-                    task_name, 
-                    args=[user_gc_id, user_id, file_record, gcs_url, file.filename, language, comprehension_level]
-                )
-                
-                # Add to response
-                file_response = FileUploadResponse(
-                    id=file_record,
-                    file_name=file.filename,
-                    file_url=gcs_url,
-                    status='processing'
-                )
-                uploaded_files_responses.append(file_response)
                 
             response = UploadResponse(
                 message=f"Successfully uploaded {len(uploaded_files_responses)} files",

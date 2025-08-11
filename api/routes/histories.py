@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
-from typing import Optional
 from ..utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
 import logging

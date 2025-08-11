@@ -44,10 +44,9 @@ from datetime import datetime
 from api.models.orm_models import File  # Add this import
 import logging
 
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import selectinload
 
 from ..models import File, Flashcard as FlashcardORM, KeyConcept as KeyConceptORM, QuizQuestion as QuizQuestionORM
-from .domain_models import KeyConcept, Flashcard, QuizQuestion
 from ..schemas.learning_content import (
     KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse,
     FlashcardCreate, FlashcardUpdate, FlashcardResponse,

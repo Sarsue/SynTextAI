@@ -4,7 +4,7 @@ Extracts text content, generates chunks with embeddings, and identifies key conc
 """
 import logging
 import base64
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 from processors.base_processor import FileProcessor
 from ..llm_compat import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy

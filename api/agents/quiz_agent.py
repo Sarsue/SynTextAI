@@ -42,7 +42,7 @@ Example Usage:
     flashcards = flashcard_result.get("flashcards", [])
     ```
 """
-from typing import Dict, Any, List, Optional, Union, cast
+from typing import Dict, Any, List, Optional
 import json
 import logging
 import random

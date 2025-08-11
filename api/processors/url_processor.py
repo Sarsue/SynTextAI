@@ -14,9 +14,8 @@ import aiohttp
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import re
-import json
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from .base_processor import FileProcessor
 from ..services.embedding_service import EmbeddingService

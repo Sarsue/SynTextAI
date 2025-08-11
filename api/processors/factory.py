@@ -3,7 +3,7 @@ Factory for selecting the appropriate file processor.
 """
 import os
 import logging
-from typing import Optional, Dict, Any, Type
+from typing import Optional
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor

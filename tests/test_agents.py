@@ -16,22 +16,18 @@ that can be used for summarization, question answering, and other tasks.
 def test_agent_imports():
     """Test that all agent modules can be imported."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 def test_agent_factory_registration():
     """Test that all agents are properly registered with the factory."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 def test_ingestion_agent():
     """Test the ingestion agent functionality."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 def test_summarization_agent():
     """Test the summarization agent functionality."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 @pytest.mark.asyncio
 async def test_ingestion_agent_async():
@@ -54,22 +50,18 @@ async def test_ingestion_agent_async():
 def test_quiz_agent():
     """Test the quiz agent functionality."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 def test_qa_agent():
     """Test the QA agent functionality."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 def test_study_scheduler_agent():
     """Test the study scheduler agent functionality."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 def test_integration_agent():
     """Test the integration agent functionality."""
     # This test will be implemented after agent implementations are complete
-    pass
 
 if __name__ == "__main__":
     import asyncio

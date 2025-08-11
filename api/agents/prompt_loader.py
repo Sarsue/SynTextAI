@@ -3,8 +3,7 @@ Utility for loading prompt templates from JSON files.
 """
 import json
 import os
-from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # Directory containing the prompt templates
 PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts", "agents")

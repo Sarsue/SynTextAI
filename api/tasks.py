@@ -19,57 +19,25 @@ from __future__ import annotations
 
 # Standard library imports
 import asyncio
-import gc
-import json
 import logging
 import os
-import shutil
 import tempfile
 import time
-import uuid
-from contextlib import contextmanager
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import Any, Dict, List, Optional
 
 # Third-party imports
 import stripe
-import yt_dlp
-from fastapi import HTTPException, status
-from pydantic import BaseModel, Field, validator
+from fastapi import HTTPException
 
 # Local imports
 from .core.config import settings
-from .core.constants import (
-    DEFAULT_PAGINATION,
-    ERROR_MESSAGES,
-    LANGUAGE_CODE_MAP,
-    MAX_FILE_SIZES,
-    PROCESSING_TIMEOUTS,
-    SUPPORTED_FILE_EXTENSIONS,
-)
-from .core.exceptions import (
-    AuthenticationError,
-    AuthorizationError,
-    FileProcessingError,
-    InvalidInputError,
-    ResourceNotFoundError,
-    ServiceUnavailableError,
-)
-from .models import File, ProcessingError, ProcessingStatus, User, db
-from .processors import get_processor_for_file
-from .processors.pdf_processor import PDFProcessor
-from .processors.text_processor import TextProcessor
-from .processors.youtube_processor import YouTubeProcessor
 from .repositories.repository_manager import RepositoryManager
 from .services.agent_service import agent_service
-from .services.llm_service import LLMService
 from .services.repository_service import RepositoryService
 from .services.websocket_service import websocket_service
 from .models.transcription import (
     TranscriptSegment,
     TranscriptionInfo,
-    WordSegment,
 )
 from utils import delete_from_gcs
 # Configure logging
@@ -338,7 +306,17 @@ def adapt_whisper_segments_to_transcript_data(whisper_segments: List[Dict[str, A
     
     return result
 
-async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filename: str, file_url: str, is_youtube: bool = False, language: str = "en", comprehension_level: str = "beginner"):
+async def process_file_data(
+    user_gc_id: str, 
+    user_id: str, 
+    file_id: str, 
+    filename: str, 
+    file_url: str, 
+    is_youtube: bool = False, 
+    language: str = "en", 
+    comprehension_level: str = "beginner",
+    firebase_token: Optional[str] = None
+):
     """Process an uploaded file using the MCP service.
     
     Handles both document uploads and YouTube videos by:
@@ -357,6 +335,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
         is_youtube: Whether this is a YouTube video
         language: Language code for processing (e.g., 'en', 'es')
         comprehension_level: User's comprehension level (beginner, intermediate, advanced)
+        firebase_token: Firebase authentication token for background processing
     """
     logger.info(f"========== STARTING PROCESSING FOR FILE: {filename} (ID: {file_id}) ===========")
     logger.info(f"Processing details - User: {user_id}, GCS_ID: {user_gc_id}, Lang: {language}, Level: {comprehension_level}")

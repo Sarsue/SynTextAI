@@ -2,19 +2,10 @@
 PDF processor module - Handles extraction and processing of PDF documents.
 """
 import logging
-import os
-import asyncio
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 from io import BytesIO
-import tempfile
-import base64
-import json
-from datetime import datetime
-import hashlib
 
 import fitz  # PyMuPDF
-import numpy as np
-import re
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
@@ -24,10 +15,8 @@ from ..llm_compat import get_text_embeddings_in_batches, generate_key_concepts_d
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 
 # Import PDF extraction tools
-from pdfminer.high_level import extract_text
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFPageInterpreter
-from pdfminer.pdfdevice import PDFDevice
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.converter import TextConverter

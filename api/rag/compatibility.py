@@ -3,10 +3,9 @@ Backward compatibility module for transitioning from old rag_utils.py functions.
 """
 
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Tuple, Optional
 
 from .pipeline import RAGPipeline
-from .factory import RAGFactory
 
 logger = logging.getLogger(__name__)
 

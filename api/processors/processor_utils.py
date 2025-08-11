@@ -3,7 +3,7 @@ Utility functions and shared logic for file processors.
 Centralizes common functionality used by multiple processors.
 """
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ async def generate_learning_materials_for_concept(
                     try:
                         statement = tf.get('statement', '')
                         is_true = tf.get('is_true', True)
-                        explanation = tf.get('explanation', '')
+                        tf.get('explanation', '')
                         logger.debug(f"Saving T/F {i+1}/{len(tf_questions)}: statement='{statement[:30]}...', is_true={is_true}")
                         
                         # Note: We're not passing explanation as it's not accepted by the method

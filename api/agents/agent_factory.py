@@ -9,10 +9,9 @@ import logging
 import importlib
 import hashlib
 import json
-from typing import Dict, Type, Optional, Any, TypeVar, Generic, Union, List, Tuple
+from typing import Dict, Type, Optional, Any, TypeVar
 from pydantic import BaseModel, ValidationError, Field
-from .base_agent import BaseAgent, AgentConfig, TConfig, AgentError
-from .prompt_loader import PromptLoader
+from .base_agent import BaseAgent, AgentError
 
 logger = logging.getLogger(__name__)
 

@@ -1,13 +1,13 @@
 """
 User repository for managing user-related database operations.
 """
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
 import logging
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from .base_repository import BaseRepository
-from .domain_models import User, Subscription, CardDetails
+from .domain_models import Subscription, CardDetails
 
 # Import ORM models from the new models module
 from ..models import User as UserORM

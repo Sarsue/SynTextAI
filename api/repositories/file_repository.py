@@ -1,9 +1,9 @@
 """
 Repository for file-related database operations.
 """
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 import logging
-from sqlalchemy import text, select
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 import numpy as np
 import asyncio
@@ -11,10 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 from scipy.spatial.distance import cosine, euclidean
 
 from .base_repository import BaseRepository
-from .domain_models import File, Segment, Chunk
 
 # Import ORM models from the new models module
-from ..models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
+from ..models import File as FileORM, Chunk as ChunkORM
 from ..models import Segment as SegmentORM
 
 logger = logging.getLogger(__name__)
@@ -23,13 +22,14 @@ logger = logging.getLogger(__name__)
 class FileRepository(BaseRepository):
     """Repository for file-related database operations."""
     
-    def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
+    def add_file(self, user_id: int, file_name: str, file_url: str, file_type: str = None) -> Optional[int]:
         """Add a new file to the database.
         
         Args:
             user_id: ID of the user who owns this file
             file_name: Name of the file
             file_url: URL where the file is stored
+            file_type: Type of the file (e.g., 'pdf', 'youtube')
             
         Returns:
             int: The ID of the newly created file, or None if creation failed
@@ -39,7 +39,8 @@ class FileRepository(BaseRepository):
                 new_file = FileORM(
                     user_id=user_id,
                     file_name=file_name,
-                    file_url=file_url
+                    file_url=file_url,
+                    file_type=file_type
                 )
                 uow.session.add(new_file)
                 # Flush the session to get the ID assigned by the database

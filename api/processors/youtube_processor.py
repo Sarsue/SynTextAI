@@ -5,25 +5,21 @@ import asyncio
 import logging
 import os
 import re
-import tempfile
-import time
-import shutil
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 
 # Third-party imports
-import yt_dlp
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
-from ..llm_compat import generate_key_concepts_dspy, get_text_embeddings_in_batches
+from ..llm_compat import generate_key_concepts_dspy
 
 logger = logging.getLogger(__name__)
 
 # Import required only for YouTube processing
 try:
-    from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+    from youtube_transcript_api import YouTubeTranscriptApi
 except ImportError:
     logger.warning("YouTube Transcript API not available. YouTube processing will be limited.")
 
@@ -81,7 +77,7 @@ class YouTubeProcessor(FileProcessor):
         # Extract parameters
         language = kwargs.get('language', 'English')
         comprehension_level = kwargs.get('comprehension_level', 'Beginner')
-        user_gc_id = kwargs.get('user_gc_id', '')
+        kwargs.get('user_gc_id', '')
         
         try:
             # Step 1: Extract content (transcript)

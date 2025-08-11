@@ -5,7 +5,6 @@ This module ensures that all imports work correctly by adding the project root
 to the Python path and configuring the environment.
 """
 
-import os
 import sys
 from pathlib import Path
 

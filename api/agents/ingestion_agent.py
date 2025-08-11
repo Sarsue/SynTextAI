@@ -36,9 +36,9 @@ Example Usage:
     ```
 """
 import logging
-from typing import Dict, Any, Optional, Callable, Awaitable, List, Union
+from typing import Dict, Any, Optional, Callable, Awaitable, List
 
-from typing import Dict, Any, Optional, Callable, Awaitable, List, Union
+from typing import Dict, Any, Optional, Callable, Awaitable, List
 from sqlalchemy.orm import Session
 
 from .base_agent import BaseAgent, AgentConfig, AgentError

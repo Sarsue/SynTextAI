@@ -6,8 +6,7 @@ with fallback mechanisms and batching support.
 """
 import os
 import logging
-from typing import List, Optional, Union, Dict, Any
-import numpy as np
+from typing import List, Optional, Dict, Any
 from mistralai.client import MistralClient
 import google.generativeai as genai
 from tenacity import retry, stop_after_attempt, wait_exponential

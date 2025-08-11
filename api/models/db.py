@@ -1,10 +1,9 @@
 """
 Database session management utilities with connection pooling.
 """
-from typing import Generator, Optional
+from typing import Generator
 from contextlib import contextmanager
 from sqlalchemy import create_engine, event
-from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
 from sqlalchemy.pool import QueuePool

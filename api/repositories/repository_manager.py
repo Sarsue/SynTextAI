@@ -271,18 +271,38 @@ class RepositoryManager:
             return []
     
     # File operations
-    def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
-        """Add a new file to the database."""
-        return self.file_repo.add_file(user_id, file_name, file_url)
+    def add_file(self, user_id: int, file_name: str, file_url: str, file_type: str = None) -> Optional[int]:
+        """Add a new file to the database.
+        
+        Args:
+            user_id: ID of the user who owns this file
+            file_name: Name of the file
+            file_url: URL where the file is stored
+            file_type: Type of the file (e.g., 'pdf', 'youtube')
+            
+        Returns:
+            int: The ID of the newly created file, or None if creation failed
+        """
+        return self.file_repo.add_file(user_id, file_name, file_url, file_type)
     
-    async def add_file_async(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
-        """Async wrapper for add_file."""
+    async def add_file_async(self, user_id: int, file_name: str, file_url: str, file_type: str = None) -> Optional[int]:
+        """Async wrapper for add_file.
+        
+        Args:
+            user_id: ID of the user who owns this file
+            file_name: Name of the file
+            file_url: URL where the file is stored
+            file_type: Type of the file (e.g., 'pdf', 'youtube')
+            
+        Returns:
+            int: The ID of the newly created file, or None if creation failed
+        """
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
                 result = await loop.run_in_executor(
                     pool,
-                    lambda: self.add_file(user_id, file_name, file_url)
+                    lambda: self.add_file(user_id, file_name, file_url, file_type)
                 )
                 return result
         except Exception as e:

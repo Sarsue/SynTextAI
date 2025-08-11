@@ -40,7 +40,7 @@ Example Usage:
 """
 import os
 import logging
-from typing import Dict, Any, Optional, List, Union, AsyncGenerator
+from typing import Dict, Any, Optional, List
 
 import google.generativeai as genai
 from mistralai.client import MistralClient

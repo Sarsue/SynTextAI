@@ -1,14 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body
-from fastapi.responses import JSONResponse
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict
 import stripe
 import logging
 import os
 from dotenv import load_dotenv
 from api.utils import get_user_id
 from api.repositories.repository_manager import RepositoryManager
-from api.repositories.domain_models import Subscription
 
 # Load environment variables
 load_dotenv()
@@ -359,12 +357,11 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
             try:
                 # Using the repository methods to get subscription info
                 # We need to find the user ID from the stripe customer ID first
-                user_id = None
                 subscriptions = store.user_repo._get_raw_subscription(stripe_customer_id)
                 
                 if subscriptions and len(subscriptions) > 0:
                     subscription_in_db = subscriptions[0]
-                    user_id = subscription_in_db.user_id
+                    subscription_in_db.user_id
                     
                     if subscription_in_db.status == 'trialing' and current_status != 'trialing':
                         logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")

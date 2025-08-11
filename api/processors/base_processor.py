@@ -4,7 +4,7 @@ These provide the foundation for all specific file type processors.
 """
 from abc import ABC, abstractmethod
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ class FileProcessor(ABC):
         Returns:
             Dict containing processing results
         """
-        pass
     
     @abstractmethod
     async def extract_content(self, **kwargs) -> Dict[str, Any]:
@@ -41,7 +40,6 @@ class FileProcessor(ABC):
         Returns:
             Dict containing extracted content
         """
-        pass
         
     @abstractmethod
     async def generate_embeddings(self, content: Dict[str, Any]) -> Dict[str, Any]:
@@ -54,7 +52,6 @@ class FileProcessor(ABC):
         Returns:
             Dict containing content with embeddings
         """
-        pass
         
     @abstractmethod
     async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
@@ -68,7 +65,6 @@ class FileProcessor(ABC):
         Returns:
             List of key concepts
         """
-        pass
         
     @abstractmethod
     async def generate_learning_materials(self, 
@@ -84,7 +80,6 @@ class FileProcessor(ABC):
         Returns:
             Dict containing generated learning materials
         """
-        pass
         
     def _log_error(self, message: str, error: Exception, exc_info: bool = True) -> None:
         """Utility method for consistent error logging."""

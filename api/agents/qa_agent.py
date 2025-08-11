@@ -35,12 +35,11 @@ Example Usage:
         print(f"Error: {result['error']}")
     ```
 """
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 import json
 import logging
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
-import numpy as np
 
 from .base_agent import BaseAgent, AgentConfig
 from .prompt_loader import PromptLoader

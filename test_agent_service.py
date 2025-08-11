@@ -7,7 +7,6 @@ a sample document through the ingestion pipeline.
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 

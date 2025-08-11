@@ -3,10 +3,8 @@ Repository for managing chat-related database operations.
 """
 from typing import Optional, List, Dict, Any
 import logging
-from sqlalchemy.exc import IntegrityError
 
 from .base_repository import BaseRepository
-from .domain_models import ChatHistory, Message
 
 # Import ORM models from the new models module
 from ..models import ChatHistory as ChatHistoryORM

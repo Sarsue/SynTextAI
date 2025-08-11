@@ -3,7 +3,7 @@ Application-wide constants.
 
 This module contains constants used throughout the SynTextAI application.
 """
-from typing import Dict, List, Set, Final, Any
+from typing import Dict, Set, Final, Any
 
 # Language support
 LANGUAGE_CODE_MAP: Final[Dict[str, str]] = {

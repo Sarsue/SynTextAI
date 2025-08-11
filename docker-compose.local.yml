@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   syntextaiapp:
     build:
@@ -102,6 +104,11 @@ services:
     user: "1000:1000"
     environment:
       - INSTANCE_NAME=SyntextAI
+      - BASE_URL=http://localhost:8080/
+      - AUTOCOMPLETE=google
+      - SEARCH_FORMAT=json
+      - SAFE_SEARCH=0
+      - AUTOCORRECT=1
     networks:
       - syntextai_network
     

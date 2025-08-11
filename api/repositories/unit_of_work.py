@@ -5,7 +5,7 @@ This pattern provides a consistent way to handle database transactions across
 repository operations, reducing boilerplate code and ensuring proper commit/rollback handling.
 """
 import logging
-from typing import Callable, TypeVar, Generic, Optional, Any
+from typing import Callable, TypeVar, Optional, Any
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -35,14 +35,14 @@ class UnitOfWork:
         self.session = self.session_factory()
         return self
         
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, _):
         """
         End the transaction, with commit or rollback based on exception state.
         
         Args:
             exc_type: Exception type if an exception was raised, else None
             exc_val: Exception value if an exception was raised, else None
-            exc_tb: Exception traceback if an exception was raised, else None
+            _: Unused traceback parameter (kept for interface compatibility)
         """
         if exc_type is not None:
             # An exception occurred, rollback

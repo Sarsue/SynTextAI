@@ -34,7 +34,6 @@ Example Usage:
 """
 import logging
 from typing import Dict, Any, List, Optional
-from pydantic import Field
 
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -236,7 +235,7 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                 )
             
             # Prepare prompt based on content type and requirements
-            prompt = self._build_summary_prompt(content, language, level)
+            self._build_summary_prompt(content, language, level)
             
             # Call LLM to generate summary
             # Note: Replace this with actual LLM call

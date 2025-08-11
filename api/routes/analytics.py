@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import json
@@ -7,7 +7,6 @@ import time
 import posthog
 from sqlalchemy.orm import Session
 from api.models.db import get_db
-from api.repositories.repository_manager import RepositoryManager
 from pydantic import BaseModel, Field
 
 # Initialize PostHog client

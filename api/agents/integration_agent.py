@@ -39,11 +39,11 @@ Example Usage:
         print(f"Export failed: {result.error}")
     ```
 """
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 import json
 import logging
 from enum import Enum
-from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic import BaseModel, Field, HttpUrl
 
 from .base_agent import BaseAgent, AgentConfig
 from .prompt_loader import PromptLoader
@@ -420,7 +420,7 @@ class IntegrationAgent(BaseAgent[IntegrationAgentConfig]):
         try:
             prompt = self._prepare_export_prompt(integration, data)
             llm_response = await self._call_llm(prompt)
-            result = self._parse_export_response(llm_response)
+            self._parse_export_response(llm_response)
             
             # Here you would implement the actual export logic
             # For example, for Notion:
@@ -444,17 +444,14 @@ class IntegrationAgent(BaseAgent[IntegrationAgentConfig]):
     async def _import_data(self, integration: IntegrationType, data: Dict[str, Any]) -> IntegrationResult:
         """Import data from an external service."""
         # Implementation would be similar to _export_data
-        pass
     
     async def _sync_data(self, integration: IntegrationType, data: Dict[str, Any]) -> IntegrationResult:
         """Synchronize data with an external service."""
         # Implementation would handle two-way sync
-        pass
     
     async def _handle_auth(self, integration: IntegrationType, data: Dict[str, Any]) -> IntegrationResult:
         """Handle OAuth or other authentication flows."""
         # Implementation would handle authentication
-        pass
     
     def _prepare_export_prompt(self, integration: IntegrationType, data: Dict[str, Any]) -> str:
         """Prepare the prompt for the LLM."""

@@ -2,7 +2,7 @@
 Tests for the Summarization Agent.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from api.agents.summarization_agent import SummarizationAgent, SummarizationConfig
 from api.agents.base_agent import AgentError
 

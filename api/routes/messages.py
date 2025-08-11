@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
-from typing import List, Dict
+from typing import Dict
 import logging
 from ..utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
