@@ -7,12 +7,7 @@ services:
       - DB_MAX_OVERFLOW=5
       - DB_POOL_RECYCLE=180
       - DB_POOL_PRE_PING=true
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
+
     stop_grace_period: 30s
     stop_signal: SIGTERM
 

@@ -56,11 +56,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p "$WHISPER_CACHE_DIR" && \
     python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
 
-# Copy setup files and install the package in development mode
-COPY setup.py .
-COPY setup_paths.py .
+# Copy the application code
 COPY api/ ./api/
-RUN pip install -e .
 
 # Set environment variables for production
 ENV PYTHONPATH=/app \
@@ -100,10 +97,6 @@ ENV FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth \
 
 # Expose the application port
 EXPOSE 3000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
 
 # Command to run the application
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

@@ -317,8 +317,8 @@ async def save_file(
             
             # For backward compatibility, set the first file's info at the top level
             if uploaded_files_responses:
-                response.file_id = uploaded_files_responses[0].id
-                response.file_name = uploaded_files_responses[0].file_name
+                response.file_id = uploaded_files_responses[0]['id']
+                response.file_name = uploaded_files_responses[0]['file_name']
                 
             return response
         else:

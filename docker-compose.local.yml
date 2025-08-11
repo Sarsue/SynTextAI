@@ -38,12 +38,7 @@ services:
         reservations:
           memory: 2G
     
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+
 
   worker:
     build:
@@ -85,13 +80,7 @@ services:
         reservations:
           memory: 1G
     
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'python -m api.worker' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    
+
     restart: unless-stopped
 
   searxng:
@@ -121,12 +110,7 @@ services:
         reservations:
           memory: 512M
     
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+
     
     restart: unless-stopped
 

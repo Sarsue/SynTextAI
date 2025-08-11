@@ -207,27 +207,7 @@ async def shutdown_event():
     engine.dispose()
     logger.info("Application shutdown complete.")
 
-# Health check endpoint
-@app.get("/health", status_code=status.HTTP_200_OK)
-async def health_check():
-    """Health check endpoint for monitoring and container health checks."""
-    try:
-        # Test database connection
-        with SessionLocal() as session:
-            session.execute(text("SELECT 1"))
-        return {
-            "status": "healthy",
-            "database": "connected",
-            "websockets": {
-                "active_connections": websocket_manager.active_connections_count()
-            }
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "unhealthy", "error": str(e)}
-        )
+# Health check endpoint removed
 from .routes.subscriptions import subscriptions_router
 from .routes.users import users_router
 from .routes.analytics import router as analytics_router, posthog_middleware
@@ -249,10 +229,6 @@ build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../fronten
 # Note: StaticFiles will only handle requests for files that exist
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
 
 if __name__ == "__main__":
     import uvicorn

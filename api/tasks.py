@@ -375,8 +375,7 @@ async def process_file_data(
                 success = await update_file_status(
                     int(file_id), 
                     status,
-                    error_message=error_msg,
-                    progress=progress
+                    error=error_msg
                 )
                 if success:
                     logger.info(f"Updated file {file_id} status to {status}")
