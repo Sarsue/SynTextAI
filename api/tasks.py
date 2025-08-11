@@ -34,12 +34,12 @@ from .core.config import settings
 from .repositories.repository_manager import RepositoryManager
 from .services.agent_service import agent_service
 from .services.repository_service import RepositoryService
-from .services.websocket_service import websocket_service
+from .websocket_manager import websocket_manager as websocket_service
 from .models.transcription import (
     TranscriptSegment,
     TranscriptionInfo,
 )
-from utils import delete_from_gcs
+from .utils import delete_from_gcs
 # Configure logging
 logger = logging.getLogger(__name__)
 

@@ -26,9 +26,10 @@ class BaseRepository(ABC):
             if not database_url:
                 raise ValueError("No database URL provided and DATABASE_URL environment variable not set")
         
-        self.database_url = database_url
+        # Convert database_url to string if it's a MultiHostUrl object
+        self.database_url = str(database_url) if hasattr(database_url, '__str__') else database_url
         self.engine = create_engine(
-            database_url,
+            self.database_url,
             echo=False,
             pool_pre_ping=True,
             pool_recycle=3600,
