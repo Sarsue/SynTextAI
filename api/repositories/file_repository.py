@@ -22,6 +22,81 @@ logger = logging.getLogger(__name__)
 class FileRepository(BaseRepository):
     """Repository for file-related database operations."""
     
+    def get_pending_files(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get files with 'uploaded' status and mark them as 'processing'.
+        
+        Args:
+            limit: Maximum number of files to return
+            
+        Returns:
+            List[Dict]: List of file dictionaries with metadata
+        """
+        from api.models.orm_models import File
+        
+        try:
+            with self.get_unit_of_work() as uow:
+                # Get files that need processing
+                files = uow.session.query(File).filter(
+                    File.processing_status == 'uploaded'
+                ).order_by(
+                    File.created_at.asc()
+                ).limit(limit).all()
+                
+                if not files:
+                    return []
+                
+                # Prepare response
+                result = []
+                for file in files:
+                    result.append({
+                        'id': file.id,
+                        'file_name': file.file_name,
+                        'file_url': file.file_url,
+                        'user_id': file.user_id,
+                        'file_type': file.file_type,
+                        'created_at': file.created_at.isoformat() if file.created_at else None
+                    })
+                    
+                    # Mark as processing
+                    file.processing_status = 'processing'
+                    uow.session.add(file)
+                
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error in get_pending_files: {str(e)}", exc_info=True)
+            raise
+    
+    def update_file_processing_status(self, file_id: int, status: str) -> bool:
+        """
+        Update the processing status of a file.
+        
+        Args:
+            file_id: ID of the file to update
+            status: New status value
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        from api.models.orm_models import File
+        
+        with self.get_unit_of_work() as uow:
+            try:
+                result = uow.session.query(File).filter(
+                    File.id == file_id
+                ).update(
+                    {File.processing_status: status},
+                    synchronize_session=False
+                )
+                
+                return result > 0
+                
+            except Exception as e:
+                logger.error(f"Error updating file {file_id} status: {str(e)}", exc_info=True)
+                uow.session.rollback()
+                return False
+    
     def add_file(self, user_id: int, file_name: str, file_url: str, file_type: str = None) -> Optional[int]:
         """Add a new file to the database.
         

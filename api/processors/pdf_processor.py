@@ -2,8 +2,9 @@
 PDF processor module - Handles extraction and processing of PDF documents.
 """
 import logging
-from typing import Dict, List, Any
-from io import BytesIO
+import asyncio
+from typing import Dict, List, Any, Optional
+from io import BytesIO, StringIO
 
 import fitz  # PyMuPDF
 
@@ -22,6 +23,39 @@ from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.converter import TextConverter
 
 logger = logging.getLogger(__name__)
+
+# Global instance of RepositoryManager for the standalone function
+_repo_manager: Optional[RepositoryManager] = None
+
+async def process_pdf(
+    file_data: bytes,
+    file_id: int,
+    user_id: int,
+    filename: str,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Standalone function to process a PDF file.
+    
+    This is a convenience function that creates a PDFProcessor instance and processes the file.
+    
+    Args:
+        file_data: The binary content of the PDF file
+        file_id: ID of the file in the database
+        user_id: ID of the user who owns the file
+        filename: Name of the file
+        **kwargs: Additional keyword arguments to pass to the processor
+        
+    Returns:
+        Dictionary containing processing results
+    """
+    global _repo_manager
+    if _repo_manager is None:
+        from api.repositories.repository_manager import get_repository_manager
+        _repo_manager = get_repository_manager()
+        
+    processor = PDFProcessor(_repo_manager)
+    return await processor.process(file_data, file_id, user_id, filename, **kwargs)
 
 class PDFProcessor(FileProcessor):
     """
@@ -87,8 +121,8 @@ class PDFProcessor(FileProcessor):
         # Update the database with chunks and embeddings
         if processed_data and "chunks" in processed_data:
             logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
-            # Now properly awaiting the async method
-            success = await self.store.update_file_with_chunks(
+            # Using the async version of the method with _async suffix
+            success = await self.store.update_file_with_chunks_async(
                 user_id=user_id,
                 filename=filename,
                 file_type="pdf",

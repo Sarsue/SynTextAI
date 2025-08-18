@@ -83,43 +83,157 @@ async def process_file_with_ingestion_agent(
     language: str,
     comprehension_level: str,
     user_id: str,
-    store: RepositoryManager
+    store: RepositoryManager,
+    file_data: Optional[bytes] = None,
+    filename: Optional[str] = None,
+    is_youtube: bool = False
 ):
-    """Process an uploaded file using the IngestionAgent."""
+    """
+    Process a file or YouTube URL using the IngestionAgent.
+    
+    This is the unified entry point for all file processing, handling both:
+    - File uploads (PDF, text, etc.)
+    - YouTube URLs
+    
+    Args:
+        file_id: ID of the file in the database
+        file_path: Path to the file or YouTube URL
+        file_type: Type of file (pdf, youtube, txt, etc.)
+        language: Language code for processing
+        comprehension_level: User's comprehension level
+        user_id: ID of the user who uploaded the file
+        store: Repository manager for database operations
+        file_data: Raw file data (for direct processing)
+        filename: Original filename (for uploads)
+        is_youtube: Whether this is a YouTube URL
+    
+    Returns:
+        Dict containing processing results
+    """
+    from api.websocket_manager import websocket_manager as websocket_service
+    
+    async def update_status(status: str, error: Optional[str] = None, progress: float = 0.0):
+        """Update the processing status and notify via WebSocket."""
+        try:
+            # Use the correct method to update file status
+            store.update_file_status(
+                file_id=file_id,
+                status=status,
+                error_message=error
+            )
+            
+            # Only send WebSocket message if the service is available
+            if websocket_service:
+                try:
+                    await websocket_service.send_message(
+                        user_id=user_id,
+                        event_type="file_status_update",
+                        data={
+                            "file_id": file_id,
+                            "status": status,
+                            "error": error,
+                            "progress": progress
+                        }
+                    )
+                except Exception as ws_error:
+                    logger.error(f"WebSocket error: {ws_error}", exc_info=True)
+            else:
+                logger.debug("WebSocket service not available, skipping status update")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating status: {e}", exc_info=True)
+            return False
+    
     try:
+        # Prepare metadata for the ingestion agent
+        metadata = {
+            "file_id": file_id,
+            "user_id": user_id,
+            "language": language,
+            "comprehension_level": comprehension_level,
+            "is_youtube": is_youtube
+        }
+        
+        # Update status to processing
+        await update_status("processing", progress=0.1)
+        
+        # Determine the source type
+        source_type = "youtube" if is_youtube else file_type
+        
+        # Prepare content for the agent
+        content = {
+            "source_type": source_type,
+            "metadata": metadata,
+            "file_type": file_type,
+        }
+        
+        # Add file content or URL based on the source
+        if is_youtube:
+            content["youtube_url"] = file_path
+            content["url"] = file_path  # Add url field for compatibility with _process_youtube_new
+        else:
+            # For file uploads, we need to handle the file data
+            if file_data:
+                # If file data is provided directly, use it
+                content["file_data"] = file_data
+                content["file_path"] = "in_memory_file"  # Add file_path for compatibility
+            else:
+                # Otherwise, use the file path
+                content["file_path"] = file_path
+                
+            if filename:
+                content["filename"] = filename
+        
         # Use the IngestionAgent to process the file
+        logger.info(f"Processing {'YouTube URL' if is_youtube else 'file'} with IngestionAgent")
+        logger.debug(f"Content being sent to agent: {content}")
+        
+        # Pass the content as kwargs to ensure all fields are properly passed through
         result = await agent_service.process_content(
             agent_name="ingestion",
-            content={
-                "file_path": file_path,
-                "file_type": file_type,
-                "language": language,
-                "comprehension_level": comprehension_level,
-                "user_id": user_id
-            },
-            content_type="json"
+            content=content,  # This will be the 'content' field in input_data
+            content_type="json",
+            **content  # This ensures all content fields are available at the top level of input_data
         )
         
-        # Update file status to processed
-        store.update_file(file_id, {"status": "processed"})
+        if not result:
+            raise ValueError("No result returned from IngestionAgent")
+        
+        # Update status to processed
+        await update_status("processed", progress=1.0)
         
         # Store the processing results (key concepts, etc.)
         if result.get("key_concepts"):
             for concept in result["key_concepts"]:
                 store.add_key_concept(
                     file_id=file_id,
-                    title=concept["title"],
-                    explanation=concept["explanation"],
+                    title=concept.get("title", ""),
+                    explanation=concept.get("explanation", ""),
                     source_page=concept.get("page"),
                     source_timestamp_start=concept.get("timestamp_start"),
                     source_timestamp_end=concept.get("timestamp_end")
                 )
         
+        # Update file with any additional metadata from processing
+        update_data = {
+            "status": "processed"
+        }
+        if "title" in result:
+            update_data["title"] = result["title"]
+        if "summary" in result:
+            update_data["summary"] = result["summary"]
+            
+        store.update_file_status(
+            file_id=file_id,
+            **update_data
+        )
+        
         return result
         
     except Exception as e:
-        logger.error(f"Error processing file with IngestionAgent: {e}", exc_info=True)
-        store.update_file(file_id, {"status": "failed", "error": str(e)})
+        error_msg = f"Error processing file with IngestionAgent: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        await update_status("failed", error=error_msg)
         raise
 
 # Route to save file
@@ -134,7 +248,15 @@ async def save_file(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
-    """Handle file uploads and process them using the IngestionAgent."""
+    """
+    Handle file uploads and process them using the IngestionAgent.
+    
+    This is the single entry point for all file processing, including:
+    - YouTube URLs (via JSON or form data)
+    - File uploads (PDF, text, etc.)
+    
+    All processing is delegated to the IngestionAgent with appropriate metadata.
+    """
     try:
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
@@ -142,6 +264,12 @@ async def save_file(
         content_type = request.headers.get("content-type", "")
         is_json = "application/json" in content_type
         is_multipart = "multipart/form-data" in content_type
+        
+        # Get Firebase token from Authorization header if available
+        auth_header = request.headers.get('Authorization')
+        firebase_token = None
+        if auth_header and auth_header.startswith('Bearer '):
+            firebase_token = auth_header.split(' ')[1]
         
         # Handle YouTube URL (can come from JSON or form data)
         if youtube_data or (is_json and not is_multipart):
@@ -162,12 +290,7 @@ async def save_file(
                         logger.error(f"Error parsing JSON body: {e}")
                         raise HTTPException(status_code=400, detail="Invalid JSON body")
                 
-                # Support formats:
-                # - https://www.youtube.com/watch?v=...
-                # - https://youtu.be/...
-                # - www.youtube.com/watch?v=...
-                # - youtube.com/watch?v=...
-                # - youtu.be/...
+                # Validate YouTube URL format
                 youtube_regex = re.compile(
                     r'^(https?://)?(www\.)?'
                     r'(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/|youtube\.com/e/|youtube\.com/\?v=)'
@@ -181,7 +304,7 @@ async def save_file(
                         detail="Invalid YouTube URL. Please use a valid YouTube URL (e.g., https://www.youtube.com/watch?v=... or https://youtu.be/...)"
                     )
                 
-                # Create file record
+                # Create file record for YouTube
                 file_id = store.add_file(
                     user_id=user_id,
                     file_name=url,
@@ -192,29 +315,17 @@ async def save_file(
                 if not file_id:
                     raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
                 
-                # Get the file record to include in the response
-                file_record = store.get_file_by_id(file_id)
-                if not file_record:
-                    raise HTTPException(status_code=500, detail="Failed to retrieve file record after creation.")
-                
-                # Get the Firebase token from the Authorization header
-                auth_header = request.headers.get('Authorization')
-                firebase_token = None
-                if auth_header and auth_header.startswith('Bearer '):
-                    firebase_token = auth_header.split(' ')[1]
-                
-                # Process in background
+                # Process in background using IngestionAgent
                 background_tasks.add_task(
-                    process_file_data,
-                    user_gc_id=user_gc_id,
-                    user_id=user_id,
+                    process_file_with_ingestion_agent,
                     file_id=file_id,
-                    filename=url,
-                    file_url=url,
-                    is_youtube=True,  # Mark as YouTube video
+                    file_path=url,  # Pass URL as file_path for YouTube
+                    file_type="youtube",
                     language=language,
                     comprehension_level=comprehension_level,
-                    firebase_token=firebase_token  # Pass the token for background processing
+                    user_id=user_id,
+                    store=store,
+                    is_youtube=True  # Explicitly set is_youtube flag
                 )
                 
                 return UploadResponse(
@@ -243,68 +354,117 @@ async def save_file(
             uploaded_files_responses = []
             for file in files:
                 try:
-                    # Upload file to GCS
-                    gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
-                    if not gcs_url:
-                        logger.error(f"Failed to upload file to GCS: {file.filename}")
-                        continue
+                    # Validate file before upload
+                    try:
+                        # Check file size (10MB max)
+                        max_size = 10 * 1024 * 1024  # 10MB
+                        file.file.seek(0, 2)  # Seek to end
+                        file_size = file.file.tell()
+                        file.file.seek(0)  # Reset file pointer
+                        
+                        if file_size > max_size:
+                            raise HTTPException(
+                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                detail=f"File {file.filename} is too large. Maximum size is 10MB."
+                            )
+                        file.file.seek(0)  # Reset file pointer
+                        
+                        # Check file type
+                        file_extension = os.path.splitext(file.filename)[1].lower()
+                        allowed_extensions = [".pdf", ".txt", ".docx", ".doc", ".md", ".html", ".htm"]
+                        if file_extension not in allowed_extensions:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"File type {file_extension} is not supported. Supported types: {', '.join(allowed_extensions)}"
+                            )
+                            
+                    except HTTPException:
+                        raise
+                    except Exception as e:
+                        logger.error(f"Error validating file {file.filename}: {e}", exc_info=True)
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid file: {str(e)}"
+                        )
                     
-                    # Determine file type from content type
-                    file_type = 'pdf'  # Default to PDF
-                    if file.content_type:
-                        if 'pdf' in file.content_type.lower():
-                            file_type = 'pdf'
-                        elif any(x in file.content_type.lower() for x in ['image', 'jpeg', 'png', 'gif']):
-                            file_type = 'image'
-                        elif 'text' in file.content_type.lower():
-                            file_type = 'text'
+                    # Generate a unique filename
+                    file_extension = os.path.splitext(file.filename)[1].lower()
+                    unique_filename = f"{user_id}_{int(time.time())}_{secrets.token_hex(4)}{file_extension}"
                     
-                    # Add file record to database
-                    file_id = store.add_file(
-                        user_id=user_id,
-                        file_name=file.filename,
-                        file_url=gcs_url,
-                        file_type=file_type
-                    )
+                    # Upload to GCS
+                    try:
+                        file_url = await upload_to_gcs(
+                            file.file,
+                            unique_filename,
+                            user_gc_id,
+                            content_type=file.content_type
+                        )
+                    except Exception as e:
+                        logger.error(f"Error uploading to GCS: {e}", exc_info=True)
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Failed to upload file to storage"
+                        )
                     
-                    if not file_id:
-                        logger.error(f"Failed to create file record for {file.filename}")
-                        continue
-                    
-                    # Get the file record to include in the response
-                    file_record = store.get_file_by_id(file_id)
-                    if not file_record:
-                        logger.error(f"Failed to retrieve file record after creation for {file.filename}")
-                        continue
-                    
-                    # Get the Firebase token from the Authorization header
-                    auth_header = request.headers.get('Authorization')
-                    firebase_token = None
-                    if auth_header and auth_header.startswith('Bearer '):
-                        firebase_token = auth_header.split(' ')[1]
-                    
-                    # Start background processing
-                    background_tasks.add_task(
-                        process_file_data,
-                        user_gc_id=user_gc_id,
-                        user_id=user_id,
-                        file_id=file_id,
-                        filename=file.filename,
-                        file_url=gcs_url,
-                        is_youtube=False,
-                        language=language,
-                        comprehension_level=comprehension_level,
-                        firebase_token=firebase_token  # Pass the token for background processing
-                    )
-                    
-                    # Add to response
-                    file_response = {
-                        "id": file_id,
-                        "file_name": file.filename,
-                        "file_url": gcs_url,
-                        "status": "processing"
-                    }
-                    uploaded_files_responses.append(file_response)
+                    # Create file record in database
+                    try:
+                        file_type = file_extension[1:]  # Remove the dot
+                        
+                        file_id = store.add_file(
+                            user_id=user_id,
+                            file_name=file.filename,
+                            file_url=file_url,
+                            file_type=file_type,
+                            status="pending"
+                        )
+                        
+                        if not file_id:
+                            raise HTTPException(
+                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Failed to create file record in database"
+                            )
+                        
+                        # Read file data for processing
+                        file.file.seek(0)
+                        file_data = file.file.read()
+                        
+                        # Process in background using IngestionAgent
+                        background_tasks.add_task(
+                            process_file_with_ingestion_agent,
+                            file_id=file_id,
+                            file_path=file_url,  # Use URL for reference
+                            file_type=file_type,
+                            language=language,
+                            comprehension_level=comprehension_level,
+                            user_id=user_id,
+                            store=store,
+                            file_data=file_data,  # Pass file data directly
+                            filename=file.filename
+                        )
+                        
+                        uploaded_files_responses.append({
+                            "id": file_id,
+                            "file_name": file.filename,
+                            "file_url": file_url,
+                            "status": "processing"
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing file record: {e}", exc_info=True)
+                        # Attempt to clean up the uploaded file if database operation failed
+                        try:
+                            delete_from_gcs(file_url, user_gc_id)
+                        except Exception as cleanup_error:
+                            logger.error(f"Failed to clean up file after database error: {cleanup_error}")
+                        
+                        raise HTTPException(
+                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Failed to process file: {str(e)}"
+                        )
+                        
+                except HTTPException as http_error:
+                    # Re-raise HTTP exceptions to be handled by FastAPI
+                    raise http_error
                     
                 except Exception as e:
                     logger.error(f"Error processing file {file.filename}: {e}", exc_info=True)

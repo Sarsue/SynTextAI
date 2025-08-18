@@ -35,9 +35,8 @@ mistralai==0.4.2
 dspy==2.5.43
 
 # Audio processing
-faster-whisper>=0.10.1
-ctranslate2>=3.22,<4.0.0
-av  # Let pip resolve the version
+openai-whisper>=20231117  # OpenAI's Whisper for speech recognition
+av>=10.0.0  # FFmpeg bindings for Python
 
 # File processing
 PyMuPDF>=1.23.0,<2.0.0
@@ -81,6 +80,7 @@ python-slugify>=8.0.0,<9.0.0
 # Dependencies with specific versions due to compatibility
 pyarrow>=10.0.0,<11.0.0  # Required for dspy
 protobuf>=4.21.0,<5.0.0  # Required for many ML libraries
+huggingface-hub>=0.16.0,<0.17.0  # Required for datasets and transformers compatibility
 
 # ============================================
 # Development Dependencies (not for production)

@@ -532,7 +532,11 @@ async def process_file_data(
                         agent_name="ingestion",
                         content=video_id,
                         content_type="youtube",
-                        language=language
+                        language=language,
+                        source_type="youtube",
+                        file_id=file_id,
+                        user_id=user_id,
+                        filename=filename
                     )
                     
                     if result.get('status') != 'success':
@@ -670,11 +674,19 @@ async def process_file_data(
                         progress=0.4
                     )
                     
+                    # Read the file data before passing to the ingestion agent
+                    with open(file_path, 'rb') as f:
+                        file_data = f.read()
+                    
                     result = await agent_service.process_content(
                         agent_name="ingestion",
-                        content=file_path,
+                        content=file_data,
                         content_type=file_type,
-                        language=language
+                        language=language,
+                        source_type="pdf",
+                        file_id=file_id,
+                        user_id=user_id,
+                        filename=filename
                     )
                     
                     if result.get('status') != 'success':

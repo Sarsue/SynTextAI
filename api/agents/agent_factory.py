@@ -115,6 +115,9 @@ class AgentFactory:
         config: Optional[Dict[str, Any]] = None,
         force_new: bool = False
     ) -> BaseAgent:
+        logger.info(f"Initializing agent: {name}")
+        logger.debug(f"Current registry: {list(cls._registry.keys())}")
+        
         """
         Get or create an agent instance by name with the given configuration.
         
@@ -133,6 +136,7 @@ class AgentFactory:
         # Try to import the agent module if not registered
         if name not in cls._registry:
             try:
+                logger.debug(f"Agent {name} not found in registry, attempting to import")
                 # Try with and without _agent suffix
                 module_names = [
                     f"api.agents.{name}",
@@ -141,13 +145,27 @@ class AgentFactory:
                 
                 for module_name in module_names:
                     try:
-                        importlib.import_module(module_name)
+                        logger.debug(f"Attempting to import module: {module_name}")
+                        module = importlib.import_module(module_name)
+                        logger.debug(f"Successfully imported module: {module_name}")
+                        logger.debug(f"Module contents: {dir(module)}")
+                        
+                        # Check if the module has a class named after the agent
+                        agent_class_name = ''.join(word.capitalize() for word in name.split('_'))
+                        if hasattr(module, agent_class_name):
+                            logger.debug(f"Found agent class: {agent_class_name}")
+                            if name not in cls._registry:
+                                logger.warning(f"Module {module_name} imported but agent {name} not registered. Check if register_agents() was called.")
+                        
                         if name in cls._registry:
+                            logger.debug(f"Agent {name} registered after importing {module_name}")
                             break
-                    except ImportError:
+                    except ImportError as e:
+                        logger.debug(f"Failed to import {module_name}: {str(e)}")
                         continue
                 
                 if name not in cls._registry:
+                    logger.error(f"Agent {name} not found after importing modules: {module_names}")
                     raise ValueError(f"Agent {name} not found after importing module")
                     
             except Exception as e:
@@ -205,6 +223,43 @@ class AgentFactory:
                 raise AgentError(f"Failed to initialize agent {name}") from e
         
         return cls._instances[instance_key]
+    
+    @classmethod
+    def get_agent_class(cls, name: str) -> Type[BaseAgent]:
+        """
+        Get the agent class for the given name.
+        
+        Args:
+            name: Name of the agent to get
+            
+        Returns:
+            The agent class
+            
+        Raises:
+            ValueError: If the agent is not found
+        """
+        if name not in cls._registry:
+            raise ValueError(f"Agent {name} not found")
+            
+        return cls._registry[name].agent_class
+        
+    @classmethod
+    def list_agents(cls) -> Dict[str, Dict[str, Any]]:
+        """
+        List all registered agents and their metadata.
+        
+        Returns:
+            Dictionary mapping agent names to their metadata
+        """
+        return {
+            name: {
+                "class": metadata.agent_class.__name__,
+                "is_dspy_agent": metadata.is_dspy_agent,
+                "description": metadata.description,
+                "version": metadata.version
+            }
+            for name, metadata in cls._registry.items()
+        }
     
     @classmethod
     def get_agent_metadata(cls, name: str) -> AgentMetadata:

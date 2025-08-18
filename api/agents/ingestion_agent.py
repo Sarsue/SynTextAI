@@ -4,44 +4,13 @@ Ingestion Agent for processing and normalizing various content types.
 This module provides the IngestionAgent class which is responsible for ingesting content
 from various sources (PDFs, YouTube videos, text, and URLs) and converting them into a
 standardized format suitable for further processing by other agents in the SynTextAI system.
-
-The agent handles:
-- PDF document processing and text extraction
-- YouTube video metadata and transcript retrieval
-- Text content normalization
-- Web page content extraction from URLs
-- Chunking of large documents
-- Optional embedding generation
-- Integration with the SummarizationAgent for content analysis
-
-Example Usage:
-    ```python
-    # Initialize the agent
-    agent = IngestionAgent()
-    
-    # Process a PDF file
-    result = await agent.process({
-        "source_type": "pdf",
-        "file_path": "/path/to/document.pdf",
-        "file_id": "unique-file-id",
-        "metadata": {"title": "Sample Document"}
-    })
-    
-    # Process a YouTube video
-    result = await agent.process({
-        "source_type": "youtube",
-        "url": "https://www.youtube.com/watch?v=example",
-        "file_id": "unique-youtube-id"
-    })
-    ```
 """
 import logging
-from typing import Dict, Any, Optional, Callable, Awaitable, List
-
-from typing import Dict, Any, Optional, Callable, Awaitable, List
+from typing import Dict, Any, Optional, Callable, Awaitable, List, Union
 from sqlalchemy.orm import Session
 
 from .base_agent import BaseAgent, AgentConfig, AgentError
+from .agent_factory import agent
 from .summarization_agent import SummarizationAgent, SummarizationConfig
 from ..processors import (
     process_pdf,
@@ -86,7 +55,21 @@ class IngestionConfig(AgentConfig):
     embedding_provider: Optional[str] = None
     embedding_batch_size: int = 10
 
-@agent("ingestion", {"max_chunk_size": 4000, "chunk_overlap": 200})
+@agent(
+    name="ingestion",
+    description="Handles content ingestion from various sources including PDFs, YouTube, text, and URLs",
+    version="1.0.0",
+    is_dspy_agent=False,
+    config={
+        "max_chunk_size": 4000,
+        "chunk_overlap": 200,
+        "supported_types": ["pdf", "youtube", "text", "url"],
+        "timeout": 300,
+        "generate_embeddings": True,
+        "embedding_provider": None,
+        "embedding_batch_size": 10
+    }
+)
 class IngestionAgent(BaseAgent[IngestionConfig]):
     """
     Agent responsible for ingesting and normalizing content from various sources.
@@ -127,8 +110,19 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
         ```
     """
     
-    def __init__(self, config: Optional[IngestionConfig] = None):
+    def __init__(self, config: Optional[Union[Dict[str, Any], AgentConfig, IngestionConfig]] = None):
+        # Initialize with default config if none provided
         super().__init__(config or IngestionConfig())
+        
+        # Convert AgentConfig to IngestionConfig if needed
+        if isinstance(self.config, AgentConfig) and not isinstance(self.config, IngestionConfig):
+            # Convert AgentConfig to dict and then to IngestionConfig
+            config_dict = self.config.dict()
+            self.config = IngestionConfig(**config_dict)
+        # Ensure we have an IngestionConfig instance
+        elif not isinstance(self.config, IngestionConfig):
+            self.config = IngestionConfig()
+            
         self._processors: Dict[str, Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]] = {
             "pdf": self._process_pdf,
             "youtube": self._process_youtube,
@@ -150,11 +144,20 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
             Dictionary containing processed content with chunks and metadata
         """
         try:
-            # Use existing process_pdf utility with the new signature
+            # Read the file content
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+                
+            # Call process_pdf with all required parameters
             result = await process_pdf(
-                content=file_path,
+                file_data=file_data,
+                file_id=0,  # Will be set by the caller
+                user_id='system',  # Will be set by the caller
+                filename=os.path.basename(file_path),
                 chunk_size=self.config.max_chunk_size,
-                chunk_overlap=self.config.chunk_overlap
+                chunk_overlap=self.config.chunk_overlap,
+                language=metadata.get('language', 'English'),
+                comprehension_level=metadata.get('comprehension_level', 'Beginner')
             )
             
             # Ensure metadata is properly set
@@ -174,37 +177,107 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
 
     async def _process_youtube_new(self, video_url: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
-        New implementation of YouTube processing with explicit URL.
+        Process YouTube video with optional audio file for transcription.
         
         Args:
-            video_url: URL of the YouTube video
-            metadata: Dictionary containing metadata about the video
+            video_url: URL of the YouTube video (can be full URL or just video ID)
+            metadata: Dictionary containing metadata about the video, may include:
+                - audio_file: Path to pre-downloaded audio file (optional)
+                - language: Language code for transcription (default: 'en')
+                - title: Video title (optional)
+                - description: Video description (optional)
                 
         Returns:
-            Dictionary containing processed content with chunks and metadata
+            Dictionary containing:
+                - chunks: List of content chunks with text and metadata
+                - metadata: Additional video metadata
+                
+        Raises:
+            AgentError: If processing fails
         """
         try:
-            # Use existing process_youtube utility with the new signature
+            # Extract video ID if full URL is provided
+            if 'youtube.com' in video_url or 'youtu.be' in video_url:
+                from urllib.parse import urlparse, parse_qs
+                
+                # Handle youtu.be short URLs
+                if 'youtu.be' in video_url:
+                    video_id = urlparse(video_url).path.lstrip('/')
+                else:
+                    # Handle full youtube.com URLs
+                    parsed = urlparse(video_url)
+                    if 'v' in parse_qs(parsed.query):
+                        video_id = parse_qs(parsed.query)['v'][0]
+                    else:
+                        video_id = parsed.path.split('/')[-1]
+            else:
+                video_id = video_url
+                video_url = f'https://www.youtube.com/watch?v={video_id}'
+            
+            # Prepare metadata
+            if 'metadata' not in metadata:
+                metadata['metadata'] = {}
+                
+            metadata['metadata'].update({
+                'source_type': 'youtube',
+                'source_url': video_url,
+                'video_id': video_id,
+                'language': metadata.get('language', 'en')
+            })
+            
+            # Process with audio file if provided
+            audio_file = metadata.pop('audio_file', None)
+            if audio_file and os.path.exists(audio_file):
+                try:
+                    # Process audio file directly
+                    from ..processors.youtube_processor import YouTubeProcessor
+                    processor = YouTubeProcessor()
+                    
+                    # Get language from metadata or default to English
+                    language = metadata.get('language', 'en')
+                    
+                    # Transcribe audio
+                    segments = await processor._transcribe_with_whisper(
+                        video_id=video_id,
+                        target_lang_code=language
+                    )
+                    
+                    if not segments:
+                        raise AgentError("No transcription segments returned")
+                    
+                    # Format result
+                    result = {
+                        'chunks': segments,
+                        'metadata': metadata['metadata']
+                    }
+                    
+                    return result
+                    
+                except Exception as e:
+                    logger.error(f"Error processing audio file {audio_file}: {str(e)}", exc_info=True)
+                    # Fall through to standard processing if audio processing fails
+            
+            # Fall back to standard YouTube processing without audio file
             result = await process_youtube(
                 video_url=video_url,
+                file_id=metadata.get('file_id'),
+                user_id=metadata.get('user_id'),
                 chunk_size=self.config.max_chunk_size,
-                chunk_overlap=self.config.chunk_overlap
+                chunk_overlap=self.config.chunk_overlap,
+                language=metadata.get('language', 'en')
             )
             
             # Ensure metadata is properly set
             if 'metadata' not in result:
                 result['metadata'] = {}
                 
-            result['metadata'].update({
-                'source_type': 'youtube',
-                'source_url': video_url
-            })
+            result['metadata'].update(metadata['metadata'])
             
             return result
             
         except Exception as e:
-            logger.error(f"Error in _process_youtube_new: {str(e)}")
-            raise AgentError(f"Failed to process YouTube video: {str(e)}")
+            logger.error(f"Error in _process_youtube_new: {str(e)}", exc_info=True)
+            raise AgentError(f"Failed to process YouTube video {video_url}: {str(e)}")
 
     async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
         """
@@ -226,19 +299,29 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
             Dictionary containing the processed content and metadata
         """
         try:
+            # Ensure config is properly initialized
+            if not hasattr(self.config, 'supported_types') or not self.config.supported_types:
+                self.logger.warning("Config not properly initialized, using default values")
+                self.config = IngestionConfig()
+                
             source_type = input_data.get("source_type")
             file_id = input_data.get("file_id")
             
             if not source_type:
                 raise AgentError("No source_type specified in input data")
                 
+            self.logger.debug(f"Processing source type: {source_type}")
+            self.logger.debug(f"Available processors: {list(self._processors.keys())}")
+            
             # Handle new-style calls first
             if source_type == "pdf" and "file_path" in input_data:
+                self.logger.debug("Using new-style PDF processor")
                 result = await self._process_pdf_new(
                     file_path=input_data["file_path"],
                     metadata=input_data.get("metadata", {})
                 )
             elif source_type == "youtube" and "url" in input_data:
+                self.logger.debug("Using new-style YouTube processor")
                 result = await self._process_youtube_new(
                     video_url=input_data["url"],
                     metadata=input_data.get("metadata", {})
@@ -246,13 +329,16 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
             else:
                 # Fall back to original processor for other cases
                 if source_type not in self.config.supported_types:
-                    raise AgentError(f"Unsupported source type: {source_type}")
+                    raise AgentError(f"Unsupported source type: {source_type}. Supported types: {self.config.supported_types}")
+                
+                if source_type not in self._processors:
+                    raise AgentError(f"No processor available for source type: {source_type}")
                     
                 processor = self._processors[source_type]
                 result = await processor(input_data)
             
             # Generate embeddings if enabled
-            if self.config.generate_embeddings and "chunks" in result:
+            if hasattr(self.config, 'generate_embeddings') and self.config.generate_embeddings and "chunks" in result:
                 await self._generate_chunk_embeddings(result["chunks"])
             
             # Generate summary and key concepts if we have content
@@ -309,11 +395,18 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
         if not content:
             raise AgentError("No content provided for PDF processing")
             
+        # Import the PDF processor
+        from api.processors.pdf_processor import process_pdf as pdf_processor
+        
         # Process the PDF to extract text and chunk it
-        result = await process_pdf(
-            content=content,
+        result = await pdf_processor(
+            file_data=content,
+            file_id=input_data.get('file_id', 'temp_' + str(hash(str(content[:1000]))) if content else 'unknown'),
+            user_id=input_data.get('user_id', 'system'),
+            filename=input_data.get('filename', 'document.pdf'),
             chunk_size=self.config.max_chunk_size,
-            chunk_overlap=self.config.chunk_overlap
+            chunk_overlap=self.config.chunk_overlap,
+            language=input_data.get('language', 'en')
         )
         
         # Add source metadata if not present
@@ -344,10 +437,23 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
             raise AgentError("No YouTube URL provided")
             
         # Process the YouTube video to get transcript and chunk it
-        result = await process_youtube(
+        from api.processors.youtube_processor import process_youtube as youtube_processor
+        
+        # Get file_id from input_data or generate a temporary one
+        file_id = input_data.get('file_id', 'temp_' + str(hash(video_url)))
+        
+        # Call the processor with required parameters
+        # The process_youtube function expects (video_url, file_id, user_id, **kwargs)
+        # and will handle passing these to the processor's process method
+        result = await youtube_processor(
             video_url=video_url,
+            file_id=file_id,
+            user_id=input_data.get('user_id', 'system'),
+            # Don't pass filename here as it's already handled in process_youtube
             chunk_size=self.config.max_chunk_size,
-            chunk_overlap=self.config.chunk_overlap
+            chunk_overlap=self.config.chunk_overlap,
+            language=input_data.get('metadata', {}).get('language', 'English'),
+            comprehension_level=input_data.get('metadata', {}).get('comprehension_level', 'Beginner')
         )
         
         # Add source metadata if not present

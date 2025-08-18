@@ -271,21 +271,39 @@ class RepositoryManager:
             return []
     
     # File operations
-    def add_file(self, user_id: int, file_name: str, file_url: str, file_type: str = None) -> Optional[int]:
-        """Add a new file to the database.
+    def get_pending_files(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get files with 'uploaded' status and mark them as 'processing'.
         
         Args:
-            user_id: ID of the user who owns this file
-            file_name: Name of the file
-            file_url: URL where the file is stored
-            file_type: Type of the file (e.g., 'pdf', 'youtube')
+            limit: Maximum number of files to return
             
         Returns:
-            int: The ID of the newly created file, or None if creation failed
+            List[Dict]: List of file dictionaries with metadata
         """
+        return self.file_repo.get_pending_files(limit)
+    
+    def update_file_processing_status(self, file_id: int, status: str) -> bool:
+        """
+        Update the processing status of a file.
+        
+        Args:
+            file_id: ID of the file to update
+            status: New status value ('uploaded', 'processing', 'completed', 'failed')
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        return self.file_repo.update_file_processing_status(file_id, status)
+    
+    def add_file(self, user_id: int, file_name: str, file_url: str, file_type: str = None, **kwargs) -> Optional[int]:
+        """Add a new file to the database."""
+        # Log any unexpected arguments for debugging
+        if kwargs:
+            logger.warning(f"Unexpected arguments in add_file: {', '.join(kwargs.keys())}")
         return self.file_repo.add_file(user_id, file_name, file_url, file_type)
     
-    async def add_file_async(self, user_id: int, file_name: str, file_url: str, file_type: str = None) -> Optional[int]:
+    async def add_file_async(self, user_id: int, file_name: str, file_url: str, file_type: str = None, **kwargs) -> Optional[int]:
         """Async wrapper for add_file.
         
         Args:
@@ -293,23 +311,23 @@ class RepositoryManager:
             file_name: Name of the file
             file_url: URL where the file is stored
             file_type: Type of the file (e.g., 'pdf', 'youtube')
+            **kwargs: Additional arguments (ignored for backward compatibility)
             
         Returns:
             int: The ID of the newly created file, or None if creation failed
         """
+        # Log any unexpected arguments for debugging
+        if kwargs:
+            logger.warning(f"Unexpected arguments in add_file_async: {', '.join(kwargs.keys())}")
         try:
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(
-                    pool,
-                    lambda: self.add_file(user_id, file_name, file_url, file_type)
-                )
-                return result
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self.add_file, user_id, file_name, file_url, file_type
+            )
         except Exception as e:
             logger.error(f"Error in async wrapper for add_file: {e}", exc_info=True)
             return None
     
-    def update_file_with_chunks(
+    async def update_file_with_chunks(
         self, 
         user_id: int, 
         filename: str, 
@@ -317,7 +335,7 @@ class RepositoryManager:
         extracted_data: List[Dict]
     ) -> bool:
         """Store processed file data with embeddings, segments, and metadata."""
-        return self.file_repo.update_file_with_chunks(user_id, filename, file_type, extracted_data)
+        return await self.file_repo.update_file_with_chunks(user_id, filename, file_type, extracted_data)
     
     async def update_file_with_chunks_async(
         self, 
@@ -536,15 +554,62 @@ class RepositoryManager:
         status: str = None, 
         error_message: str = None
     ) -> bool:
-        """Update the status of a file (deprecated - columns don't exist)."""
-        # Log that we're skipping the status update because the columns don't exist
-        log_msg = f"Status update for file ID {file_id} skipped (columns don't exist in schema)"
-        if status:
-            log_msg += f", status would have been: {status}"
-        if error_message:
-            log_msg += f", error would have been: {error_message[:50]}{'...' if len(error_message) > 50 else ''}"
-        logger.info(log_msg)
-        return True
+        """
+        Update the status of a file in the database.
+        
+        Args:
+            file_id: The ID of the file to update
+            status: The new status ('uploaded', 'processing', 'completed', 'failed')
+            error_message: Optional error message for failed status
+            
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        try:
+            # Update the file status using the file repository
+            if status:
+                success = self.file_repo.update_file_processing_status(file_id, status)
+                if not success:
+                    logger.error(f"Failed to update status for file {file_id}")
+                    return False
+            
+            # If there's an error message, we need to update it separately
+            # since update_file_processing_status doesn't handle error messages
+            if error_message:
+                success = self._update_file_error_message(file_id, error_message)
+                if not success:
+                    logger.error(f"Failed to update error message for file {file_id}")
+                    return False
+            
+            logger.info(f"Updated file {file_id} status to {status}" + 
+                       (f" with error: {error_message[:100]}..." if error_message else ""))
+            
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error updating file {file_id} status: {str(e)}", exc_info=True)
+            return False
+            
+    def _update_file_error_message(self, file_id: int, error_message: str) -> bool:
+        """Helper method to update the error message for a file."""
+        from api.models.orm_models import File
+        
+        try:
+            # Use the unit of work pattern consistent with FileRepository
+            with self.file_repo.get_unit_of_work() as uow:
+                file = uow.session.query(File).filter(File.id == file_id).first()
+                if not file:
+                    logger.error(f"File with ID {file_id} not found")
+                    return False
+                    
+                file.error_message = error_message[:500]  # Truncate to avoid DB issues
+                uow.session.add(file)
+                # Commit is handled by the context manager
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error updating error message for file {file_id}: {str(e)}", exc_info=True)
+            return False
         
     async def update_file_status_async(
         self, 
@@ -556,17 +621,35 @@ class RepositoryManager:
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(
-                    pool,
-                    self.update_file_status,
-                    file_id, status, error_message
-                )
-                return result
+                # Update status if provided
+                if status:
+                    status_success = await loop.run_in_executor(
+                        pool,
+                        lambda: self.file_repo.update_file_processing_status(file_id, status)
+                    )
+                    if not status_success:
+                        logger.error(f"Failed to update status for file {file_id}")
+                        return False
+                
+                # Update error message if provided
+                if error_message:
+                    error_success = await loop.run_in_executor(
+                        pool,
+                        lambda: self._update_file_error_message(file_id, error_message)
+                    )
+                    if not error_success:
+                        logger.error(f"Failed to update error message for file {file_id}")
+                        return False
+                
+                logger.info(f"Updated file {file_id} status to {status}" + 
+                          (f" with error: {error_message[:100]}..." if error_message else ""))
+                
+                return True
+                
         except Exception as e:
-            logger.error(f"Error in async wrapper for update_file_status: {e}", exc_info=True)
+            logger.error(f"Error in async update_file_status for file {file_id}: {e}", exc_info=True)
             return False
-    
-    # For backward compatibility with the old method name
+            
     def update_file_processing_status(
         self, 
         file_id: int, 
@@ -1004,3 +1087,42 @@ class RepositoryManager:
         except Exception as e:
             logger.error(f"Error in async wrapper for add_key_concept: {e}", exc_info=True)
             return None
+
+
+# Global instance of RepositoryManager
+_repository_manager_instance = None
+
+def get_repository_manager(database_url: str = None) -> "RepositoryManager":
+    """
+    Get or create a singleton instance of RepositoryManager.
+    
+    Args:
+        database_url: Optional database URL. If not provided, constructs from environment variables.
+        
+    Returns:
+        RepositoryManager: The singleton instance
+    """
+    global _repository_manager_instance
+    if _repository_manager_instance is None:
+        if database_url is None:
+            import os
+            # Construct database URL from individual environment variables
+            database_config = {
+                'dbname': os.getenv("DATABASE_NAME"),
+                'user': os.getenv("DATABASE_USER"),
+                'password': os.getenv("DATABASE_PASSWORD"),
+                'host': os.getenv("DATABASE_HOST"),
+                'port': os.getenv("DATABASE_PORT"),
+            }
+            
+            if not all(database_config.values()):
+                raise ValueError("Missing required database configuration. Please set all DATABASE_* environment variables.")
+                
+            database_url = (
+                f"postgresql://{database_config['user']}:{database_config['password']}"
+                f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
+            )
+            
+        _repository_manager_instance = RepositoryManager(database_url)
+    return _repository_manager_instance
+

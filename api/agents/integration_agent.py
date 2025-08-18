@@ -197,7 +197,7 @@ class IntegrationMetadata(BaseModel):
         ...,
         description="Version identifier for the integration",
         example="1.0.0",
-        regex=r'^\d+\.\d+\.\d+$'
+        pattern=r'^\d+\.\d+\.\d+$'
     )
     icon_url: Optional[HttpUrl] = Field(
         default=None,

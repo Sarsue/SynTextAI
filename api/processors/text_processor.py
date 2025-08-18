@@ -4,13 +4,52 @@ Extracts text content, generates chunks with embeddings, and identifies key conc
 """
 import logging
 import base64
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
-from processors.base_processor import FileProcessor
-from ..llm_compat import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy
-from utils import chunk_text
+# Use absolute imports instead of relative imports
+from api.processors.base_processor import FileProcessor
+from api.repositories.repository_manager import RepositoryManager
+from api.llm_compat import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy
+from api.utils import chunk_text
 
 logger = logging.getLogger(__name__)
+
+# Global instance of RepositoryManager for the standalone function
+_repo_manager: Optional[RepositoryManager] = None
+
+async def process_text(
+    text_content: str,
+    file_id: int,
+    user_id: int,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Standalone function to process text content.
+    
+    This is a convenience function that creates a TextProcessor instance and processes the text.
+    
+    Args:
+        text_content: The text content to process
+        file_id: ID of the file in the database
+        user_id: ID of the user who owns the file
+        **kwargs: Additional keyword arguments to pass to the processor
+        
+    Returns:
+        Dictionary containing processing results
+    """
+    global _repo_manager
+    if _repo_manager is None:
+        from api.repositories.repository_manager import get_repository_manager
+        _repo_manager = get_repository_manager()
+        
+    processor = TextProcessor(_repo_manager)
+    return await processor.process(
+        text_content.encode('utf-8'),  # Convert to bytes for consistency
+        user_id,
+        file_id,
+        "text_content.txt",  # Default filename
+        **kwargs
+    )
 
 class TextProcessor(FileProcessor):
     """Processor for text files and images."""

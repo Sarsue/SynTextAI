@@ -21,6 +21,7 @@ from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import decode_firebase_token
 from .models.db import SessionLocal, engine
+from .agents import register_agents
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,12 +66,29 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_event():
     """
-    Initializes Firebase Admin SDK. This must be run before the app starts
-    accepting requests to ensure that authentication utilities are ready.
+    Initializes application services. This must be run before the app starts
+    accepting requests to ensure all services are ready.
     """
-    logger.info("Executing startup event: Initializing Firebase...")
-    initialize_firebase()
-    logger.info("Firebase initialized successfully.")
+    try:
+        # Initialize Firebase
+        initialize_firebase()
+        logger.info("Firebase Admin SDK initialized successfully")
+        
+        # Register all agents
+        logger.info("Starting agent registration...")
+        from .agents import register_agents
+        register_agents()
+        
+        # Verify agent registration
+        from .agents import agent_factory
+        registered_agents = agent_factory.list_agents()
+        logger.info(f"Successfully registered agents: {list(registered_agents.keys())}")
+        
+    except ImportError as e:
+        logger.error(f"Import error during application startup: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error during application startup: {e}", exc_info=True)
+        raise  # Re-raise to prevent the app from starting with errors
 
 database_config = {
     'dbname': os.getenv("DATABASE_NAME"),

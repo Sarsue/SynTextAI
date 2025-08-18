@@ -19,8 +19,46 @@ from typing import Dict, Any, List, Optional
 
 from .base_processor import FileProcessor
 from ..services.embedding_service import EmbeddingService
+from ..repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
+
+# Global instance of RepositoryManager for the standalone function
+_repo_manager: Optional[RepositoryManager] = None
+
+async def process_url(
+    url: str,
+    file_id: int,
+    user_id: int,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Standalone function to process a URL.
+    
+    This is a convenience function that creates a URLProcessor instance and processes the URL.
+    
+    Args:
+        url: The URL to process
+        file_id: ID of the file in the database
+        user_id: ID of the user who owns the file
+        **kwargs: Additional keyword arguments to pass to the processor
+        
+    Returns:
+        Dictionary containing processing results
+    """
+    global _repo_manager
+    if _repo_manager is None:
+        from api.repositories.repository_manager import get_repository_manager
+        _repo_manager = get_repository_manager()
+        
+    processor = URLProcessor()
+    return await processor.process(
+        user_id=str(user_id),
+        file_id=str(file_id),
+        filename=url,
+        file_url=url,
+        **kwargs
+    )
 
 class URLProcessor(FileProcessor):
     """Processor for handling various types of web URLs."""

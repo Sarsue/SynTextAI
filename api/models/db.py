@@ -1,6 +1,7 @@
 """
 Database session management utilities with connection pooling.
 """
+import atexit
 from typing import Generator
 from contextlib import contextmanager
 from sqlalchemy import create_engine, event
@@ -88,13 +89,14 @@ def set_statement_timeout(dbapi_connection, connection_record):
     cursor.execute("SET statement_timeout = 30000")  # 30 seconds
     cursor.close()
 
-# Create a thread-safe session factory
+# Create a thread-safe session factory with explicit connection management
 SessionLocal = scoped_session(
     sessionmaker(
         autocommit=False,
         autoflush=False,
         bind=engine,
-        expire_on_commit=False  # Prevent detached instance errors
+        expire_on_commit=False,  # Prevent detached instance errors
+        class_=Session
     )
 )
 
@@ -115,19 +117,30 @@ def on_checkin(dbapi_connection, connection_record):
 def on_close(dbapi_connection, connection_record):
     logger.debug(f"Connection closed: {id(dbapi_connection)}")
 
-@event.listens_for(engine, 'close')
-def on_engine_close(engine):
-    logger.info("Engine closed. Cleaning up connection pool...")
-
-# Ensure connections are properly closed when the app shuts down
-import atexit
+@event.listens_for(engine, 'engine_disposed')
+def receive_engine_disposed(engine):
+    """Log when the engine is disposed."""
+    logger.info("Database engine has been disposed")
 
 def cleanup():
-    logger.info("Application shutdown: Cleaning up database connections...")
-    SessionLocal.remove()
-    engine.dispose()
-    logger.info("Database connections cleaned up.")
+    """Close all connections when the application exits."""
+    logger.info("Closing all database connections...")
+    try:
+        # Remove all scoped sessions first
+        SessionLocal.remove()
+        # Then dispose of the engine
+        engine.dispose()
+        logger.info("Database connections closed successfully")
+    except Exception as e:
+        logger.error(f"Error during database cleanup: {str(e)}", exc_info=True)
+    finally:
+        # Ensure the engine is disposed even if there's an error
+        try:
+            engine.dispose()
+        except Exception as e:
+            logger.error(f"Error disposing engine: {str(e)}", exc_info=True)
 
+# Register cleanup function
 atexit.register(cleanup)
 
 # Context manager for database sessions
@@ -141,17 +154,29 @@ def get_db_session() -> Generator[Session, None, None]:
             # Use session here
             result = session.query(MyModel).all()
     """
-    session = SessionLocal()
+    session = None
     try:
+        session = SessionLocal()
         yield session
         session.commit()
     except Exception as e:
-        session.rollback()
-        logger.error(f"Database error: {str(e)}")
+        logger.error(f"Database error: {str(e)}", exc_info=True)
+        if session:
+            session.rollback()
         raise
     finally:
-        session.close()
+        if session:
+            try:
+                session.close()
+            except Exception as e:
+                logger.error(f"Error closing session: {str(e)}", exc_info=True)
+        # Always remove the scoped session to prevent connection leaks
+        try:
+            SessionLocal.remove()
+        except Exception as e:
+            logger.error(f"Error removing scoped session: {str(e)}", exc_info=True)
 
+# Dependency for FastAPI
 def get_db() -> Generator[Session, None, None]:
     """
     Dependency function for FastAPI to get a database session.
@@ -160,4 +185,8 @@ def get_db() -> Generator[Session, None, None]:
         SQLAlchemy Session: A database session that's automatically closed after use.
     """
     with get_db_session() as session:
-        yield session
+        try:
+            yield session
+        except Exception as e:
+            logger.error(f"Error in database session: {str(e)}", exc_info=True)
+            raise

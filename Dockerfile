@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    libgl1-mesa-glx \
+    libgl1 \
+    libglib2.0-0 \
     libsndfile1-dev \
     libavcodec-dev \
     libavformat-dev \
@@ -28,6 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblapack-dev \
     gfortran \
     postgresql-server-dev-all \
+    libgomp1 \
+    libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -52,9 +55,11 @@ RUN pip install --upgrade pip && \
 # Install Python dependencies with retries
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download the Whisper model
-RUN mkdir -p "$WHISPER_CACHE_DIR" && \
-    python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
+# Install faster-whisper with specific version
+RUN pip install --no-cache-dir faster-whisper==0.9.0
+
+# Create cache directory with correct permissions
+RUN mkdir -p "$WHISPER_CACHE_DIR" && chmod 777 "$WHISPER_CACHE_DIR"
 
 # Copy the application code
 COPY api/ ./api/
@@ -98,5 +103,9 @@ ENV FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth \
 # Expose the application port
 EXPOSE 3000
 
+# Set Python path to include the app directory
+ENV PYTHONPATH=/app:$PYTHONPATH
+
 # Command to run the application
+WORKDIR /app
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

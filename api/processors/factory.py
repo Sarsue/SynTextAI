@@ -3,7 +3,8 @@ Factory for selecting the appropriate file processor.
 """
 import os
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any, List, TypedDict
+from dataclasses import dataclass, field
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
@@ -14,6 +15,41 @@ from api.repositories.repository_manager import RepositoryManager
 from api.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class ProcessResult:
+    """
+    Dataclass representing the result of a file processing operation.
+    
+    Attributes:
+        success: Whether the processing was successful
+        content: The processed content (text, chunks, etc.)
+        metadata: Additional metadata about the processing
+        error: Error message if processing failed
+    """
+    success: bool
+    content: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the result to a dictionary."""
+        return {
+            'success': self.success,
+            'content': self.content,
+            'metadata': self.metadata,
+            'error': self.error
+        }
+        
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ProcessResult':
+        """Create a ProcessResult from a dictionary."""
+        return cls(
+            success=data.get('success', False),
+            content=data.get('content'),
+            metadata=data.get('metadata', {}),
+            error=data.get('error')
+        )
 
 class FileProcessingFactory:
     """

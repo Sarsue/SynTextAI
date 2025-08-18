@@ -63,40 +63,18 @@ def register_agent(
         raise
 
 def register_agents() -> None:
-    """Register all agents with the AgentFactory."""
+    """Register all agents with the AgentFactory.
+    
+    Note: Agents using the @agent decorator are automatically registered
+    when their module is imported. Only agents not using the decorator
+    need to be registered here.
+    """
     # Import agents here to avoid circular imports
-    from .ingestion_agent import IngestionAgent, IngestionConfig
-    from .summarization_agent import SummarizationAgent, SummarizationConfig
-    from .quiz_agent import QuizAgent, QuizConfig
     from .qa_agent import QAAgent, QAConfig
     from .study_scheduler_agent import StudySchedulerAgent, StudySchedulerConfig
     from .integration_agent import IntegrationAgent, IntegrationAgentConfig
     
-    # Register each agent
-    register_agent(
-        name="ingestion",
-        agent_class=IngestionAgent,
-        config_class=IngestionConfig,
-        description="Handles content ingestion from various sources",
-        is_dspy_agent=False
-    )
-    
-    register_agent(
-        name="summarization",
-        agent_class=SummarizationAgent,
-        config_class=SummarizationConfig,
-        description="Generates summaries of content",
-        is_dspy_agent=True
-    )
-    
-    register_agent(
-        name="quiz",
-        agent_class=QuizAgent,
-        config_class=QuizConfig,
-        description="Generates quizzes from content",
-        is_dspy_agent=True
-    )
-    
+    # Register agents that don't use the @agent decorator
     register_agent(
         name="qa",
         agent_class=QAAgent,

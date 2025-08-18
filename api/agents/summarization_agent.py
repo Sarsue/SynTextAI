@@ -36,9 +36,9 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from .base_agent import BaseAgent, AgentConfig, AgentError
+from .agent_factory import agent  # Import the agent decorator
 from .dspy_utils import extract_key_concepts
 from ..models.orm_models import KeyConcept
 
@@ -225,7 +225,6 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
         language: str,
         level: str
     ) -> Dict[str, Any]:
-        """Generate a structured summary of the content."""
         try:
             # Convert content to string if it's a list of chunks
             if isinstance(content, list):
@@ -234,23 +233,23 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                     for chunk in content
                 )
             
-            # Prepare prompt based on content type and requirements
-            self._build_summary_prompt(content, language, level)
+            # ✅ Ensure content is not a coroutine
+            if callable(content) or hasattr(content, '__await__'):
+                content = await content
+
+            # Prepare prompt
+            prompt = self._build_summary_prompt(content, language, level)
             
-            # Call LLM to generate summary
-            # Note: Replace this with actual LLM call
+            # (LLM call would go here)
             summary = f"Generated summary for {len(content)} characters of content in {language} at {level} level."
-            
-            # Structure the summary with sections if needed
-            structured_summary = {
+
+            return {
                 "overview": summary,
                 "sections": [],
                 "length": len(summary),
                 "language": language,
                 "comprehension_level": level
             }
-            
-            return structured_summary
             
         except Exception as e:
             logger.error(f"Error generating summary: {str(e)}", exc_info=True)
@@ -330,13 +329,24 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                     )
                     db_concepts.append(db_concept)
             
-            # Sort concepts by confidence (highest first)
-            formatted_concepts.sort(key=lambda x: x.get("confidence", 0.0), reverse=True)
+            # Ensure formatted_concepts is a list and sort by confidence (highest first)
+            if not isinstance(formatted_concepts, list):
+                formatted_concepts = []
+            else:
+                formatted_concepts = sorted(
+                    formatted_concepts, 
+                    key=lambda x: float(x.get("confidence", 0.0)), 
+                    reverse=True
+                )
             
-            # Limit to max_concepts if specified
-            if hasattr(self.config, 'max_concepts') and self.config.max_concepts:
-                formatted_concepts = formatted_concepts[:self.config.max_concepts]
-                db_concepts = db_concepts[:self.config.max_concepts]
+            # Limit to max_concepts if specified and we have a valid max_concepts value
+            if hasattr(self.config, 'max_concepts') and self.config.max_concepts and formatted_concepts:
+                max_concepts = int(self.config.max_concepts)
+                formatted_concepts = formatted_concepts[:max_concepts]
+                if isinstance(db_concepts, list):
+                    db_concepts = db_concepts[:max_concepts]
+                else:
+                    db_concepts = []
             
             # Save to database if session is provided
             if db is not None and file_id is not None and db_concepts:
@@ -368,17 +378,47 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
     
     def _build_summary_prompt(
         self, 
-        content: str, 
+        content: Any, 
         language: str,
         level: str
     ) -> str:
-        """Build the prompt for summary generation."""
-        # This is a simplified version - in practice, you'd want more sophisticated prompt engineering
-        return (
-            f"Generate a {level}-level summary in {language} for the following content. "
-            f"The summary should be comprehensive but concise, suitable for {level} understanding.\n\n"
-            f"CONTENT:\n{content[:10000]}..."  # Limit content length for the prompt
-        )
+        """Build the prompt for summary generation.
+        
+        Args:
+            content: The content to summarize. Can be a string, list, or other sequence.
+            language: The language for the summary.
+            level: The comprehension level (beginner, intermediate, advanced).
+            
+        Returns:
+            str: The formatted prompt string.
+            
+        Raises:
+            AgentError: If content cannot be converted to a string.
+        """
+        try:
+            # Convert content to string if it's a list of chunks or other sequence
+            if isinstance(content, (list, tuple)):
+                content = "\n\n".join(
+                    str(chunk.get("text", "") if isinstance(chunk, dict) else chunk)
+                    for chunk in content
+                )
+            elif not isinstance(content, (str, bytes, bytearray)):
+                content = str(content)
+                
+            # Ensure content is a string and truncate if necessary
+            content_str = str(content)
+            if len(content_str) > 10000:
+                content_str = content_str[:10000] + "..."
+                
+            return (
+                f"Generate a {level}-level summary in {language} for the following content. "
+                f"The summary should be comprehensive but concise, suitable for {level} understanding.\n\n"
+                f"CONTENT:\n{content_str}"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error building summary prompt: {str(e)}", exc_info=True)
+            raise AgentError(f"Failed to build summary prompt: {str(e)}")
     
     async def validate_input(self, input_data: Dict[str, Any]) -> bool:
         """Validate the input data before processing."""
