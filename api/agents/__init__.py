@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 # Agent registry with metadata
 AGENT_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
+# Import agents that use the @agent decorator to ensure they're registered
+from . import ingestion_agent  # noqa: F401
+from . import summarization_agent  # noqa: F401
+
 def register_agent(
     name: str,
     agent_class: Type[BaseAgent],

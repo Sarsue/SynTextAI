@@ -346,15 +346,11 @@ class RepositoryManager:
     ) -> bool:
         """Async wrapper for update_file_with_chunks."""
         try:
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(
-                    pool,
-                    lambda: self.update_file_with_chunks(user_id, filename, file_type, extracted_data)
-                )
-                return result
+            # Directly await the coroutine instead of using run_in_executor
+            # since we're already in an async context
+            return await self.update_file_with_chunks(user_id, filename, file_type, extracted_data)
         except Exception as e:
-            logger.error(f"Error in async wrapper for update_file_with_chunks: {e}", exc_info=True)
+            logger.error(f"Error in update_file_with_chunks: {e}", exc_info=True)
             return False
     
     def get_files_for_user(
@@ -666,64 +662,223 @@ class RepositoryManager:
         log_msg += f", processed flag: {processed}, status would have been: {status_value}"
         if error_message:
             log_msg += f", error would have been: {error_message[:50]}{'...' if len(error_message) > 50 else ''}"
+        
         logger.info(log_msg)
         return True
     
-    # Learning material operations
-    def add_key_concept(
-        self,
-        file_id: int,
-        concept_title: str,
-        concept_explanation: str,
-        source_page_number: Optional[int] = None,
-        source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
-    ) -> Optional[int]:
-        """Add a new key concept associated with a file.
+# Learning material operations
+def add_key_concept(
+    self,
+    file_id: int,
+    concept_title: str,
+    concept_explanation: str,
+    source_page_number: Optional[int] = None,
+    source_video_timestamp_start_seconds: Optional[int] = None,
+    source_video_timestamp_end_seconds: Optional[int] = None,
+    is_custom: bool = False
+) -> Optional[int]:
+    """Add a new key concept associated with a file.
+    
+    Args:
+        file_id: ID of the file this concept belongs to
+        concept_title: Title/name of the concept
+        concept_explanation: Detailed explanation of the concept
+        source_page_number: Page number where the concept appears (for PDFs)
+        source_video_timestamp_start_seconds: Start timestamp for video content
+        source_video_timestamp_end_seconds: End timestamp for video content
+        is_custom: Whether this is a custom (user-created) concept
         
-        Parameter order must match LearningMaterialRepository.add_key_concept:
-        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds)
-        """
-        return self.learning_material_repo.add_key_concept(
+    Returns:
+        int: ID of the created concept, or None if creation failed
+    """
+    from ..schemas.learning_content import KeyConceptCreate
+    
+    # Create a KeyConceptCreate object with the provided data
+    key_concept_data = KeyConceptCreate(
+        concept_title=concept_title,
+        concept_explanation=concept_explanation,
+        source_page_number=source_page_number,
+        source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
+        source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
+        is_custom=is_custom
+    )
+    
+    # Call the repository method with the KeyConceptCreate object
+    result = self.learning_material_repo.add_key_concept(
+        file_id=file_id,
+        key_concept_data=key_concept_data
+    )
+    
+    # Return the ID of the created concept
+    return result.get('id') if result else None
+
+async def add_key_concept_async(
+    self,
+    file_id: int,
+    concept_title: str,
+    concept_explanation: str,
+    source_page_number: Optional[int] = None,
+    source_video_timestamp_start_seconds: Optional[int] = None,
+    source_video_timestamp_end_seconds: Optional[int] = None,
+    is_custom: bool = False
+) -> Optional[int]:
+    """Async wrapper for add_key_concept.
+    
+    Args:
+        file_id: ID of the file this concept belongs to
+        concept_title: Title/name of the concept
+        concept_explanation: Detailed explanation of the concept
+        source_page_number: Page number where the concept appears (for PDFs)
+        source_video_timestamp_start_seconds: Start timestamp for video content
+        source_video_timestamp_end_seconds: End timestamp for video content
+        is_custom: Whether this is a custom (user-created) concept
+        
+    Returns:
+        int: ID of the created concept, or None if creation failed
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            result = await loop.run_in_executor(
+                pool,
+                lambda: self.add_key_concept(
+                    file_id=file_id,
+                    concept_title=concept_title,
+                    concept_explanation=concept_explanation,
+                    source_page_number=source_page_number,
+                    source_video_timestamp_start_seconds=source_video_timestamp_start_seconds,
+                    source_video_timestamp_end_seconds=source_video_timestamp_end_seconds,
+                    is_custom=is_custom
+                )
+            )
+            return result
+    except Exception as e:
+        logger.error(f"Error in async wrapper for add_key_concept: {e}", exc_info=True)
+        return None
+    
+def add_flashcard(
+    self, 
+    file_id: int, 
+    question: str, 
+    answer: str, 
+    key_concept_id: Optional[int] = None, 
+    is_custom: bool = False
+) -> Optional[int]:
+    """Add a new flashcard linked to a file and optionally a key concept."""
+    return self.learning_material_repo.add_flashcard(
+        file_id, 
+        question, 
+        answer, 
+        key_concept_id, 
+        is_custom
+    )
+        
+async def add_flashcard_async(
+    self, 
+    file_id: int, 
+    question: str, 
+    answer: str, 
+    key_concept_id: Optional[int] = None, 
+    is_custom: bool = False
+) -> Optional[int]:
+    """Async wrapper for add_flashcard.
+    
+    Order of parameters must match LearningMaterialRepository.add_flashcard:
+    (file_id, question, answer, key_concept_id, is_custom)
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            result = await loop.run_in_executor(
+                pool,
+                lambda: self.add_flashcard(
+                    file_id, 
+                    question, 
+                    answer, 
+                    key_concept_id, 
+                    is_custom
+                )
+            )
+            return result
+    except Exception as e:
+        logger.error(f"Error in async wrapper for add_flashcard: {e}", exc_info=True)
+        return None
+    
+def add_quiz_question(
+    self, 
+    file_id: int, 
+    key_concept_id: Optional[int] = None, 
+    question: str = None, 
+    question_type: str = 'MCQ', 
+    correct_answer: str = None, 
+    distractors: Optional[List[str]] = None,
+    quiz_question_data: Optional[Dict] = None
+) -> Optional[int]:
+    """Add a new quiz question linked to a file and optionally a key concept."""
+    if quiz_question_data is not None:
+        # New style call with quiz_question_data
+        if not isinstance(quiz_question_data, dict):
+            quiz_question_data = quiz_question_data.dict()
+        return self.learning_material_repo.add_quiz_question(
+            file_id=file_id,
+            quiz_question_data=quiz_question_data
+        )
+    else:
+        # Old style call with individual parameters
+        return self.learning_material_repo.add_quiz_question(
             file_id,
-            concept_title,
-            concept_explanation,
-            source_page_number,
-            source_video_timestamp_start_seconds,
-            source_video_timestamp_end_seconds
+            key_concept_id=key_concept_id,
+            question=question,
+            question_type=question_type,
+            correct_answer=correct_answer,
+            distractors=distractors or []
         )
         
-    async def add_key_concept_async(
-        self,
-        file_id: int,
-        concept_title: str,
-        concept_explanation: str,
-        source_page_number: Optional[int] = None,
-        source_video_timestamp_start_seconds: Optional[int] = None,
-        source_video_timestamp_end_seconds: Optional[int] = None
+    async def add_quiz_question_async(
+        self, 
+        file_id: int, 
+        question: str = None, 
+        question_type: str = 'MCQ', 
+        correct_answer: str = None, 
+        distractors: Optional[List[str]] = None,
+        key_concept_id: Optional[int] = None,
+        is_custom: bool = False,
+        quiz_question_data: Optional[Dict] = None
     ) -> Optional[int]:
-        """Async wrapper for add_key_concept.
+        """Async wrapper for add_quiz_question.
         
-        Parameter order must match LearningMaterialRepository.add_key_concept:
-        (file_id, concept_title, concept_explanation, source_page_number, source_video_timestamp_start_seconds, source_video_timestamp_end_seconds)
+        Args:
+            file_id: ID of the file this question is associated with
+            question: The question text
+            question_type: Type of question (e.g., 'MCQ', 'True/False')
+            correct_answer: The correct answer to the question
+            distractors: List of incorrect answer options (for multiple choice)
+            key_concept_id: Optional ID of a key concept this question tests
+            is_custom: Whether this is a custom (user-created) question
+            quiz_question_data: Additional question data in a dictionary
+            
+        Returns:
+            int: ID of the created quiz question, or None if creation failed
         """
         try:
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as pool:
                 result = await loop.run_in_executor(
                     pool,
-                    lambda: self.add_key_concept(
-                        file_id,
-                        concept_title,
-                        concept_explanation,
-                        source_page_number,
-                        source_video_timestamp_start_seconds,
-                        source_video_timestamp_end_seconds
+                    lambda: self.add_quiz_question(
+                        file_id=file_id,
+                        question=question,
+                        question_type=question_type,
+                        correct_answer=correct_answer,
+                        distractors=distractors,
+                        key_concept_id=key_concept_id,
+                        is_custom=is_custom,
+                        quiz_question_data=quiz_question_data
                     )
                 )
                 return result
         except Exception as e:
-            logger.error(f"Error in async wrapper for add_key_concept: {e}", exc_info=True)
+            logger.error(f"Error in async wrapper for add_quiz_question: {e}", exc_info=True)
             return None
     
     def add_flashcard(

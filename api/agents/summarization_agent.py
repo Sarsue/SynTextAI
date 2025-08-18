@@ -41,6 +41,7 @@ from .base_agent import BaseAgent, AgentConfig, AgentError
 from .agent_factory import agent  # Import the agent decorator
 from .dspy_utils import extract_key_concepts
 from ..models.orm_models import KeyConcept
+from ..utils.language_utils import validate_language, is_language_supported, get_supported_languages
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,6 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
     
     def __init__(self, config: Optional[SummarizationConfig] = None):
         super().__init__(config or SummarizationConfig())
-        self.supported_languages = ["english", "spanish", "french"]  # Supported languages
         self.supported_levels = ["beginner", "intermediate", "advanced"]
     
     async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
@@ -425,12 +425,19 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
         if not input_data.get("content"):
             raise AgentError("No content provided for summarization")
         
-        language = input_data.get("language", self.config.language).lower()
-        if language not in [lang.lower() for lang in self.supported_languages]:
+        # Get and normalize language input
+        language = input_data.get("language", self.config.language)
+        
+        try:
+            # This will raise ValueError if language is not supported
+            language = validate_language(language)
+        except ValueError as e:
+            # If language is not supported, log a warning but continue with English
+            supported = ", ".join(lang['code'] for lang in get_supported_languages())
             logger.warning(
-                f"Language '{language}' may not be fully supported. "
-                f"Supported languages: {', '.join(self.supported_languages)}"
+                f"{str(e)}. Falling back to English."
             )
+            language = 'english'
         
         level = input_data.get("comprehension_level", self.config.comprehension_level).lower()
         if level not in self.supported_levels:

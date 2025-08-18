@@ -3,6 +3,7 @@ YouTube processor module - Handles extraction and processing of YouTube videos.
 """
 import asyncio
 import json
+from ..utils.language_utils import validate_language, get_language_name
 import logging
 import os
 import re
@@ -211,20 +212,15 @@ class YouTubeProcessor(FileProcessor):
                         continue
                         
                     try:
-                        # Create KeyConceptCreate object
-                        key_concept_data = KeyConceptCreate(
+                        # Save the concept to get its ID using the repository manager's async method
+                        concept_id = await self.store.add_key_concept_async(
+                            file_id=file_id,
                             concept_title=title,
                             concept_explanation=explanation,
                             source_page_number=concept.get("source_page_number"),
                             source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
                             source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds"),
-                            is_custom=False  # Default to False for auto-generated concepts
-                        )
-                        
-                        # Save the concept to get its ID
-                        concept_id = await self.store.learning_material_repo.add_key_concept_async(
-                            file_id=file_id,
-                            key_concept_data=key_concept_data
+                            is_custom=False
                         )
                         
                         if not concept_id:
@@ -320,8 +316,13 @@ class YouTubeProcessor(FileProcessor):
         if not video_id:
             raise ValueError(f"Invalid YouTube video ID or URL: {filename}")
             
+        # Validate language
+        language = validate_language(language)
+        if not language:
+            raise ValueError("Invalid language")
+            
         # Map language to code
-        target_lang_code = LANGUAGE_CODE_MAP.get(language.lower(), language.lower())
+        target_lang_code = get_language_name(language)
         if not target_lang_code:  # Handle empty language string
             target_lang_code = 'en'
             

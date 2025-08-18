@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, 
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
-from api.utils import decode_firebase_token
+from ..utils.utils import decode_firebase_token
 from api.repositories.repository_manager import RepositoryManager
 import logging
 

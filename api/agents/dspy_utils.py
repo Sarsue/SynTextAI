@@ -4,13 +4,19 @@ DSPy utilities for SynTextAI agents.
 This module provides DSPy-based implementations of common NLP tasks,
 including key concept extraction with self-improving capabilities.
 """
-import json
 import logging
+import json
+import re
 import time
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import Dict, List, Optional, Any
 
 import dspy
 from dspy.teleprompt import BootstrapFewShot
+from pydantic import BaseModel, Field, validator
+
+from ..utils.language_utils import validate_language
+
+logger = logging.getLogger(__name__)
 
 # Import our DSPy configuration
 from .dspy_config import configure_dspy
@@ -269,6 +275,12 @@ Key concepts in JSON format: """
         language: str = "english", 
         comprehension_level: str = "intermediate"
     ) -> dspy.Prediction:
+        # Validate language
+        try:
+            language = validate_language(language)
+        except ValueError as e:
+            logger.warning(f"{str(e)}. Defaulting to English.")
+            language = 'english'
         """Extract key concepts from the document."""
         try:
             # Ensure document is not empty

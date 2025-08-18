@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .base_agent import BaseAgent, AgentConfig, AgentError
 from .agent_factory import agent
 from .summarization_agent import SummarizationAgent, SummarizationConfig
+from ..utils.language_utils import validate_language
 from ..processors import (
     process_pdf,
     process_youtube,
@@ -233,8 +234,8 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
                     from ..processors.youtube_processor import YouTubeProcessor
                     processor = YouTubeProcessor()
                     
-                    # Get language from metadata or default to English
-                    language = metadata.get('language', 'en')
+                    # Get and validate language from metadata or default to English
+                    language = validate_language(metadata.get('language', 'en'))
                     
                     # Transcribe audio
                     segments = await processor._transcribe_with_whisper(
@@ -264,7 +265,7 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
                 user_id=metadata.get('user_id'),
                 chunk_size=self.config.max_chunk_size,
                 chunk_overlap=self.config.chunk_overlap,
-                language=metadata.get('language', 'en')
+                language=validate_language(metadata.get('language', 'en'))
             )
             
             # Ensure metadata is properly set

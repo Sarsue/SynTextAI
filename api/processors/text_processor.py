@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.llm_compat import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy
-from api.utils import chunk_text
+from ..utils.utils import chunk_text
 
 logger = logging.getLogger(__name__)
 

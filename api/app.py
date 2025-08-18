@@ -19,7 +19,7 @@ from sqlalchemy import text
 from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
-from .utils import decode_firebase_token
+from .utils import utils
 from .models.db import SessionLocal, engine
 from .agents import register_agents
 
@@ -137,7 +137,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 return
                 
             token = data.get("token")
-            success, user_info = decode_firebase_token(token)
+            success, user_info = utils.decode_firebase_token(token)
             
             if not success or str(user_info.get('user_id')) != user_id:
                 logger.warning(f"WebSocket authentication failed for user {user_id}")

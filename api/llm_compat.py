@@ -164,128 +164,144 @@ async def generate_key_concepts_dspy(
         logger.debug(f"Raw LLM response for key concepts: {response[:500]}...")
         
         # Clean and parse the response
-        try:
-            import json
-            import re
+        import json
+        import re
+        from typing import List, Dict, Any, Optional
+        
+        # Clean up the response - handle markdown code blocks and other artifacts
+        cleaned_response = response.strip()
+        
+        # Try to extract JSON from markdown code blocks if present
+        json_match = re.search(r'```(?:json\r?\n)?(.*?)\r?\n```', cleaned_response, re.DOTALL)
+        if json_match:
+            cleaned_response = json_match.group(1).strip()
+        
+        # Define parse attempts
+        def direct_parse(x: str) -> Any:
+            return json.loads(x)
             
-            # Clean up the response - handle markdown code blocks and other artifacts
-            cleaned_response = response.strip()
+        def fix_trailing_commas(x: str) -> Any:
+            return json.loads(re.sub(r',(\s*[}\]])', r'\1', x))
             
-            # Extract JSON from markdown code blocks if present
-            json_match = re.search(r'```(?:json\n)?(.*?)\n```', cleaned_response, re.DOTALL)
-            if json_match:
-                cleaned_response = json_match.group(1).strip()
+        def extract_json_object(x: str) -> Any:
+            return json.loads('{' + x.split('{', 1)[1].rsplit('}', 1)[0] + '}')
             
-            # Handle common JSON formatting issues
-            cleaned_response = re.sub(r',\s*]', ']', cleaned_response)  # Trailing commas
-            cleaned_response = re.sub(r',\s*\}', '}', cleaned_response)  # Trailing commas in objects
-            
-            # Try to parse the cleaned response as JSON
-            concepts_data = json.loads(cleaned_response)
-            
-            # Ensure we have a list
-            if not isinstance(concepts_data, list):
-                if isinstance(concepts_data, dict):
-                    concepts_data = [concepts_data]
-                else:
-                    logger.error(f"Expected list of concepts, got {type(concepts_data).__name__}")
-                    return []
-            
-            logger.info(f"Successfully parsed {len(concepts_data)} concepts from LLM response")
-            
-            # Convert to KeyConcept objects and validate
-            valid_concepts = []
-            for i, concept in enumerate(concepts_data, 1):
-                try:
-                    if not isinstance(concept, dict):
-                        logger.warning(f"Skipping concept {i} - expected dict, got {type(concept).__name__}")
-                        continue
-                        
-                    title = concept.get('title', '')
-                    if title and isinstance(title, str):
-                        title = title.strip()
-                    
-                    explanation = concept.get('explanation', '')
-                    if explanation and isinstance(explanation, str):
-                        explanation = explanation.strip()
-                    
-                    if not title or not explanation:
-                        logger.warning(f"Skipping concept {i} - missing title or explanation")
-                        logger.debug(f"Title: {title}\nExplanation: {explanation}")
-                        continue
-                        
-                    # Create and validate the key concept
-                    key_concept = KeyConcept(
-                        title=title[:500],  # Limit length to prevent DB issues
-                        explanation=explanation[:2000],
-                        source_page=concept.get('source_page'),
-                        source_timestamp_start=concept.get('source_timestamp_start'),
-                        source_timestamp_end=concept.get('source_timestamp_end'),
-                    )
-                    
-                    valid_concepts.append(key_concept.dict(exclude_none=True))
-                    
-                except Exception as e:
-                    logger.error(f"Error processing concept {i}: {str(e)}", exc_info=True)
-            
-            logger.info(f"Successfully extracted {len(valid_concepts)} valid concepts")
-            return valid_concepts
-            
-        except json.JSONDecodeError as je:
-            logger.error(f"JSON decode error: {str(je)}")
-            logger.warning("Failed to parse LLM response as JSON, attempting text extraction...")
-            
-            # Try to extract concepts from plain text response
+        def fix_common_issues(x: str) -> Any:
+            # Fix common JSON formatting issues
+            fixed = re.sub(r'([{\[,])\s*([}\\],])', r'\1\2', x)  # Remove spaces between brackets
+            fixed = re.sub(r'([:,\[{])\s*\n\s*', r'\1', fixed)  # Remove newlines after delimiters
+            fixed = re.sub(r'"([^"]*?)"\s*:', r'"\1":', fixed)  # Fix missing quotes around keys
+            fixed = re.sub(r':\s*\n\s*"', ': "', fixed)  # Fix newlines after colons
+            fixed = re.sub(r'([^\\])\"', r'\1""', fixed)  # Fix unescaped quotes
+            return json.loads(fixed)
+        
+        # Try each parse attempt
+        parse_attempts = [
+            {'name': 'direct_parse', 'function': direct_parse},
+            {'name': 'fix_trailing_commas', 'function': fix_trailing_commas},
+            {'name': 'extract_json_object', 'function': extract_json_object},
+            {'name': 'fix_common_issues', 'function': fix_common_issues}
+        ]
+        
+        last_error = None
+        concepts_data = None
+        
+        for attempt in parse_attempts:
             try:
-                concepts = []
-                # Look for patterns like "1. Title: ... Explanation: ..."
-                pattern = r'(?:\d+\.\s*)?([^:\n]+?)\s*:\s*([^\n]+)'
-                matches = re.finditer(pattern, response, re.IGNORECASE | re.MULTILINE)
-                
-                for match in matches:
-                    title = match.group(1).strip()
-                    explanation = match.group(2).strip()
-                    
-                    if title and explanation and len(title) < 100 and len(explanation) < 500:
-                        concepts.append({
-                            'title': title,
-                            'explanation': explanation
-                        })
-                
-                if concepts:
-                    logger.info(f"Extracted {len(concepts)} concepts from text response")
-                    return concepts
-                
-                logger.warning("No concepts could be extracted from text response")
+                concepts_data = attempt['function'](cleaned_response)
+                logger.info(f"Successfully parsed JSON using {attempt['name']} strategy")
+                break
+            except (json.JSONDecodeError, IndexError, AttributeError) as e:
+                logger.debug(f"JSON parse attempt '{attempt['name']}' failed: {str(e)}")
+                last_error = e
+        else:
+            # If we get here, all attempts failed
+            logger.warning("All JSON parse attempts failed, falling back to text extraction")
+            raise last_error or ValueError("No parse attempts were made")
+        
+        # Ensure we have a list
+        if not isinstance(concepts_data, list):
+            if isinstance(concepts_data, dict):
+                concepts_data = [concepts_data]
+            else:
+                logger.error(f"Expected list of concepts, got {type(concepts_data).__name__}")
                 return []
+        
+        logger.info(f"Successfully parsed {len(concepts_data)} concepts from LLM response")
+            
+        # Convert to KeyConcept objects and validate
+        key_concepts = []
+        for i, concept in enumerate(concepts_data, 1):
+            try:
+                if not isinstance(concept, dict):
+                    logger.warning(f"Skipping concept {i} - expected dict, got {type(concept).__name__}")
+                    continue
+                
+                # Handle both 'title'/'explanation' and 'concept_title'/'concept_explanation' field names
+                title = concept.get('concept_title') or concept.get('title', '')
+                explanation = concept.get('concept_explanation') or concept.get('explanation', '')
+                
+                if not title or not explanation:
+                    logger.warning(f"Skipping concept with empty title or explanation: {concept}")
+                    continue
+                
+                # Create a KeyConcept object to validate the data
+                key_concept = KeyConcept(
+                    title=title,
+                    explanation=explanation,
+                    source_page=concept.get('source_page'),
+                    source_timestamp_start=concept.get('source_timestamp_start'),
+                    source_timestamp_end=concept.get('source_timestamp_end')
+                )
+                
+                # Convert to dict and add to results
+                concept_dict = key_concept.dict(exclude_none=True)
+                # Ensure we're using the field names expected by the YouTube processor
+                concept_dict['concept_title'] = concept_dict.pop('title')
+                concept_dict['concept_explanation'] = concept_dict.pop('explanation')
+                key_concepts.append(concept_dict)
                 
             except Exception as e:
-                logger.error(f"Error during text extraction fallback: {str(e)}")
-                return []
+                logger.warning(f"Skipping invalid concept: {concept}. Error: {e}")
+                continue
+        
+        logger.info(f"Successfully extracted {len(key_concepts)} valid concepts")
+        return key_concepts
+            
+    except json.JSONDecodeError as je:
+        logger.error(f"JSON decode error: {str(je)}")
+        logger.warning("Failed to parse LLM response as JSON, attempting text extraction...")
+        
+        # Try to extract concepts from plain text response
+        try:
+            concepts = []
+            # Look for patterns like "1. Title: ... Explanation: ..."
+            pattern = r'(?:\d+\.\s*)?([^:\n]+?)\s*:\s*([^\n]+)'
+            matches = re.finditer(pattern, response, re.IGNORECASE | re.MULTILINE)
+            
+            for match in matches:
+                title = match.group(1).strip()
+                explanation = match.group(2).strip()
+                
+                if title and explanation and len(title) < 100 and len(explanation) < 500:
+                    concepts.append({
+                        'title': title,
+                        'explanation': explanation
+                    })
+            
+            if concepts:
+                logger.info(f"Extracted {len(concepts)} concepts from text response")
+                return concepts
+            
+            logger.warning("No concepts could be extracted from text response")
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error during text extraction fallback: {str(e)}")
+            return []
                 
     except Exception as e:
         logger.error(f"Error in generate_key_concepts_dspy: {str(e)}", exc_info=True)
-        return []
-    
-    concepts = []
-    try:
-        import re
-        concept_matches = re.findall(r'(?i)concept\s*:?\s*(.+?)(?=\n\s*explanation|\n\s*\n|$)', response, re.DOTALL)
-        explanation_matches = re.findall(r'(?i)explanation\s*:?\s*(.+?)(?=\n\s*concept|\n\s*\n|$)', response, re.DOTALL)
-        
-        concepts = [
-            {'title': title.strip(), 'explanation': explanation.strip()}
-            for title, explanation in zip(concept_matches, explanation_matches)
-        ]
-            
-        if concepts:
-            logger.info(f"Extracted {len(concepts)} concepts")
-            return concepts
-            
-        return [{"title": "Key Concept", "explanation": response[:500]}]
-            
-    except Exception as e:
-        logger.error(f"Error generating key concepts: {e}")
         return []
 
 async def extract_image_text(

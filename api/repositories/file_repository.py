@@ -203,7 +203,7 @@ class FileRepository(BaseRepository):
                         for chunk_data in segment_data['chunks']:
                             chunk = ChunkORM(
                                 segment_id=segment.id,
-                                content=chunk_data.get('content', ''),
+                                file_id=file.id,
                                 embedding=chunk_data.get('embedding')
                             )
                             uow.session.add(chunk)
