@@ -275,6 +275,57 @@ class LLMService:
         
         return response.text
     
+    def generate_text_sync(
+        self,
+        prompt: str,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ) -> str:
+        """
+        Synchronous version of generate_text.
+        
+        This method should only be used when async is not an option, such as in Celery tasks.
+        It runs the async method in a new event loop.
+        
+        Args:
+            prompt: The input prompt or text to complete
+            provider: Optional provider name (e.g., 'mistral', 'google')
+            model: Override the default model for the active provider
+            temperature: Controls randomness (0.0 to 1.0)
+            max_tokens: Maximum number of tokens to generate
+            **kwargs: Additional provider-specific parameters
+            
+        Returns:
+            The generated text as a string
+            
+        Raises:
+            ValueError: If no provider is available or request fails
+        """
+        import asyncio
+        
+        try:
+            # Try to get the running event loop
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # If there's no running loop, create a new one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        # Run the async method in the event loop
+        return loop.run_until_complete(
+            self.generate_text(
+                prompt=prompt,
+                provider=provider,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+        )
+
     async def chat(
         self,
         messages: List[Dict[str, str]],

@@ -119,7 +119,7 @@ class TextProcessor(FileProcessor):
             for item in processed_data:
                 chunks = item.get('chunks', [])
                 for chunk in chunks:
-                    self.store.add_chunk(
+                    await self.store.add_chunk_async(
                         user_id=user_id,
                         file_id=file_id,
                         page_num=item.get('page_number', 0),
@@ -134,7 +134,7 @@ class TextProcessor(FileProcessor):
             key_concept_count = 0
             if key_concepts:
                 for i, concept in enumerate(key_concepts):
-                    self.store.add_key_concept(
+                    await self.store.add_key_concept(
                         file_id=file_id,
                         concept_title=concept.get("concept_title"),
                         concept_explanation=concept.get("concept_explanation"),
@@ -144,7 +144,7 @@ class TextProcessor(FileProcessor):
                     key_concept_count += 1
             
             # Update file processing status
-            self.store.update_file_processing_status(file_id, True)
+            await self.store.update_file_processing_status_async(file_id, "completed")
             
             return {
                 'success': True,
@@ -157,8 +157,8 @@ class TextProcessor(FileProcessor):
             logger.error(f"Error processing {filename}: {e}", exc_info=True)
             # Mark as processed with error
             if self.store:
-                self.store.update_file_processing_status(
-                    file_id, True, status="error", 
+                await self.store.update_file_processing_status_async(
+                    file_id, "error", 
                     error_message=f"Processing error: {str(e)[:100]}"
                 )
             return {

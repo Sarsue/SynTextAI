@@ -951,11 +951,15 @@ async def process_file_data(
 
 async def delete_user_task(user_id: str, user_gc_id: str):
     """Deletes a user's account, subscription, and associated files."""
+    repo_manager = get_repository_manager()
     try:
-        user_sub = store.get_subscription(user_id)
-        if user_sub and user_sub.get("status") == "active":
-            stripe_sub_id = user_sub.get("stripe_subscription_id")
-            stripe_customer_id = user_sub.get("stripe_customer_id")
+        # Get user subscription info
+        subscription_repo = repo_manager.subscription_repo
+        user_sub = await subscription_repo.get_user_subscription(user_id)
+        
+        if user_sub and user_sub.status == "active":
+            stripe_sub_id = user_sub.stripe_subscription_id
+            stripe_customer_id = user_sub.stripe_customer_id
 
             # Cancel the subscription
             if stripe_sub_id:
@@ -973,12 +977,21 @@ async def delete_user_task(user_id: str, user_gc_id: str):
                 logger.info(f"Stripe customer {stripe_customer_id} deleted.")
 
         # Delete files and user account
-        for file in store.get_files_for_user(user_id):
-            delete_from_gcs(user_gc_id, file["name"])
+        file_repo = repo_manager.file_repo
+        files = await file_repo.get_files_by_user_id(user_id)
+        
+        for file in files:
+            delete_from_gcs(user_gc_id, file.file_name)
 
-        store.delete_user_account(user_id)
+        # Delete user account
+        user_repo = repo_manager.user_repo
+        await user_repo.delete_user_account(user_id)
         logger.info(f"User account {user_id} deleted.")
 
     except Exception as e:
-        logger.error(f"Error during user deletion: {e}")
+        logger.error(f"Error during user deletion: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="User deletion failed")
+    finally:
+        # Ensure repository manager is closed
+        if 'repo_manager' in locals() and hasattr(repo_manager, 'close'):
+            await repo_manager.close()

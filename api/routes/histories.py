@@ -25,10 +25,11 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
         logger.error("Failed to authenticate user with token")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = store.get_user_id_from_email(user_info['email'])
-    if not user_id:
-        logger.error(f"No user ID found for email: {user_info['email']}")
+    user = await store.user_repo.get_user_by_email(user_info['email'])
+    if not user:
+        logger.error(f"No user found with email: {user_info['email']}")
         raise HTTPException(status_code=404, detail="User not found")
+    user_id = user.id
 
     logger.info(f"Authenticated user_id: {user_id}")
     return {"user_id": user_id, "user_info": user_info}
@@ -86,7 +87,7 @@ async def delete_specific_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        store.delete_chat_history(user_id, history_id)
+        await store.chat_repo.delete_chat_history(user_id, history_id)
         return {"message": "History deleted successfully", "deletedHistoryId": history_id}
     except Exception as e:
         logger.error(f"Error deleting history {history_id}: {e}")
@@ -100,7 +101,7 @@ async def delete_all_user_histories(
 ):
     try:
         user_id = user_data["user_id"]
-        store.delete_all_user_histories(user_id)
+        await store.chat_repo.delete_all_user_histories(user_id)
         return {"message": "All histories deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting all histories for user {user_id}: {e}")

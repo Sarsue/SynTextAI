@@ -39,6 +39,26 @@ class WebSocketManager:
         """Return the total number of active WebSocket connections across all users"""
         return sum(len(connections) for connections in self.active_connections.values())
         
+    async def disconnect_all(self):
+        """Close all active WebSocket connections"""
+        logger.info(f"Closing all WebSocket connections ({self.active_connections_count()} total)")
+        # Create a list of all connections to avoid modifying the dict during iteration
+        all_connections = []
+        for connections in self.active_connections.values():
+            all_connections.extend(connections)
+            
+        # Close all connections
+        for websocket in all_connections:
+            try:
+                await websocket.close()
+            except Exception as e:
+                logger.warning(f"Error closing WebSocket: {e}")
+        
+        # Clear all connection tracking
+        self.active_connections.clear()
+        self.connection_map.clear()
+        logger.info("All WebSocket connections closed")
+        
     async def send_message(self, user_id: str, event_type: str, data: dict):
         """Send a message to all connections for a specific user"""
         if user_id not in self.active_connections:

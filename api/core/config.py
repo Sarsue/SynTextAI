@@ -73,8 +73,8 @@ class Settings(BaseSettings):
         if not all([db_user, db_password, db_host, db_name]):
             return None
             
-        # Construct the DSN as a string
-        return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        # Construct the DSN as a string with asyncpg driver
+        return f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
 # Create settings instance
 settings = Settings()

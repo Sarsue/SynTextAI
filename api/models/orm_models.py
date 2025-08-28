@@ -2,7 +2,8 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Boolean, text
+import sqlalchemy as sa
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Boolean, text, CheckConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -77,7 +78,12 @@ class File(Base):
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
-    key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
+    key_concepts = relationship(
+        "KeyConcept",
+        back_populates="file",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
     flashcards = relationship("Flashcard", back_populates="file", cascade="all, delete-orphan")
     quiz_questions = relationship("QuizQuestion", back_populates="file", cascade="all, delete-orphan")
 
@@ -120,25 +126,34 @@ class Chunk(Base):
 
 class KeyConcept(Base):
     __tablename__ = "key_concepts"
+    __table_args__ = (
+        # Ensure end timestamp is after start timestamp for video segments
+        sa.CheckConstraint(
+            'source_video_timestamp_end_seconds IS NULL OR '
+            'source_video_timestamp_start_seconds IS NULL OR '
+            'source_video_timestamp_end_seconds >= source_video_timestamp_start_seconds',
+            name='check_video_timestamps_valid'
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    concept_title = Column(String, nullable=False)
+    concept_title = Column(String(500), nullable=False)  # Added reasonable max length
     concept_explanation = Column(Text, nullable=False)
     
-
-
-    source_page_number = Column(Integer, nullable=True) 
-    source_video_timestamp_start_seconds = Column(Integer, nullable=True)
+    source_page_number = Column(Integer, nullable=True, index=True)
+    source_video_timestamp_start_seconds = Column(Integer, nullable=True, index=True)
     source_video_timestamp_end_seconds = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_custom = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    is_custom = Column(Boolean, default=False, nullable=False, index=True)
     
     # Relationships
+    file = relationship("File", back_populates="key_concepts")
     flashcards = relationship("Flashcard", back_populates="key_concept", cascade="all, delete-orphan")
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    quiz_questions = relationship("QuizQuestion", back_populates="key_concept", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<KeyConcept(id={self.id}, file_id={self.file_id}, title='{self.concept_title[:30]}...')>"
@@ -187,16 +202,28 @@ class Flashcard(Base):
 
 class QuizQuestion(Base):
     __tablename__ = "quiz_questions"
+    __table_args__ = (
+        # Ensure question_type is one of the allowed values
+        sa.CheckConstraint(
+            "question_type IN ('MCQ', 'true_false', 'short_answer')",
+            name='check_question_type_valid'
+        ),
+    )
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
-    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
-    question = Column(String, nullable=False)
-    question_type = Column(String, nullable=False)
-    correct_answer = Column(String, nullable=False)
-    distractors = Column(JSON, nullable=True)
-    is_custom = Column(Boolean, nullable=False, server_default='false')
-    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
+    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="SET NULL"), nullable=True, index=True)
+    question = Column(String(1000), nullable=False)  # Added reasonable max length
+    question_type = Column(String(50), nullable=False, index=True)
+    correct_answer = Column(Text, nullable=False)  # Changed to Text for longer answers
+    distractors = Column(JSON, nullable=True)  # For multiple choice options
+    is_custom = Column(Boolean, nullable=False, server_default='false', index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     file = relationship("File", back_populates="quiz_questions")
+    key_concept = relationship("KeyConcept", back_populates="quiz_questions")
+    
+    def __repr__(self):
+        return f"<QuizQuestion(id={self.id}, question='{self.question[:50]}...', type={self.question_type})>"

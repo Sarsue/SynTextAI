@@ -98,13 +98,21 @@ database_config = {
     'port': os.getenv("DATABASE_PORT"),
 }
 
+# Use asyncpg driver for async SQLAlchemy
 DATABASE_URL = (
-    f"postgresql://{database_config['user']}:{database_config['password']}"
+    f"postgresql+asyncpg://{database_config['user']}:{database_config['password']}"
     f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
 )
 
+# Initialize repository manager with database URL
 store = RepositoryManager(database_url=DATABASE_URL)
 app.state.store = store
+
+# Add shutdown handler to clean up resources
+@app.on_event("shutdown")
+async def shutdown_event():
+    if hasattr(app.state, 'store'):
+        await app.state.store.close()
 
 # Dependency to get the store
 def get_store(request: Request):

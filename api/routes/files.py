@@ -6,6 +6,7 @@ from redis.exceptions import RedisError
 from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from ..repositories.repository_manager import RepositoryManager
+from ..models.orm_models import File
 from fastapi.responses import JSONResponse
 from ..dependencies import get_store, authenticate_user
 from ..services.agent_service import agent_service
@@ -64,10 +65,11 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
             logger.error("Failed to authenticate user with token")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
-        user_id = store.get_user_id_from_email(user_info['email'])
-        if not user_id:
-            logger.error(f"No user ID found for email: {user_info['email']}")
+        user = await store.user_repo.get_user_by_email(user_info['email'])
+        if not user:
+            logger.error(f"No user found with email: {user_info['email']}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        user_id = user.id
 
         logger.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
         return {"user_id": user_id, "user_gc_id": user_info['user_id']}
@@ -115,30 +117,28 @@ async def process_file_with_ingestion_agent(
     async def update_status(status: str, error: Optional[str] = None, progress: float = 0.0):
         """Update the processing status and notify via WebSocket."""
         try:
-            # Use the correct method to update file status
-            store.update_file_status(
+            # Use the file repository to update the file status
+            await store.file_repo.update_file_status(
                 file_id=file_id,
                 status=status,
                 error_message=error
             )
             
-            # Only send WebSocket message if the service is available
-            if websocket_service:
-                try:
-                    await websocket_service.send_message(
-                        user_id=user_id,
-                        event_type="file_status_update",
-                        data={
-                            "file_id": file_id,
-                            "status": status,
-                            "error": error,
-                            "progress": progress
-                        }
-                    )
-                except Exception as ws_error:
-                    logger.error(f"WebSocket error: {ws_error}", exc_info=True)
-            else:
+            try:
+                # Notify via WebSocket
+                await websocket_manager.send_message(
+                    user_id,
+                    "file_status",
+                    {
+                        "file_id": file_id,
+                        "status": status,
+                        "error": error,
+                        "progress": progress
+                    }
+                )
+            except Exception as ws_error:
                 logger.debug("WebSocket service not available, skipping status update")
+            
             return True
         except Exception as e:
             logger.error(f"Error updating status: {e}", exc_info=True)
@@ -205,14 +205,15 @@ async def process_file_with_ingestion_agent(
         # Store the processing results (key concepts, etc.)
         if result.get("key_concepts"):
             for concept in result["key_concepts"]:
-                store.add_key_concept(
-                    file_id=file_id,
-                    title=concept.get("title", ""),
-                    explanation=concept.get("explanation", ""),
-                    source_page=concept.get("page"),
-                    source_timestamp_start=concept.get("timestamp_start"),
-                    source_timestamp_end=concept.get("timestamp_end")
-                )
+                key_concept_data = {
+                    "concept_title": concept.get("title", ""),
+                    "concept_explanation": concept.get("explanation", ""),
+                    "source_page_number": concept.get("page_number"),
+                    "source_video_timestamp_start_seconds": concept.get("timestamp_start"),
+                    "source_video_timestamp_end_seconds": concept.get("timestamp_end"),
+                    "is_custom": False
+                }
+                await store.learning_material_repo.add_key_concept(file_id, key_concept_data)
         
         # Update file with any additional metadata from processing
         update_data = {
@@ -223,7 +224,8 @@ async def process_file_with_ingestion_agent(
         if "summary" in result:
             update_data["summary"] = result["summary"]
             
-        store.update_file_status(
+        # Update the file status using the file repository
+        await store.file_repo.update_file_status(
             file_id=file_id,
             **update_data
         )
@@ -305,12 +307,14 @@ async def save_file(
                     )
                 
                 # Create file record for YouTube
-                file_id = store.add_file(
-                    user_id=user_id,
-                    file_name=url,
-                    file_url=url,
-                    file_type="youtube"
-                )
+                file_data = {
+                    'user_id': user_id,
+                    'file_name': url,
+                    'file_url': url,
+                    'file_type': 'youtube'
+                }
+                file = await store.file_repo.create_file(file_data, return_id=True)
+                file_id = file if file is not None else None
                 
                 if not file_id:
                     raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
@@ -410,13 +414,14 @@ async def save_file(
                     try:
                         file_type = file_extension[1:]  # Remove the dot
                         
-                        file_id = store.add_file(
-                            user_id=user_id,
-                            file_name=file.filename,
-                            file_url=file_url,
-                            file_type=file_type,
-                            status="pending"
-                        )
+                        file_data = {
+                            'user_id': user_id,
+                            'file_name': file.filename,
+                            'file_url': file_url,
+                            'file_type': file_type
+                        }
+                        file = await store.file_repo.create_file(file_data, return_id=True)
+                        file_id = file if file is not None else None
                         
                         if not file_id:
                             raise HTTPException(
@@ -502,33 +507,47 @@ async def retrieve_files(
     try:
         user_id = user_data['user_id']
         offset = (page - 1) * page_size
-        paginated_result = store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size)
         
-        db_files = paginated_result.get('items', [])
-        total_files = paginated_result.get('total', 0)
+        # Get the file repository and fetch files
+        file_repo = store.file_repo
+        db_files = await file_repo.list_user_files(user_id, skip=offset, limit=page_size)
+        
+        # Get total count of files for pagination
+        total_files = await file_repo.count(user_id=user_id)
+        
+        # Format the response to match the expected structure
+        paginated_result = {
+            'items': db_files,
+            'total': total_files
+        }
 
         # Construct the response to match the frontend's expectation
         response_items = [
             {
-                "id": f["id"],
-                "file_name": f["file_name"],
-                "file_url": f["file_url"],
-                "created_at": f.get("created_at"),
-                "file_type": f.get("file_type"),
-                "status": f.get("processing_status", "uploaded"),
+                "id": f.id,
+                "file_name": f.file_name,
+                "file_url": f.file_url,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+                "file_type": f.file_type,
+                "status": f.processing_status if hasattr(f, 'processing_status') and f.processing_status else "uploaded",
             }
             for f in db_files
         ]
 
         return {
             "items": response_items,
+            "total": total_files,
             "page": page,
             "page_size": page_size,
-            "total": total_files,
+            "total_pages": (total_files + page_size - 1) // page_size
         }
+
     except Exception as e:
-        logger.error(f"Error retrieving files for user {user_data.get('user_id')}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not retrieve files.")
+        logger.error(f"Error retrieving files for user {user_data.get('user_id', 'unknown')}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail="Failed to retrieve files. Please try again later."
+        )
 
 # Route to delete a file
 @files_router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -541,15 +560,15 @@ async def delete_file(
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
 
-        file_to_delete = store.file_repo.get_file_by_id(file_id)
-        if not file_to_delete or file_to_delete.get('user_id') != user_id:
+        file_to_delete = await store.file_repo.get_file_by_id(file_id)
+        if not file_to_delete or file_to_delete.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
 
-        file_url = file_to_delete.get('file_url')
-        if file_url and "storage.googleapis.com" in file_url:
-             delete_from_gcs(file_url, user_gc_id)
+        if file_to_delete.file_url and "storage.googleapis.com" in file_to_delete.file_url:
+             delete_from_gcs(file_to_delete.file_url, user_gc_id)
 
-        if not store.delete_file_entry(file_id=file_id, user_id=user_id):
+        # Delete the file record
+        if not await store.file_repo.delete(id=file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -594,7 +613,7 @@ async def get_flashcards_for_file(
             )
         
         # Get file details for context
-        file = store.get_file_by_id(file_id)
+        file = await store.file_repo.get_file_by_id(file_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
         
@@ -678,7 +697,7 @@ async def generate_flashcards(
         check_ownership(file_id, user_data["user_id"], store)
         
         # Get file and key concepts for context
-        file = store.get_file_by_id(file_id)
+        file = await store.file_repo.get_file_by_id(file_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
             
@@ -772,9 +791,9 @@ async def add_flashcard_for_file(
             )
         
         # Add the flashcard and get the new flashcard
-        flashcard = store.learning_material_repo.add_flashcard(
+        flashcard = await store.learning_material_repo.add_flashcard(
             file_id=file_id,
-            flashcard_data=flashcard_data
+            flashcard_data=flashcard_data.dict()
         )
         
         if not flashcard:
@@ -840,10 +859,9 @@ async def update_flashcard(
             )
         
         # Update the flashcard - the repository will verify it belongs to the user
-        updated_flashcard = store.learning_material_repo.update_flashcard(
+        updated_flashcard = await store.learning_material_repo.update_flashcard(
             flashcard_id=flashcard_id,
-            user_id=user_data["user_id"],
-            update_data=flashcard_update_data
+            update_data=flashcard_update_data.dict(exclude_unset=True)
         )
         
         if not updated_flashcard:
@@ -967,9 +985,9 @@ async def add_quiz_question_for_file(
         question_dict = question_data.dict()
         
         # Add the quiz question and get the new question ID
-        question_id = store.learning_material_repo.add_quiz_question(
+        question_id = await store.learning_material_repo.add_quiz_question(
             file_id=file_id,
-            quiz_question_data=question_data
+            quiz_question_data=question_data.dict()
         )
         
         if not question_id:
@@ -1104,7 +1122,7 @@ async def generate_quiz_questions(
         check_ownership(file_id, user_data["user_id"], store)
         
         # Get file and key concepts for context
-        file = store.get_file_by_id(file_id)
+        file = await store.file_repo.get_file_by_id(file_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
             
@@ -1327,9 +1345,9 @@ async def add_key_concept(
             )
         
         # Add the key concept through the repository
-        new_concept = store.learning_material_repo.add_key_concept(
+        new_concept = await store.learning_material_repo.add_key_concept(
             file_id=file_id, 
-            key_concept_data=key_concept_data
+            key_concept_data=key_concept_data.dict()
         )
         
         if not new_concept:
@@ -1406,7 +1424,7 @@ async def get_key_concepts_for_file(
             )
             
         # Get paginated key concepts
-        concepts = store.learning_material_repo.get_key_concepts_for_file(
+        result = await store.learning_material_repo.get_key_concepts_for_file(
             file_id=file_id,
             page=page,
             page_size=page_size
@@ -1414,20 +1432,20 @@ async def get_key_concepts_for_file(
         
         # Convert to frontend-compatible format
         formatted_concepts = []
-        for concept in concepts:
+        for concept in result["items"]:
             formatted_concept = {
-                "id": concept.id,
-                "file_id": concept.file_id,
-                "concept_title": concept.concept_title,
-                "concept": concept.concept_title,  # Alias for frontend compatibility
-                "concept_explanation": concept.concept_explanation,
-                "source_page_number": concept.source_page_number,
-                "source_video_timestamp_start_seconds": concept.source_video_timestamp_start_seconds,
-                "source_video_timestamp_end_seconds": concept.source_video_timestamp_end_seconds,
-                "is_custom": concept.is_custom,
+                "id": concept["id"],
+                "file_id": concept["file_id"],
+                "concept_title": concept["concept_title"],
+                "concept": concept["concept_title"],  # Alias for frontend compatibility
+                "concept_explanation": concept["concept_explanation"],
+                "source_page_number": concept.get("source_page_number"),
+                "source_video_timestamp_start_seconds": concept.get("source_video_timestamp_start_seconds"),
+                "source_video_timestamp_end_seconds": concept.get("source_video_timestamp_end_seconds"),
+                "is_custom": concept.get("is_custom", False),
                 "display_order": None,  # Frontend expects this field
-                "created_at": concept.created_at.isoformat() if concept.created_at else None,
-                "updated_at": concept.updated_at.isoformat() if concept.updated_at else None
+                "created_at": concept.get("created_at"),
+                "updated_at": concept.get("updated_at")
             }
             formatted_concepts.append(formatted_concept)
         
@@ -1472,16 +1490,10 @@ async def update_key_concept(
                 detail="File not found or you don't have permission to access it."
             )
         
-        # Update the key concept
-        store.learning_material_repo.update_key_concept(
+        # Update the key concept and get the updated concept - repository returns a dictionary
+        updated_concept = await store.learning_material_repo.update_key_concept(
             concept_id=key_concept_id,
-            update_data=key_concept_update_data
-        )
-        
-        # Get the updated concept - repository returns a dictionary
-        updated_concept = store.learning_material_repo.update_key_concept(
-            concept_id=key_concept_id,
-            update_data=key_concept_update_data
+            update_data=key_concept_update_data.dict(exclude_unset=True)
         )
         
         if not updated_concept:
@@ -1538,15 +1550,15 @@ async def delete_key_concept(
             )
             
         # Delete the key concept
-        success = store.learning_material_repo.delete_key_concept(
-            key_concept_id=key_concept_id, 
-            user_id=user_data["user_id"]
+        success = await store.learning_material_repo.delete_key_concept(
+            concept_id=key_concept_id,
+            update_data={"deleted_at": datetime.utcnow()}
         )
         
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Key concept not found or user does not have permission."
+                detail="Key concept not found or you don't have permission to delete it"
             )
             
         return {

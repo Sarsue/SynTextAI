@@ -29,10 +29,11 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
         logger.error("Failed to authenticate user with token")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = store.get_user_id_from_email(user_info['email'])
-    if not user_id:
-        logger.error(f"No user ID found for email: {user_info['email']}")
+    user = await store.user_repo.get_user_by_email(user_info['email'])
+    if not user:
+        logger.error(f"No user found with email: {user_info['email']}")
         raise HTTPException(status_code=404, detail="User not found")
+    user_id = user.id
 
     logger.info(f"Authenticated user_id: {user_id}")
     return {"user_id": user_id, "user_info": user_info}
@@ -69,14 +70,10 @@ async def create_user( # Function name remains 'create_user'
         name = email 
 
     # Check if user already exists by email
-    existing_user_id = store.get_user_id_from_email(email)
-    if existing_user_id:
-        logger.info(f"POST /users: User with email {email} already exists with ID {existing_user_id}. Returning 200 OK.")
-        # You might want to fetch and return the full existing user object
-        # For now, a simple confirmation is fine, or adapt to return what UserContext expects
-        # existing_user_obj = store.get_user_by_id(existing_user_id) # If you have such a method
-        # if existing_user_obj:
-        #     return existing_user_obj 
+    existing_user = await store.user_repo.get_user_by_email(email)
+    if existing_user:
+        logger.info(f"POST /users: User with email {email} already exists with ID {existing_user.id}. Returning 200 OK.")
+        existing_user_id = existing_user.id
         return JSONResponse(
             content={"message": "User already registered", "email": email, "user_id": existing_user_id}, 
             status_code=200
@@ -85,14 +82,16 @@ async def create_user( # Function name remains 'create_user'
     # If user does not exist, create them
     try:
         logger.info(f"POST /users: Creating new user with email {email} and name {name}.")
-        # Ensure add_user can handle potential missing fields or has defaults
-        # Also, consider if your store.add_user needs/accepts firebase_uid
-        new_user = store.add_user(email, name, firebase_uid=firebase_uid) # Pass firebase_uid if your add_user and DB schema support it
-        logger.info(f"POST /users: Successfully created new user: {new_user.email if hasattr(new_user, 'email') else 'unknown'}")
-        return new_user # FastAPI will serialize this (hopefully Pydantic model) to JSON with 201 status
+        # Await the async add_user method
+        new_user_id = await store.add_user(email, name, firebase_uid=firebase_uid)
+        logger.info(f"POST /users: Successfully created new user with ID: {new_user_id}")
+        return JSONResponse(
+            content={"message": "User created successfully", "email": email, "user_id": new_user_id},
+            status_code=201
+        )
     except IntegrityError: 
         # This case should ideally be caught by the explicit check above.
-        # If it happens, it means there's a race condition or get_user_id_from_email didn't find it but add_user did.
+        # If it happens, it means there's a race condition or get_user_by_email didn't find it but add_user did.
         logger.error(f"POST /users: IntegrityError while creating user {email}. This implies a race condition or inconsistent check.")
         # Returning 409 Conflict is more appropriate here than 400.
         raise HTTPException(status_code=409, detail=f"User with email {email} already exists (IntegrityError).")
@@ -112,12 +111,18 @@ async def delete_user(
         user_info = user_data["user_info"]
         user_gc_id = user_info['user_id']
 
-        # Trigger Celery task to delete user and associated files
+        # Trigger background task to delete user and associated files
         background_tasks.add_task(delete_user_task, user_id, user_gc_id)
-        return {"message": "User deletion in progress", "email": user_info['email']}
-    except IntegrityError:
-        logger.error(f"Database error while deleting user {user_info['email']}")
-        raise HTTPException(status_code=500, detail="Failed to delete user due to database constraints")
+        
+        # Return response immediately while deletion happens in background
+        return {
+            "message": "User deletion in progress. You will be logged out shortly.", 
+            "email": user_info['email']
+        }
+        
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred")
+        logger.error(f"Error initiating user deletion: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail="An error occurred while initiating user deletion"
+        )

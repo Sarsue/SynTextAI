@@ -25,12 +25,7 @@ async def generate_learning_materials_for_concept(
         bool: Success status
     """
     try:
-        # Import needed functions directly using absolute imports
-        from api.tasks import (
-            generate_flashcards_from_concept,
-            generate_mcqs_from_concept,
-            generate_true_false_from_concept
-        )
+        from api.services.llm_service import llm_service
         
         concept_id = concept.get('id')
         if not concept_id:
@@ -59,8 +54,12 @@ async def generate_learning_materials_for_concept(
             
         # 1. Generate flashcards for this concept
         try:
-            logger.debug(f"Calling generate_flashcards_from_concept for '{concept_title[:30]}...'")
-            flashcards = await generate_flashcards_from_concept(concept_title, concept_explanation)
+            logger.debug(f"Calling generate_flashcards for '{concept_title[:30]}...'")
+            flashcards = await llm_service.generate_flashcards(
+                concept_title=concept_title,
+                concept_explanation=concept_explanation,
+                num_flashcards=3
+            )
             logger.debug(f"Generated {len(flashcards)} flashcards: {flashcards}")
             
             if flashcards:
@@ -71,7 +70,7 @@ async def generate_learning_materials_for_concept(
                         back = card.get('answer', card.get('back', ''))
                         logger.debug(f"Saving flashcard {i+1}/{len(flashcards)}: front='{front[:30]}...', back='{back[:30]}...'")
                         
-                        await store.add_flashcard_async(
+                        await store.add_flashcard(
                             file_id=int(file_id),
                             question=front,
                             answer=back,
@@ -85,38 +84,41 @@ async def generate_learning_materials_for_concept(
                 
         # 2. Generate MCQ questions
         try:
-            logger.debug(f"Calling generate_mcqs_from_concept for '{concept_title[:30]}...'")
-            mcqs = await generate_mcqs_from_concept(concept_title, concept_explanation)
+            logger.debug(f"Calling generate_mcqs for '{concept_title[:30]}...'")
+            mcqs = await llm_service.generate_mcqs(
+                concept_title=concept_title,
+                concept_explanation=concept_explanation,
+                num_questions=3  # Default number of MCQs to generate
+            )
             logger.debug(f"Generated {len(mcqs)} MCQs: {mcqs}")
             
             if mcqs:
                 logger.info(f"Saving {len(mcqs)} MCQs for concept ID {concept_id}")
-                for i, mcq in enumerate(mcqs):
+                for mcq in mcqs:
                     try:
-                        # Extract options and answer
-                        question = mcq.get('question', '')
-                        options = mcq.get('options', [])
-                        answer = mcq.get('answer', '')
-                        logger.debug(f"Saving MCQ {i+1}/{len(mcqs)}: question='{question[:30]}...', answer='{answer[:30]}...'")
-                        
-                        await store.add_quiz_question_async(
-                            file_id=int(file_id),
-                            question=question,
-                            question_type="MCQ",
-                            correct_answer=answer,
-                            distractors=options,
-                            key_concept_id=int(concept_id)
+                        await store.add_quiz_question(
+                            file_id=file_id,
+                            key_concept_id=concept_id,
+                            question=mcq.get('question', ''),
+                            question_type='MCQ',
+                            correct_answer=mcq.get('answer', ''),
+                            distractors=mcq.get('options', []),
+                            quiz_question_data=mcq
                         )
                         mcqs_saved += 1
                     except Exception as e:
-                        logger.error(f"Error saving MCQ {i+1}: {e}", exc_info=True)
+                        logger.error(f"Error saving MCQ: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Error generating MCQs: {e}", exc_info=True)
                 
         # 3. Generate True/False questions
         try:
-            logger.debug(f"Calling generate_true_false_from_concept for '{concept_title[:30]}...'")
-            tf_questions = await generate_true_false_from_concept(concept_title, concept_explanation)
+            logger.debug(f"Calling generate_true_false_questions for '{concept_title[:30]}...'")
+            tf_questions = await llm_service.generate_true_false_questions(
+                concept_title=concept_title,
+                concept_explanation=concept_explanation,
+                num_questions=2
+            )
             logger.debug(f"Generated {len(tf_questions)} T/F questions: {tf_questions}")
             
             if tf_questions:
@@ -129,12 +131,13 @@ async def generate_learning_materials_for_concept(
                         logger.debug(f"Saving T/F {i+1}/{len(tf_questions)}: statement='{statement[:30]}...', is_true={is_true}")
                         
                         # Note: We're not passing explanation as it's not accepted by the method
-                        await store.add_quiz_question_async(
+                        await store.add_quiz_question(
                             file_id=int(file_id),
                             question=statement,
                             question_type="TF",  # Must match frontend's expected type 'TF' for true/false
                             correct_answer="True" if is_true else "False",
-                            key_concept_id=int(concept_id)
+                            key_concept_id=int(concept_id),
+                            quiz_question_data={"is_true": is_true}
                         )
                         tf_saved += 1
                     except Exception as e:

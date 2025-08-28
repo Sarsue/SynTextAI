@@ -506,68 +506,199 @@ class QuizAgent(BaseAgent[QuizConfig]):
             return []
     
     def _generate_basic_flashcard(self, concept: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a basic Q&A flashcard from a key concept."""
-        return {
-            "type": "basic",
-            "question": f"What is {concept['concept_title']}?",
-            "answer": concept["concept_explanation"],
-            "key_concept_id": concept.get("id"),
-            "source_page": concept.get("source_page"),
-            "source_timestamp_start": concept.get("source_timestamp_start"),
-            "source_timestamp_end": concept.get("source_timestamp_end")
-        }
+        """Generate a basic Q&A flashcard from a key concept with practical application."""
+        # Check if there are related concepts in the explanation
+        explanation = concept.get("concept_explanation", "")
+        related_concepts_section = "Related Concepts:"
+        
+        if related_concepts_section in explanation:
+            # Split to get the main explanation and related concepts
+            main_explanation = explanation.split(related_concepts_section)[0].strip()
+            related_concepts = explanation.split(related_concepts_section)[1].strip()
+            
+            # Create a practical application question
+            question = f"How would you apply {concept['concept_title']} in a real-world scenario?"
+            
+            return {
+                "type": "practical",
+                "question": question,
+                "answer": main_explanation,
+                "related_concepts": related_concepts,
+                "key_concept_id": concept.get("id"),
+                "source_page": concept.get("source_page"),
+                "source_timestamp_start": concept.get("source_timestamp_start"),
+                "source_timestamp_end": concept.get("source_timestamp_end")
+            }
+        else:
+            # Fallback to basic flashcard if no related concepts
+            return {
+                "type": "basic",
+                "question": f"What is {concept['concept_title']}?",
+                "answer": explanation,
+                "key_concept_id": concept.get("id"),
+                "source_page": concept.get("source_page"),
+                "source_timestamp_start": concept.get("source_timestamp_start"),
+                "source_timestamp_end": concept.get("source_timestamp_end")
+            }
     
     def _generate_mcq_flashcard(self, concept: Dict[str, Any], all_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Generate a multiple-choice flashcard from a key concept."""
-        correct_answer = concept["concept_explanation"]
-        distractors = [
-            c["concept_explanation"] 
-            for c in all_concepts 
-            if c.get("id") != concept.get("id")
-        ]
-        random.shuffle(distractors)
-        distractors = distractors[:2]  # Use 2 distractors
-        options = distractors + [correct_answer]
-        random.shuffle(options)
+        """Generate a multiple-choice flashcard from a key concept with adaptive questions."""
+        explanation = concept.get("concept_explanation", "")
+        related_concepts_section = "Related Concepts:"
         
-        return {
-            "type": "mcq",
-            "question": f"Which of the following best describes '{concept['concept_title']}'?",
-            "options": options,
-            "correct_answer": correct_answer,
-            "key_concept_id": concept.get("id"),
-            "source_page": concept.get("source_page"),
-            "source_timestamp_start": concept.get("source_timestamp_start"),
-            "source_timestamp_end": concept.get("source_timestamp_end")
-        }
+        if related_concepts_section in explanation:
+            # For concepts with relationships, create application-based questions
+            main_explanation = explanation.split(related_concepts_section)[0].strip()
+            related_concepts = explanation.split(related_concepts_section)[1].strip()
+            
+            # Create an application-based question
+            question = f"Which of the following scenarios best demonstrates the application of {concept['concept_title']}?"
+            
+            # Generate realistic but incorrect application scenarios
+            distractors = []
+            for other_concept in all_concepts:
+                if other_concept.get("id") != concept.get("id"):
+                    # Create plausible but incorrect application scenarios
+                    distractor = (
+                        f"A situation where {other_concept.get('concept_title', 'this concept')} "
+                        f"is used instead of {concept['concept_title']}"
+                    )
+                    distractors.append(distractor)
+                    if len(distractors) >= 3:  # Limit number of distractors
+                        break
+            
+            # Add one correct application scenario
+            correct_scenario = (
+                f"A situation where {concept['concept_title']} is applied to solve "
+                f"a specific problem in its intended context"
+            )
+            options = distractors + [correct_scenario]
+            random.shuffle(options)
+            
+            return {
+                "type": "application_mcq",
+                "question": question,
+                "options": options,
+                "correct_answer": correct_scenario,
+                "explanation": f"The correct answer demonstrates a proper application of {concept['concept_title']}: {main_explanation}",
+                "key_concept_id": concept.get("id"),
+                "source_page": concept.get("source_page"),
+                "source_timestamp_start": concept.get("source_timestamp_start"),
+                "source_timestamp_end": concept.get("source_timestamp_end")
+            }
+        else:
+            # Fallback to basic MCQ for concepts without relationships
+            correct_answer = concept["concept_explanation"]
+            distractors = [
+                c["concept_explanation"] 
+                for c in all_concepts 
+                if c.get("id") != concept.get("id")
+            ]
+            random.shuffle(distractors)
+            distractors = distractors[:2]  # Use 2 distractors
+            options = distractors + [correct_answer]
+            random.shuffle(options)
+            
+            return {
+                "type": "mcq",
+                "question": f"Which of the following best describes '{concept['concept_title']}'?",
+                "options": options,
+                "correct_answer": correct_answer,
+                "key_concept_id": concept.get("id"),
+                "source_page": concept.get("source_page"),
+                "source_timestamp_start": concept.get("source_timestamp_start"),
+                "source_timestamp_end": concept.get("source_timestamp_end")
+            }
     
     def _generate_true_false_flashcard(self, concept: Dict[str, Any], all_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Generate a true/false flashcard from a key concept."""
-        use_true = random.choice([True, False])
+        """Generate a true/false flashcard that tests understanding of concept relationships."""
+        explanation = concept.get("concept_explanation", "")
+        related_concepts_section = "Related Concepts:"
         
-        if use_true or len(all_concepts) == 1:
-            statement = concept["concept_explanation"]
-            is_true = True
-        else:
-            # Pick a random explanation from another concept
-            distractors = [c for c in all_concepts if c.get("id") != concept.get("id")]
-            if distractors:
-                distractor = random.choice(distractors)
-                statement = distractor["concept_explanation"]
-                is_true = False
+        if related_concepts_section in explanation:
+            # For concepts with relationships, create relationship-based true/false questions
+            main_explanation = explanation.split(related_concepts_section)[0].strip()
+            related_concepts = explanation.split(related_concepts_section)[1].strip()
+            
+            # Randomly decide whether to create a true or false statement
+            is_true = random.choice([True, False])
+            
+            if is_true:
+                # Create a true statement about the concept's relationships
+                relationship_phrases = [
+                    f"is related to",
+                    f"can be used together with",
+                    f"is often combined with",
+                    f"shares characteristics with"
+                ]
+                relationship = random.choice(relationship_phrases)
+                
+                # Extract the first related concept
+                first_related = related_concepts.split('\n')[0].split(':')[0].strip()
+                statement = f"{concept['concept_title']} {relationship} {first_related}"
             else:
+                # Create a false statement by using an unrelated concept
+                unrelated_concepts = [
+                    c for c in all_concepts 
+                    if c.get("id") != concept.get("id") and 
+                       c["concept_title"] not in related_concepts
+                ]
+                
+                if unrelated_concepts:
+                    unrelated = random.choice(unrelated_concepts)
+                    relationship_phrases = [
+                        f"is the same as",
+                        f"is a type of",
+                        f"is completely unrelated to",
+                        f"cannot be used with"
+                    ]
+                    relationship = random.choice(relationship_phrases)
+                    statement = f"{concept['concept_title']} {relationship} {unrelated['concept_title']}"
+                else:
+                    # Fallback to basic true/false if no unrelated concepts
+                    statement = concept["concept_explanation"]
+                    is_true = True
+            
+            return {
+                "type": "relationship_tf",
+                "question": f"True or False: {statement}",
+                "correct_answer": is_true,
+                "explanation": (
+                    f"This statement is {'true' if is_true else 'false'}. "
+                    f"{main_explanation}"
+                ),
+                "key_concept_id": concept.get("id"),
+                "source_page": concept.get("source_page"),
+                "source_timestamp_start": concept.get("source_timestamp_start"),
+                "source_timestamp_end": concept.get("source_timestamp_end")
+            }
+        else:
+            # Fallback to basic true/false for concepts without relationships
+            use_true = random.choice([True, False])
+            
+            if use_true or len(all_concepts) == 1:
                 statement = concept["concept_explanation"]
                 is_true = True
-        
-        return {
-            "type": "true_false",
-            "question": f"True or False: '{concept['concept_title']}' is defined as: {statement}",
-            "correct_answer": is_true,
-            "key_concept_id": concept.get("id"),
-            "source_page": concept.get("source_page"),
-            "source_timestamp_start": concept.get("source_timestamp_start"),
-            "source_timestamp_end": concept.get("source_timestamp_end")
-        }
+            else:
+                # Pick a random explanation from another concept
+                distractors = [c for c in all_concepts if c.get("id") != concept.get("id")]
+                if distractors:
+                    distractor = random.choice(distractors)
+                    statement = distractor["concept_explanation"]
+                    is_true = False
+                else:
+                    statement = concept["concept_explanation"]
+                    is_true = True
+            
+            return {
+                "type": "true_false",
+                "question": f"True or False: '{concept['concept_title']}' is defined as: {statement}",
+                "correct_answer": is_true,
+                "key_concept_id": concept.get("id"),
+                "source_page": concept.get("source_page"),
+                "source_timestamp_start": concept.get("source_timestamp_start"),
+                "source_timestamp_end": concept.get("source_timestamp_end")
+            }
     
     def _parse_llm_response(self, response: str) -> List[QuizQuestion]:
         """Parse and validate the LLM response for quiz questions."""
