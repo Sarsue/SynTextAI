@@ -175,6 +175,26 @@ class YouTubeProcessor(FileProcessor):
             await self._store_video_segments(user_id, file_id, filename, processed_content)
 
             # Step 4: Generate key concepts from processed content
+            # First check if we have valid transcript content
+            segments = processed_content.get("processed_segments", [])
+            full_text = "\n\n".join(
+                s.get("content", "").strip() 
+                for s in segments 
+                if isinstance(s, dict) and s.get("content")
+            ).strip()
+
+            if not full_text:
+                logger.warning(f"No transcript content available for key concept generation for file {file_id}")
+                return {
+                    "success": False,
+                    "file_id": file_id,
+                    "error": "Transcript empty, cannot generate key concepts",
+                    "metadata": {
+                        "processor_type": "youtube",
+                    },
+                }
+
+            # Now generate key concepts with the validated content
             key_concepts = await self.generate_key_concepts(
                 processed_content, language=language, comprehension_level=comprehension_level
             )
@@ -205,15 +225,28 @@ class YouTubeProcessor(FileProcessor):
                     continue
 
                 try:
-                    concept_id = await self.store.add_key_concept_async(
-                        file_id=file_id,
-                        concept_title=title,
-                        concept_explanation=explanation,
-                        source_page_number=concept.get("source_page_number"),
-                        source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
-                        source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds"),
-                        is_custom=False,
-                    )
+                    # Create a dictionary with the key concept data
+                    key_concept_data = {
+                        "concept_title": title,
+                        "concept_explanation": explanation,
+                        "source_page_number": concept.get("source_page_number"),
+                        "source_video_timestamp_start_seconds": concept.get("source_video_timestamp_start_seconds"),
+                        "source_video_timestamp_end_seconds": concept.get("source_video_timestamp_end_seconds"),
+                        "is_custom": False
+                    }
+                    
+                    # Add the key concept using the learning material repository
+                    try:
+                        result = await self.store.learning_material_repo.add_key_concept(
+                            file_id=file_id,
+                            key_concept_data=key_concept_data
+                        )
+                        concept_id = result.get("id") if result else None
+                        if not concept_id:
+                            raise ValueError("Failed to get concept ID from repository")
+                    except Exception as e:
+                        logger.error(f"Error saving key concept to database: {e}", exc_info=True)
+                        raise
                 except Exception as e:
                     logger.error(f"Error saving concept '{title}': {str(e)}", exc_info=True)
                     continue
@@ -529,9 +562,12 @@ class YouTubeProcessor(FileProcessor):
         for segment in segments:
             segment_data = {
                 "content": segment["content"],
-                "start_time": segment["start_time"],
-                "end_time": segment["end_time"],
-                "duration": segment["duration"],
+                "page_number": 0,  # Default page number for video segments
+                "metadata": {
+                    "start_time": segment["start_time"],
+                    "end_time": segment["end_time"],
+                    "duration": segment["duration"]
+                },
                 "chunks": [],
             }
 
@@ -562,6 +598,12 @@ class YouTubeProcessor(FileProcessor):
         """
         Generate key concepts from the video transcript content.
         Expects content containing 'processed_segments'.
+        
+        Returns:
+            List of dictionaries containing key concepts, or empty list if no content
+            
+        Raises:
+            ValueError: If content is invalid or empty
         """
         try:
             if not content or not isinstance(content, dict):
@@ -572,43 +614,57 @@ class YouTubeProcessor(FileProcessor):
             if not isinstance(segments, list):
                 logger.warning("'processed_segments' must be a list")
                 return []
+                
+            if not segments:
+                logger.warning("No segments found in processed content")
+                return []
 
             language = str(kwargs.get("language", "English")).strip()
             comprehension_level = str(kwargs.get("comprehension_level", "Beginner")).strip()
 
-            # Build full text with timestamps
+            # Build full text with timestamps and validate content
+            valid_segments = [
+                s for s in segments 
+                if isinstance(s, dict) and s.get('content') and str(s.get('content', '')).strip()
+            ]
+            
+            if not valid_segments:
+                logger.warning("No valid segments with content found in transcript")
+                return []
+
             full_text = "\n\n".join(
-                f"[{s.get('start_time', 0):.1f}s] {s.get('content', '').strip()}" for s in segments if isinstance(s, dict)
+                f"[{s.get('metadata', {}).get('start_time', 0):.1f}s] {s.get('content', '').strip()}" 
+                for s in valid_segments
             ).strip()
+            
             if not full_text:
-                logger.warning("No transcript content available for key concept generation")
+                logger.warning("No transcript content available for key concept generation after processing")
                 return []
 
-            logger.info(f"Generating key concepts from {len(full_text)} characters of transcript")
+            logger.info(f"Generating key concepts from {len(valid_segments)} segments ({len(full_text)} chars)")
 
-            key_concepts = await generate_key_concepts_dspy(
-                document_text=full_text, language=language, comprehension_level=comprehension_level
-            )
-
-            if not isinstance(key_concepts, list):
-                logger.error(f"Expected list from generate_key_concepts_dspy, got {type(key_concepts)}")
-                return []
-
-            results = []
-            for concept in key_concepts:
-                if not isinstance(concept, dict):
-                    continue
-                results.append(
-                    {
-                        "concept_title": concept.get("concept_title", ""),
-                        "concept_explanation": concept.get("concept_explanation", ""),
-                        "source_video_timestamp_start_seconds": concept.get("start_time"),
-                        "source_video_timestamp_end_seconds": concept.get("end_time"),
-                    }
+            try:
+                key_concepts = await generate_key_concepts_dspy(
+                    document_text=full_text, 
+                    language=language, 
+                    comprehension_level=comprehension_level
                 )
+                
+                if not key_concepts:
+                    logger.warning("No key concepts were generated from the transcript")
+                    return []
+                    
+                logger.info(f"Successfully generated {len(key_concepts)} key concepts")
+                return key_concepts
+                
+            except Exception as e:
+                logger.error(f"Error during key concept generation: {str(e)}", exc_info=True)
+                # Include the first 100 chars of the transcript in the error for debugging
+                sample_text = full_text[:100] + ('...' if len(full_text) > 100 else '')
+                logger.debug(f"Transcript sample (first 100 chars): {sample_text}")
+                return []
 
-            logger.info(f"Generated {len(results)} key concepts from video")
-            return results
+            return key_concepts
 
         except Exception as e:
             self._log_error("Error in generate_key_concepts", e)
@@ -719,7 +775,7 @@ class YouTubeProcessor(FileProcessor):
             logger.error(f"Error generating learning materials: {e}", exc_info=True)
             return False
 
-    def generate_learning_materials(self, file_id: int, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def generate_learning_materials(self, file_id: int, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         (Optional bulk path) Generate flashcards, MCQs, and T/F questions from key concepts.
         """
@@ -731,7 +787,7 @@ class YouTubeProcessor(FileProcessor):
         concept_results = []
         for concept in key_concepts:
             try:
-                ok = utils_generate_learning_materials_for_concept(self.store, int(file_id), concept)
+                ok = await self.generate_learning_materials_for_concept(int(file_id), concept)
             except Exception as e:
                 logger.error(f"Error generating materials for concept: {e}", exc_info=True)
                 ok = False

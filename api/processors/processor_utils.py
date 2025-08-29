@@ -70,11 +70,18 @@ async def generate_learning_materials_for_concept(
                         back = card.get('answer', card.get('back', ''))
                         logger.debug(f"Saving flashcard {i+1}/{len(flashcards)}: front='{front[:30]}...', back='{back[:30]}...'")
                         
+                        # First, get the file to access user_id
+                        file_result = await store.file_repo.get_file(file_id=file_id)
+                        if not file_result:
+                            logger.error(f"File not found: {file_id}")
+                            continue
+                            
                         await store.add_flashcard(
                             file_id=int(file_id),
                             question=front,
                             answer=back,
-                            key_concept_id=int(concept_id)
+                            key_concept_id=int(concept_id),
+                            user_id=file_result.user_id
                         )
                         flashcards_saved += 1
                     except Exception as e:
@@ -96,6 +103,12 @@ async def generate_learning_materials_for_concept(
                 logger.info(f"Saving {len(mcqs)} MCQs for concept ID {concept_id}")
                 for mcq in mcqs:
                     try:
+                        # Get the file to access user_id
+                        file_result = await store.file_repo.get_file(file_id=file_id)
+                        if not file_result:
+                            logger.error(f"File not found: {file_id}")
+                            continue
+                            
                         await store.add_quiz_question(
                             file_id=file_id,
                             key_concept_id=concept_id,
@@ -103,7 +116,8 @@ async def generate_learning_materials_for_concept(
                             question_type='MCQ',
                             correct_answer=mcq.get('answer', ''),
                             distractors=mcq.get('options', []),
-                            quiz_question_data=mcq
+                            quiz_question_data=mcq,
+                            user_id=file_result.user_id
                         )
                         mcqs_saved += 1
                     except Exception as e:
@@ -130,6 +144,12 @@ async def generate_learning_materials_for_concept(
                         tf.get('explanation', '')
                         logger.debug(f"Saving T/F {i+1}/{len(tf_questions)}: statement='{statement[:30]}...', is_true={is_true}")
                         
+                        # Get the file to access user_id
+                        file_result = await store.file_repo.get_file(file_id=file_id)
+                        if not file_result:
+                            logger.error(f"File not found: {file_id}")
+                            continue
+                            
                         # Note: We're not passing explanation as it's not accepted by the method
                         await store.add_quiz_question(
                             file_id=int(file_id),
@@ -137,7 +157,8 @@ async def generate_learning_materials_for_concept(
                             question_type="TF",  # Must match frontend's expected type 'TF' for true/false
                             correct_answer="True" if is_true else "False",
                             key_concept_id=int(concept_id),
-                            quiz_question_data={"is_true": is_true}
+                            quiz_question_data={"is_true": is_true},
+                            user_id=file_result.user_id
                         )
                         tf_saved += 1
                     except Exception as e:

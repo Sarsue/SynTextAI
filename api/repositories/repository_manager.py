@@ -129,11 +129,77 @@ class RepositoryManager:
         
     @property
     def learning_material_repo(self):
-        """Lazily initialize and return the learning material repository."""
+        """Get the learning material repository."""
         if self._learning_material_repo is None:
             from .async_learning_material_repository import AsyncLearningMaterialRepository
             self._learning_material_repo = AsyncLearningMaterialRepository(self)
         return self._learning_material_repo
+        
+    async def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """
+        Add a new flashcard.
+        
+        Args:
+            file_id: ID of the file this flashcard is associated with
+            question: The flashcard question
+            answer: The flashcard answer
+            key_concept_id: Optional ID of the key concept this flashcard relates to
+            user_id: ID of the user who owns this flashcard (required for access control)
+            
+        Returns:
+            The created flashcard as a dictionary, or None if creation failed
+        """
+        if user_id is None:
+            raise ValueError("user_id is required for access control")
+            
+        return await self.learning_material_repo.create_custom_flashcard(
+            user_id=user_id,
+            file_id=file_id,
+            question=question,
+            answer=answer,
+            key_concept_id=key_concept_id
+        )
+        
+    async def add_quiz_question(self, file_id: int, question: str, question_type: str, 
+                              correct_answer: str, key_concept_id: Optional[int] = None, 
+                              distractors: Optional[List[str]] = None, 
+                              quiz_question_data: Optional[Dict[str, Any]] = None,
+                              user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """
+        Add a new quiz question.
+        
+        Args:
+            file_id: ID of the file this question is associated with
+            question: The question text
+            question_type: Type of question (e.g., 'MCQ', 'TF')
+            correct_answer: The correct answer to the question
+            key_concept_id: Optional ID of the key concept this question relates to
+            distractors: List of incorrect answer options (for multiple choice)
+            quiz_question_data: Additional question data as a dictionary
+            user_id: ID of the user who owns this question (required for access control)
+            
+        Returns:
+            The created quiz question as a dictionary, or None if creation failed
+        """
+        if user_id is None:
+            raise ValueError("user_id is required for access control")
+            
+        # Verify the user has access to the file
+        file_repo = self.file_repo
+        has_access = await file_repo.check_user_file_ownership(file_id, user_id)
+        if not has_access:
+            logger.warning(f"User {user_id} does not have access to file {file_id}")
+            return None
+            
+        return await self.learning_material_repo.create_quiz_question(
+            file_id=file_id,
+            question=question,
+            question_type=question_type,
+            correct_answer=correct_answer,
+            key_concept_id=key_concept_id,
+            distractors=distractors or [],
+            quiz_question_data=quiz_question_data or {}
+        )
     
 
     async def close(self):

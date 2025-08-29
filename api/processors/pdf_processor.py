@@ -244,7 +244,8 @@ class PDFProcessor(FileProcessor):
                         "page_number": page.get("page_number"),
                         "metadata": {
                             "source": "pdf",
-                            "page": page.get("page_number")
+                            "page_number": page.get("page_number"),
+                            "file_type": "pdf"
                         }
                     })
             
@@ -323,11 +324,19 @@ class PDFProcessor(FileProcessor):
             if not file_data:
                 raise ValueError("No file data provided")
                 
-            # Extract text with page numbers
+            # Extract text with page numbers and format with metadata
             pages = self.extract_text_with_page_numbers(file_data)
             
             return {
-                "pages": pages,
+                "pages": [{
+                    "content": page["content"],
+                    "page_number": page["page_number"],
+                    "metadata": {
+                        "source": "pdf",
+                        "page_number": page["page_number"],
+                        "file_type": "pdf"
+                    }
+                } for page in pages],
                 "page_count": len(pages),
                 "format": "pdf"
             }

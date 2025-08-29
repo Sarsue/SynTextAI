@@ -126,13 +126,18 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
                 
                 # Add new segments and chunks
                 for segment_data in extracted_data:
+                    # Store timing information in metadata if needed
+                    metadata = segment_data.get('metadata', {})
+                    if 'start_time' in segment_data:
+                        metadata['start_time'] = segment_data['start_time']
+                    if 'end_time' in segment_data:
+                        metadata['end_time'] = segment_data['end_time']
+                        
                     segment = Segment(
                         file_id=file.id,
                         content=segment_data.get('content', ''),
-                        page_number=segment_data.get('page_number'),
-                        start_time=segment_data.get('start_time'),
-                        end_time=segment_data.get('end_time'),
-                        metadata=segment_data.get('metadata', {})
+                        page_number=segment_data.get('page_number', 0),  # Default to 0 if not provided
+                        meta_data=metadata
                     )
                     session.add(segment)
                     await session.flush()  # Get the segment ID for chunks
