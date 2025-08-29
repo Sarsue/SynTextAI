@@ -173,17 +173,15 @@ class Chunk:
         id: Optional[int] = None,
         file_id: Optional[int] = None,
         segment_id: Optional[int] = None,
-        content: str = "",
         embedding: Optional[List[float]] = None
     ):
         self.id = id
         self.file_id = file_id
         self.segment_id = segment_id
-        self.content = content
         self.embedding = embedding
     
     def __repr__(self) -> str:
-        return f"Chunk(id={self.id}, content='{self.content[:20]}...')"
+        return f"Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:5] if self.embedding else None}...)"
 
 
 class KeyConcept:

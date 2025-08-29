@@ -11,7 +11,7 @@ import hashlib
 import json
 from typing import Dict, Type, Optional, Any, TypeVar
 from pydantic import BaseModel, ValidationError, Field
-from .base_agent import BaseAgent, AgentError
+from api.agents.base_agent import BaseAgent, AgentError
 
 logger = logging.getLogger(__name__)
 

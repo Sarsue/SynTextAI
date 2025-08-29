@@ -10,8 +10,13 @@ import fitz  # PyMuPDF
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
-from ..llm_compat import get_text_embeddings_in_batches_sync, generate_key_concepts_dspy_sync as generate_key_concepts_dspy
-from api.processors.processor_utils import generate_learning_materials_for_concept
+from api.services.llm_service import llm_service
+from api.services.embedding_service import embedding_service
+from api.processors.processor_utils import (
+    generate_learning_materials,
+    LearningMaterialsSummary,
+    generate_learning_materials_for_concept
+)
 
 # Import PDF extraction tools
 from pdfminer.layout import LAParams
@@ -117,76 +122,89 @@ class PDFProcessor(FileProcessor):
             # Process pages to generate embeddings
             processed_data = self.process_pages(page_data)
             
-            # Generate key concepts
-            content = " ".join([chunk.get("content", "") for chunk in processed_data.get("chunks", []) 
-                               if isinstance(chunk, dict) and "content" in chunk])
+            # Prepare content for key concept generation
+            content = {
+                "pages": [
+                    {
+                        "page_number": i + 1,
+                        "content": seg.get("content", ""),
+                        "metadata": {
+                            "source": "pdf",
+                            "page_number": i + 1,
+                            "file_type": "pdf"
+                        }
+                    }
+                    for i, seg in enumerate(processed_data.get("segments", []))
+                    if isinstance(seg, dict) and seg.get("content")
+                ]
+            }
             
             try:
                 # Generate key concepts using dspy
-                key_concepts = generate_key_concepts_dspy(content, language, comprehension_level)
+                key_concepts = await self.generate_key_concepts(content)
                 
-                if not key_concepts or not isinstance(key_concepts, list):
-                    logger.warning("No valid key concepts were extracted from the document content")
+                # Store key concepts
+                concepts_processed = 0
+                for concept in key_concepts:
+                    if not isinstance(concept, dict):
+                        continue
+                        
+                    # Format the concept for the repository
+                    key_concept_data = {
+                        "concept_title": concept.get("concept_title", ""),
+                        "concept_explanation": concept.get("concept_explanation", ""),
+                        "source_page_number": concept.get("source_page_number"),
+                        "is_custom": False
+                    }
+                    
+                    # Store the concept
+                    result = await self.store.learning_material_repo.add_key_concept(
+                        file_id=file_id,
+                        key_concept_data=key_concept_data
+                    )
+                    
+                    if result and result.get("id"):
+                        concepts_processed += 1
+                    else:
+                        logger.warning(f"Failed to save concept: {concept.get('concept_title')}")
+                
+                # Store segments and chunks in the database
+                success = await self.store.file_repo.update_file_with_chunks(
+                    user_id=user_id,
+                    filename=filename,
+                    file_type="pdf",
+                    extracted_data=processed_data.get("segments", [])
+                )
+                
+                if not success:
+                    logger.error(f"Failed to store PDF segments for file_id: {file_id}")
                     return {
                         "success": False,
+                        "error": "Failed to store processed segments",
                         "file_id": file_id,
-                        "error": "Failed to extract key concepts",
                         "metadata": {
                             "processor_type": "pdf",
-                            "page_count": len(page_data)
+                            "page_count": len(page_data),
+                            "segment_count": len(processed_data.get("segments", [])),
+                            "key_concepts_count": concepts_processed
                         }
                     }
                 
-                logger.info(f"Extracted {len(key_concepts)} key concepts from document")
-                concepts_processed = 0
+                # Update file status to completed
+                await self.store.file_repo.update_file_status(
+                    file_id=file_id,
+                    status="completed"
+                )
                 
-                # Process one concept at a time
-                for i, concept in enumerate(key_concepts):
-                    title = concept.get("concept_title", "")
-                    explanation = concept.get("concept_explanation", "")
-                    logger.info(f"Processing concept {i+1}/{len(key_concepts)}: '{title[:50]}...'")
-                    
-                    # Save the concept to get its ID
-                    concept_id = await self.store.add_key_concept(
-                        file_id=file_id,
-                        concept_title=title,
-                        concept_explanation=explanation,
-                        source_page_number=concept.get("source_page_number"),
-                        source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
-                        source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
-                    )
-                    
-                    if concept_id is not None:
-                        logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
-                        
-                        # Generate and save learning materials for this concept
-                        concept_with_id = {
-                            "concept_title": title,
-                            "concept_explanation": explanation,
-                            "id": concept_id
-                        }
-                        
-                        # Generate flashcards and quizzes for this concept
-                        result = await self.generate_learning_materials_for_concept(file_id, concept_with_id)
-                        
-                        if result:
-                            concepts_processed += 1
-                            logger.info(f"Successfully generated learning materials for concept '{title[:30]}...'")
-                        else:
-                            logger.error(f"Failed to generate learning materials for concept '{title[:30]}...'")
-                    else:
-                        logger.error(f"Failed to save concept '{title[:30]}...' to database for file {file_id}")
-                
-                logger.info(f"Completed processing {concepts_processed}/{len(key_concepts)} key concepts for file {file_id}")
+                logger.info(f"Successfully processed PDF with {concepts_processed} key concepts")
                 
                 return {
                     "success": True,
                     "file_id": file_id,
-                    "page_count": len(page_data),
                     "metadata": {
                         "processor_type": "pdf",
                         "page_count": len(page_data),
-                        "chunk_count": len(processed_data.get("chunks", [])),
+                        "segment_count": len(processed_data.get("segments", [])),
                         "key_concepts_count": concepts_processed
                     }
                 }
@@ -196,12 +214,11 @@ class PDFProcessor(FileProcessor):
                 return {
                     "success": True,  # Still consider it a success since we have the content
                     "file_id": file_id,
-                    "page_count": len(page_data),
                     "warning": f"Key concept generation failed: {str(e)}",
                     "metadata": {
                         "processor_type": "pdf",
                         "page_count": len(page_data),
-                        "chunk_count": len(processed_data.get("chunks", [])),
+                        "segment_count": len(processed_data.get("segments", [])),
                         "key_concepts_count": 0
                     }
                 }
@@ -225,56 +242,56 @@ class PDFProcessor(FileProcessor):
             page_data: List of dictionaries containing page numbers and content
             
         Returns:
-            Dictionary with processed chunks including embeddings
+            Dictionary with processed segments and chunks including embeddings
         """
         try:
-            chunks = []
+            segments = []
             
-            # Process each page
+            # Process each page as a segment
             for page in page_data:
                 if not page.get("content"):
                     continue
                     
                 # Split content into chunks
                 page_chunks = self._chunk_text(page["content"])
+                chunks_data = []
                 
-                for chunk_text in page_chunks:
-                    chunks.append({
-                        "content": chunk_text,
-                        "page_number": page.get("page_number"),
-                        "metadata": {
-                            "source": "pdf",
-                            "page_number": page.get("page_number"),
-                            "file_type": "pdf"
-                        }
-                    })
-            
-            # Generate embeddings for all chunks
-            if chunks:
-                # Get embeddings in batches
-                embeddings = []
-                batch_size = 10  # Adjust based on API limits
-                
-                for i in range(0, len(chunks), batch_size):
-                    batch = chunks[i:i + batch_size]
-                    batch_texts = [chunk["content"] for chunk in batch]
-                    batch_embeddings = get_text_embeddings_in_batches_sync(batch_texts)
+                # Generate embeddings for each chunk
+                if page_chunks:
+                    # Get embeddings in batches
+                    embeddings = []
+                    batch_size = 10  # Adjust based on API limits
                     
-                    if batch_embeddings and len(batch_embeddings) == len(batch):
-                        embeddings.extend(batch_embeddings)
-                    else:
-                        # If embedding generation fails, skip these chunks
-                        logger.error(f"Failed to generate embeddings for batch {i//batch_size}")
-                        embeddings.extend([None] * len(batch))
+                    for i in range(0, len(page_chunks), batch_size):
+                        batch = page_chunks[i:i + batch_size]
+                        batch_embeddings = get_text_embeddings_in_batches_sync(batch)
+                        
+                        if batch_embeddings and len(batch_embeddings) == len(batch):
+                            embeddings.extend(batch_embeddings)
+                        else:
+                            # If embedding generation fails, skip these chunks
+                            logger.error(f"Failed to generate embeddings for batch {i//batch_size}")
+                            embeddings.extend([None] * len(batch))
+                    
+                    # Prepare chunks data with embeddings
+                    for embedding in embeddings:
+                        if embedding is not None:
+                            chunks_data.append({"embedding": embedding})
                 
-                # Add embeddings to chunks
-                for i, embedding in enumerate(embeddings):
-                    if i < len(chunks):
-                        chunks[i]["embedding"] = embedding
+                # Add segment with its chunks
+                segments.append({
+                    "content": page["content"],
+                    "page_number": page.get("page_number"),
+                    "metadata": {
+                        "source": "pdf",
+                        "page_number": page.get("page_number")
+                    },
+                    "chunks": chunks_data
+                })
             
             return {
-                "chunks": chunks,
-                "total_chunks": len(chunks),
+                "segments": segments,
+                "total_segments": len(segments),
                 "total_pages": len(page_data)
             }
             
@@ -380,25 +397,60 @@ class PDFProcessor(FileProcessor):
                 
         return chunks
     
-    async def generate_learning_materials_for_concept(self, file_id: int, concept: Dict[str, Any]) -> bool:
+    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
         """
-        Generate and save learning materials for a single key concept.
-        Delegates to the shared utility function.
+        Generate key concepts from the PDF content.
         
         Args:
-            file_id: ID of the file
-            concept: A single key concept with ID
+            content: Dictionary containing 'pages' with page content
+            **kwargs: Additional parameters
             
         Returns:
-            bool: Success status
+            List of key concept dictionaries
         """
         try:
-            return generate_learning_materials_for_concept(
-                store=self.store,
-                file_id=file_id,
-                concept=concept
-            )
+            if not content or not isinstance(content, dict) or 'pages' not in content:
+                logger.warning("Invalid content: expected dict with 'pages' key")
+                return []
+
+            # Extract text from all pages
+            full_text = "\n\n".join([
+                f"Page {page.get('page_number', 0)}:\n{page.get('content', '').strip()}"
+                for page in content.get('pages', [])
+                if page.get('content', '').strip()
+            ])
+            
+            if not full_text.strip():
+                logger.warning("No text content found in PDF")
+                return []
+
+            # Generate key concepts using the async DSPy function
+            key_concepts = await generate_key_concepts_dspy(document_text=full_text)
+            
+            # Format the key concepts to match repository expectations
+            formatted_concepts = []
+            for concept in key_concepts:
+                if not isinstance(concept, dict):
+                    continue
+                    
+                formatted_concept = {
+                    "concept_title": concept.get("concept_title", ""),
+                    "concept_explanation": concept.get("concept_explanation", ""),
+                    "source_page_number": concept.get("source_page_number"),
+                    "is_custom": False
+                }
+                
+                # Include any additional fields that might be in the concept
+                for field in ["source_text", "relevance_score", "related_concepts"]:
+                    if field in concept:
+                        formatted_concept[field] = concept[field]
+                
+                formatted_concepts.append(formatted_concept)
+            
+            return formatted_concepts
+            
         except Exception as e:
-            logger.error(f"Error generating learning materials for concept {concept.get('id')}: {e}", 
-                        exc_info=True)
-            return False
+            logger.error(f"Error in generate_key_concepts: {e}", exc_info=True)
+            return []
+
+    # Learning materials generation is now handled by the base class

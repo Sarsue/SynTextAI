@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import sessionmaker
 
 # Import domain models first to avoid circular imports
-from .domain_models import Subscription, CardDetails
+from .domain_models import Subscription, CardDetails, Flashcard, QuizQuestion
 from .session_manager import SessionContextManager
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,89 @@ class RepositoryManager:
         """
         async with self.session_scope() as session:
             yield session
+    
+    async def add_flashcard(
+        self,
+        file_id: int,
+        question: str,
+        answer: str,
+        key_concept_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        is_custom: bool = False
+    ) -> Flashcard:
+        """
+        Add a new flashcard.
+        
+        Args:
+            file_id: ID of the associated file
+            question: Flashcard question
+            answer: Flashcard answer
+            key_concept_id: Optional ID of the associated key concept
+            user_id: ID of the user who owns the flashcard
+            is_custom: Whether this is a user-created flashcard
+            
+        Returns:
+            The created Flashcard object
+        """
+        async with self.session_scope() as session:
+            flashcard = Flashcard(
+                file_id=file_id,
+                key_concept_id=key_concept_id,
+                question=question,
+                answer=answer,
+                is_custom=is_custom
+            )
+            session.add(flashcard)
+            await session.commit()
+            await session.refresh(flashcard)
+            return flashcard
+            
+    async def add_quiz_question(
+        self,
+        file_id: int,
+        question: str,
+        question_type: str,
+        correct_answer: str,
+        key_concept_id: Optional[int] = None,
+        distractors: Optional[List[str]] = None,
+        quiz_question_data: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None
+    ) -> Optional[QuizQuestion]:
+        """
+        Add a new quiz question.
+        
+        Args:
+            file_id: ID of the associated file
+            question: The question text
+            question_type: Type of question (e.g., 'MCQ', 'TF')
+            correct_answer: The correct answer
+            key_concept_id: Optional ID of the associated key concept
+            distractors: List of incorrect answers (for multiple choice)
+            quiz_question_data: Additional question data
+            user_id: ID of the user who owns the question
+            
+        Returns:
+            The created QuizQuestion object or None if creation failed
+        """
+        async with self.session_scope() as session:
+            try:
+                question = QuizQuestion(
+                    file_id=file_id,
+                    key_concept_id=key_concept_id,
+                    question=question,
+                    question_type=question_type,
+                    correct_answer=correct_answer,
+                    distractors=distractors or [],
+                    quiz_question_data=quiz_question_data or {}
+                )
+                session.add(question)
+                await session.commit()
+                await session.refresh(question)
+                return question
+            except Exception as e:
+                logger.error(f"Error adding quiz question: {e}")
+                await session.rollback()
+                return None
     
     async def execute_in_session(self, operation: Callable[[AsyncSession], Awaitable[T]]) -> T:
         """

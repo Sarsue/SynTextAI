@@ -13,12 +13,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..utils.language_utils import validate_language, get_language_name
-from ..llm_compat import get_text_embeddings_in_batches, generate_key_concepts_dspy
-from ..repositories.repository_manager import RepositoryManager
-from .base_processor import FileProcessor
-from .processor_utils import (
-    generate_learning_materials_for_concept as utils_generate_learning_materials_for_concept,
+from api.utils.language_utils import validate_language, get_language_name
+from api.services.llm_service import llm_service
+from api.services.embedding_service import embedding_service
+from api.repositories.repository_manager import RepositoryManager
+from api.processors.base_processor import FileProcessor
+from api.processors.processor_utils import (
+    generate_learning_materials,
+    LearningMaterialsSummary,
     log_concept_processing_summary,
 )
 
@@ -177,26 +179,22 @@ class YouTubeProcessor(FileProcessor):
             # Step 4: Generate key concepts from processed content
             # First check if we have valid transcript content
             segments = processed_content.get("processed_segments", [])
-            full_text = "\n\n".join(
-                s.get("content", "").strip() 
-                for s in segments 
-                if isinstance(s, dict) and s.get("content")
-            ).strip()
-
-            if not full_text:
-                logger.warning(f"No transcript content available for key concept generation for file {file_id}")
+            if not segments:
+                logger.warning(f"No processed segments available for key concept generation for file {file_id}")
                 return {
                     "success": False,
                     "file_id": file_id,
-                    "error": "Transcript empty, cannot generate key concepts",
+                    "error": "No processed segments available, cannot generate key concepts",
                     "metadata": {
                         "processor_type": "youtube",
                     },
                 }
 
-            # Now generate key concepts with the validated content
+            # Now generate key concepts with the processed content
             key_concepts = await self.generate_key_concepts(
-                processed_content, language=language, comprehension_level=comprehension_level
+                processed_content, 
+                language=language, 
+                comprehension_level=comprehension_level
             )
 
             if key_concepts and isinstance(key_concepts, list):
@@ -576,7 +574,7 @@ class YouTubeProcessor(FileProcessor):
                 if not emb:
                     logger.warning(f"Missing embedding for chunk in file_id: {file_id}")
                     continue
-                segment_data["chunks"].append({"content": chunk["content"], "embedding": emb})
+                segment_data["chunks"].append({"embedding": emb})
 
             extracted_data.append(segment_data)
 
@@ -764,36 +762,88 @@ class YouTubeProcessor(FileProcessor):
             self._log_error("Error generating embeddings", e)
             return content
 
-    async def generate_learning_materials_for_concept(self, file_id: int, concept: Dict[str, Any]) -> bool:
+    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
         """
-        Generate and save learning materials for a single key concept (async wrapper).
+        Generate key concepts from the video transcript content.
+        Expects content containing 'processed_segments'.
+        
+        Returns:
+            List of dictionaries containing key concepts, or empty list if no content
+            
+        Raises:
+            ValueError: If content is invalid or empty
         """
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, lambda: utils_generate_learning_materials_for_concept(self.store, int(file_id), concept))
+            if not content or not isinstance(content, dict):
+                logger.warning("Invalid content: expected dict with 'processed_segments'")
+                return []
+
+            processed_segments = content.get("processed_segments", [])
+            if not processed_segments:
+                logger.warning("No processed segments found in content")
+                return []
+
+            # Concatenate all segment content for key concept extraction
+            full_text = "\n\n".join(
+                f"[{segment.get('start_time', 0):.1f}s - {segment.get('end_time', 0):.1f}s] {segment.get('content', '').strip()}"
+                for segment in processed_segments
+                if segment.get("content")
+            )
+            
+            if not full_text.strip():
+                logger.warning("Empty transcript text, skipping key concept generation")
+                return []
+
+            # Generate key concepts using the async DSPy function
+            key_concepts = await generate_key_concepts_dspy(document_text=full_text)
+            
+            # Format the key concepts to match repository expectations
+            formatted_concepts = []
+            for concept in key_concepts:
+                if not isinstance(concept, dict):
+                    continue
+                    
+                # Extract timestamp from source_text if available
+                source_timestamp = None
+                source_text = concept.get("source_text", "")
+                if source_text and "[" in source_text and "]" in source_text:
+                    timestamp_str = source_text.split("]")[0] + "]"
+                    try:
+                        # Extract start and end times from the timestamp string
+                        times = re.findall(r"(\d+\.?\d*)s", timestamp_str)
+                        if len(times) >= 2:
+                            source_timestamp = {
+                                "start_seconds": float(times[0]),
+                                "end_seconds": float(times[1]) if len(times) > 1 else float(times[0]) + 10.0
+                            }
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse timestamp from source_text: {source_text}")
+                
+                formatted_concept = {
+                    "concept_title": concept.get("concept_title", ""),
+                    "concept_explanation": concept.get("concept_explanation", ""),
+                    "is_custom": False
+                }
+                
+                # Add timestamp information if available
+                if source_timestamp:
+                    formatted_concept["source_video_timestamp_start_seconds"] = source_timestamp["start_seconds"]
+                    formatted_concept["source_video_timestamp_end_seconds"] = source_timestamp["end_seconds"]
+                
+                # Include any additional fields that might be in the concept
+                for field in ["source_text", "relevance_score", "related_concepts"]:
+                    if field in concept:
+                        formatted_concept[field] = concept[field]
+                
+                formatted_concepts.append(formatted_concept)
+            
+            return formatted_concepts
+            
         except Exception as e:
-            logger.error(f"Error generating learning materials: {e}", exc_info=True)
-            return False
+            logger.error(f"Error in generate_key_concepts: {e}", exc_info=True)
+            return []
 
-    async def generate_learning_materials(self, file_id: int, key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        (Optional bulk path) Generate flashcards, MCQs, and T/F questions from key concepts.
-        """
-        if not key_concepts:
-            logger.warning(f"No key concepts provided to generate learning materials for file {file_id}")
-            return {"concepts_processed": 0, "concepts_successful": 0, "concepts_failed": 0}
-
-        logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
-        concept_results = []
-        for concept in key_concepts:
-            try:
-                ok = await self.generate_learning_materials_for_concept(int(file_id), concept)
-            except Exception as e:
-                logger.error(f"Error generating materials for concept: {e}", exc_info=True)
-                ok = False
-            concept_results.append(ok)
-
-        return log_concept_processing_summary(concept_results, int(file_id))
+    # Learning materials generation is now handled by the base class
 
     def _log_error(self, message: str, error: Exception) -> None:
         """

@@ -146,10 +146,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
                         chunk = Chunk(
                             segment_id=segment.id,
                             file_id=file.id,
-                            content=chunk_data.get('content', ''),
-                            embedding=chunk_data.get('embedding'),
-                            token_count=chunk_data.get('token_count', 0),
-                            metadata=chunk_data.get('metadata', {})
+                            embedding=chunk_data.get('embedding')
                         )
                         session.add(chunk)
                 

@@ -9,8 +9,13 @@ from typing import Dict, List, Any, Optional
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
-from api.llm_compat import extract_image_text, get_text_embeddings_in_batches, generate_key_concepts_dspy
-from ..utils.utils import chunk_text
+from api.services.llm_service import llm_service
+from api.services.embedding_service import embedding_service
+from api.utils.utils import chunk_text
+from api.processors.processor_utils import (
+    generate_learning_materials,
+    LearningMaterialsSummary
+)
 
 logger = logging.getLogger(__name__)
 
@@ -294,15 +299,4 @@ class TextProcessor(FileProcessor):
             logger.error(f"Error generating key concepts: {e}", exc_info=True)
             return []
     
-    async def generate_learning_materials(self, 
-                                        file_id: str,
-                                        key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate learning materials based on key concepts.
-        Currently not implemented for text files.
-        
-        Returns:
-            Empty dict as this is not implemented for text files
-        """
-        # Not implemented for text files
-        return {}
+    # Learning materials generation is now handled by the base class

@@ -1,201 +1,228 @@
-"""
-Utility functions and shared logic for file processors.
-Centralizes common functionality used by multiple processors.
-"""
+import asyncio
 import logging
-from typing import Dict, Any, List
+import random
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from api.models import File, KeyConcept, Flashcard, QuizQuestion
+from api.repositories import get_repository_manager
+from api.repositories.async_file_repository import AsyncFileRepository
+from api.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
-async def generate_learning_materials_for_concept(
-    store, 
-    file_id: int, 
-    concept: Dict[str, Any]
-) -> bool:
-    """
-    Generate and save learning materials for a single key concept.
-    Used by multiple processors to avoid code duplication.
-    
-    Args:
-        store: The repository store object with database access methods
-        file_id: ID of the file
-        concept: A single key concept with database ID
-        
-    Returns:
-        bool: Success status
-    """
-    try:
-        from api.services.llm_service import llm_service
-        
-        concept_id = concept.get('id')
-        if not concept_id:
-            logger.warning(f"Cannot generate learning materials - concept has no ID: {concept.get('concept_title', concept.get('concept', 'Unknown'))}")
-            return False
-            
-        # Handle both naming conventions to ensure compatibility
-        concept_title = concept.get('concept_title', concept.get('concept', ''))
-        concept_explanation = concept.get('concept_explanation', concept.get('explanation', ''))
-        
-        # Log complete field data to help with debugging
-        logger.info(f"Generating learning materials for concept ID {concept_id}: '{concept_title[:30]}...'")
-        logger.debug(f"Full concept fields: {list(concept.keys())}")
-        logger.debug(f"Extracted concept_title: '{concept_title}', concept_explanation length: {len(concept_explanation)}")
-        logger.debug(f"Full concept data for learning material generation: {concept}")
-        
-        # Ensure we actually have content to work with
-        if not concept_title or not concept_explanation:
-            logger.error(f"Missing concept title or explanation for concept ID {concept_id}. Title: '{concept_title}', Explanation length: {len(concept_explanation)}")
-            return False
-        
-        # Track success for each material type
-        flashcards_saved = 0
-        mcqs_saved = 0
-        tf_saved = 0
-            
-        # 1. Generate flashcards for this concept
-        try:
-            logger.debug(f"Calling generate_flashcards for '{concept_title[:30]}...'")
-            flashcards = await llm_service.generate_flashcards(
-                concept_title=concept_title,
-                concept_explanation=concept_explanation,
-                num_flashcards=3
-            )
-            logger.debug(f"Generated {len(flashcards)} flashcards: {flashcards}")
-            
-            if flashcards:
-                logger.info(f"Saving {len(flashcards)} flashcards for concept ID {concept_id}")
-                for i, card in enumerate(flashcards):
-                    try:
-                        front = card.get('question', card.get('front', ''))
-                        back = card.get('answer', card.get('back', ''))
-                        logger.debug(f"Saving flashcard {i+1}/{len(flashcards)}: front='{front[:30]}...', back='{back[:30]}...'")
-                        
-                        # First, get the file to access user_id
-                        file_result = await store.file_repo.get_file(file_id=file_id)
-                        if not file_result:
-                            logger.error(f"File not found: {file_id}")
-                            continue
-                            
-                        await store.add_flashcard(
-                            file_id=int(file_id),
-                            question=front,
-                            answer=back,
-                            key_concept_id=int(concept_id),
-                            user_id=file_result.user_id
-                        )
-                        flashcards_saved += 1
-                    except Exception as e:
-                        logger.error(f"Error saving flashcard {i+1}: {e}", exc_info=True)
-        except Exception as e:
-            logger.error(f"Error generating flashcards: {e}", exc_info=True)
-                
-        # 2. Generate MCQ questions
-        try:
-            logger.debug(f"Calling generate_mcqs for '{concept_title[:30]}...'")
-            mcqs = await llm_service.generate_mcqs(
-                concept_title=concept_title,
-                concept_explanation=concept_explanation,
-                num_questions=3  # Default number of MCQs to generate
-            )
-            logger.debug(f"Generated {len(mcqs)} MCQs: {mcqs}")
-            
-            if mcqs:
-                logger.info(f"Saving {len(mcqs)} MCQs for concept ID {concept_id}")
-                for mcq in mcqs:
-                    try:
-                        # Get the file to access user_id
-                        file_result = await store.file_repo.get_file(file_id=file_id)
-                        if not file_result:
-                            logger.error(f"File not found: {file_id}")
-                            continue
-                            
-                        await store.add_quiz_question(
-                            file_id=file_id,
-                            key_concept_id=concept_id,
-                            question=mcq.get('question', ''),
-                            question_type='MCQ',
-                            correct_answer=mcq.get('answer', ''),
-                            distractors=mcq.get('options', []),
-                            quiz_question_data=mcq,
-                            user_id=file_result.user_id
-                        )
-                        mcqs_saved += 1
-                    except Exception as e:
-                        logger.error(f"Error saving MCQ: {e}", exc_info=True)
-        except Exception as e:
-            logger.error(f"Error generating MCQs: {e}", exc_info=True)
-                
-        # 3. Generate True/False questions
-        try:
-            logger.debug(f"Calling generate_true_false_questions for '{concept_title[:30]}...'")
-            tf_questions = await llm_service.generate_true_false_questions(
-                concept_title=concept_title,
-                concept_explanation=concept_explanation,
-                num_questions=2
-            )
-            logger.debug(f"Generated {len(tf_questions)} T/F questions: {tf_questions}")
-            
-            if tf_questions:
-                logger.info(f"Saving {len(tf_questions)} True/False questions for concept ID {concept_id}")
-                for i, tf in enumerate(tf_questions):
-                    try:
-                        statement = tf.get('statement', '')
-                        is_true = tf.get('is_true', True)
-                        tf.get('explanation', '')
-                        logger.debug(f"Saving T/F {i+1}/{len(tf_questions)}: statement='{statement[:30]}...', is_true={is_true}")
-                        
-                        # Get the file to access user_id
-                        file_result = await store.file_repo.get_file(file_id=file_id)
-                        if not file_result:
-                            logger.error(f"File not found: {file_id}")
-                            continue
-                            
-                        # Note: We're not passing explanation as it's not accepted by the method
-                        await store.add_quiz_question(
-                            file_id=int(file_id),
-                            question=statement,
-                            question_type="TF",  # Must match frontend's expected type 'TF' for true/false
-                            correct_answer="True" if is_true else "False",
-                            key_concept_id=int(concept_id),
-                            quiz_question_data={"is_true": is_true},
-                            user_id=file_result.user_id
-                        )
-                        tf_saved += 1
-                    except Exception as e:
-                        logger.error(f"Error saving T/F question {i+1}: {e}", exc_info=True)
-        except Exception as e:
-            logger.error(f"Error generating True/False questions: {e}", exc_info=True)
-        
-        # Log summary of materials saved
-        total_items = flashcards_saved + mcqs_saved + tf_saved
-        logger.info(f"Learning materials generated for concept ID {concept_id}: {flashcards_saved} flashcards, {mcqs_saved} MCQs, {tf_saved} T/F questions")
-        
-        return total_items > 0  # Success if at least one item was saved
-        
-    except Exception as e:
-        logger.error(f"Error generating learning materials: {e}", exc_info=True)
-        return False
 
-async def log_concept_processing_summary(concept_results: List[bool], file_id: int) -> Dict[str, Any]:
+# -------------------------------
+# Dataclasses
+# -------------------------------
+@dataclass
+class LearningMaterialResult:
+    concept_id: int
+    material_type: str
+    success: bool
+    error: Optional[str] = None
+    retry_count: int = 0
+    duration: float = 0.0
+    created_count: int = 0
+
+
+@dataclass
+class LearningMaterialsSummary:
+    file_id: int
+    total_concepts: int
+    successful_concepts: int = 0
+    failed_concepts: int = 0
+    start_time: datetime = field(default_factory=datetime.utcnow)
+    end_time: Optional[datetime] = None
+    duration: float = 0.0
+    results: List[LearningMaterialResult] = field(default_factory=list)
+
+    def update_duration(self):
+        if self.end_time:
+            self.duration = (self.end_time - self.start_time).total_seconds()
+
+
+# -------------------------------
+# Main entry point
+# -------------------------------
+async def generate_learning_materials(
+    file_id: int,
+    key_concepts: List[Dict[str, Any]],
+    max_retries: int = 2,
+) -> LearningMaterialsSummary:
     """
-    Log a summary of concept processing results and return a summary.
-    
-    Args:
-        concept_results: List of boolean success values from processing each concept
-        file_id: The file ID
-        
-    Returns:
-        Dict with summary of successful and failed concepts
+    Generate flashcards, MCQs, and true/false questions for each key concept.
+    Returns a summary of successes and failures.
     """
-    # Summarize concept processing results
-    successful_concepts = sum(1 for result in concept_results if result)
-    failed_concepts = len(concept_results) - successful_concepts
-    
-    logger.info(f"Completed processing {len(concept_results)} concepts for file {file_id}.")
-    logger.info(f"Summary: {successful_concepts} concepts processed successfully, {failed_concepts} failed")
-    
-    return {
-        "concepts_processed": len(concept_results),
-        "concepts_successful": successful_concepts,
-        "concepts_failed": failed_concepts
+    summary = LearningMaterialsSummary(file_id=file_id, total_concepts=len(key_concepts))
+
+    if not key_concepts:
+        logger.warning(f"No key concepts provided for file {file_id}")
+        return summary
+
+    logger.info(f"Starting learning materials generation for file {file_id} with {len(key_concepts)} concepts")
+
+    # Process each concept sequentially
+    for concept in key_concepts:
+        concept_id = concept.get("id")
+        concept_title = concept.get("concept_title", "Unnamed Concept")
+        concept_results: List[LearningMaterialResult] = []
+
+        logger.info(f"Processing concept {concept_id} ({concept_title})")
+
+        try:
+            result = await generate_learning_materials_for_concept(
+                concept=concept,
+                file_id=file_id,
+                max_retries=max_retries,
+            )
+            concept_results.extend(result)
+
+        except Exception as e:
+            logger.error(f"Critical failure processing concept {concept_id}: {e}", exc_info=True)
+            concept_results.append(
+                LearningMaterialResult(
+                    concept_id=concept_id,
+                    material_type="all",
+                    success=False,
+                    error=str(e),
+                )
+            )
+
+        # Log per-concept summary
+        await log_concept_processing_summary(concept_results, file_id)
+
+        # Update global summary
+        summary.results.extend(concept_results)
+        if any(r.success for r in concept_results):
+            summary.successful_concepts += 1
+        else:
+            summary.failed_concepts += 1
+
+    # Finalize duration
+    summary.end_time = datetime.utcnow()
+    summary.update_duration()
+
+    logger.info(
+        f"Completed learning materials generation for {summary.successful_concepts}/"
+        f"{summary.total_concepts} concepts in {summary.duration:.2f}s "
+        f"(file_id={file_id})"
+    )
+    return summary
+
+
+# -------------------------------
+# Per-concept processing
+# -------------------------------
+async def generate_learning_materials_for_concept(
+    concept: Dict[str, Any],
+    file_id: int,
+    max_retries: int = 2,
+) -> List[LearningMaterialResult]:
+    """
+    Generate flashcards, MCQs, and true/false questions for a single concept.
+    Retries failed operations with exponential backoff.
+    """
+    concept_id = concept["id"]
+    results: List[LearningMaterialResult] = []
+
+    # Fetch file once (avoid duplicate DB calls)
+    repo_manager = get_repository_manager()
+    file_repo = AsyncFileRepository(repo_manager)
+    file_result = await file_repo.get_file_by_id(file_id=file_id)
+    user_id = file_result.user_id if file_result else None
+
+    # Define generators using LLM service methods
+    generators = {
+        "flashcard": llm_service.generate_flashcards,
+        "mcq": llm_service.generate_mcqs,
+        "true_false": llm_service.generate_true_false_questions,
     }
+
+    # Loop through each type of material
+    for material_type, generator in generators.items():
+        success = False
+        error_msg = None
+        retry_count = 0
+        start_time = time.time()
+        created_count = 0
+
+        for attempt in range(max_retries + 1):
+            try:
+                # Call the appropriate LLM service method with the required parameters
+                if material_type == "flashcard":
+                    materials = await generator(
+                        concept_title=concept.get("title", ""),
+                        concept_explanation=concept.get("explanation", ""),
+                        num_flashcards=3,
+                    )
+                elif material_type == "mcq":
+                    materials = await generator(
+                        concept_title=concept.get("title", ""),
+                        concept_explanation=concept.get("explanation", ""),
+                        all_key_concepts=[],  # TODO: Pass actual key concepts for better distractors
+                        num_questions=3,
+                        num_distractors=3,
+                    )
+                elif material_type == "true_false":
+                    materials = await generator(
+                        concept_title=concept.get("title", ""),
+                        concept_explanation=concept.get("explanation", ""),
+                        all_key_concepts=[],  # TODO: Pass actual key concepts for better false statements
+                        num_questions=2,
+                    )
+                else:
+                    materials = []
+
+                created_count = len(materials) if materials else 0
+                success = created_count > 0
+                break
+
+            except Exception as e:
+                retry_count = attempt
+                error_msg = str(e)
+                logger.warning(
+                    f"Attempt {attempt+1}/{max_retries+1} failed for {material_type} "
+                    f"(concept_id={concept_id}, file_id={file_id}): {error_msg}"
+                )
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt + random.random())
+
+        duration = time.time() - start_time
+        results.append(
+            LearningMaterialResult(
+                concept_id=concept_id,
+                material_type=material_type,
+                success=success,
+                error=error_msg,
+                retry_count=retry_count,
+                duration=duration,
+                created_count=created_count,
+            )
+        )
+
+    return results
+
+
+# -------------------------------
+# Logging helpers
+# -------------------------------
+async def log_concept_processing_summary(
+    concept_results: List[LearningMaterialResult],
+    file_id: int,
+):
+    """Log a detailed summary of one concept's processing results."""
+    for result in concept_results:
+        if result.success:
+            logger.info(
+                f"✅ Created {result.created_count} {result.material_type} items for "
+                f"concept {result.concept_id} (file_id={file_id}, "
+                f"took {result.duration:.2f}s)"
+            )
+        else:
+            logger.error(
+                f"❌ Failed to create {result.material_type} for concept {result.concept_id} "
+                f"(file_id={file_id}, retries={result.retry_count}, error={result.error})"
+            )

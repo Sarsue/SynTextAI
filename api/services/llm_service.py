@@ -46,6 +46,8 @@ import google.generativeai as genai
 from mistralai.client import MistralClient
 from mistralai.models.chat_completion import ChatMessage
 from tenacity import retry, stop_after_attempt, wait_exponential
+import random
+from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -452,6 +454,174 @@ class LLMService:
         )
         
         return response.text
+        
+    async def generate_flashcards(
+        self,
+        concept_title: str,
+        concept_explanation: str,
+        num_flashcards: int = 3,
+        **kwargs
+    ) -> List[Dict[str, str]]:
+        """
+        Generate flashcards for a given concept.
+        
+        Args:
+            concept_title: The title of the concept
+            concept_explanation: The explanation of the concept
+            num_flashcards: Number of flashcards to generate
+            
+        Returns:
+            List of dictionaries with 'question' and 'answer' keys
+        """
+        # Generate a simple Q&A flashcard from a key concept dict
+        def generate_flashcard_from_key_concept(key_concept: Dict) -> Dict:
+            """Generate a simple Q&A flashcard."""
+            return {
+                "question": f"What is {key_concept['concept_title']}?",
+                "answer": key_concept["concept_explanation"]
+            }
+        
+        # For now, we'll generate simple Q&A flashcards
+        # In the future, we could use the LLM to generate more varied flashcards
+        flashcards = []
+        key_concept = {
+            'concept_title': concept_title,
+            'concept_explanation': concept_explanation,
+            'id': 'temp'  # Not used in the utility function
+        }
+        
+        for _ in range(num_flashcards):
+            flashcard = generate_flashcard_from_key_concept(key_concept)
+            flashcards.append(flashcard)
+            
+        return flashcards
+        
+    async def generate_mcqs(
+        self,
+        concept_title: str,
+        concept_explanation: str,
+        all_key_concepts: List[Dict] = None,
+        num_questions: int = 3,
+        num_distractors: int = 3,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate multiple-choice questions for a given concept.
+        
+        Args:
+            concept_title: The title of the concept
+            concept_explanation: The explanation of the concept
+            all_key_concepts: List of all key concepts for generating distractors
+            num_questions: Number of questions to generate
+            num_distractors: Number of distractors per question
+            
+        Returns:
+            List of MCQs with 'question', 'options', 'correct_answer', and 'distractors' keys
+        """
+        # Generate a multiple-choice question from a key concept
+        def generate_mcq_from_key_concepts(key_concept: Dict, all_key_concepts: List[Dict], num_distractors: int = 2) -> Dict:
+            """Generate a multiple-choice question with distractors from other concepts."""
+            correct_answer = key_concept["concept_explanation"]
+            distractors = [kc["concept_explanation"] for kc in all_key_concepts if kc.get("id") != key_concept.get("id")]
+            random.shuffle(distractors)
+            distractors = distractors[:num_distractors]
+            options = distractors + [correct_answer]
+            random.shuffle(options)
+            return {
+                "question": f"Which of the following best describes '{key_concept['concept_title']}'?",
+                "options": options,
+                "correct_answer": correct_answer,
+                "distractors": distractors
+            }
+        
+        if all_key_concepts is None:
+            all_key_concepts = []
+            
+        current_concept = {
+            'concept_title': concept_title,
+            'concept_explanation': concept_explanation,
+            'id': 'current'
+        }
+        
+        # Add current concept to the list of all concepts if not present
+        if not any(c.get('id') == 'current' for c in all_key_concepts):
+            all_key_concepts = [current_concept] + all_key_concepts
+            
+        mcqs = []
+        for _ in range(num_questions):
+            mcq = generate_mcq_from_key_concepts(
+                current_concept,
+                all_key_concepts,
+                num_distractors=min(num_distractors, len(all_key_concepts) - 1)
+            )
+            mcqs.append(mcq)
+            
+        return mcqs
+        
+    async def generate_true_false_questions(
+        self,
+        concept_title: str,
+        concept_explanation: str,
+        all_key_concepts: List[Dict] = None,
+        num_questions: int = 2,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate true/false questions for a given concept.
+        
+        Args:
+            concept_title: The title of the concept
+            concept_explanation: The explanation of the concept
+            all_key_concepts: List of all key concepts for generating false statements
+            num_questions: Number of questions to generate
+            
+        Returns:
+            List of T/F questions with 'question', 'correct_answer', and 'is_true' keys
+        """
+        # Generate a true/false question from a key concept
+        def generate_true_false_from_key_concepts(key_concept: Dict, all_key_concepts: List[Dict]) -> Dict:
+            """Generate a true/false question with 50% chance of being true or false."""
+            use_true = random.choice([True, False])
+            if use_true or len(all_key_concepts) == 1:
+                statement = key_concept["concept_explanation"]
+                is_true = True
+            else:
+                # Pick a random explanation from another key concept
+                distractors = [kc for kc in all_key_concepts if kc.get("id") != key_concept.get("id") and kc.get("concept_explanation") != key_concept.get("concept_explanation")]
+                if not distractors:  # Fallback to any concept if no good distractors
+                    distractors = [kc for kc in all_key_concepts if kc.get("id") != key_concept.get("id")]
+                if not distractors:  # If still no distractors, use a modified version of the correct answer
+                    statement = key_concept["concept_explanation"].replace(" is ", " is not ", 1)
+                    is_true = False
+                else:
+                    distractor = random.choice(distractors)
+                    statement = distractor["concept_explanation"]
+                    is_true = False
+            return {
+                "question": f"True or False: '{key_concept['concept_title']}' is defined as: {statement}",
+                "correct_answer": "True" if is_true else "False",
+                "distractors": ["False" if is_true else "True"]
+            }
+        
+        if all_key_concepts is None:
+            all_key_concepts = []
+            
+        current_concept = {
+            'concept_title': concept_title,
+            'concept_explanation': concept_explanation,
+            'id': 'current'
+        }
+        
+        # Add current concept to the list of all concepts if not present
+        if not any(c.get('id') == 'current' for c in all_key_concepts):
+            all_key_concepts = [current_concept] + all_key_concepts
+            
+        tf_questions = []
+        for _ in range(num_questions):
+            tf = generate_true_false_from_key_concepts(current_concept, all_key_concepts)
+            tf_questions.append(tf)
+            
+        return tf_questions
 
 
 # Singleton instance of the LLM service

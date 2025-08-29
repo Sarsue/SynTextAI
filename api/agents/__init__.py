@@ -8,8 +8,8 @@ modular agents that handle different aspects of content processing.
 import logging
 from typing import Type, Dict, Any
 
-from .base_agent import BaseAgent, AgentConfig, AgentError
-from .agent_factory import AgentFactory
+from api.agents.base_agent import BaseAgent, AgentConfig, AgentError
+from api.agents.agent_factory import AgentFactory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 AGENT_REGISTRY: Dict[str, Dict[str, Any]] = {}
 
 # Import agents that use the @agent decorator to ensure they're registered
-from . import ingestion_agent  # noqa: F401
-from . import summarization_agent  # noqa: F401
+from api.agents import ingestion_agent  # noqa: F401
+from api.agents import summarization_agent  # noqa: F401
 
 def register_agent(
     name: str,

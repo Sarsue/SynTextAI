@@ -9,18 +9,18 @@ import logging
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Union
 from sqlalchemy.orm import Session
 
-from .base_agent import BaseAgent, AgentConfig, AgentError
-from .agent_factory import agent
-from .summarization_agent import SummarizationAgent, SummarizationConfig
-from ..utils.language_utils import validate_language
-from ..processors import (
+from api.agents.base_agent import BaseAgent, AgentConfig, AgentError
+from api.agents.agent_factory import agent
+from api.agents.summarization_agent import SummarizationAgent, SummarizationConfig
+from api.utils.language_utils import validate_language
+from api.processors import (
     process_pdf,
     process_youtube,
     process_text,
     process_url
 )
-from ..services.embedding_service import embedding_service
-from ..services.llm_service import llm_service
+from api.services.embedding_service import embedding_service
+from api.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
