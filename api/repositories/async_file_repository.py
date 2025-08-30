@@ -84,7 +84,8 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
         user_id: int, 
         filename: str, 
         file_type: str, 
-        extracted_data: List[Dict[str, Any]]
+        extracted_data: List[Dict[str, Any]],
+        batch_size: int = 50
     ) -> bool:
         """
         Store processed file data with embeddings, segments, and metadata asynchronously.
@@ -94,6 +95,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
             filename: Name of the file
             file_type: Type of the file (pdf, youtube, etc.)
             extracted_data: List of segments with chunks and embeddings
+            batch_size: Number of segments to process in a single batch
             
         Returns:
             bool: True if successful, False otherwise
@@ -120,42 +122,62 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
                     session.add(file)
                     await session.flush()
                 
-                # Delete existing segments and chunks for this file
+                # Delete existing segments and chunks for this file in batches
                 await session.execute(delete(Chunk).where(Chunk.file_id == file.id))
                 await session.execute(delete(Segment).where(Segment.file_id == file.id))
                 
-                # Add new segments and chunks
-                for segment_data in extracted_data:
-                    # Store timing information in metadata if needed
-                    metadata = segment_data.get('metadata', {})
-                    if 'start_time' in segment_data:
-                        metadata['start_time'] = segment_data['start_time']
-                    if 'end_time' in segment_data:
-                        metadata['end_time'] = segment_data['end_time']
-                        
-                    segment = Segment(
-                        file_id=file.id,
-                        content=segment_data.get('content', ''),
-                        page_number=segment_data.get('page_number', 0),  # Default to 0 if not provided
-                        meta_data=metadata
-                    )
-                    session.add(segment)
-                    await session.flush()  # Get the segment ID for chunks
+                # Process segments in batches
+                for i in range(0, len(extracted_data), batch_size):
+                    batch = extracted_data[i:i + batch_size]
+                    segments = []
+                    chunks = []
                     
-                    for chunk_data in segment_data.get('chunks', []):
-                        chunk = Chunk(
-                            segment_id=segment.id,
+                    # Prepare segments and chunks for this batch
+                    for segment_data in batch:
+                        # Store timing information in metadata if needed
+                        metadata = segment_data.get('metadata', {})
+                        if 'start_time' in segment_data:
+                            metadata['start_time'] = segment_data['start_time']
+                        if 'end_time' in segment_data:
+                            metadata['end_time'] = segment_data['end_time']
+                            
+                        segment = Segment(
                             file_id=file.id,
-                            embedding=chunk_data.get('embedding')
+                            content=segment_data.get('content', ''),
+                            page_number=segment_data.get('page_number', 0),  # Default to 0 if not provided
+                            meta_data=metadata
                         )
-                        session.add(chunk)
+                        segments.append(segment)
+                    
+                    # Add all segments in this batch
+                    session.add_all(segments)
+                    await session.flush()  # This will assign IDs to all segments
+                    
+                    # Prepare chunks for these segments
+                    for segment, segment_data in zip(segments, batch):
+                        for chunk_data in segment_data.get('chunks', []):
+                            chunk = Chunk(
+                                segment_id=segment.id,
+                                file_id=file.id,
+                                embedding=chunk_data.get('embedding')
+                            )
+                            chunks.append(chunk)
+                    
+                    # Add all chunks in this batch
+                    if chunks:
+                        session.add_all(chunks)
+                        await session.flush()
+                        chunks = []  # Reset for next batch
+                    
+                    # Commit after each batch
+                    await session.commit()
+                    logger.info(f"Processed batch {i//batch_size + 1}/{(len(extracted_data)-1)//batch_size + 1}")
                 
                 # Update file status to completed
                 update_data = {
                     'processing_status': 'completed'
                 }
                 
-                # Use direct update since we already have a session
                 await session.execute(
                     update(FileModel)
                     .where(FileModel.id == file.id)
@@ -169,8 +191,8 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
                 logger.error(f"Error in update_file_with_chunks: {e}", exc_info=True)
                 try:
                     await session.rollback()
-                except Exception:
-                    pass
+                except Exception as rollback_error:
+                    logger.error(f"Error during rollback: {rollback_error}", exc_info=True)
                 return False
 
     async def check_user_file_ownership(self, file_id: int, user_id: int) -> bool:
@@ -369,44 +391,60 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
             logger.error(f"Error in get_segments_for_time_range: {e}", exc_info=True)
             return []
 
-    async def get_pending_files(self, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_pending_files(
+        self, 
+        limit: int = 10, 
+        exclude_ids: Optional[List[int]] = None,
+        batch_size: int = 100
+    ) -> List[Dict[str, Any]]:
         """
         Get files with 'uploaded' status and mark them as 'processing'.
         
         Args:
             limit: Maximum number of files to return
+            exclude_ids: List of file IDs to exclude from results
+            batch_size: Number of files to process in a single batch
             
         Returns:
             List[Dict]: List of file dictionaries with metadata
         """
-        from sqlalchemy import update
+        from sqlalchemy import update, and_
         
         try:
             async with self.session_scope as session:
                 # Start a transaction
                 async with session.begin():
-                    # Find files with 'uploaded' status
-                    result = await session.execute(
+                    # Build base query
+                    query = (
                         select(FileModel)
                         .where(FileModel.processing_status == 'uploaded')
                         .order_by(FileModel.created_at.asc())
-                        .limit(limit)
-                        .with_for_update(skip_locked=True)  # Lock the rows we're updating
+                        .limit(min(limit, batch_size))  # Don't exceed batch size
+                    )
+                    
+                    # Add exclusion filter if provided
+                    if exclude_ids:
+                        query = query.where(FileModel.id.notin_(exclude_ids))
+                    
+                    # Execute query with row-level locking
+                    result = await session.execute(
+                        query.with_for_update(skip_locked=True)
                     )
                     files = result.scalars().all()
                     
                     if not files:
                         return []
                     
-                    # Mark files as 'processing'
+                    # Mark files as 'processing' in a single batch
                     file_ids = [file.id for file in files]
                     await session.execute(
                         update(FileModel)
                         .where(FileModel.id.in_(file_ids))
                         .values(processing_status='processing')
+                        .execution_options(synchronize_session='fetch')
                     )
                 
-                # Convert SQLAlchemy models to dictionaries
+                # Use a more efficient dictionary comprehension for conversion
                 return [
                     {
                         'id': file.id,
@@ -414,7 +452,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
                         'file_name': file.file_name,
                         'file_type': file.file_type,
                         'file_url': file.file_url,
-                        'processing_status': 'processing',  # We just updated this
+                        'processing_status': 'processing',
                         'created_at': file.created_at.isoformat() if file.created_at else None,
                         'metadata': file.metadata or {}
                     }

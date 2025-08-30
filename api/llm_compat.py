@@ -59,42 +59,7 @@ async def get_text_embeddings_in_batches(
     
     return all_embeddings
 
-
-def get_text_embeddings_in_batches_sync(
-    texts: List[str], 
-    batch_size: int = 32,
-    **kwargs
-) -> List[List[float]]:
-    """
-    Synchronous version of get_text_embeddings_in_batches.
-    
-    This function should only be used when async is not an option, such as in Celery tasks.
-    It runs the async method in a new event loop.
-    
-    Args:
-        texts: List of text strings to generate embeddings for
-        batch_size: Number of texts to process in each batch
-        **kwargs: Additional arguments to pass to the embedding service
-        
-    Returns:
-        List of embedding vectors, one for each input text
-    """
-    import asyncio
-    
-    try:
-        # Try to get the running event loop
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        # If there's no running loop, create a new one
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-    # Run the async method in the event loop
-    return loop.run_until_complete(
-        get_text_embeddings_in_batches(texts, batch_size, **kwargs)
-    )
-
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 import base64
 import io
 from PIL import Image
@@ -170,11 +135,28 @@ async def generate_key_concepts_dspy(
     Raises:
         ValueError: If LLM service is not properly initialized or if concept extraction fails
     """
-    if not document_text or not document_text.strip():
-        logger.warning("Empty or None document text provided for concept extraction")
+    # Input validation
+    if not isinstance(document_text, str):
+        error_msg = f"Invalid document text type: {type(document_text).__name__}. Expected string."
+        logger.error(error_msg)
+        return []
+        
+    document_text = document_text.strip()
+    if not document_text:
+        logger.warning("Empty document text provided for concept extraction")
         return []
     
-    logger.info(f"Starting key concept extraction for {len(document_text)} characters of text")
+    # Log document metadata for debugging
+    logger.info(
+        f"Starting key concept extraction - "
+        f"Length: {len(document_text)} chars, "
+        f"Language: {language}, "
+        f"Level: {comprehension_level}"
+    )
+    
+    # Log a sample of the document text for debugging (first 200 chars)
+    sample = document_text[:200] + ('...' if len(document_text) > 200 else '')
+    logger.debug(f"Document sample: {sample}")
     
     # Log LLM service status
     from .services.llm_service import llm_service
@@ -309,8 +291,12 @@ async def generate_key_concepts_dspy(
         
         def clean_json_response(response: str) -> str:
             """Clean and normalize the LLM response before JSON parsing."""
-            # Remove markdown code blocks if present
+            if not response or not isinstance(response, str):
+                return "[]"
+                
             cleaned = response.strip()
+            
+            # Remove markdown code blocks if present
             json_match = re.search(r'```(?:json\r?\n)?(.*?)\r?\n```', cleaned, re.DOTALL)
             if json_match:
                 cleaned = json_match.group(1).strip()
@@ -323,55 +309,145 @@ async def generate_key_concepts_dspy(
                 if json_array_match:
                     cleaned = json_array_match.group(1).strip()
                 else:
-                    json_object_match = re.search(r'(\{.*?\})', cleaned, re.DOTALL)
-                    if json_object_match:
-                        cleaned = f"[{json_object_match.group(1).strip()}]"
+                    # Try to find the outermost JSON array or object
+                    stack = []
+                    start_idx = -1
+                    
+                    for i, char in enumerate(cleaned):
+                        if char in '[{':
+                            if not stack:
+                                start_idx = i
+                            stack.append(char)
+                        elif char in ']}':
+                            if stack:
+                                stack.pop()
+                            if not stack and start_idx != -1:
+                                cleaned = cleaned[start_idx:i+1]
+                                break
             
+            # If still not valid JSON, try to extract just the array part
+            if not (cleaned.startswith('[') and cleaned.endswith(']')):
+                array_match = re.search(r'(\[.*\])', cleaned, re.DOTALL)
+                if array_match:
+                    cleaned = array_match.group(1).strip()
+            
+            # If we have nothing valid at this point, return empty array
+            if not cleaned or not (cleaned.startswith('[') and cleaned.endswith(']')):
+                return "[]"
+                
             return cleaned
         
         # Define JSON parsing strategies from most to least strict
+        def safe_loads(x):
+            try:
+                return json.loads(x)
+            except json.JSONDecodeError as e:
+                raise e
+                
+        def fix_trailing_commas(x):
+            # Remove trailing commas before closing brackets/braces
+            return re.sub(r',(\s*[}\]])', r'\1', x)
+            
+        def extract_json_object(x):
+            # Try to extract a JSON object from the text
+            match = re.search(r'\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}', x, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+            raise ValueError("No valid JSON object found")
+            
+        def fix_common_issues(x):
+            # Apply multiple fixes in sequence
+            fixed = x.strip()
+            # Remove markdown code blocks
+            fixed = re.sub(r'```(?:json\r?\n)?|```', '', fixed)
+            # Fix unescaped quotes
+            fixed = re.sub(r'([^\\])"', r'\1\\"', fixed)
+            # Fix unquoted keys
+            fixed = re.sub(r'([\{\s,])(\w+)(\s*:)\s*', r'\1"\2"\3', fixed)
+            # Fix trailing commas
+            fixed = re.sub(r',(\s*[}\]])', r'\1', fixed)
+            # Fix missing commas between objects
+            fixed = re.sub(r'}\s*{', '},{', fixed)
+            # Fix single quotes
+            fixed = fixed.replace("'", '"')
+            return json.loads(fixed)
+            
+        def aggressive_json_repair(x):
+            # Last resort - try to extract array elements and build JSON manually
+            try:
+                # Look for array elements
+                items = re.findall(r'\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}', x, re.DOTALL)
+                if items:
+                    # Try to parse each item individually
+                    parsed_items = []
+                    for item in items:
+                        try:
+                            # Clean up the item
+                            clean_item = re.sub(r'^\s*[\[\],]\s*', '', item.strip())
+                            if clean_item:
+                                parsed = json.loads('{' + clean_item + '}')
+                                parsed_items.append(parsed)
+                        except:
+                            continue
+                    return parsed_items
+                raise ValueError("No valid JSON objects found")
+            except Exception as e:
+                logger.warning(f"Aggressive JSON repair failed: {e}")
+                raise
+        
         json_parse_strategies = [
             # 1. Direct parse (strict)
-            json.loads,
+            safe_loads,
             
-            # 2. Fix trailing commas
-            lambda x: json.loads(re.sub(r',(\s*[}\]])', r'\1', x)),
+            # 2. Fix trailing commas and try again
+            lambda x: json.loads(fix_trailing_commas(x)),
             
             # 3. Extract JSON object from text
-            lambda x: json.loads('{' + x.split('{', 1)[1].rsplit('}', 1)[0] + '}'),
+            extract_json_object,
             
             # 4. Fix common formatting issues
-            lambda x: json.loads(
-                re.sub(r'([^\\])"', r'\1\\"',  # Fix unescaped quotes
-                re.sub(r'([{\[,])\s*([}\\],])', r'\1\2',  # Remove spaces between brackets
-                re.sub(r'([:,\[{])\s*\n\s*', r'\1',  # Remove newlines after delimiters
-                re.sub(r'"([^"]*?)"\s*:', r'"\1":',  # Fix missing quotes around keys
-                re.sub(r':\s*\n\s*"', ': "',  # Fix newlines after colons
-                x.strip())))))),
+            fix_common_issues,
             
-            # 5. Aggressive fixes (last resort)
-            lambda x: json.loads(
-                re.sub(r'```(?:json\r?\n)?|```', '',  # Remove markdown
-                re.sub(r'([^\\])"', r'\\\1"',  # Fix unescaped quotes
-                re.sub(r'([\{\s,])(\w+)(\s*:)\s*', r'\1"\2"\3',  # Fix unquoted keys
-                re.sub(r',(\s*[}\]])', r'\1',  # Fix trailing commas
-                re.sub(r'}\s*{', '},{',  # Fix missing commas
-                x.replace("'", '"')  # Fix single quotes
-                ))))).strip())
+            # 5. Try to extract and parse individual objects
+            aggressive_json_repair
         ]
         
         # Clean and parse the response
-        cleaned_response = clean_json_response(response)
-        
         try:
+            # First, log the raw response for debugging (truncated to avoid log spam)
+            log_response = response[:1000] + ('...' if len(response) > 1000 else '')
+            logger.debug(f"Raw LLM response (truncated): {log_response}")
+            
+            # Clean the response
+            cleaned_response = clean_json_response(response)
+            logger.debug(f"Cleaned response: {cleaned_response[:500]}...")
+            
+            # Try parsing with increasingly permissive strategies
             concepts_data = try_parse_json(
                 cleaned_response,
                 json_parse_strategies,
-                error_context={"response_length": len(response)}
+                error_context={
+                    "response_length": len(response),
+                    "cleaned_length": len(cleaned_response)
+                }
             )
+            
+            if not concepts_data:
+                logger.warning("No concepts extracted from LLM response")
+                return []
+                
+            logger.debug(f"Successfully parsed {len(concepts_data) if isinstance(concepts_data, list) else 1} concepts")
+            
         except Exception as e:
-            logger.warning("Failed to parse LLM response as JSON, falling back to text extraction")
-            raise ValueError(f"Failed to parse LLM response: {str(e)}") from e
+            logger.error(
+                "Failed to parse LLM response as JSON",
+                exc_info=True,
+                extra={
+                    "error": str(e),
+                    "response_sample": response[:500] + ('...' if len(response) > 500 else '')
+                }
+            )
+            return []
         
         # Normalize and validate the parsed concepts
         def normalize_concepts(data: Any) -> List[Dict[str, Any]]:

@@ -23,6 +23,7 @@ from api.processors.processor_utils import (
     LearningMaterialsSummary,
     log_concept_processing_summary,
 )
+from api.llm_compat import generate_key_concepts_dspy
 
 # Import whisper/torch only when available
 try:
@@ -641,31 +642,62 @@ class YouTubeProcessor(FileProcessor):
 
             logger.info(f"Generating key concepts from {len(valid_segments)} segments ({len(full_text)} chars)")
 
-            try:
-                key_concepts = await generate_key_concepts_dspy(
-                    document_text=full_text, 
-                    language=language, 
-                    comprehension_level=comprehension_level
-                )
-                
-                if not key_concepts:
-                    logger.warning("No key concepts were generated from the transcript")
-                    return []
-                    
-                logger.info(f"Successfully generated {len(key_concepts)} key concepts")
-                return key_concepts
-                
-            except Exception as e:
-                logger.error(f"Error during key concept generation: {str(e)}", exc_info=True)
-                # Include the first 100 chars of the transcript in the error for debugging
-                sample_text = full_text[:100] + ('...' if len(full_text) > 100 else '')
-                logger.debug(f"Transcript sample (first 100 chars): {sample_text}")
+            # Generate key concepts
+            key_concepts = await generate_key_concepts_dspy(
+                document_text=full_text, 
+                language=language, 
+                comprehension_level=comprehension_level
+            )
+            
+            if not key_concepts:
+                logger.warning("No key concepts were generated from the transcript")
                 return []
-
-            return key_concepts
-
+            
+            # Format the key concepts to match repository expectations
+            formatted_concepts = []
+            for concept in key_concepts:
+                if not isinstance(concept, dict):
+                    logger.warning(f"Skipping invalid key concept (not a dict): {concept}")
+                    continue
+                
+                # Extract timestamp from source_text if available
+                source_timestamp = None
+                source_text = concept.get("source_text", "")
+                if source_text and "[" in source_text and "]" in source_text:
+                    timestamp_str = source_text.split("]")[0] + "]"
+                    try:
+                        # Extract start and end times from the timestamp string
+                        times = re.findall(r"(\d+\.?\d*)s", timestamp_str)
+                        if len(times) >= 2:
+                            source_timestamp = {
+                                "start_seconds": float(times[0]),
+                                "end_seconds": float(times[1]) if len(times) > 1 else float(times[0]) + 10.0
+                            }
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Failed to parse timestamp from source_text: {source_text}", exc_info=True)
+                
+                formatted_concept = {
+                    "concept_title": concept.get("concept_title", ""),
+                    "concept_explanation": concept.get("concept_explanation", ""),
+                    "is_custom": False
+                }
+                
+                # Add timestamp information if available
+                if source_timestamp:
+                    formatted_concept["source_video_timestamp_start_seconds"] = source_timestamp["start_seconds"]
+                    formatted_concept["source_video_timestamp_end_seconds"] = source_timestamp["end_seconds"]
+                
+                # Include any additional fields that might be in the concept
+                for field in ["source_text", "relevance_score", "related_concepts"]:
+                    if field in concept:
+                        formatted_concept[field] = concept[field]
+                
+                formatted_concepts.append(formatted_concept)
+            
+            return formatted_concepts
+                
         except Exception as e:
-            self._log_error("Error in generate_key_concepts", e)
+            logger.error(f"Error in generate_key_concepts: {e}", exc_info=True)
             return []
 
     @staticmethod
@@ -738,8 +770,9 @@ class YouTubeProcessor(FileProcessor):
             texts_to_embed = [c for (_, _, c) in all_chunks]
             logger.info(f"Generating embeddings for {len(texts_to_embed)} chunks")
 
-            # Batch embeddings (async function)
-            embeddings: List[List[float]] = await get_text_embeddings_in_batches(texts_to_embed)
+            # Generate embeddings using the embedding service
+            from api.services.embedding_service import embedding_service
+            embeddings: List[List[float]] = await embedding_service.get_embeddings(texts_to_embed)
 
             if len(embeddings) != len(all_chunks):
                 logger.error(
@@ -796,13 +829,19 @@ class YouTubeProcessor(FileProcessor):
 
             # Generate key concepts using the async DSPy function
             key_concepts = await generate_key_concepts_dspy(document_text=full_text)
+            logger.info(f"Successfully generated {len(key_concepts) if key_concepts else 0} key concepts")
+            
+            if not key_concepts:
+                logger.warning("No key concepts were generated from the transcript")
+                return []
             
             # Format the key concepts to match repository expectations
             formatted_concepts = []
             for concept in key_concepts:
                 if not isinstance(concept, dict):
+                    logger.warning(f"Skipping invalid key concept (not a dict): {concept}")
                     continue
-                    
+                
                 # Extract timestamp from source_text if available
                 source_timestamp = None
                 source_text = concept.get("source_text", "")
@@ -817,7 +856,7 @@ class YouTubeProcessor(FileProcessor):
                                 "end_seconds": float(times[1]) if len(times) > 1 else float(times[0]) + 10.0
                             }
                     except (ValueError, IndexError) as e:
-                        logger.warning(f"Failed to parse timestamp from source_text: {source_text}")
+                        logger.warning(f"Failed to parse timestamp from source_text: {source_text}", exc_info=True)
                 
                 formatted_concept = {
                     "concept_title": concept.get("concept_title", ""),

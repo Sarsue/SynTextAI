@@ -17,6 +17,7 @@ from api.processors.processor_utils import (
     LearningMaterialsSummary,
     generate_learning_materials_for_concept
 )
+from typing import List, Dict, Any, Optional, Union
 
 # Import PDF extraction tools
 from pdfminer.layout import LAParams
@@ -120,7 +121,7 @@ class PDFProcessor(FileProcessor):
                 }
             
             # Process pages to generate embeddings
-            processed_data = self.process_pages(page_data)
+            processed_data = await self.process_pages(page_data)
             
             # Prepare content for key concept generation
             content = {
@@ -234,7 +235,7 @@ class PDFProcessor(FileProcessor):
                 }
             }
     
-    def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
+    async def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
         """
         Process PDF pages: chunk text and generate embeddings.
         
@@ -245,6 +246,7 @@ class PDFProcessor(FileProcessor):
             Dictionary with processed segments and chunks including embeddings
         """
         try:
+            from api.services.embedding_service import embedding_service
             segments = []
             
             # Process each page as a segment
@@ -258,25 +260,33 @@ class PDFProcessor(FileProcessor):
                 
                 # Generate embeddings for each chunk
                 if page_chunks:
-                    # Get embeddings in batches
-                    embeddings = []
-                    batch_size = 10  # Adjust based on API limits
-                    
-                    for i in range(0, len(page_chunks), batch_size):
-                        batch = page_chunks[i:i + batch_size]
-                        batch_embeddings = get_text_embeddings_in_batches_sync(batch)
+                    try:
+                        # Get embeddings using the async embedding service
+                        embeddings = await embedding_service.get_embeddings(page_chunks)
                         
-                        if batch_embeddings and len(batch_embeddings) == len(batch):
-                            embeddings.extend(batch_embeddings)
-                        else:
-                            # If embedding generation fails, skip these chunks
-                            logger.error(f"Failed to generate embeddings for batch {i//batch_size}")
-                            embeddings.extend([None] * len(batch))
-                    
-                    # Prepare chunks data with embeddings
-                    for embedding in embeddings:
-                        if embedding is not None:
-                            chunks_data.append({"embedding": embedding})
+                        # Prepare chunks data with embeddings
+                        for i, embedding in enumerate(embeddings):
+                            if embedding is not None:
+                                chunks_data.append({
+                                    "embedding": embedding,
+                                    "text": page_chunks[i],
+                                    "metadata": {
+                                        "page_number": page.get("page_number"),
+                                        "chunk_index": i
+                                    }
+                                })
+                    except Exception as e:
+                        logger.error(f"Error generating embeddings: {str(e)}", exc_info=True)
+                        # Fallback: add chunks without embeddings
+                        for i, chunk in enumerate(page_chunks):
+                            chunks_data.append({
+                                "text": chunk,
+                                "metadata": {
+                                    "page_number": page.get("page_number"),
+                                    "chunk_index": i,
+                                    "error": "Failed to generate embedding"
+                                }
+                            })
                 
                 # Add segment with its chunks
                 segments.append({
