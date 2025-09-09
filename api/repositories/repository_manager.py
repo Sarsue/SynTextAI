@@ -1,305 +1,160 @@
 """
 Repository manager that provides a unified interface to all repositories.
 
-Acts as a facade over the specialized repositories to provide backward compatibility
-with the original DocSynthStore interface while maintaining separation of concerns.
+Acts as a facade over specialized repositories while enforcing user_id for access control.
 """
-from typing import Optional, List, Dict, Any, Tuple, AsyncGenerator, TypeVar, Type, Callable, Awaitable, Any, ContextManager
+from typing import Optional, List, Dict, Any, AsyncGenerator, TypeVar, Callable, Awaitable
 import logging
-import asyncio
+import os
 from contextlib import asynccontextmanager
-from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
-from sqlalchemy.orm import sessionmaker
 
-# Import domain models first to avoid circular imports
-from .domain_models import Subscription, CardDetails, Flashcard, QuizQuestion
+from .domain_models import Flashcard, QuizQuestion
 from .session_manager import SessionContextManager
 
 logger = logging.getLogger(__name__)
-T = TypeVar('T')
-
-# Import repositories here to avoid circular imports
-# These will be imported later when needed
+T = TypeVar("T")
 
 class RepositoryManager:
     """
-    Repository manager that coordinates access to all repositories.
+    Repository manager coordinating access to all repositories.
     
-    Provides a unified interface with proper session management using context managers
-    to ensure resources are properly cleaned up.
+    Can be used as an async context manager:
+    
+    async with RepositoryManager(DATABASE_URL) as repo_manager:
+        # Use repo_manager here
+        pass
     """
     
-    def __init__(self, database_url: str, echo: bool = True):
-        """
-        Initialize the repository manager with a database URL.
-        
-        Args:
-            database_url: Database connection URL as a string or URL-like object
-            echo: Whether to enable SQL query logging
-        """
-        db_url_str = str(database_url) if hasattr(database_url, '__str__') else database_url
-        self.engine: AsyncEngine = create_async_engine(
-            db_url_str, 
-            echo=echo,
-            future=True,
-            pool_pre_ping=True,
-            pool_recycle=3600  # Recycle connections after 1 hour
-        )
-        
-        self.async_session_factory = async_sessionmaker(
-            bind=self.engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autoflush=False,
-            autocommit=False
-        )
-        
-        # Initialize repository caches with None - they'll be created on first access
+    def __init__(self, database_url: str, echo: Optional[bool] = None):
+        self._database_url = database_url
+        self._echo = echo
+        self.engine: Optional[AsyncEngine] = None
+        self.async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+        self._initialized = False
+        self._closed = False
         self._user_repo = None
         self._chat_repo = None
         self._file_repo = None
-        self._learning_material_repo = None
-    
-    def session_scope(self) -> SessionContextManager:
-        """
-        Get a session context manager.
+
+    async def initialize(self) -> None:
+        """Initialize database engine and session factory."""
+        if self._initialized or self._closed:
+            return
         
-        Example:
-            async with repo_manager.session_scope() as session:
-                # Use session here
-                result = await session.execute(query)
-                # Session is automatically committed if no exceptions occur
-                # or rolled back if an exception is raised
-        """
+        try:
+            pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+            max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+            pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "60"))
+            pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+            connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
+            
+            from sqlalchemy.engine.url import make_url
+            db_url = make_url(str(self._database_url))
+            
+            connect_args = {
+                "timeout": connect_timeout,
+                "server_settings": {
+                    "application_name": os.getenv("DB_APP_NAME", "syntext-worker"),
+                    "statement_timeout": "30000",
+                    "idle_in_transaction_session_timeout": "300000"
+                }
+            }
+
+            self.engine = create_async_engine(
+                db_url,
+                echo=os.getenv("SQL_ECHO", "false").lower() == "true" if self._echo is None else self._echo,
+                future=True,
+                pool_pre_ping=True,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_timeout=pool_timeout,
+                pool_recycle=pool_recycle,
+                pool_use_lifo=True,
+                connect_args=connect_args
+            )
+
+            self.async_session_factory = async_sessionmaker(
+                bind=self.engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+                autoflush=False,
+                autocommit=False
+            )
+
+            self._initialized = True
+            logger.info("RepositoryManager initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize RepositoryManager: {e}", exc_info=True)
+            await self.close()
+            raise
+
+    async def __aenter__(self) -> "RepositoryManager":
+        await self.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """Close database connections; safe to call multiple times."""
+        if self._closed:
+            return
+        try:
+            if self.engine:
+                try:
+                    await self.engine.dispose()
+                    logger.info("Database engine disposed")
+                except Exception as e:
+                    logger.error(f"Error disposing database engine: {e}", exc_info=True)
+                finally:
+                    self.engine = None
+                    self.async_session_factory = None
+        finally:
+            self._closed = True
+            self._initialized = False
+
+    def session_scope(self) -> SessionContextManager:
+        """Return a session context manager for async DB operations."""
+        if not self._initialized or self._closed:
+            raise RuntimeError("RepositoryManager is not initialized or has been closed")
         return SessionContextManager(self.async_session_factory)
-    
+
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """
-        Async context manager for database sessions.
-        
-        This is maintained for backward compatibility. Prefer using session_scope()
-        for new code as it provides better error handling.
-        """
+        """Async context manager for sessions; backward-compatible."""
         async with self.session_scope() as session:
             yield session
-    
-    async def add_flashcard(
-        self,
-        file_id: int,
-        question: str,
-        answer: str,
-        key_concept_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        is_custom: bool = False
-    ) -> Flashcard:
-        """
-        Add a new flashcard.
-        
-        Args:
-            file_id: ID of the associated file
-            question: Flashcard question
-            answer: Flashcard answer
-            key_concept_id: Optional ID of the associated key concept
-            user_id: ID of the user who owns the flashcard
-            is_custom: Whether this is a user-created flashcard
-            
-        Returns:
-            The created Flashcard object
-        """
-        async with self.session_scope() as session:
-            flashcard = Flashcard(
-                file_id=file_id,
-                key_concept_id=key_concept_id,
-                question=question,
-                answer=answer,
-                is_custom=is_custom
-            )
-            session.add(flashcard)
-            await session.commit()
-            await session.refresh(flashcard)
-            return flashcard
-            
-    async def add_quiz_question(
-        self,
-        file_id: int,
-        question: str,
-        question_type: str,
-        correct_answer: str,
-        key_concept_id: Optional[int] = None,
-        distractors: Optional[List[str]] = None,
-        quiz_question_data: Optional[Dict[str, Any]] = None,
-        user_id: Optional[int] = None
-    ) -> Optional[QuizQuestion]:
-        """
-        Add a new quiz question.
-        
-        Args:
-            file_id: ID of the associated file
-            question: The question text
-            question_type: Type of question (e.g., 'MCQ', 'TF')
-            correct_answer: The correct answer
-            key_concept_id: Optional ID of the associated key concept
-            distractors: List of incorrect answers (for multiple choice)
-            quiz_question_data: Additional question data
-            user_id: ID of the user who owns the question
-            
-        Returns:
-            The created QuizQuestion object or None if creation failed
-        """
-        async with self.session_scope() as session:
-            try:
-                question = QuizQuestion(
-                    file_id=file_id,
-                    key_concept_id=key_concept_id,
-                    question=question,
-                    question_type=question_type,
-                    correct_answer=correct_answer,
-                    distractors=distractors or [],
-                    quiz_question_data=quiz_question_data or {}
-                )
-                session.add(question)
-                await session.commit()
-                await session.refresh(question)
-                return question
-            except Exception as e:
-                logger.error(f"Error adding quiz question: {e}")
-                await session.rollback()
-                return None
-    
+
     async def execute_in_session(self, operation: Callable[[AsyncSession], Awaitable[T]]) -> T:
-        """
-        Execute a function within a session with automatic commit/rollback.
-        
-        Args:
-            operation: Async function that takes a session and returns a result
-            
-        Returns:
-            The result of the operation
-            
-        Example:
-            result = await repo_manager.execute_in_session(
-                lambda s: s.execute(query).scalar_one()
-            )
-        """
+        """Execute async operation in a session with automatic commit/rollback."""
         async with self.session_scope() as session:
             return await operation(session)
-    
+
     @property
     def user_repo(self):
-        """Lazily initialize and return the user repository."""
         if self._user_repo is None:
             from .async_user_repository import AsyncUserRepository
             self._user_repo = AsyncUserRepository(self)
         return self._user_repo
-        
+
     @property
     def chat_repo(self):
-        """Lazily initialize and return the chat repository."""
         if self._chat_repo is None:
             from .async_chat_repository import AsyncChatRepository
             self._chat_repo = AsyncChatRepository(self)
         return self._chat_repo
-        
+
     @property
     def file_repo(self):
-        """Lazily initialize and return the file repository."""
         if self._file_repo is None:
             from .async_file_repository import AsyncFileRepository
             self._file_repo = AsyncFileRepository(self)
         return self._file_repo
-        
-    @property
-    def learning_material_repo(self):
-        """Get the learning material repository."""
-        if self._learning_material_repo is None:
-            from .async_learning_material_repository import AsyncLearningMaterialRepository
-            self._learning_material_repo = AsyncLearningMaterialRepository(self)
-        return self._learning_material_repo
-        
-    async def add_flashcard(self, file_id: int, question: str, answer: str, key_concept_id: Optional[int] = None, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """
-        Add a new flashcard.
-        
-        Args:
-            file_id: ID of the file this flashcard is associated with
-            question: The flashcard question
-            answer: The flashcard answer
-            key_concept_id: Optional ID of the key concept this flashcard relates to
-            user_id: ID of the user who owns this flashcard (required for access control)
-            
-        Returns:
-            The created flashcard as a dictionary, or None if creation failed
-        """
-        if user_id is None:
-            raise ValueError("user_id is required for access control")
-            
-        return await self.learning_material_repo.create_custom_flashcard(
-            user_id=user_id,
-            file_id=file_id,
-            question=question,
-            answer=answer,
-            key_concept_id=key_concept_id
-        )
-        
-    async def add_quiz_question(self, file_id: int, question: str, question_type: str, 
-                              correct_answer: str, key_concept_id: Optional[int] = None, 
-                              distractors: Optional[List[str]] = None, 
-                              quiz_question_data: Optional[Dict[str, Any]] = None,
-                              user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """
-        Add a new quiz question.
-        
-        Args:
-            file_id: ID of the file this question is associated with
-            question: The question text
-            question_type: Type of question (e.g., 'MCQ', 'TF')
-            correct_answer: The correct answer to the question
-            key_concept_id: Optional ID of the key concept this question relates to
-            distractors: List of incorrect answer options (for multiple choice)
-            quiz_question_data: Additional question data as a dictionary
-            user_id: ID of the user who owns this question (required for access control)
-            
-        Returns:
-            The created quiz question as a dictionary, or None if creation failed
-        """
-        if user_id is None:
-            raise ValueError("user_id is required for access control")
-            
-        # Verify the user has access to the file
-        file_repo = self.file_repo
-        has_access = await file_repo.check_user_file_ownership(file_id, user_id)
-        if not has_access:
-            logger.warning(f"User {user_id} does not have access to file {file_id}")
-            return None
-            
-        return await self.learning_material_repo.create_quiz_question(
-            file_id=file_id,
-            question=question,
-            question_type=question_type,
-            correct_answer=correct_answer,
-            key_concept_id=key_concept_id,
-            distractors=distractors or [],
-            quiz_question_data=quiz_question_data or {}
-        )
-    
 
-    async def close(self):
-        """Close the database engine and clean up resources."""
-        if self.engine:
-            await self.engine.dispose()
+    # Learning material operations are handled by AsyncLearningMaterialRepository
 
-def get_repository_manager(database_url) -> RepositoryManager:
-    """
-    Create a new instance of RepositoryManager with the provided database URL.
-    
-    Args:
-        database_url: Database connection URL (can be string, URL, or MultiHostUrl)
-        
-    Returns:
-        RepositoryManager: A new repository manager instance
-    """
-    # Convert database_url to string if it has a __str__ method
-    db_url = str(database_url) if hasattr(database_url, '__str__') else database_url
-    return RepositoryManager(database_url=db_url)
+def get_repository_manager(database_url: str) -> RepositoryManager:
+    """Return a new RepositoryManager instance."""
+    return RepositoryManager(database_url=str(database_url))

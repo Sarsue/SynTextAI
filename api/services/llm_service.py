@@ -623,6 +623,126 @@ class LLMService:
             
         return tf_questions
 
+    async def generate_key_concepts_dspy(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Generate key concepts from a text chunk using the LLM.
+        
+        Args:
+            text: The input text to extract concepts from
+            
+        Returns:
+            List of concept dictionaries with 'concept', 'explanation', and 'relevance' keys
+        """
+        if not text or not text.strip():
+            logger.warning("Empty text provided for concept extraction")
+            return []
+            
+        # Truncate very long text to avoid token limits
+        max_text_length = 8000  # Leave room for the prompt
+        truncated_text = text[:max_text_length] + (text[max_text_length:] and '...')
+        
+        system_prompt = """You are a helpful assistant that extracts key concepts from text. 
+Your response MUST be a valid JSON array of objects, each with these exact fields:
+- 'concept' (string): A concise title (1-5 words)
+- 'explanation' (string): A brief explanation (1-2 sentences)
+- 'relevance' (float): A score from 0.0 to 1.0 indicating importance
+
+Example response format:
+[
+    {
+        "concept": "Machine Learning",
+        "explanation": "A field of AI that enables systems to learn from data.",
+        "relevance": 0.9
+    }
+]
+
+Respond ONLY with the JSON array, no other text or markdown formatting."""
+
+        user_prompt = f"""Extract 3-5 key concepts from the following text. 
+Focus on the most important and distinctive ideas.
+
+Text: {truncated_text}"""
+
+        try:
+            # Use the chat interface
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+            
+            response = await self.chat(
+                messages=messages,
+                temperature=0.3,  # Lower temperature for more focused results
+                max_tokens=1000
+            )
+            
+            # Parse the response
+            import json
+            import re
+
+            # Clean the response
+            clean_response = response.strip()
+            
+            # Remove markdown code blocks if present
+            clean_response = re.sub(r"```(?:json)?", "", clean_response).strip()
+            
+            try:
+                result = json.loads(clean_response)
+                
+                # Validate and normalize the response
+                if isinstance(result, list):
+                    return result
+                elif isinstance(result, dict):
+                    if 'concepts' in result and isinstance(result['concepts'], list):
+                        return result['concepts']
+                    # If it's a single concept object
+                    if all(k in result for k in ('concept', 'explanation', 'relevance')):
+                        return [result]
+                    # If it's an object with concept items
+                    concepts = [v for v in result.values() 
+                              if isinstance(v, dict) and 'concept' in v]
+                    if concepts:
+                        return concepts
+                
+                logger.warning(f"Unexpected response format: {type(result)}")
+                return []
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parsing failed: {e}\nRaw response: {clean_response}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error generating key concepts: {str(e)}")
+            return []
+    
+    def _parse_concepts_from_text(self, text: str) -> List[Dict[str, Any]]:
+        """Fallback method to parse concepts from text if JSON parsing fails"""
+        import re
+        concepts = []
+        
+        # Try to find concept blocks
+        pattern = r'(?i)(?:concept|key point)[:\s]*(.*?)(?=\n\s*(?:concept|key point|$))'
+        matches = re.finditer(pattern, text, re.DOTALL)
+        
+        for match in matches:
+            concept_text = match.group(1).strip()
+            # Simple heuristic to split title and explanation
+            if ':' in concept_text:
+                title, explanation = concept_text.split(':', 1)
+            elif '-' in concept_text:
+                title, explanation = concept_text.split('-', 1)
+            else:
+                title = concept_text.split('.')[0] if '.' in concept_text else concept_text
+                explanation = concept_text
+                
+            concepts.append({
+                "concept": title.strip(),
+                "explanation": explanation.strip(),
+                "relevance": 0.8  # Default relevance
+            })
+            
+        return concepts
+
 
 # Singleton instance of the LLM service
 # This instance should be imported and used throughout the application

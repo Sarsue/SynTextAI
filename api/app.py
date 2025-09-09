@@ -20,7 +20,7 @@ from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import utils
-from .models.db import SessionLocal, engine
+from .models.async_db import engine, get_db, startup as db_startup, shutdown as db_shutdown
 from .agents import register_agents
 
 # Configure logging
@@ -72,17 +72,17 @@ async def startup_event():
     try:
         # Initialize Firebase
         initialize_firebase()
-        logger.info("Firebase Admin SDK initialized successfully")
         
-        # Register all agents
-        logger.info("Starting agent registration...")
-        from .agents import register_agents
+        # Initialize database connection
+        await db_startup()
+        
+        # Initialize repository manager
+        RepositoryManager.initialize()
+        
+        # Register agents
         register_agents()
-        
-        # Verify agent registration
-        from .agents import agent_factory
-        registered_agents = agent_factory.list_agents()
-        logger.info(f"Successfully registered agents: {list(registered_agents.keys())}")
+            
+        logger.info("Application startup complete")
         
     except ImportError as e:
         logger.error(f"Import error during application startup: {e}", exc_info=True)
@@ -111,8 +111,12 @@ app.state.store = store
 # Add shutdown handler to clean up resources
 @app.on_event("shutdown")
 async def shutdown_event():
-    if hasattr(app.state, 'store'):
-        await app.state.store.close()
+    """Handle application shutdown."""
+    logger.info("Shutting down application...")
+    # Close database connections
+    await db_shutdown()
+    # Clean up other resources
+    logger.info("Application shutdown complete.")
 
 # Dependency to get the store
 def get_store(request: Request):
@@ -220,18 +224,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 from .routes.files import files_router
 from .routes.histories import histories_router
 from .routes.messages import messages_router
-
-# Register shutdown event handler
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Handle application shutdown."""
-    logger.info("Shutting down application...")
-    # Clean up WebSocket connections
-    await websocket_manager.disconnect_all()
-    # Clean up database connections
-    SessionLocal.remove()
-    engine.dispose()
-    logger.info("Application shutdown complete.")
 
 # Health check endpoint removed
 from .routes.subscriptions import subscriptions_router

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
@@ -105,50 +105,15 @@ async def create_user( # Function name remains 'create_user'
         logger.error(f"POST /users: Unexpected error creating user {email}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during user creation.")
 
-async def delete_user_data(user_id: str, user_gc_id: str, store: RepositoryManager):
-    """Helper function to delete user data including Stripe subscription and files."""
-    try:
-        # Get user subscription info
-        subscription_repo = store.subscription_repo
-        user_sub = await subscription_repo.get_user_subscription(user_id)
-        
-        if user_sub and user_sub.status == "active":
-            stripe_sub_id = user_sub.stripe_subscription_id
-            stripe_customer_id = user_sub.stripe_customer_id
-
-            # Cancel the subscription
-            if stripe_sub_id:
-                stripe.Subscription.delete(stripe_sub_id)
-                logger.info(f"Subscription {stripe_sub_id} canceled.")
-
-            # Remove payment methods and delete the customer
-            if stripe_customer_id:
-                payment_methods = stripe.PaymentMethod.list(customer=stripe_customer_id, type="card")
-                for method in payment_methods.auto_paging_iter():
-                    stripe.PaymentMethod.detach(method.id)
-                    logger.info(f"Payment method {method.id} detached.")
-                
-                stripe.Customer.delete(stripe_customer_id)
-                logger.info(f"Stripe customer {stripe_customer_id} deleted.")
-
-        # Delete files and user account
-        file_repo = store.file_repo
-        files = await file_repo.get_files_by_user_id(user_id)
-        
-        for file in files:
-            from ..utils import delete_from_gcs
-            delete_from_gcs(user_gc_id, file.file_name)
-
-        # Delete user account
-        user_repo = store.user_repo
-        await user_repo.delete_user_account(user_id)
-        logger.info(f"User account {user_id} deleted.")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error during user deletion: {e}", exc_info=True)
-        return False
+# User data deletion has been moved to RepositoryManager.delete_user_data
+# This function is kept for backward compatibility but is now a thin wrapper
+async def delete_user_data(user_id: str, user_gc_id: str, store: RepositoryManager) -> bool:
+    """
+    Wrapper function for backward compatibility.
+    User data deletion logic has been moved to RepositoryManager.
+    """
+    logger.warning("delete_user_data helper is deprecated. Use RepositoryManager.delete_user_data instead.")
+    return await store.delete_user_data(user_id=user_id, user_gc_id=user_gc_id)
 
 # Route to delete a user
 @users_router.delete("", status_code=200)
@@ -159,22 +124,30 @@ async def delete_user(
     try:
         user_id = user_data["user_id"]
         user_info = user_data["user_info"]
-        user_gc_id = user_info['user_id']
+        user_gc_id = str(user_id)  # Using user_id as GC ID
 
-        # Delete user data including Stripe subscription and files
-        success = await delete_user_data(user_id, user_gc_id, store)
+        # Delete user data using RepositoryManager
+        success = await store.delete_user_data(
+            user_id=user_id,
+            user_gc_id=user_gc_id
+        )
         
         if not success:
-            raise Exception("Failed to delete user data")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete user data"
+            )
             
         return {
             "message": "User account and all associated data have been deleted.",
             "email": user_info['email']
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error during user deletion: {str(e)}", exc_info=True)
+        logger.error(f"Error deleting user account: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=500, 
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while deleting the user account"
         )

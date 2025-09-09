@@ -39,14 +39,11 @@ class KeyConceptExtractionSignature(dspy.Signature):
     )
 
 class KeyConceptExtractor(dspy.Module):
-    """DSPy module for extracting key concepts from documents."""
+    """DSPy module for extracting key concepts from documents with improved JSON handling."""
     
     def __init__(self, lm: Optional[dspy.LM] = None):
         super().__init__()
         self.lm = lm or dspy.settings.lm
-        self.extractor = dspy.ChainOfThought(KeyConceptExtractionSignature)
-        
-        # Initialize the extractor with the signature
         self.extractor = dspy.ChainOfThought(KeyConceptExtractionSignature)
         
         # Set the prompt before any compilation
@@ -106,13 +103,18 @@ class KeyConceptExtractor(dspy.Module):
                     "concept_title": "Acceleration",
                     "concept_explanation": "The rate of change of velocity of an object with respect to time.",
                     "confidence": 0.90
+                },
+                {
+                    "concept_title": "Net Force",
+                    "concept_explanation": "The vector sum of all the forces acting on an object.",
+                    "confidence": 0.90
                 }
             ]
         ).with_inputs('document', 'language', 'comprehension_level')
         
         self.examples = [ex1, ex2]
         
-        # Compile the module with few-shot examples
+        # Initialize compiled extractor with few-shot examples
         self.compiled_extractor = self._compile_module()
     
     def _compile_module(self) -> dspy.Module:
@@ -139,8 +141,7 @@ class KeyConceptExtractor(dspy.Module):
             teleprompter = BootstrapFewShot(
                 metric=self._validate_key_concepts,
                 max_bootstrapped_demos=min(3, len(bound_examples)),
-                max_labeled_demos=min(5, len(bound_examples)),
-                num_threads=1  # Avoid potential threading issues
+                max_labeled_demos=min(5, len(bound_examples))
             )
             
             compiled = teleprompter.compile(
@@ -171,35 +172,28 @@ class KeyConceptExtractor(dspy.Module):
             return self.extractor
     
     def _build_prompt(self) -> str:
-        """Build a default prompt for key concept extraction."""
-        return """You are an expert at extracting and explaining key concepts from educational content. 
-For the given text, identify the most important concepts that would help someone understand the material.
+        """Build the prompt for key concept extraction with clear JSON formatting."""
+        return """Extract key concepts from the following text for a {comprehension_level} level audience.
+Language: {language}
 
-For EACH concept, provide:
-1. A clear, concise title (1-5 words)
-2. A detailed explanation in {language} (2-4 sentences)
-3. A confidence score between 0.5 and 1.0
-
-Text to analyze:
+Text:
 {document}
 
-Target Comprehension Level: {comprehension_level.upper()}
+Return a JSON array of concepts, each with:
+- concept_title: Short title (1-5 words)
+- concept_explanation: Detailed explanation (2-4 sentences)
+- confidence: Score between 0.5 and 1.0
 
-IMPORTANT: Your response MUST be a valid JSON array of objects. Each object MUST have these exact fields:
-- "concept_title": (string) - The name of the concept
-- "concept_explanation": (string) - Detailed explanation
-- "confidence": (float) - Between 0.5 and 1.0
-
-Example format:
+Format your response as a JSON array. Example:
 [
   {
     "concept_title": "Example Concept",
-    "concept_explanation": "This is a detailed explanation of the example concept.",
+    "concept_explanation": "Detailed explanation here...",
     "confidence": 0.95
   }
 ]
 
-Key concepts in JSON format: """
+IMPORTANT: Return ONLY the JSON array, no other text or markdown formatting."""
     
     def _validate_key_concepts(
         self, 
@@ -275,111 +269,88 @@ Key concepts in JSON format: """
         language: str = "english", 
         comprehension_level: str = "intermediate"
     ) -> dspy.Prediction:
-        # Validate language
-        try:
-            language = validate_language(language)
-        except ValueError as e:
-            logger.warning(f"{str(e)}. Defaulting to English.")
-            language = 'english'
-        """Extract key concepts from the document."""
+        """Extract key concepts from the document with improved error handling."""
         try:
             # Ensure document is not empty
             if not document or not document.strip():
                 logger.warning("Empty document provided for key concept extraction")
                 return dspy.Prediction(key_concepts=[])
 
+            # Validate language
+            try:
+                language = validate_language(language)
+            except ValueError as e:
+                logger.warning(f"{str(e)}. Defaulting to English.")
+                language = 'english'
+                
             # Use the compiled extractor if available, otherwise use the base extractor
             extractor = getattr(self, 'compiled_extractor', self.extractor)
             
             # Log the input for debugging
-            logger.debug(f"Extracting concepts from document (length: {len(document)} chars)")
+            logger.debug(f"Extracting concepts from document (first 100 chars): {document[:100]}...")
+            
+            # Prepare the input as a structured dictionary
+            input_data = {
+                'document': document,
+                'language': language,
+                'comprehension_level': comprehension_level
+            }
             
             # Get the prediction
-            pred = extractor(
-                document=document,
-                language=language,
-                comprehension_level=comprehension_level
-            )
+            pred = extractor(**input_data)
             
             # Debug log the raw prediction
             logger.debug(f"Raw prediction: {getattr(pred, 'key_concepts', 'No key_concepts in prediction')}")
-            
-            # Ensure we have key_concepts in the prediction
+
+            # Process the prediction
             if not hasattr(pred, 'key_concepts') or not pred.key_concepts:
-                logger.warning("No key_concepts in prediction")
+                logger.warning("No key concepts found in prediction")
+                return dspy.Prediction(key_concepts=[])
+
+            # Handle different response formats
+            try:
+                import json
+                
+                # If key_concepts is already a list, validate and return
+                if isinstance(pred.key_concepts, list):
+                    return self._validate_and_format_concepts(pred.key_concepts)
+                    
+                # If it's a string, try to parse it as JSON
+                if isinstance(pred.key_concepts, str):
+                    # Clean the response if it contains markdown code blocks
+                    content = pred.key_concepts.strip()
+                    if '```json' in content:
+                        content = content.split('```json')[1].split('```')[0].strip()
+                    elif '```' in content:
+                        content = content.split('```')[1].split('```')[0].strip()
+                    
+                    # Parse the JSON
+                    parsed = json.loads(content)
+                    
+                    # Handle different JSON structures
+                    if isinstance(parsed, list):
+                        return self._validate_and_format_concepts(parsed)
+                    elif isinstance(parsed, dict) and 'key_concepts' in parsed:
+                        return self._validate_and_format_concepts(parsed['key_concepts'])
+                    else:
+                        logger.warning(f"Unexpected JSON structure: {parsed}")
+                        return dspy.Prediction(key_concepts=[])
+                        
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse key_concepts: {str(e)}\nContent: {getattr(pred, 'key_concepts', '')}")
                 return dspy.Prediction(key_concepts=[])
                 
-            # Process and validate concepts
-            valid_concepts = []
-            for i, concept in enumerate(pred.key_concepts):
-                try:
-                    # Handle case where concept might be a string
-                    if not isinstance(concept, dict):
-                        concept = {"concept_title": str(concept).strip()}
-                    
-                    # Ensure required fields exist
-                    title = str(concept.get('concept_title', '')).strip()
-                    explanation = str(concept.get('concept_explanation', '')).strip()
-                    
-                    # Skip empty concepts
-                    if not title or not explanation:
-                        logger.debug(f"Skipping empty concept (title: '{title}', explanation: '{explanation}')")
-                        continue
-                        
-                    # Add to valid concepts
-                    valid_concepts.append({
-                        "concept_title": title,
-                        "concept_explanation": explanation,
-                        "confidence": float(concept.get('confidence', 0.0))
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"Error processing concept {i}: {str(e)}")
-            
-            logger.info(f"Extracted {len(valid_concepts)} valid concepts from {len(pred.key_concepts)} total")
-            return dspy.Prediction(key_concepts=valid_concepts)
-            
+            return pred
+
         except Exception as e:
-            logger.error(f"Error in key concept extraction: {str(e)}", exc_info=True)
-            return dspy.Prediction(key_concepts=[])
-
-def forward(
-    self, 
-    document: str, 
-    language: str = "english", 
-    comprehension_level: str = "intermediate"
-) -> dspy.Prediction:
-    """Extract key concepts from the document."""
-    try:
-        # Ensure document is not empty
-        if not document or not document.strip():
-            logger.warning("Empty document provided for key concept extraction")
-            return dspy.Prediction(key_concepts=[])
-
-        # Use the compiled extractor if available, otherwise use the base extractor
-        extractor = getattr(self, 'compiled_extractor', self.extractor)
-        
-        # Log the input for debugging
-        logger.debug(f"Extracting concepts from document (length: {len(document)} chars)")
-        
-        # Get the prediction
-        pred = extractor(
-            document=document,
-            language=language,
-            comprehension_level=comprehension_level
-        )
-        
-        # Debug log the raw prediction
-        logger.debug(f"Raw prediction: {getattr(pred, 'key_concepts', 'No key_concepts in prediction')}")
-        
-        # Ensure we have key_concepts in the prediction
-        if not hasattr(pred, 'key_concepts') or not pred.key_concepts:
-            logger.warning("No key_concepts in prediction")
+            logger.error(f"Error in forward pass: {str(e)}", exc_info=True)
             return dspy.Prediction(key_concepts=[])
             
-        # Process and validate concepts
+    def _validate_and_format_concepts(self, concepts: List[Any]) -> dspy.Prediction:
+        """Validate and format the extracted concepts."""
         valid_concepts = []
-        for i, concept in enumerate(pred.key_concepts):
+        
+        for i, concept in enumerate(concepts):
             try:
                 # Handle case where concept might be a string
                 if not isinstance(concept, dict):
@@ -388,28 +359,27 @@ def forward(
                 # Ensure required fields exist
                 title = str(concept.get('concept_title', '')).strip()
                 explanation = str(concept.get('concept_explanation', '')).strip()
+                confidence = float(concept.get('confidence', 0.8))
                 
                 # Skip empty concepts
                 if not title or not explanation:
                     logger.debug(f"Skipping empty concept (title: '{title}', explanation: '{explanation}')")
                     continue
                     
-                # Add to valid concepts
+                # Ensure confidence is within valid range
+                confidence = max(0.5, min(1.0, confidence))
+                
                 valid_concepts.append({
-                    "concept_title": title,
-                    "concept_explanation": explanation,
-                    "confidence": float(concept.get('confidence', 0.0))
+                    'concept_title': title,
+                    'concept_explanation': explanation,
+                    'confidence': confidence
                 })
                 
             except Exception as e:
                 logger.error(f"Error processing concept {i}: {str(e)}")
         
-        logger.info(f"Extracted {len(valid_concepts)} valid concepts from {len(pred.key_concepts)} total")
+        logger.info(f"Extracted {len(valid_concepts)} valid concepts from {len(concepts)} total")
         return dspy.Prediction(key_concepts=valid_concepts)
-        
-    except Exception as e:
-        logger.error(f"Error in key concept extraction: {str(e)}")
-        return dspy.Prediction(key_concepts=[])
 
 def extract_key_concepts(
     document: str, 

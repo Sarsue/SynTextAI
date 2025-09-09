@@ -1,466 +1,402 @@
 """
 PDF processor module - Handles extraction and processing of PDF documents.
+Uses PyMuPDF for text extraction with chunked embeddings and concept extraction.
 """
 import logging
-from typing import Dict, List, Any, Optional
-from io import BytesIO
-
+import asyncio
 import fitz  # PyMuPDF
+from io import BytesIO
+from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
 
-# Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.services.llm_service import llm_service
 from api.services.embedding_service import embedding_service
-from api.processors.processor_utils import (
-    generate_learning_materials,
-    LearningMaterialsSummary,
-    generate_learning_materials_for_concept
-)
-from typing import List, Dict, Any, Optional, Union
-
-# Import PDF extraction tools
-from pdfminer.layout import LAParams
-from pdfminer.pdfinterp import PDFPageInterpreter
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.converter import TextConverter
+from api.llm_compat import generate_key_concepts_dspy
 
 logger = logging.getLogger(__name__)
 
-# Global instance of RepositoryManager for the standalone function
-_repo_manager: Optional[RepositoryManager] = None
+# Concurrency controls
+_CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+_EMBED_CONCURRENCY = 5
+_CONCEPT_CONCURRENCY = 5
 
-def process_pdf(
-    file_data: bytes,
-    file_id: int,
-    user_id: int,
-    filename: str,
-    **kwargs
-) -> Dict[str, Any]:
+
+async def process_pdf(file_data: bytes, file_id: int, user_id: int, filename: str = "", **kwargs) -> Dict[str, Any]:
     """
-    Standalone function to process a PDF file.
-    
-    This is a convenience function that creates a PDFProcessor instance and processes the file.
+    Process a PDF file through the entire pipeline.
     
     Args:
-        file_data: The binary content of the PDF file
-        file_id: ID of the file in the database
-        user_id: ID of the user who owns the file
-        filename: Name of the file
-        **kwargs: Additional keyword arguments to pass to the processor
+        file_data: Raw PDF bytes
+        file_id: Unique file identifier
+        user_id: User who owns the file
+        filename: Original filename (optional)
+        **kwargs: Additional processing options
         
     Returns:
-        Dictionary containing processing results
+        Dictionary with processing results and status
     """
-    global _repo_manager
-    if _repo_manager is None:
-        from api.repositories.repository_manager import get_repository_manager
-        _repo_manager = get_repository_manager()
-        
-    processor = PDFProcessor(_repo_manager)
-    return processor.process(file_data, file_id, user_id, filename, **kwargs)
+    try:
+        repo = RepositoryManager()
+        async with PDFProcessor(repo) as processor:
+            return await processor.process(
+                file_data=file_data,
+                file_id=file_id,
+                user_id=user_id,
+                filename=filename,
+                **kwargs
+            )
+    except Exception as e:
+        logger.error(f"PDF processing failed: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Failed to process PDF: {str(e)}",
+            "content": None,
+            "key_concepts": None,
+            "metadata": {}
+        }
 
-class PDFProcessor(FileProcessor):
+
+class PDFProcessor(FileProcessor[Dict[str, Any]]):
     """
-    Processor for PDF documents.
-    Handles text extraction, embedding generation, and key concept extraction.
+    Processor for PDF files with support for text extraction, chunking,
+    embeddings, and concept extraction.
     """
-    
+
     def __init__(self, store: RepositoryManager):
-        """
-        Initialize the PDF processor.
-        
-        Args:
-            store: RepositoryManager instance for database operations
-        """
         super().__init__()
         self.store = store
+        self.semaphore = asyncio.Semaphore(_EMBED_CONCURRENCY)
+        self.concept_semaphore = asyncio.Semaphore(_CONCEPT_CONCURRENCY)
         
-    async def process(self, 
-               file_data: bytes, 
-               file_id: int, 
-               user_id: int, 
-               filename: str, 
-               **kwargs) -> Dict[str, Any]:
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # Cleanup any resources if needed
+        pass
+
+    async def extract_content(self, **kwargs) -> Dict[str, Any]:
         """
-        Process a PDF file: extract text, generate embeddings, create key concepts.
+        Extract text content from a PDF file with page-level metadata.
         
         Args:
-            file_data: Raw PDF file data in bytes
-            file_id: Database ID of the file
-            user_id: ID of the user who owns the file
-            filename: Name of the file
-            **kwargs: Additional arguments
+            file_data: Raw PDF bytes
+            file_id: Unique file identifier
+            user_id: User who owns the file
+            filename: Original filename (optional)
             
         Returns:
-            Dictionary containing processing results
+            Dictionary with extracted content and metadata
         """
-        try:
-            # Extract additional parameters
-            language = kwargs.get('language', 'English')
-            comprehension_level = kwargs.get('comprehension_level', 'Beginner')
-            
-            logger.info(f"Processing PDF file: {filename} (ID: {file_id}, User: {user_id}, "
-                       f"Language: {language}, Level: {comprehension_level})")
-            
-            # Extract text from PDF with page numbers
-            page_data = self.extract_text_with_page_numbers(file_data)
-            logger.info(f"PDF extraction complete. Pages: {len(page_data)}")
-            
-            if not page_data:
-                logger.error(f"Failed to extract content from PDF: {filename}")
-                return {
-                    "success": False,
-                    "file_id": file_id,
-                    "error": "Failed to extract content from PDF",
-                    "metadata": {
-                        "processor_type": "pdf",
-                        "page_count": 0
-                    }
-                }
-            
-            # Process pages to generate embeddings
-            processed_data = await self.process_pages(page_data)
-            
-            # Prepare content for key concept generation
-            content = {
-                "pages": [
-                    {
-                        "page_number": i + 1,
-                        "content": seg.get("content", ""),
-                        "metadata": {
-                            "source": "pdf",
-                            "page_number": i + 1,
-                            "file_type": "pdf"
-                        }
-                    }
-                    for i, seg in enumerate(processed_data.get("segments", []))
-                    if isinstance(seg, dict) and seg.get("content")
-                ]
-            }
-            
-            try:
-                # Generate key concepts using dspy
-                key_concepts = await self.generate_key_concepts(content)
-                
-                # Store key concepts
-                concepts_processed = 0
-                for concept in key_concepts:
-                    if not isinstance(concept, dict):
-                        continue
-                        
-                    # Format the concept for the repository
-                    key_concept_data = {
-                        "concept_title": concept.get("concept_title", ""),
-                        "concept_explanation": concept.get("concept_explanation", ""),
-                        "source_page_number": concept.get("source_page_number"),
-                        "is_custom": False
-                    }
-                    
-                    # Store the concept
-                    result = await self.store.learning_material_repo.add_key_concept(
-                        file_id=file_id,
-                        key_concept_data=key_concept_data
-                    )
-                    
-                    if result and result.get("id"):
-                        concepts_processed += 1
-                    else:
-                        logger.warning(f"Failed to save concept: {concept.get('concept_title')}")
-                
-                # Store segments and chunks in the database
-                success = await self.store.file_repo.update_file_with_chunks(
-                    user_id=user_id,
-                    filename=filename,
-                    file_type="pdf",
-                    extracted_data=processed_data.get("segments", [])
-                )
-                
-                if not success:
-                    logger.error(f"Failed to store PDF segments for file_id: {file_id}")
-                    return {
-                        "success": False,
-                        "error": "Failed to store processed segments",
-                        "file_id": file_id,
-                        "metadata": {
-                            "processor_type": "pdf",
-                            "page_count": len(page_data),
-                            "segment_count": len(processed_data.get("segments", [])),
-                            "key_concepts_count": concepts_processed
-                        }
-                    }
-                
-                # Update file status to completed
-                await self.store.file_repo.update_file_status(
-                    file_id=file_id,
-                    status="completed"
-                )
-                
-                logger.info(f"Successfully processed PDF with {concepts_processed} key concepts")
-                
-                return {
-                    "success": True,
-                    "file_id": file_id,
-                    "metadata": {
-                        "processor_type": "pdf",
-                        "page_count": len(page_data),
-                        "segment_count": len(processed_data.get("segments", [])),
-                        "key_concepts_count": concepts_processed
-                    }
-                }
-                    
-            except Exception as e:
-                logger.error(f"Error generating key concepts: {e}", exc_info=True)
-                return {
-                    "success": True,  # Still consider it a success since we have the content
-                    "file_id": file_id,
-                    "warning": f"Key concept generation failed: {str(e)}",
-                    "metadata": {
-                        "processor_type": "pdf",
-                        "page_count": len(page_data),
-                        "segment_count": len(processed_data.get("segments", [])),
-                        "key_concepts_count": 0
-                    }
-                }
-                
-        except Exception as e:
-            logger.error(f"Error processing PDF file {filename}: {e}", exc_info=True)
+        file_data = kwargs.get("file_data")
+        file_id = kwargs.get("file_id")
+        user_id = kwargs.get("user_id")
+        filename = kwargs.get("filename", "")
+        language = kwargs.get("language", "en")
+
+        if not all([file_data, file_id, user_id]):
             return {
                 "success": False,
-                "file_id": file_id,
-                "error": str(e),
-                "metadata": {
-                    "processor_type": "pdf"
-                }
+                "error": "Missing required parameters: file_data, file_id, or user_id",
+                "text": "",
+                "pages": [],
+                "segments": []
             }
-    
-    async def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
-        """
-        Process PDF pages: chunk text and generate embeddings.
-        
-        Args:
-            page_data: List of dictionaries containing page numbers and content
-            
-        Returns:
-            Dictionary with processed segments and chunks including embeddings
-        """
+
         try:
-            from api.services.embedding_service import embedding_service
-            segments = []
-            
-            # Process each page as a segment
-            for page in page_data:
-                if not page.get("content"):
-                    continue
-                    
-                # Split content into chunks
-                page_chunks = self._chunk_text(page["content"])
-                chunks_data = []
-                
-                # Generate embeddings for each chunk
-                if page_chunks:
-                    try:
-                        # Get embeddings using the async embedding service
-                        embeddings = await embedding_service.get_embeddings(page_chunks)
-                        
-                        # Prepare chunks data with embeddings
-                        for i, embedding in enumerate(embeddings):
-                            if embedding is not None:
-                                chunks_data.append({
-                                    "embedding": embedding,
-                                    "text": page_chunks[i],
-                                    "metadata": {
-                                        "page_number": page.get("page_number"),
-                                        "chunk_index": i
-                                    }
-                                })
-                    except Exception as e:
-                        logger.error(f"Error generating embeddings: {str(e)}", exc_info=True)
-                        # Fallback: add chunks without embeddings
-                        for i, chunk in enumerate(page_chunks):
-                            chunks_data.append({
-                                "text": chunk,
+            # Process PDF in a thread to avoid blocking
+            def _extract_pages():
+                with fitz.open(stream=BytesIO(file_data), filetype="pdf") as doc:
+                    pages = []
+                    for page_num in range(len(doc)):
+                        try:
+                            page = doc.load_page(page_num)
+                            page_text = page.get_text()
+                            pages.append({
+                                "page_number": page_num + 1,
+                                "text": page_text,
                                 "metadata": {
-                                    "page_number": page.get("page_number"),
-                                    "chunk_index": i,
-                                    "error": "Failed to generate embedding"
+                                    "width": page.rect.width,
+                                    "height": page.rect.height,
+                                    "rotation": page.rotation
                                 }
                             })
-                
-                # Add segment with its chunks
-                segments.append({
-                    "content": page["content"],
-                    "page_number": page.get("page_number"),
-                    "metadata": {
-                        "source": "pdf",
-                        "page_number": page.get("page_number")
-                    },
-                    "chunks": chunks_data
-                })
-            
-            return {
-                "segments": segments,
-                "total_segments": len(segments),
-                "total_pages": len(page_data)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error processing PDF pages: {e}", exc_info=True)
-            raise
-    
-    def extract_text_with_page_numbers(self, pdf_data: bytes) -> List[Dict[str, Any]]:
-        """
-        Extracts text from PDF data while capturing page numbers.
-        
-        Args:
-            pdf_data: PDF file data in bytes
-            
-        Returns:
-            List of dictionaries with page numbers and text content
-        """
-        try:
-            pages = []
-            with fitz.open(stream=pdf_data, filetype="pdf") as doc:
-                for page_num in range(len(doc)):
-                    page = doc.load_page(page_num)
-                    text = page.get_text()
-                    if text.strip():  # Only add non-empty pages
-                        pages.append({
-                            "page_number": page_num + 1,
-                            "content": text
-                        })
-            return pages
-            
-        except Exception as e:
-            logger.error(f"Error extracting text from PDF: {e}", exc_info=True)
-            raise
-    
-    def extract_content(self, **kwargs) -> Dict[str, Any]:
-        """
-        Extract raw content from the PDF file.
-        
-        Args:
-            **kwargs: Must include 'file_data' as bytes
-            
-        Returns:
-            Dict containing extracted page content
-        """
-        try:
-            file_data = kwargs.get('file_data')
-            if not file_data:
-                raise ValueError("No file data provided")
-                
-            # Extract text with page numbers and format with metadata
-            pages = self.extract_text_with_page_numbers(file_data)
-            
-            return {
-                "pages": [{
-                    "content": page["content"],
-                    "page_number": page["page_number"],
-                    "metadata": {
-                        "source": "pdf",
-                        "page_number": page["page_number"],
-                        "file_type": "pdf"
-                    }
-                } for page in pages],
-                "page_count": len(pages),
-                "format": "pdf"
-            }
-            
-        except Exception as e:
-            logger.error(f"Error extracting content from PDF: {e}", exc_info=True)
-            raise
-    
-    def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 100) -> List[str]:
-        """
-        Split text into overlapping chunks.
-        
-        Args:
-            text: Text to split into chunks
-            chunk_size: Maximum size of each chunk
-            overlap: Number of characters to overlap between chunks
-            
-        Returns:
-            List of text chunks
-        """
-        if not text:
-            return []
-            
-        chunks = []
-        start = 0
-        text_length = len(text)
-        
-        while start < text_length:
-            end = min(start + chunk_size, text_length)
-            chunks.append(text[start:end].strip())
-            
-            if end == text_length:
-                break
-                
-            # Move start forward, but overlap with the previous chunk
-            start = end - overlap
-            
-            # If we can't make progress, break to avoid infinite loop
-            if start >= text_length - 1:
-                break
-                
-        return chunks
-    
-    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
-        """
-        Generate key concepts from the PDF content.
-        
-        Args:
-            content: Dictionary containing 'pages' with page content
-            **kwargs: Additional parameters
-            
-        Returns:
-            List of key concept dictionaries
-        """
-        try:
-            if not content or not isinstance(content, dict) or 'pages' not in content:
-                logger.warning("Invalid content: expected dict with 'pages' key")
-                return []
+                        except Exception as e:
+                            logger.warning(f"Skipping page {page_num+1} in {filename}: {e}")
+                    return pages
 
-            # Extract text from all pages
-            full_text = "\n\n".join([
-                f"Page {page.get('page_number', 0)}:\n{page.get('content', '').strip()}"
-                for page in content.get('pages', [])
-                if page.get('content', '').strip()
-            ])
-            
-            if not full_text.strip():
-                logger.warning("No text content found in PDF")
-                return []
+            pages = await asyncio.get_event_loop().run_in_executor(
+                _CPU_EXECUTOR, _extract_pages
+            )
 
-            # Generate key concepts using the async DSPy function
-            key_concepts = await generate_key_concepts_dspy(document_text=full_text)
+            if not pages:
+                return {
+                    "success": False,
+                    "error": "No extractable content found in PDF",
+                    "text": "",
+                    "pages": [],
+                    "segments": []
+                }
+
+            # Convert pages to segments format for consistency with other processors
+            segments = []
+            full_text = []
             
-            # Format the key concepts to match repository expectations
-            formatted_concepts = []
-            for concept in key_concepts:
-                if not isinstance(concept, dict):
+            for page in pages:
+                page_num = page["page_number"]
+                page_text = page["text"].strip()
+                if not page_text:
                     continue
                     
-                formatted_concept = {
-                    "concept_title": concept.get("concept_title", ""),
-                    "concept_explanation": concept.get("concept_explanation", ""),
-                    "source_page_number": concept.get("source_page_number"),
-                    "is_custom": False
+                full_text.append(f"\n\nPage {page_num}:\n{page_text}")
+                segments.append({
+                    "text": page_text,
+                    "start": page_num - 1,  # Using page number as position
+                    "end": page_num,
+                    "page_number": page_num,
+                    "metadata": page["metadata"]
+                })
+
+            full_text = "".join(full_text).strip()
+            
+            return {
+                "success": True,
+                "text": full_text,
+                "segments": segments,
+                "pages": pages,
+                "total_pages": len(pages),
+                "metadata": {
+                    "filename": filename,
+                    "file_size": len(file_data),
+                    "extraction_method": "pymupdf",
+                    "file_id": file_id,
+                    "user_id": user_id,
+                    "source_type": "pdf",
+                    "language": language,
+                    "processing_status": "completed"
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF {filename}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to extract text: {e}",
+                "text": "",
+                "pages": [],
+                "segments": []
+            }
+
+    async def _batch_embed_texts(self, texts: List[str], batch_size: int = 10) -> List[List[float]]:
+        """Embed texts in batches with concurrency control."""
+        all_embeddings = []
+
+        async def embed(text: str):
+            async with self.semaphore:
+                try:
+                    return await embedding_service.get_embedding(text)
+                except Exception as e:
+                    logger.error(f"Embedding failed: {e}")
+                    return [0.0] * 1536  # Return zero vector on failure
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            results = await asyncio.gather(*[embed(t) for t in batch])
+            all_embeddings.extend(results)
+
+        return all_embeddings
+
+    async def generate_embeddings(self, content: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """
+        Generate embeddings for the extracted content with chunking and overlap.
+        
+        Args:
+            content: Dictionary containing extracted text and segments
+            chunk_size: Maximum size of each text chunk (default: 1000 chars)
+            chunk_overlap: Overlap between chunks (default: 200 chars)
+            
+        Returns:
+            Dictionary with content and generated embeddings
+        """
+        if not content.get("success"):
+            return content
+
+        try:
+            # Use segments if available, otherwise fall back to full text
+            segments = content.get("segments", [])
+            if not segments:
+                text = content.get("text", "")
+                if not text.strip():
+                    return {"success": False, "error": "No text content to embed"}
+                segments = [{"text": text, "start": 0, "end": len(text)}]
+
+            # Chunk the text with overlap
+            chunks = self._split_text_with_overlap(
+                segments,
+                chunk_size=kwargs.get("chunk_size", 1000),
+                chunk_overlap=kwargs.get("chunk_overlap", 200)
+            )
+            
+            if not chunks:
+                return {"success": False, "error": "No valid text chunks produced for embeddings"}
+
+            # Generate embeddings in batches with concurrency control
+            texts = [c["text"] for c in chunks]
+            embeddings = await self._batch_embed_texts(texts)
+
+            # Combine chunks with their embeddings
+            processed_segments = []
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+                processed_segments.append({
+                    **chunk,
+                    "embedding": emb,
+                    "chunk_index": i,
+                    "token_count": len(chunk["text"].split()),
+                })
+
+            return {
+                "success": True,
+                "processed_segments": processed_segments,
+                "total_chunks": len(processed_segments),
+                **{k: v for k, v in content.items() if k not in ["processed_segments", "total_chunks"]}
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating embeddings: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to generate embeddings: {e}",
+                **{k: v for k, v in content.items() if k != "error"}
+            }
+
+    def _split_text_with_overlap(self, segments: List[Dict[str, Any]], chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Dict[str, Any]]:
+        """
+        Split text segments into chunks with overlap, preserving metadata.
+        
+        Args:
+            segments: List of text segments with metadata
+            chunk_size: Maximum size of each chunk
+            chunk_overlap: Number of characters to overlap between chunks
+            
+        Returns:
+            List of chunks with preserved metadata
+        """
+        chunks = []
+        buffer = []
+        current_length = 0
+        current_start = None
+        
+        for seg in segments:
+            seg_text = seg.get("text", "")
+            if not seg_text.strip():
+                continue
+                
+            seg_start = seg.get("start", 0)
+            seg_end = seg.get("end", seg_start + len(seg_text))
+            
+            if current_start is None:
+                current_start = seg_start
+                
+            # If adding this segment would exceed chunk size, finalize current chunk
+            if current_length + len(seg_text) > chunk_size and buffer:
+                chunk_text = " ".join(buffer)
+                chunks.append({
+                    "text": chunk_text,
+                    "start": current_start,
+                    "end": seg_start,
+                    "metadata": {
+                        "chunk_number": len(chunks) + 1,
+                        "source": "pdf",
+                        **seg.get("metadata", {})
+                    }
+                })
+                
+                # Prepare overlap for next chunk
+                overlap_text = " ".join(buffer[-(chunk_overlap // 20):])  # Approximate overlap in words
+                buffer = [overlap_text] if overlap_text else []
+                current_length = len(overlap_text)
+                current_start = seg_start
+            
+            buffer.append(seg_text)
+            current_length += len(seg_text) + 1  # +1 for space
+        
+        # Add remaining text as final chunk
+        if buffer:
+            chunk_text = " ".join(buffer)
+            chunks.append({
+                "text": chunk_text,
+                "start": current_start,
+                "end": segments[-1].get("end", current_start + len(chunk_text)) if segments else current_start + len(chunk_text),
+                "metadata": {
+                    "chunk_number": len(chunks) + 1,
+                    "source": "pdf",
+                    **({} if not segments else segments[-1].get("metadata", {}))
                 }
-                
-                # Include any additional fields that might be in the concept
-                for field in ["source_text", "relevance_score", "related_concepts"]:
-                    if field in concept:
-                        formatted_concept[field] = concept[field]
-                
-                formatted_concepts.append(formatted_concept)
+            })
             
-            return formatted_concepts
+        return chunks
+
+    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
+        """
+        Generate key concepts from document content using LLM.
+        
+        Args:
+            content: Dictionary containing processed segments and metadata
             
+        Returns:
+            List of key concepts with relevance scores
+        """
+        if not content.get("success"):
+            return []
+
+        try:
+            # Use processed segments if available, otherwise fall back to full text
+            segments = content.get("processed_segments", [])
+            if not segments:
+                text = content.get("text", "")
+                if not text.strip():
+                    return []
+                segments = [{"text": text, "start": 0, "end": len(text)}]
+
+            all_concepts = []
+            
+            async def process_chunk(chunk: Dict[str, Any]):
+                async with self.concept_semaphore:
+                    try:
+                        concepts = await generate_key_concepts_dspy(chunk["text"]) or []
+                        for concept in concepts:
+                            concept.update({
+                                "file_id": content["metadata"]["file_id"],
+                                "user_id": content["metadata"]["user_id"],
+                                "source_type": "pdf",
+                                "source_reference": f"Page {chunk.get('page_number', 'unknown')}",
+                                "start": chunk.get("start"),
+                                "end": chunk.get("end"),
+                                "chunk_index": chunk.get("chunk_index"),
+                                "metadata": {
+                                    **chunk.get("metadata", {}),
+                                    "extraction_method": "llm"
+                                }
+                            })
+                        return concepts
+                    except Exception as e:
+                        logger.error(f"Concept extraction failed for chunk: {e}")
+                        return []
+
+            # Process chunks in parallel with concurrency control
+            tasks = [process_chunk(chunk) for chunk in segments]
+            results = await asyncio.gather(*tasks)
+            all_concepts = [concept for sublist in results for concept in sublist]
+            
+            # Sort by relevance score (descending)
+            return sorted(
+                all_concepts,
+                key=lambda x: float(x.get("relevance", 0)),
+                reverse=True
+            )
+
         except Exception as e:
             logger.error(f"Error in generate_key_concepts: {e}", exc_info=True)
             return []
-
-    # Learning materials generation is now handled by the base class

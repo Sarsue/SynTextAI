@@ -1,891 +1,290 @@
 """
-YouTube processor module - Handles extraction and processing of YouTube videos.
+Production-ready YouTube processor.
+Handles yt-dlp download, FFmpeg normalization, Whisper transcription,
+chunked embeddings, and concept extraction with safe cleanup.
 """
+
 import asyncio
-import json
+import functools
 import logging
 import os
 import re
-import shutil
-import subprocess
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+import shutil
 from typing import Any, Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
 
-from api.utils.language_utils import validate_language, get_language_name
-from api.services.llm_service import llm_service
-from api.services.embedding_service import embedding_service
-from api.repositories.repository_manager import RepositoryManager
+import aiohttp
+import torch
+import whisper
+import yt_dlp
+from aiohttp import ClientSession
+
+from whisper.audio import SAMPLE_RATE
+
 from api.processors.base_processor import FileProcessor
-from api.processors.processor_utils import (
-    generate_learning_materials,
-    LearningMaterialsSummary,
-    log_concept_processing_summary,
-)
-from api.llm_compat import generate_key_concepts_dspy
-
-# Import whisper/torch only when available
-try:
-    import whisper  # type: ignore
-    import torch  # type: ignore
-except ImportError:
-    whisper = None
-    torch = None
+from api.repositories.repository_manager import RepositoryManager, get_repository_manager
+from api.services.embedding_service import embedding_service
+from api.services.llm_service import llm_service
+from api.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Global instance of RepositoryManager for the standalone function
-_repo_manager: Optional[RepositoryManager] = None
+_CPU_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+_EMBED_CONCURRENCY = 5
+_CONCEPT_CONCURRENCY = 5
 
+@functools.lru_cache(maxsize=1)
+def get_whisper_model(model_name: str = "base") -> whisper.Whisper:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return whisper.load_model(model_name).to(device)
 
-async def process_youtube(
-    video_url: str,
-    file_id: int,
-    user_id: int,
-    **kwargs,
-) -> Dict[str, Any]:
-    """
-    Standalone function to process a YouTube video.
-
-    Args:
-        video_url: URL of the YouTube video
-        file_id: ID of the file in the database
-        user_id: ID of the user who owns the file
-        **kwargs: Additional keyword arguments to pass to the processor
-
-    Returns:
-        Dictionary containing processing results
-    """
-    global _repo_manager
-    if _repo_manager is None:
-        from api.repositories.repository_manager import get_repository_manager
-        from api.core.config import settings
-
-        _repo_manager = get_repository_manager(database_url=settings.DATABASE_URL)
-
-    processor = YouTubeProcessor(_repo_manager)
-    # The processor.process signature uses user_id, file_id, filename, file_url
-    return await processor.process(
-        user_id=user_id,
-        file_id=file_id,
-        filename=video_url,  # Using video URL as "filename" for convenience
-        file_url=video_url,
-        **kwargs,
+def get_database_url() -> str:
+    from urllib.parse import quote_plus
+    return (
+        f"postgresql+asyncpg://{os.getenv('DATABASE_USER')}:{quote_plus(os.getenv('DATABASE_PASSWORD',''))}"
+        f"@{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
     )
 
-
-# Import required only for YouTube processing
-YouTubeTranscriptApi = None
-try:
-    # Try to import the transcript API
-    from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
-
-    # Test if the required methods are available
-    required_methods = ["list_transcripts", "get_transcript"]
-    if all(hasattr(YouTubeTranscriptApi, method) for method in required_methods):
-        # Test with a known public video ID to verify API functionality
-        test_video_id = "dQw4w9WgXcQ"
-        try:
-            # Test if we can list transcripts
-            YouTubeTranscriptApi.list_transcripts(test_video_id)
-            logger.info("YouTube Transcript API is available and functional")
-        except Exception as api_error:
-            logger.warning(
-                f"YouTube Transcript API test failed: {str(api_error)}. Falling back to Whisper."
-            )
-            YouTubeTranscriptApi = None
-    else:
-        missing_methods = [m for m in required_methods if not hasattr(YouTubeTranscriptApi, m)]
-        logger.warning(
-            f"YouTube Transcript API is missing required methods: {', '.join(missing_methods)}. Falling back to Whisper."
-        )
-        YouTubeTranscriptApi = None
-
-except ImportError as e:
-    logger.warning(f"YouTube Transcript API not installed: {e}. Falling back to Whisper.")
-    YouTubeTranscriptApi = None
-
-except Exception as e:
-    logger.warning(f"Unexpected error initializing YouTube Transcript API: {str(e)}. Falling back to Whisper.")
-    YouTubeTranscriptApi = None
-
-
-class TemporaryAudioFile:
-    """Context manager for temporary audio files (and directory)."""
-
-    def __init__(self, video_id: str, extension: str = "wav"):
-        self.video_id = video_id
-        self.extension = extension.lstrip(".")
-        self.temp_dir: Optional[str] = None
-        self.file_path: Optional[str] = None
-
-    def __enter__(self) -> str:
-        self.temp_dir = tempfile.mkdtemp(prefix=f"youtube_{self.video_id}_")
-        self.file_path = os.path.join(self.temp_dir, f"{self.video_id}.{self.extension}")
-        return self.file_path
-
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        if self.temp_dir and os.path.exists(self.temp_dir):
-            try:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-                logger.debug(f"Cleaned up temporary directory: {self.temp_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to clean up temporary directory {self.temp_dir}: {e}")
-        self.temp_dir = None
-        self.file_path = None
+def extract_video_id(url: str) -> Optional[str]:
+    patterns = [
+        r"(?:youtube\.com/(?:[^/]+/.+/|(?:v|e(?:mbed)?)/|.*[?&]v=)|youtu\.be/)([^\"&?/\\s]{11})",
+        r"^([a-zA-Z0-9_-]{11})$",
+    ]
+    for p in patterns:
+        m = re.search(p, url)
+        if m:
+            return m.group(1)
+    return None
 
 
 class YouTubeProcessor(FileProcessor):
-    """
-    Processor for YouTube videos.
-    Handles transcript extraction, embedding generation, and key concept extraction.
-    """
-
-    def __init__(self, store: RepositoryManager):
+    def __init__(self, store: RepositoryManager, model_name: str = "base"):
         super().__init__()
         self.store = store
+        self.model = get_whisper_model(model_name)
+        self.sample_rate = SAMPLE_RATE
+        self.session: Optional[ClientSession] = None
 
-    async def process(
-        self,
-        user_id: int,
-        file_id: int,
-        filename: str,
-        file_url: str,
-        **kwargs,
-    ) -> Dict[str, Any]:
-        """
-        Process a YouTube video from start to finish.
-        """
-        logger.info(f"Starting YouTube processing for: {filename} (ID: {file_id}, User: {user_id})")
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
 
-        language = kwargs.get("language", "English")
-        comprehension_level = kwargs.get("comprehension_level", "Beginner")
-        kwargs.get("user_gc_id", "")
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+
+    async def _get_metadata(self, video_id: str) -> Dict[str, Any]:
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        try:
+            async with self.session.get(url) as resp:
+                return await resp.json() if resp.status == 200 else {}
+        except Exception as e:
+            logger.warning(f"Metadata fetch failed: {e}")
+            return {}
+
+    async def _download_and_normalize(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        temp_dir = tempfile.mkdtemp(prefix="yt_audio_")
+        raw_out = os.path.join(temp_dir, "audio.%(ext)s")
+
+        opts = {
+            "format": "bestaudio/best",
+            "outtmpl": raw_out,
+            "quiet": True,
+            "no_warnings": True,
+        }
 
         try:
-            # Step 1: Extract transcript
-            content = await self.extract_content(filename=filename, language=language, file_url=file_url)
-
-            if not content or not content.get("transcript_data"):
-                logger.error(f"Failed to extract transcript from YouTube video: {filename}")
-                return {"success": False, "error": "Failed to extract transcript"}
-
-            # Step 2: Generate embeddings and build processed segments
-            processed_content = await self.generate_embeddings(content, language=language, comprehension_level=comprehension_level)
-
-            # Step 3: Store segments and chunks
-            await self._store_video_segments(user_id, file_id, filename, processed_content)
-
-            # Step 4: Generate key concepts from processed content
-            # First check if we have valid transcript content
-            segments = processed_content.get("processed_segments", [])
-            if not segments:
-                logger.warning(f"No processed segments available for key concept generation for file {file_id}")
-                return {
-                    "success": False,
-                    "file_id": file_id,
-                    "error": "No processed segments available, cannot generate key concepts",
-                    "metadata": {
-                        "processor_type": "youtube",
-                    },
-                }
-
-            # Now generate key concepts with the processed content
-            key_concepts = await self.generate_key_concepts(
-                processed_content, 
-                language=language, 
-                comprehension_level=comprehension_level
+            info = await asyncio.get_event_loop().run_in_executor(
+                _CPU_EXECUTOR, lambda: yt_dlp.YoutubeDL(opts).extract_info(url, download=True)
             )
 
-            if key_concepts and isinstance(key_concepts, list):
-                logger.info(f"Extracted {len(key_concepts)} key concepts from video")
-                for i, concept in enumerate(key_concepts):
-                    title = str(concept.get("concept_title", ""))[:80]
-                    logger.debug(f"Processed concept {i+1}: title='{title}'")
-            else:
-                logger.warning("No key concepts were extracted from the video content")
-                return {
-                    "success": False,
-                    "file_id": file_id,
-                    "error": "Failed to extract key concepts",
-                    "metadata": {
-                        "processor_type": "youtube",
-                    },
-                }
+            dl_file = None
+            for ext in (".m4a", ".webm", ".mp3", ".wav"):
+                candidate = os.path.join(temp_dir, f"audio{ext}")
+                if os.path.exists(candidate):
+                    dl_file = candidate
+                    break
+            if not dl_file:
+                raise RuntimeError("yt-dlp did not produce an audio file")
 
-            # Step 5: Save each concept and immediately generate its learning materials
-            concepts_processed = 0
-            for i, concept in enumerate(key_concepts):
-                title = concept.get("concept_title", "")
-                explanation = concept.get("concept_explanation", "")
-                if not title.strip() or not explanation.strip():
-                    logger.warning(f"Skipping empty concept (title: '{title}', explanation length: {len(explanation)})")
-                    continue
+            wav_file = os.path.join(temp_dir, "audio.wav")
+            cmd = [
+                "ffmpeg", "-y", "-i", dl_file,
+                "-ar", str(self.sample_rate), "-ac", "1",
+                "-acodec", "pcm_s16le", wav_file
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            _, err = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(f"FFmpeg failed: {err.decode()}")
 
-                try:
-                    # Create a dictionary with the key concept data
-                    key_concept_data = {
-                        "concept_title": title,
-                        "concept_explanation": explanation,
-                        "source_page_number": concept.get("source_page_number"),
-                        "source_video_timestamp_start_seconds": concept.get("source_video_timestamp_start_seconds"),
-                        "source_video_timestamp_end_seconds": concept.get("source_video_timestamp_end_seconds"),
-                        "is_custom": False
-                    }
-                    
-                    # Add the key concept using the learning material repository
-                    try:
-                        result = await self.store.learning_material_repo.add_key_concept(
-                            file_id=file_id,
-                            key_concept_data=key_concept_data
-                        )
-                        concept_id = result.get("id") if result else None
-                        if not concept_id:
-                            raise ValueError("Failed to get concept ID from repository")
-                    except Exception as e:
-                        logger.error(f"Error saving key concept to database: {e}", exc_info=True)
-                        raise
-                except Exception as e:
-                    logger.error(f"Error saving concept '{title}': {str(e)}", exc_info=True)
-                    continue
+            return wav_file, temp_dir, None
 
-                if concept_id is None:
-                    logger.error(f"Failed to save concept '{title[:30]}...' to database for file {file_id}")
-                    continue
+        except Exception as e:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None, None, str(e)
 
-                concept_with_id = {
-                    "concept_title": title,
-                    "concept_explanation": explanation,
-                    "id": concept_id,
-                }
+    async def _transcribe(self, wav_file: str, language: str) -> Dict[str, Any]:
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                _CPU_EXECUTOR, lambda: self.model.transcribe(wav_file, language=language)
+            )
+            segments = [
+                {"start": s["start"], "end": s["end"], "text": s["text"].strip()}
+                for s in result.get("segments", [])
+            ]
+            return {"success": True, "text": result.get("text", ""), "segments": segments}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
-                logger.debug(f"Starting learning material generation for concept ID {concept_id}")
-                result = await self.generate_learning_materials_for_concept(file_id, concept_with_id)
-                if result:
-                    concepts_processed += 1
-                    logger.info(f"Generated learning materials for concept '{title[:30]}...'")
-                else:
-                    logger.error(f"Failed to generate learning materials for concept '{title[:30]}...'")
+    async def extract_content(self, file_data: str, file_id: int, user_id: int, filename: str = "", language: str = "en") -> Dict[str, Any]:
+        video_id = extract_video_id(file_data)
+        if not video_id:
+            return {"success": False, "error": "Invalid YouTube URL"}
 
-            logger.info(f"Completed processing {concepts_processed}/{len(key_concepts)} key concepts for file {file_id}")
+        temp_dir = None
+        try:
+            metadata = await self._get_metadata(video_id)
+            wav_file, temp_dir, error = await self._download_and_normalize(file_data)
+            if error:
+                return {"success": False, "error": f"Download/convert failed: {error}"}
 
-            segment_count = len(processed_content.get("processed_segments", []))
-            chunk_count = sum(len(s.get("chunks", [])) for s in processed_content.get("processed_segments", []))
+            result = await self._transcribe(wav_file, language)
+            if not result["success"]:
+                return result
 
             return {
                 "success": True,
-                "file_id": file_id,
+                "video_id": video_id,
+                "transcript": result["text"],
+                "segments": result["segments"],
                 "metadata": {
-                    "segment_count": segment_count,
-                    "chunk_count": chunk_count,
-                    "key_concepts_count": len(key_concepts) if key_concepts else 0,
-                    "processor_type": "youtube",
+                    **metadata,
+                    "filename": filename or metadata.get("title", f"youtube_{video_id}"),
+                    "url": file_data,
+                    "file_id": file_id,
+                    "user_id": user_id,
+                    "source_type": "youtube",
+                    "thumbnail_url": metadata.get("thumbnail_url"),
+                    "author": metadata.get("author_name"),
+                    "processing_status": "completed",
                 },
             }
 
         except Exception as e:
-            self._log_error(f"Error processing YouTube video {filename}", e)
-            return {
-                "success": False,
-                "file_id": file_id,
-                "error": str(e),
-                "metadata": {"processor_type": "youtube"},
-            }
+            logger.error(f"extract_content failed: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
-    async def extract_content(self, **kwargs) -> Dict[str, Any]:
-        """
-        Extract transcript from a YouTube video.
-        Returns {'transcript_data': List[segment], 'video_id': str}
-        """
-        filename = kwargs.get("filename")
-        language = kwargs.get("language", "English")
-
-        if not filename:
-            raise ValueError("Filename (YouTube URL) is required")
-
-        # Check if already a video ID
-        if re.fullmatch(r"[\w-]{11}", filename):
-            video_id = filename
-        else:
-            # Extract ID from URL
-            yt_match = re.search(r"(?:v=|youtu\.be/|embed/|/)([\w-]{11})", filename)
-            video_id = yt_match.group(1) if yt_match else None
-
-        if not video_id:
-            raise ValueError(f"Invalid YouTube video ID or URL: {filename}")
-
-        # Validate language
-        language = validate_language(language)
-        if not language:
-            raise ValueError("Invalid language")
-
-        # Map language to code
-        target_lang_code = get_language_name(language) or "en"
-
-        # Try YouTube transcripts
-        transcript_data = await self._get_youtube_transcript(video_id, target_lang_code)
-
-        # Fallback: Whisper transcription
-        if not transcript_data:
-            transcript_data = await self._transcribe_with_whisper(video_id, target_lang_code)
-
-        if not transcript_data:
-            raise ValueError(f"Failed to extract transcript from video {video_id}")
-
-        return {"transcript_data": transcript_data, "video_id": video_id}
-
-    async def _get_youtube_transcript(self, video_id: str, target_lang_code: str) -> Optional[List[Dict[str, Any]]]:
-        """
-        Attempt to get transcript via YouTube Transcript API.
-        """
-        if YouTubeTranscriptApi is None:
-            logger.info("YouTubeTranscriptApi is not available, skipping transcript fetch")
-            return None
-
-        try:
-            logger.info(f"Attempting direct transcript fetch for {video_id} in language: {target_lang_code}")
-
-            try:
-                if hasattr(YouTubeTranscriptApi, "list_transcripts"):
-                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                    transcript = transcript_list.find_transcript([target_lang_code])
-                    transcript_data = transcript.fetch()
-                elif hasattr(YouTubeTranscriptApi, "get_transcript"):
-                    logger.info("Using legacy YouTube Transcript API")
-                    transcript_data = YouTubeTranscriptApi.get_transcript(
-                        video_id, languages=[target_lang_code], preserve_formatting=True
-                    )
-                else:
-                    logger.warning("No usable YouTube Transcript API methods found")
-                    return None
-            except Exception as api_error:
-                logger.warning(f"YouTube Transcript API error: {api_error}")
-                transcript_data = None
-
-            if not transcript_data:
-                logger.warning("No transcript data returned from YouTube API")
-                return None
-
-            logger.info(f"Fetched transcript in {target_lang_code} (segments: {len(transcript_data)})")
-            return transcript_data
-
-        except Exception as direct_fetch_error:
-            logger.warning(f"Direct transcript fetch failed: {direct_fetch_error}")
-
-            if target_lang_code != "en":
-                try:
-                    logger.info(f"Attempting fallback to English transcript for {video_id}")
-                    if hasattr(YouTubeTranscriptApi, "list_transcripts"):
-                        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                        transcript = transcript_list.find_transcript(["en"])
-                        transcript_data = transcript.fetch()
-                    elif hasattr(YouTubeTranscriptApi, "get_transcript"):
-                        transcript_data = YouTubeTranscriptApi.get_transcript(
-                            video_id, languages=["en"], preserve_formatting=True
-                        )
-                    else:
-                        return None
-
-                    logger.info("Successfully fetched English transcript as fallback.")
-                    return transcript_data
-                except Exception as english_fetch_error:
-                    logger.warning(f"English transcript fallback also failed: {english_fetch_error}")
-
-            return None
-
-    async def _transcribe_with_whisper(self, video_id: str, target_lang_code: str) -> List[Dict[str, Any]]:
-        """
-        Use Whisper for local transcription when YouTube API fails.
-        Returns list of segments: [{'start': float, 'end': float, 'text': str, 'words': [...]}, ...]
-        """
-        class AgentError(Exception):
-            pass
-
-        if whisper is None:
-            raise AgentError("Whisper is not available. Install with: pip install openai-whisper")
-
-        logger.info(f"Fallback to local Whisper transcription for video ID: {video_id}")
-
-        # Keep temp audio alive for the whole transcription
-        with TemporaryAudioFile(video_id, "wav") as temp_audio_path:
-            # Download audio into the temp directory
-            ok = await self._download_youtube_audio_segment(video_id, temp_audio_path)
-            if not ok or not os.path.exists(temp_audio_path):
-                raise AgentError("Failed to download audio for transcription")
-
-            logger.info(f"Downloaded audio to {temp_audio_path} (Size: {os.path.getsize(temp_audio_path)} bytes)")
-
-            # Determine device
-            device = "cuda" if (torch is not None and torch.cuda.is_available()) else "cpu"
-            logger.info(f"Using device: {device}")
-
-            # Load model in a separate thread
-            def load_model():
-                return whisper.load_model("base", device=device)
-
-            with ThreadPoolExecutor() as executor:
-                model = await asyncio.get_event_loop().run_in_executor(executor, load_model)
-
-            logger.info(f"Whisper model loaded on {device.upper()}")
-
-            # Transcribe (run in executor with timeout)
-            def transcribe():
-                return model.transcribe(
-                    temp_audio_path,
-                    language=None if target_lang_code == "auto" else target_lang_code,
-                    verbose=False,
-                    fp16=(torch is not None and torch.cuda.is_available()),
-                )
-
-            try:
-                result = await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(None, transcribe),
-                    timeout=3600,
-                )
-            except asyncio.TimeoutError:
-                logger.error("Whisper transcription timed out after 1 hour")
-                raise AgentError("Transcription timed out")
-
-            if not result or "segments" not in result:
-                raise AgentError("Whisper returned empty result")
-
-            transcript_segments: List[Dict[str, Any]] = []
-            for segment in result["segments"]:
-                transcript_segments.append(
-                    {
-                        "start": float(segment["start"]),
-                        "end": float(segment["end"]),
-                        "text": str(segment["text"]).strip(),
-                        "words": [
-                            {
-                                "word": w.get("word"),
-                                "start": w.get("start"),
-                                "end": w.get("end"),
-                                "probability": w.get("probability", 0.0),
-                            }
-                            for w in segment.get("words", []) or []
-                        ],
-                    }
-                )
-
-            logger.info(f"Successfully transcribed {len(transcript_segments)} segments via Whisper")
-            return transcript_segments
-
-    async def _download_youtube_audio_segment(self, video_id: str, final_wav_path: str) -> bool:
-        """
-        Download YouTube audio into the directory of final_wav_path and create a 16kHz mono WAV there.
-        Returns True on success, False otherwise.
-        """
-        try:
-            import yt_dlp  # type: ignore
-        except ImportError:
-            logger.error("yt-dlp is not installed. Please install it with: pip install yt-dlp")
-            return False
-
-        ffmpeg_path = shutil.which("ffmpeg")
-        if not ffmpeg_path:
-            logger.error("FFmpeg is not installed or not in PATH. Audio conversion will fail.")
-            return False
-
-        out_dir = os.path.dirname(final_wav_path)
-        video_basename = os.path.splitext(os.path.basename(final_wav_path))[0]
-        # Let yt-dlp write to <dir>/<video_id>.<ext>, then we will ensure WAV
-        template = os.path.join(out_dir, f"{video_id}.%(ext)s")
-
-        # Options with post-processor to WAV 16kHz mono
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": template,
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": False,
-            "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "0"},
-            ],
-            "postprocessor_args": ["-ar", "16000", "-ac", "1"],  # 16kHz mono
-            "ffmpeg_location": ffmpeg_path,
-            "retries": 3,
-            "fragment_retries": 3,
-            "extractor_retries": 3,
-            "ignoreerrors": False,
-        }
-
-        logger.info(f"Starting audio download for video {video_id}")
-        ydl = yt_dlp.YoutubeDL(ydl_opts)
-
-        async def run_download() -> None:
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-            )
-
-        try:
-            await asyncio.wait_for(run_download(), timeout=600)  # 10 minutes
-        except asyncio.TimeoutError:
-            logger.error("Audio download timed out after 10 minutes")
-            return False
-        except Exception as e:
-            logger.error(f"yt-dlp download failed: {e}", exc_info=True)
-            return False
-
-        produced_wav = os.path.join(out_dir, f"{video_id}.wav")
-        if os.path.exists(produced_wav):
-            try:
-                # Move/rename to the requested final_wav_path (if different)
-                if os.path.abspath(produced_wav) != os.path.abspath(final_wav_path):
-                    shutil.move(produced_wav, final_wav_path)
-                logger.info(f"Audio prepared at {final_wav_path}")
-                return True
-            except Exception as e:
-                logger.error(f"Failed to move produced WAV: {e}", exc_info=True)
-                return False
-
-        logger.error("yt-dlp did not produce a WAV file")
-        return False
-
-    async def _store_video_segments(
-        self, user_id: int, file_id: int, filename: str, processed_content: Dict[str, Any]
-    ) -> None:
-        """
-        Store processed segments and chunks in the database.
-        """
-        segments = processed_content.get("processed_segments", [])
-        if not segments:
-            logger.warning(f"No segments to store for file_id: {file_id}")
-            return
-
-        logger.info(f"Storing {len(segments)} segments and their chunks for file_id: {file_id}")
-
-        extracted_data: List[Dict[str, Any]] = []
-        file_type = "youtube"  # Since this is the YouTube processor
-        for segment in segments:
-            segment_data = {
-                "content": segment["content"],
-                "page_number": 0,  # Default page number for video segments
-                "metadata": {
-                    "start_time": segment["start_time"],
-                    "end_time": segment["end_time"],
-                    "duration": segment["duration"]
-                },
-                "chunks": [],
-            }
-
-            for chunk in segment.get("chunks", []):
-                emb = chunk.get("embedding")
-                if not emb:
-                    logger.warning(f"Missing embedding for chunk in file_id: {file_id}")
-                    continue
-                segment_data["chunks"].append({"embedding": emb})
-
-            extracted_data.append(segment_data)
-
-            # Store the segments and chunks using the file repository
-            success = await self.store.file_repo.update_file_with_chunks(
-                user_id=user_id,
-                filename=filename,
-                file_type=file_type,
-                extracted_data=extracted_data
-            )
-            
-            if not success:
-                logger.error(f"Failed to store video segments for file_id: {file_id}")
-                return
-
-        logger.info(f"Successfully stored all segments and chunks for file_id: {file_id}")
-
-    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
-        """
-        Generate key concepts from the video transcript content.
-        Expects content containing 'processed_segments'.
-        
-        Returns:
-            List of dictionaries containing key concepts, or empty list if no content
-            
-        Raises:
-            ValueError: If content is invalid or empty
-        """
-        try:
-            if not content or not isinstance(content, dict):
-                logger.warning("Invalid content: expected dict with 'processed_segments'")
-                return []
-
-            segments = content.get("processed_segments", [])
-            if not isinstance(segments, list):
-                logger.warning("'processed_segments' must be a list")
-                return []
-                
-            if not segments:
-                logger.warning("No segments found in processed content")
-                return []
-
-            language = str(kwargs.get("language", "English")).strip()
-            comprehension_level = str(kwargs.get("comprehension_level", "Beginner")).strip()
-
-            # Build full text with timestamps and validate content
-            valid_segments = [
-                s for s in segments 
-                if isinstance(s, dict) and s.get('content') and str(s.get('content', '')).strip()
-            ]
-            
-            if not valid_segments:
-                logger.warning("No valid segments with content found in transcript")
-                return []
-
-            full_text = "\n\n".join(
-                f"[{s.get('metadata', {}).get('start_time', 0):.1f}s] {s.get('content', '').strip()}" 
-                for s in valid_segments
-            ).strip()
-            
-            if not full_text:
-                logger.warning("No transcript content available for key concept generation after processing")
-                return []
-
-            logger.info(f"Generating key concepts from {len(valid_segments)} segments ({len(full_text)} chars)")
-
-            # Generate key concepts
-            key_concepts = await generate_key_concepts_dspy(
-                document_text=full_text, 
-                language=language, 
-                comprehension_level=comprehension_level
-            )
-            
-            if not key_concepts:
-                logger.warning("No key concepts were generated from the transcript")
-                return []
-            
-            # Format the key concepts to match repository expectations
-            formatted_concepts = []
-            for concept in key_concepts:
-                if not isinstance(concept, dict):
-                    logger.warning(f"Skipping invalid key concept (not a dict): {concept}")
-                    continue
-                
-                # Extract timestamp from source_text if available
-                source_timestamp = None
-                source_text = concept.get("source_text", "")
-                if source_text and "[" in source_text and "]" in source_text:
-                    timestamp_str = source_text.split("]")[0] + "]"
-                    try:
-                        # Extract start and end times from the timestamp string
-                        times = re.findall(r"(\d+\.?\d*)s", timestamp_str)
-                        if len(times) >= 2:
-                            source_timestamp = {
-                                "start_seconds": float(times[0]),
-                                "end_seconds": float(times[1]) if len(times) > 1 else float(times[0]) + 10.0
-                            }
-                    except (ValueError, IndexError) as e:
-                        logger.warning(f"Failed to parse timestamp from source_text: {source_text}", exc_info=True)
-                
-                formatted_concept = {
-                    "concept_title": concept.get("concept_title", ""),
-                    "concept_explanation": concept.get("concept_explanation", ""),
-                    "is_custom": False
-                }
-                
-                # Add timestamp information if available
-                if source_timestamp:
-                    formatted_concept["source_video_timestamp_start_seconds"] = source_timestamp["start_seconds"]
-                    formatted_concept["source_video_timestamp_end_seconds"] = source_timestamp["end_seconds"]
-                
-                # Include any additional fields that might be in the concept
-                for field in ["source_text", "relevance_score", "related_concepts"]:
-                    if field in concept:
-                        formatted_concept[field] = concept[field]
-                
-                formatted_concepts.append(formatted_concept)
-            
-            return formatted_concepts
-                
-        except Exception as e:
-            logger.error(f"Error in generate_key_concepts: {e}", exc_info=True)
-            return []
-
-    @staticmethod
-    def _chunk_text(text: str, max_chars: int = 800, overlap: int = 150) -> List[str]:
-        """
-        Split text into overlapping chunks.
-        """
-        text = (text or "").strip()
-        if not text:
-            return []
-        chunks: List[str] = []
-        start = 0
-        n = len(text)
-        while start < n:
-            end = min(start + max_chars, n)
-            chunks.append(text[start:end])
-            if end == n:
-                break
-            start = max(0, end - overlap)
+    def _split_text_with_overlap(self, segments: List[Dict[str, Any]], chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Dict[str, Any]]:
+        chunks, buffer, length, start_time = [], [], 0, None
+        for seg in segments:
+            seg_text = seg["text"]
+            seg_len = len(seg_text)
+            if not buffer:
+                start_time = seg["start"]
+            if length + seg_len > chunk_size:
+                chunk_text = " ".join(buffer)
+                chunks.append({"text": chunk_text, "start": start_time, "end": seg["start"]})
+                overlap_tokens = " ".join(buffer[-(chunk_overlap // 5):])
+                buffer = [overlap_tokens] if overlap_tokens else []
+                length = len(overlap_tokens)
+                start_time = seg["start"]
+            buffer.append(seg_text)
+            length += seg_len + 1
+        if buffer:
+            chunk_text = " ".join(buffer)
+            chunks.append({"text": chunk_text, "start": start_time, "end": segments[-1]["end"]})
         return chunks
 
-    async def generate_embeddings(self, content: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-        """
-        Build processed segments from transcript_data and generate embeddings for chunks.
-        Returns content dict with 'processed_segments' populated (with chunks+embeddings).
-        """
-        try:
-            if not content or not isinstance(content, dict):
-                logger.warning("Invalid content: expected dict with transcript_data")
-                return content
+    async def _batch_embed_texts(self, texts: List[str], batch_size: int = 10) -> List[List[float]]:
+        semaphore = asyncio.Semaphore(_EMBED_CONCURRENCY)
+        all_embeddings = []
 
-            transcript_data = content.get("transcript_data", [])
-            if not isinstance(transcript_data, list) or not transcript_data:
-                logger.warning("No transcript_data to process for embeddings.")
-                return content
+        async def embed(text: str):
+            async with semaphore:
+                try:
+                    return await embedding_service.get_embedding(text)
+                except Exception as e:
+                    logger.error(f"Embedding failed: {e}")
+                    return [0.0] * 1536
 
-            # Convert raw transcript segments to processed_segments
-            processed_segments: List[Dict[str, Any]] = []
-            for seg in transcript_data:
-                # transcript segments could be shape from YT API or Whisper
-                start = float(seg.get("start", seg.get("start_time", 0.0)))
-                end = float(seg.get("end", seg.get("end_time", start)))
-                text = str(seg.get("text", seg.get("content", ""))).strip()
-                if end < start:
-                    end = start
-                duration = max(0.0, end - start)
-                processed_segments.append(
-                    {
-                        "content": text,
-                        "start_time": start,
-                        "end_time": end,
-                        "duration": duration,
-                        "chunks": [],  # will fill next
-                    }
-                )
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            results = await asyncio.gather(*[embed(t) for t in batch])
+            all_embeddings.extend(results)
 
-            # Create chunks across segments and gather for batch embedding
-            all_chunks: List[Tuple[int, int, str]] = []  # (segment_index, chunk_index, content)
-            for si, seg in enumerate(processed_segments):
-                chunks = self._chunk_text(seg["content"])
-                seg["chunks"] = [{"content": c} for c in chunks]
-                for ci, ch in enumerate(chunks):
-                    all_chunks.append((si, ci, ch))
+        return all_embeddings
 
-            if not all_chunks:
-                logger.warning("No text chunks available for embedding generation.")
-                content["processed_segments"] = processed_segments
-                return content
+    async def generate_embeddings(self, content: Dict[str, Any], chunk_size: int = 1000, chunk_overlap: int = 200) -> Dict[str, Any]:
+        segments = content.get("segments", [])
+        if not segments:
+            return {"success": False, "error": "No transcript segments to embed"}
 
-            texts_to_embed = [c for (_, _, c) in all_chunks]
-            logger.info(f"Generating embeddings for {len(texts_to_embed)} chunks")
+        chunks = self._split_text_with_overlap(segments, chunk_size, chunk_overlap)
+        texts = [c["text"] for c in chunks]
+        embeddings = await self._batch_embed_texts(texts)
 
-            # Generate embeddings using the embedding service
-            from api.services.embedding_service import embedding_service
-            embeddings: List[List[float]] = await embedding_service.get_embeddings(texts_to_embed)
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            chunk.update({
+                "embedding": emb,
+                "chunk_index": i,
+                "token_count": len(chunk["text"].split()),
+            })
 
-            if len(embeddings) != len(all_chunks):
-                logger.error(
-                    f"Mismatch between chunks ({len(all_chunks)}) and embeddings ({len(embeddings)})"
-                )
-                content["processed_segments"] = processed_segments
-                return content
+        return {"success": True, "processed_segments": chunks}
 
-            # Place embeddings back into segments
-            for (si, ci, _), emb in zip(all_chunks, embeddings):
-                processed_segments[si]["chunks"][ci]["embedding"] = emb
+    async def generate_key_concepts(self, content: Dict[str, Any]) -> List[Dict[str, Any]]:
+        chunks = content.get("processed_segments", [])
+        semaphore = asyncio.Semaphore(_CONCEPT_CONCURRENCY)
 
-            # Return updated content
-            result = content.copy()
-            result["processed_segments"] = processed_segments
-            logger.info(f"Successfully generated embeddings for {len(all_chunks)} chunks")
-            return result
+        async def extract_concepts(chunk: Dict[str, Any]):
+            async with semaphore:
+                try:
+                    concepts = await llm_service.generate_key_concepts_dspy(chunk["text"])
+                    for c in concepts:
+                        c.update({"start": chunk["start"], "end": chunk["end"], "chunk_index": chunk["chunk_index"]})
+                    return concepts
+                except Exception as e:
+                    logger.error(f"Concept extraction failed: {e}")
+                    return []
 
-        except Exception as e:
-            self._log_error("Error generating embeddings", e)
-            return content
+        results = await asyncio.gather(*[extract_concepts(c) for c in chunks])
+        all_concepts = [c for r in results for c in r]
+        return sorted(all_concepts, key=lambda x: x.get("relevance", 0), reverse=True)
 
-    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
-        """
-        Generate key concepts from the video transcript content.
-        Expects content containing 'processed_segments'.
-        
-        Returns:
-            List of dictionaries containing key concepts, or empty list if no content
-            
-        Raises:
-            ValueError: If content is invalid or empty
-        """
-        try:
-            if not content or not isinstance(content, dict):
-                logger.warning("Invalid content: expected dict with 'processed_segments'")
-                return []
 
-            processed_segments = content.get("processed_segments", [])
-            if not processed_segments:
-                logger.warning("No processed segments found in content")
-                return []
+async def process_youtube(url: str, file_id: int, user_id: int, filename: str = "", language: str = "en") -> Dict[str, Any]:
+    try:
+        db_url = getattr(settings, "DATABASE_URL", None) or get_database_url()
+        repo = get_repository_manager(db_url)
+        processor = YouTubeProcessor(repo)
 
-            # Concatenate all segment content for key concept extraction
-            full_text = "\n\n".join(
-                f"[{segment.get('start_time', 0):.1f}s - {segment.get('end_time', 0):.1f}s] {segment.get('content', '').strip()}"
-                for segment in processed_segments
-                if segment.get("content")
-            )
-            
-            if not full_text.strip():
-                logger.warning("Empty transcript text, skipping key concept generation")
-                return []
+        content = await processor.extract_content(url, file_id, user_id, filename, language)
+        if not content.get("success"):
+            return {"success": False, "error": content["error"]}
 
-            # Generate key concepts using the async DSPy function
-            key_concepts = await generate_key_concepts_dspy(document_text=full_text)
-            logger.info(f"Successfully generated {len(key_concepts) if key_concepts else 0} key concepts")
-            
-            if not key_concepts:
-                logger.warning("No key concepts were generated from the transcript")
-                return []
-            
-            # Format the key concepts to match repository expectations
-            formatted_concepts = []
-            for concept in key_concepts:
-                if not isinstance(concept, dict):
-                    logger.warning(f"Skipping invalid key concept (not a dict): {concept}")
-                    continue
-                
-                # Extract timestamp from source_text if available
-                source_timestamp = None
-                source_text = concept.get("source_text", "")
-                if source_text and "[" in source_text and "]" in source_text:
-                    timestamp_str = source_text.split("]")[0] + "]"
-                    try:
-                        # Extract start and end times from the timestamp string
-                        times = re.findall(r"(\d+\.?\d*)s", timestamp_str)
-                        if len(times) >= 2:
-                            source_timestamp = {
-                                "start_seconds": float(times[0]),
-                                "end_seconds": float(times[1]) if len(times) > 1 else float(times[0]) + 10.0
-                            }
-                    except (ValueError, IndexError) as e:
-                        logger.warning(f"Failed to parse timestamp from source_text: {source_text}", exc_info=True)
-                
-                formatted_concept = {
-                    "concept_title": concept.get("concept_title", ""),
-                    "concept_explanation": concept.get("concept_explanation", ""),
-                    "is_custom": False
-                }
-                
-                # Add timestamp information if available
-                if source_timestamp:
-                    formatted_concept["source_video_timestamp_start_seconds"] = source_timestamp["start_seconds"]
-                    formatted_concept["source_video_timestamp_end_seconds"] = source_timestamp["end_seconds"]
-                
-                # Include any additional fields that might be in the concept
-                for field in ["source_text", "relevance_score", "related_concepts"]:
-                    if field in concept:
-                        formatted_concept[field] = concept[field]
-                
-                formatted_concepts.append(formatted_concept)
-            
-            return formatted_concepts
-            
-        except Exception as e:
-            logger.error(f"Error in generate_key_concepts: {e}", exc_info=True)
-            return []
+        emb = await processor.generate_embeddings(content)
+        if not emb.get("success"):
+            return {"success": False, "error": emb["error"]}
 
-    # Learning materials generation is now handled by the base class
+        content["processed_segments"] = emb["processed_segments"]
+        concepts = await processor.generate_key_concepts(content)
 
-    def _log_error(self, message: str, error: Exception) -> None:
-        """
-        Helper method to log errors with consistent formatting.
-        """
-        logger.error(f"{message}: {str(error)[:200]}", exc_info=True)
+        return {
+            "success": True,
+            "content": content,
+            "key_concepts": concepts,
+            "metadata": {"type": "youtube", "source": url, "language": language}
+        }
+
+    except Exception as e:
+        logger.error(f"process_youtube failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e), "content": None, "key_concepts": None, "metadata": {}}

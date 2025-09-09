@@ -1,150 +1,139 @@
 """
-Base processor classes and interfaces for file processing in the RAG pipeline.
-These provide the foundation for all specific file type processors.
+Base processor module - Defines the abstract base class for all file processors.
 """
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, TypeVar, Generic, Type, TypedDict, Literal
 import logging
-from typing import Dict, List, Any
+from dataclasses import dataclass
+from datetime import datetime
+
+# Create a generic type variable
+T = TypeVar('T')
 
 logger = logging.getLogger(__name__)
 
-class FileProcessor(ABC):
-    """Abstract base class for all file processors."""
+
+@dataclass
+class ProcessResult:
+    """
+    A dataclass to standardize the return type for all processor operations.
+    """
+    success: bool
+    content: Optional[Dict[str, Any]] = None
+    key_concepts: Optional[List[Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    timestamp: datetime = None
     
-    @abstractmethod
-    async def process(self, 
-                     user_id: str, 
-                     file_id: str, 
-                     filename: str, 
-                     file_url: str, 
-                     **kwargs) -> Dict[str, Any]:
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.utcnow()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the ProcessResult to a dictionary."""
+        return {
+            'success': self.success,
+            'content': self.content,
+            'key_concepts': self.key_concepts,
+            'metadata': self.metadata,
+            'error': self.error,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None
+        }
+
+
+class FileProcessor(ABC, Generic[T]):
+    """
+    Abstract base class for file processors.
+    Implements a simplified processing pipeline with error handling.
+    """
+    
+    async def process(self, **kwargs) -> ProcessResult:
         """
-        Process the file and return results.
+        Process a file through the entire pipeline:
+        1. Extract content
+        2. Generate embeddings
+        3. Extract key concepts
         
         Args:
-            user_id: User ID
-            file_id: File ID
-            filename: Name of the file
-            file_url: URL to access the file
-            **kwargs: Additional parameters specific to the processor
+            **kwargs: Must include file_data, file_id, user_id, and filename
             
         Returns:
-            Dict containing processing results
+            Dictionary containing processing results and status
         """
+        result = {
+            'success': False,
+            'file_id': kwargs.get('file_id'),
+            'user_id': kwargs.get('user_id'),
+            'filename': kwargs.get('filename', ''),
+            'error': None,
+            'metadata': {}
+        }
+        
+        try:
+            # Step 1: Extract content
+            content = await self.extract_content(**kwargs)
+            if not content.get('success'):
+                result['error'] = content.get('error', 'Failed to extract content')
+                return result
+                
+            result.update(content)
+            
+            # Step 2: Generate embeddings
+            content_with_embeddings = await self.generate_embeddings(content, **kwargs)
+            if not content_with_embeddings.get('success'):
+                result['error'] = content_with_embeddings.get('error', 'Failed to generate embeddings')
+                return result
+                
+            result.update(content_with_embeddings)
+            
+            # Step 3: Extract key concepts
+            key_concepts = await self.generate_key_concepts(content_with_embeddings, **kwargs)
+            result['key_concepts'] = key_concepts
+            
+            # Mark as successful
+            result['success'] = True
+            
+        except Exception as e:
+            logger.error(f"Error processing file: {str(e)}", exc_info=True)
+            result['error'] = f"Processing failed: {str(e)}"
+            
+        return result
     
     @abstractmethod
     async def extract_content(self, **kwargs) -> Dict[str, Any]:
         """
-        Extract raw content from the file.
+        Extract content from the file.
         
+        Args:
+            **kwargs: Must include file_data, file_id, user_id, and filename
+            
         Returns:
-            Dict containing extracted content
+            Dictionary containing extracted content and metadata
         """
+        pass
         
     @abstractmethod
-    async def generate_embeddings(self, content: Dict[str, Any]) -> Dict[str, Any]:
+    async def generate_embeddings(self, content: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         Generate embeddings for the extracted content.
         
         Args:
-            content: Extracted content
+            content: Dictionary containing extracted content
             
         Returns:
-            Dict containing content with embeddings
+            Dictionary with content and embeddings
         """
+        pass
         
-    @abstractmethod
     async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
         """
-        Generate key concepts from the content.
+        Generate key concepts from the extracted content.
+        Can be overridden by subclasses for custom behavior.
         
         Args:
-            content: Processed content
-            **kwargs: Additional parameters
+            content: Dictionary containing extracted content and embeddings
             
         Returns:
             List of key concepts
         """
-        
-    async def generate_learning_materials(self, 
-                                      file_id: str,
-                                      key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Default implementation for generating learning materials from key concepts.
-        
-        Args:
-            file_id: File ID
-            key_concepts: List of key concepts
-            
-        Returns:
-            Dict containing generated learning materials
-        """
-        from api.processors.processor_utils import generate_learning_materials
-        
-        if not key_concepts:
-            logger.warning(f"No key concepts provided to generate learning materials for file {file_id}")
-            return {"concepts_processed": 0, "concepts_successful": 0, "concepts_failed": 0}
-
-        logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
-        
-        try:
-            result = await generate_learning_materials(
-                store=self.store,
-                file_id=int(file_id),
-                key_concepts=key_concepts,
-                generate_flashcards=True,
-                generate_mcqs=True,
-                generate_tf_questions=True
-            )
-            
-            return {
-                "concepts_processed": result.total_concepts,
-                "concepts_successful": result.successful_concepts,
-                "concepts_failed": result.failed_concepts,
-                "total_flashcards": result.total_flashcards,
-                "total_mcqs": result.total_mcqs,
-                "total_tf_questions": result.total_tf_questions,
-                "duration_seconds": result.duration
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in generate_learning_materials: {e}", exc_info=True)
-            return {
-                "concepts_processed": len(key_concepts),
-                "concepts_successful": 0,
-                "concepts_failed": len(key_concepts),
-                "error": str(e)
-            }
-        
-    async def generate_learning_materials_for_concept(self, 
-                                                    file_id: str,
-                                                    concept: Dict[str, Any]) -> bool:
-        """
-        Default implementation for generating learning materials for a single key concept.
-        
-        Args:
-            file_id: File ID
-            concept: A single key concept
-            
-        Returns:
-            bool: True if generation was successful, False otherwise
-        """
-        from api.processors.processor_utils import generate_learning_materials
-        
-        try:
-            result = await generate_learning_materials(
-                store=self.store,
-                file_id=int(file_id),
-                key_concepts=[concept],
-                generate_flashcards=True,
-                generate_mcqs=True,
-                generate_tf_questions=True
-            )
-            return result.successful_concepts > 0
-        except Exception as e:
-            logger.error(f"Error generating learning materials: {e}", exc_info=True)
-            return False
-        
-    def _log_error(self, message: str, error: Exception, exc_info: bool = True) -> None:
-        """Utility method for consistent error logging."""
-        logger.error(f"{message}: {error}", exc_info=exc_info)
+        return []

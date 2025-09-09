@@ -1,417 +1,304 @@
 """
 Background worker for processing files asynchronously.
-Handles ingestion, retry logic, database updates, and notifications.
+Handles ingestion, database updates, and notifications.
 """
 
+import aiohttp
 import asyncio
 import logging
 import os
 import signal
 import sys
-import traceback
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Set, Any, Dict, Optional
-import aiohttp
+from dataclasses import dataclass
+from typing import List, Optional, Set
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+from dotenv import load_dotenv
 
-# Application imports
-from api.repositories.repository_manager import get_repository_manager
-from api.agents.ingestion_agent import IngestionAgent
+# Load environment variables
+load_dotenv()
 
-# Database configuration
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME", "syntextai"),
-    'user': os.getenv("DATABASE_USER", "postgres"),
-    'password': os.getenv("DATABASE_PASSWORD", "postgres"),
-    'host': os.getenv("DATABASE_HOST", "localhost"),
-    'port': os.getenv("DATABASE_PORT", "5432"),
-}
-
-# Construct the database URL
-DATABASE_URL = (
-    f"postgresql+asyncpg://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-)
-
-# ------------------------------------------------------------------------------
-# Configuration
-# ------------------------------------------------------------------------------
-
-# Global state
-stop_event = asyncio.Event()
-active_tasks: List[asyncio.Task] = []
-
-# Constants
-MAX_CONCURRENT_TASKS = 3
-MAX_RETRY_ATTEMPTS = 3
-INITIAL_POLL_DELAY = 5  # Initial delay in seconds
-MAX_POLL_DELAY = 60  # Maximum delay between polls in seconds
-POLL_BACKOFF_FACTOR = 2  # How much to multiply delay by on each empty poll
-BATCH_SIZE = 100  # Number of files to fetch in one batch
-# Internal endpoint for notifications - same service
-API_NOTIFY_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
-
-# Configure root logger
+# Configure structured logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("worker.log")
-    ],
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger("worker")
+
+# Application imports
+from api.repositories.repository_manager import RepositoryManager
+from api.agents.ingestion_agent import IngestionAgent
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
+
+# Database configuration
+DATABASE_URL = (
+    f"postgresql+asyncpg://{os.getenv('DATABASE_USER')}:{os.getenv('DATABASE_PASSWORD')}"
+    f"@{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
 )
 
-logger = logging.getLogger(__name__)
+# Worker configuration
+MAX_CONCURRENT_TASKS = int(os.getenv("WORKER_MAX_CONCURRENT_TASKS", "3"))
+INITIAL_POLL_DELAY = int(os.getenv("WORKER_INITIAL_POLL_DELAY", "5"))
+MAX_POLL_DELAY = int(os.getenv("WORKER_MAX_POLL_DELAY", "60"))
+POLL_BACKOFF_FACTOR = float(os.getenv("WORKER_POLL_BACKOFF", "2.0"))
+BATCH_SIZE = int(os.getenv("WORKER_BATCH_SIZE", "100"))
+API_NOTIFY_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
+
+NOTIFY_RETRY_CONFIG = {
+    "stop": stop_after_attempt(3),
+    "wait": wait_exponential(multiplier=1, min=1, max=10),
+    "retry": retry_if_exception_type((asyncio.TimeoutError, ConnectionError)),
+    "before_sleep": before_sleep_log(logger, logging.WARNING),
+}
 
 
-# ------------------------------------------------------------------------------
-# Core Processing
-# ------------------------------------------------------------------------------
+@dataclass
+class WorkerMetrics:
+    processed_count: int = 0
+    failed_count: int = 0
+    active_tasks: int = 0
+    last_successful_connection: Optional[datetime] = None
+    last_error: Optional[str] = None
+    queue_size: int = 0
 
-async def process_file(file_id: int, repo_manager, semaphore: asyncio.Semaphore):
-    """Process a single file with retry logic and status updates."""
-    async with semaphore:
-        attempt = 0
-        last_error = None
-        file_data = None
-        
+
+class WorkerContext:
+    """Manages worker state and resources."""
+
+    def __init__(self):
+        self.repo_manager: Optional[RepositoryManager] = None
+        self.agent: Optional[IngestionAgent] = None
+        self.active_tasks: Set[asyncio.Task] = set()
+        self.metrics = WorkerMetrics()
+        self._shutdown_event = asyncio.Event()
+        self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+        self._db_initialized = False
+
+    async def initialize(self) -> bool:
+        """Initialize worker context and dependencies."""
         try:
-            # Get file data within a session
-            async with repo_manager.session_scope() as session:
-                file_repo = repo_manager.file_repo
-                file_data = await file_repo.get_by_id(file_id)
-                if not file_data:
-                    raise ValueError(f"File with ID {file_id} not found")
-                
-                # Convert SQLAlchemy model to dict if needed
-                if hasattr(file_data, '__dict__'):
-                    file_data = {k: v for k, v in file_data.__dict__.items() if not k.startswith('_')}
-                
-                # Update file status to processing
-                await file_repo.update_file_status(file_id, 'processing')
-        except Exception as e:
-            logger.error(f"Error initializing file processing for {file_id}: {str(e)}", exc_info=True)
-            raise
-        
-        # Retry loop
-        while attempt < MAX_RETRY_ATTEMPTS and not stop_event.is_set():
-            try:
-                attempt += 1
-                logger.info(f"Processing file {file_id} (attempt {attempt}/{MAX_RETRY_ATTEMPTS})")
-                
-                # Process the file using the agent with timeout
-                try:
-                    # Initialize the ingestion agent
-                    agent = IngestionAgent()
-                    
-                    result = await asyncio.wait_for(
-                        agent.process({
-                            "file_id": file_id,
-                            "file_path": file_data.get("path"),
-                            "source_type": file_data.get("file_type"),
-                            "metadata": {
-                                "title": file_data.get("name"),
-                                "user_id": file_data.get("user_id"),
-                                "organization_id": file_data.get("organization_id")
-                            }
-                        }),
-                        timeout=300  # 5 minutes timeout
-                    )
-                    
-                    # Update file status to completed
-                    async with repo_manager.session_scope() as session:
-                        await repo_manager.file_repo.update_file_status(file_id, 'completed')
-                    
-                    logger.info(f"File {file_id} processed successfully")
-                    
-                    # Notify success via WebSocket if available
-                    await _notify_processing_status(file_id, "completed")
-                    return
-                    
-                except asyncio.TimeoutError:
-                    error_msg = f"Processing timed out after 5 minutes"
-                    logger.error(f"{error_msg} for file {file_id}")
-                    last_error = error_msg
-                    async with repo_manager.session_scope() as session:
-                        await repo_manager.file_repo.update_file_status(file_id, 'error', error_msg)
-                
-                except Exception as e:
-                    last_error = str(e)
-                    logger.error(
-                        f"Error processing file {file_id} (attempt {attempt}): {last_error}",
-                        exc_info=True
-                    )
-                
-                # If we have more attempts left, wait before retrying
-                if attempt < MAX_RETRY_ATTEMPTS and not stop_event.is_set():
-                    backoff = min(BASE_BACKOFF ** attempt, 30)  # Cap backoff at 30 seconds
-                    logger.info(f"Retrying in {backoff} seconds...")
-                    await asyncio.sleep(backoff)
-            
-            except Exception as e:
-                last_error = str(e)
-                logger.error(
-                    f"Unexpected error in process_file for file {file_id}: {last_error}",
-                    exc_info=True
-                )
-                break
-        
-        # If we get here, all attempts failed
-        if stop_event.is_set():
-            logger.info(f"Processing cancelled for file {file_id} (shutdown in progress)")
-            return
-            
-        # Update file status to failed with the last error
-        error_msg = f"Failed after {attempt} attempts: {last_error}" if last_error else "Unknown error"
-        logger.error(f"Processing failed for file {file_id}: {error_msg}")
-        
-        try:
-            async with repo_manager.session_scope() as session:
-                await repo_manager.file_repo.update_file_status(
-                    file_id, 
-                    'failed', 
-                    error_msg[:1000]  # Truncate long error messages
-                )
-            
-            # Notify failure via WebSocket if available
-            await _notify_processing_status(file_id, "failed", error_msg)
-            
-        except Exception as update_error:
-            logger.error(
-                f"Failed to update file status for {file_id}: {str(update_error)}",
-                exc_info=True
+            self.repo_manager = RepositoryManager(
+                DATABASE_URL,
+                echo=os.getenv("SQL_ECHO", "false").lower() == "true",
             )
+            await self.repo_manager.initialize()
 
+            self.agent = IngestionAgent(self.repo_manager)
 
-async def _notify_processing_status(file_id: int, status: str, error: str = None):
-    """Helper function to send file processing status updates via HTTP POST."""
-    if not API_NOTIFY_URL:
-        logger.warning("API_NOTIFY_URL not configured, skipping notification")
-        return
-        
-    try:
-        import aiohttp
-        
-        payload = {
-            "file_id": file_id,
-            "status": status,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        
-        if error:
-            payload["error"] = error
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{API_NOTIFY_URL}/internal/notify-client",
-                json={
-                    "user_id": None,  # Will be set by the API based on file ownership
-                    "event_type": "file_processed",
-                    "data": payload
-                },
-                timeout=10
-            ) as response:
-                if response.status != 200:
-                    logger.error(
-                        f"Failed to send notification for file {file_id}: "
-                        f"HTTP {response.status}"
-                    )
-    except Exception as e:
-        logger.error(
-            f"Failed to send notification for file {file_id}: {str(e)}",
-            exc_info=True
-        )
+            if await self.check_database_connection():
+                self._db_initialized = True
+                self.metrics.last_successful_connection = datetime.utcnow()
+                logger.info("Worker context initialized successfully")
+                return True
+            return False
+        except Exception as e:
+            self.metrics.last_error = str(e)
+            logger.critical(f"Failed to initialize worker context: {e}", exc_info=True)
+            await self._safe_close_repository_manager()
+            return False
 
+    async def check_database_connection(self) -> bool:
+        """Check if database is accessible using ORM."""
+        if not self.repo_manager:
+            logger.error("Repository manager not initialized")
+            return False
+        try:
+            from sqlalchemy import select
+            from sqlalchemy.sql.expression import literal
 
-async def worker_loop():
-    """Main worker loop fetching and processing files continuously."""
-    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-    
-    # Initialize repository manager with database URL
-    repo_manager = get_repository_manager(DATABASE_URL)
-    
-    # Track active tasks and their status
-    active_tasks: Dict[int, asyncio.Task] = {}
-    
-    try:
-        while not stop_event.is_set():
+            async with self.repo_manager.session_scope() as session:
+                result = await session.scalar(select(literal(1)))
+                return result == 1
+        except Exception as e:
+            logger.error(f"Database connection check failed: {e}", exc_info=True)
+            return False
+
+    async def _safe_close_repository_manager(self) -> None:
+        if self.repo_manager:
             try:
-                # Get pending files that aren't already being processed
-                current_delay = INITIAL_POLL_DELAY
-                while not stop_event.is_set():
-                    async with repo_manager.session_scope() as session:
-                        pending_files = await repo_manager.file_repo.get_pending_files(
-                            limit=BATCH_SIZE,
-                            exclude_ids=list(active_tasks.keys())  # Skip files already being processed
-                        )
-                    
-                    if pending_files:
-                        break
-                        
-                    # No files to process, implement exponential backoff
-                    logger.debug(f"No pending files found. Waiting {current_delay} seconds...")
-                    await asyncio.sleep(current_delay)
-                    current_delay = min(current_delay * POLL_BACKOFF_FACTOR, MAX_POLL_DELAY)
-                
-                # Process files up to the concurrency limit
-                processed_count = 0
-                for file_data in pending_files:
-                    if stop_event.is_set() or processed_count >= MAX_CONCURRENT_TASKS:
-                        break
-                        
-                    file_id = file_data['id']
-                    
-                    # Skip if already being processed
-                    if file_id in active_tasks and not active_tasks[file_id].done():
-                        continue
-                    
-                    # Create and track the task
-                    task = asyncio.create_task(
-                        process_file(file_id, repo_manager, semaphore)
-                    )
-                    active_tasks[file_id] = task
-                    processed_count += 1
-                    
-                    # Add callback to clean up when task is done
-                    def cleanup_task(fut, fid=file_id):
-                        if fid in active_tasks:
-                            del active_tasks[fid]
-                    task.add_done_callback(cleanup_task)
-                
-                # Clean up completed tasks
-                active_tasks = {k: v for k, v in active_tasks.items() if not v.done()}
-                
-                # If we couldn't process any files (all pending are already being processed),
-                # wait a bit before checking again
-                if len(active_tasks) >= MAX_CONCURRENT_TASKS:
-                    await asyncio.sleep(1)
-                
-            except asyncio.CancelledError:
-                logger.info("Worker loop cancelled")
+                await self.repo_manager.close()
+                logger.info("Repository manager closed successfully")
+            except Exception as e:
+                logger.error(f"Error closing repository manager: {e}", exc_info=True)
+            finally:
+                self.repo_manager = None
+                self._db_initialized = False
+
+    @asynccontextmanager
+    async def db_session(self, timeout: float = 10.0):
+        """
+        Async context manager for safely acquiring a DB session.
+
+        Waits for the database to be initialized, or raises after `timeout` seconds.
+        Usage:
+            async with context.db_session() as session:
+                # use session safely
+        """
+        if not self._db_initialized:
+            # wait until db is initialized (or timeout)
+            start = asyncio.get_event_loop().time()
+            while not self._db_initialized:
+                if asyncio.get_event_loop().time() - start > timeout:
+                    raise RuntimeError("Database not initialized after waiting")
+                await asyncio.sleep(0.1)
+
+        async with self.repo_manager.session_scope() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
                 raise
-                
-            except Exception as e:
-                logger.error(
-                    f"Unexpected error in worker loop: {str(e)}",
-                    exc_info=True
+
+    async def shutdown(self):
+        """Clean up worker resources."""
+        self._shutdown_event.set()
+
+        for task in self.active_tasks:
+            if not task.done():
+                task.cancel()
+
+        if self.active_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(asyncio.wait(self.active_tasks, return_when=asyncio.ALL_COMPLETED)),
+                    timeout=10,
                 )
-                await asyncio.sleep(RETRY_DELAY)
-                
-    except asyncio.CancelledError:
-        logger.info("Worker loop cancelled")
-        raise
-        
+            except asyncio.TimeoutError:
+                logger.warning("Timed out waiting for tasks to complete")
+
+        await self._safe_close_repository_manager()
+        logger.info("Worker context shut down")
+
+
+@retry(**NOTIFY_RETRY_CONFIG)
+async def _notify_processing_status(file_id: int, status: str, error: str = None) -> bool:
+    """Send processing status update to the API with retry logic."""
+    payload = {"file_id": file_id, "status": status}
+    if error:
+        payload["error"] = error
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{API_NOTIFY_URL}/api/v1/notifications/status", json=payload, timeout=10) as resp:
+                resp.raise_for_status()
+                return True
     except Exception as e:
-        logger.critical(
-            f"Critical error in worker loop: {str(e)}",
-            exc_info=True
-        )
+        logger.warning(f"Failed to send status update for file {file_id}: {e}")
         raise
-        
+
+
+async def process_file(context: WorkerContext, file_id: int) -> None:
+    """Process a single file."""
+    try:
+        async with context._semaphore:
+            await _notify_processing_status(file_id, "processing")
+            context.metrics.active_tasks += 1
+            success = await context.agent.process_file(file_id)
+            if success:
+                context.metrics.processed_count += 1
+                await _notify_processing_status(file_id, "completed")
+            else:
+                context.metrics.failed_count += 1
+                error_msg = "Processing completed but result was not successful"
+                await _notify_processing_status(file_id, "failed", error_msg)
+    except Exception as e:
+        context.metrics.failed_count += 1
+        await _notify_processing_status(file_id, "failed", str(e))
+        logger.error(f"File {file_id} processing failed: {e}", exc_info=True)
     finally:
-        # Cancel any remaining tasks
-        for task in active_tasks.values():
-            if not task.done():
-                task.cancel()
-        
-        # Wait for tasks to complete or be cancelled
-        if active_tasks:
-            await asyncio.wait(
-                list(active_tasks.values()),
-                timeout=10.0,
-                return_when=asyncio.ALL_COMPLETED
+        context.metrics.active_tasks = max(context.metrics.active_tasks - 1, 0)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((SQLAlchemyError, OperationalError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+async def fetch_pending_files(context: WorkerContext) -> List[int]:
+    """Fetch a batch of pending files."""
+    try:
+        async with context.db_session() as session:
+            file_repo = context.repo_manager.file_repo
+            # Get pending files using get_multi with filter
+            pending_files = await file_repo.get_multi(
+                skip=0,
+                limit=BATCH_SIZE,
+                processing_status="pending"
             )
-        
-        # Close the repository manager
-        try:
-            await repo_manager.close()
-        except Exception as e:
-            logger.error(f"Error closing repository manager: {str(e)}", exc_info=True)
+            
+            if not pending_files:
+                return []
+                
+            # Update status for each file
+            file_ids = [f.id for f in pending_files]
+            for file_id in file_ids:
+                await file_repo.update(file_id, {"processing_status": "processing"})
+            return file_ids
+            
+    except Exception as e:
+        logger.error(f"Error in fetch_pending_files: {e}", exc_info=True)
+        return []
 
 
-# ------------------------------------------------------------------------------
-# Shutdown Handling
-# ------------------------------------------------------------------------------
+async def worker_loop(context: WorkerContext) -> None:
+    poll_delay = INITIAL_POLL_DELAY
+    while not context._shutdown_event.is_set():
+        pending_files = await fetch_pending_files(context)
+        context.metrics.queue_size = len(pending_files)
 
-def shutdown_handler():
-    """Signal handler for graceful shutdown."""
-    logger.info("Shutdown signal received. Stopping worker...")
-    stop_event.set()
+        if not pending_files:
+            await asyncio.sleep(poll_delay)
+            poll_delay = min(poll_delay * POLL_BACKOFF_FACTOR, MAX_POLL_DELAY)
+            continue
 
-
-async def shutdown():
-    """Gracefully cancel tasks and close resources."""
-    logger.info("Initiating graceful shutdown...")
-    
-    # Cancel all active tasks
-    if active_tasks:
-        logger.info(f"Cancelling {len(active_tasks)} active tasks...")
-        for task in active_tasks:
-            if not task.done():
+        poll_delay = INITIAL_POLL_DELAY
+        for i in range(0, len(pending_files), MAX_CONCURRENT_TASKS):
+            if context._shutdown_event.is_set():
+                break
+            batch = pending_files[i:i + MAX_CONCURRENT_TASKS]
+            tasks = [asyncio.create_task(process_file(context, fid)) for fid in batch]
+            context.active_tasks.update(tasks)
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.ALL_COMPLETED, timeout=300)
+            context.active_tasks.difference_update(done)
+            for task in done:
+                if task.exception():
+                    logger.error(f"Task failed with exception: {task.exception()}", exc_info=True)
+            for task in pending:
                 task.cancel()
-        
-        # Wait for tasks to complete or be cancelled
-        try:
-            await asyncio.wait(active_tasks, timeout=30.0)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout waiting for tasks to complete")
-    
-    # Clean up any remaining resources
-    logger.info("Worker shutdown complete")
-    
-    logger.info("Shutdown complete.")
+                await asyncio.wait([task], timeout=5)
+            await asyncio.sleep(1)
 
 
-# ------------------------------------------------------------------------------
-# Entry Point
-# ------------------------------------------------------------------------------
+async def shutdown(sig: signal.Signals, context: WorkerContext) -> None:
+    logger.info(f"Received signal {sig.name}, shutting down...")
+    await context.shutdown()
 
-async def main():
-    # Set up signal handlers
+
+async def main() -> None:
+    context = WorkerContext()
+    if not await context.initialize():
+        logger.critical("Failed to initialize worker context")
+        return
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, shutdown_handler)
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, context)))
         except NotImplementedError:
-            # Windows doesn't support signal handlers like this
-            logger.warning(f"Could not add signal handler for {sig}")
-    
-    try:
-        logger.info("Starting worker...")
-        await worker_loop()
-    except asyncio.CancelledError:
-        logger.info("Worker was cancelled")
-    except Exception as e:
-        logger.critical(f"Unexpected error in worker: {str(e)}", exc_info=True)
-        raise
-    finally:
-        logger.info("Shutting down worker...")
-        await shutdown()
-        logger.info("Worker stopped")
+            # Windows does not support signal handlers
+            pass
+
+    logger.info("Starting worker loop...")
+    await worker_loop(context)
 
 
 if __name__ == "__main__":
     try:
-        # Configure logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            handlers=[
-                logging.StreamHandler(),
-                logging.FileHandler("worker.log")
-            ]
-        )
-        
-        # Set log level for specific noisy loggers
-        logging.getLogger("asyncio").setLevel(logging.WARNING)
-        logging.getLogger("websockets").setLevel(logging.WARNING)
-        
-        logger.info("Starting SynTextAI worker...")
         asyncio.run(main())
-        
     except KeyboardInterrupt:
         logger.info("Worker stopped by user")
     except Exception as e:
-        logger.critical(f"Fatal error: {str(e)}", exc_info=True)
+        logger.critical(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
-    finally:
-        logger.info("Worker process terminated")

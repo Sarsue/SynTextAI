@@ -1,11 +1,11 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 from uuid import UUID, uuid4
 
 class UserBase(BaseModel):
     """Base user model with common fields"""
-    email: EmailStr
+    email: str
     full_name: Optional[str] = None
     is_active: bool = True
     is_superuser: bool = False
@@ -17,7 +17,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     """User update model with optional fields"""
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     full_name: Optional[str] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
