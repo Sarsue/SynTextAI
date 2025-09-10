@@ -28,9 +28,11 @@ interface SubscriptionData {
     subscription_status: string;
     card_last4?: string;
     card_brand?: string;
-    card_exp_month?: string;
-    card_exp_year?: string;
-    trial_end?: string;
+    card_exp_month?: number;
+    card_exp_year?: number;
+    trial_end?: string;  // ISO 8601 format
+    message?: string;    // Optional success/status message
+    error?: string;      // Present if status is 'error'
 }
 
 // Define the type for UserContext
@@ -98,7 +100,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             switch (message.event) {
                 case 'file_processed': {
                     const updatedFile = message.result as UploadedFile;
-                    setFiles(prevFiles => prevFiles.map(f => (f.id === updatedFile.id ? updatedFile : f)));
+                    setFiles(prevFiles => 
+                        prevFiles.map(f => f.id === updatedFile.id ? updatedFile : f)
+                    );
                     addToast(`File "${updatedFile.file_name}" has been processed.`, 'success');
                     break;
                 }
@@ -106,15 +110,17 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 case 'file_status_update': {
                     const data = message.data as FileStatusUpdatePayload;
                     setFiles(prevFiles =>
-                        prevFiles.map(file =>
-                            file.id === data.file_id
-                                ? {
+                        prevFiles.map(file => {
+                            if (file.id === data.file_id) {
+                                return {
                                     ...file,
                                     status: data.status,
                                     error_message: data.error_message,
-                                }
-                                : file
-                        )
+                                    progress: data.progress ?? file.progress
+                                };
+                            }
+                            return file;
+                        })
                     );
 
                     if (data.status === 'failed') {
@@ -126,24 +132,35 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 case 'file_status_error': {
                     const data = message.data as FileStatusUpdatePayload;
                     setFiles(prevFiles =>
-                        prevFiles.map(file =>
-                            file.id === data.file_id
-                                ? {
+                        prevFiles.map(file => {
+                            if (file.id === data.file_id) {
+                                return {
                                     ...file,
                                     status: 'failed',
-                                    error_message: data.error_message,
-                                }
-                                : file
-                        )
+                                    error_message: data.error_message || 'An unknown error occurred',
+                                    progress: 0 // Reset progress on error
+                                };
+                            }
+                            return file;
+                        })
                     );
-                    addToast(`Error processing file: ${data.error_message}`, 'error');
+                    addToast(`Error processing file: ${data.error_message || 'Unknown error'}`, 'error');
                     break;
                 }
 
                 case 'file_deleted': {
                     const data = message.data as { file_id: number };
-                    setFiles(prevFiles => prevFiles.filter(f => f.id !== data.file_id));
-                    addToast('File was deleted.', 'info');
+                    setFiles(prevFiles => {
+                        const updatedFiles = prevFiles.filter(f => f.id !== data.file_id);
+                        // If the file was being processed, show a message
+                        const deletedFile = prevFiles.find(f => f.id === data.file_id);
+                        if (deletedFile?.status === 'processing') {
+                            addToast('File processing was cancelled.', 'info');
+                        } else {
+                            addToast('File was deleted.', 'info');
+                        }
+                        return updatedFiles;
+                    });
                     break;
                 }
             }

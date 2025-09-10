@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 
 import { useNavigate, useLocation } from 'react-router-dom';
+import { getAuth } from 'firebase/auth';
 import ConversationView from './ConversationView';
 import InputArea from './InputArea';
 import HistoryView from './HistoryView';
@@ -87,6 +88,61 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }
     }, [user, identify]);
 
+    // Handle file upload
+    const handleFileUpload = useCallback(async (file: File) => {
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            const token = await user?.getIdToken();
+            if (!token) throw new Error('Not authenticated');
+            
+            const response = await fetch('/api/v1/files/upload', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData,
+            });
+
+            if (!response.ok) {
+                throw new Error('File upload failed');
+            }
+
+            const result = await response.json();
+            addToast('File uploaded successfully!', 'success');
+            
+            // Refresh the file list
+            await loadUserFiles(1, 10);
+            
+            return result;
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            addToast('Failed to upload file. Please try again.', 'error');
+            throw error;
+        }
+    }, [user, loadUserFiles, addToast]);
+
+    // Handle file selection
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files?.[0]) return;
+        
+        const file = e.target.files[0];
+        
+        try {
+            await handleFileUpload(file);
+        } catch (error) {
+            console.error('File upload error:', error);
+        } finally {
+            // Reset the file input
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
     // --- YouTube link upload state ---
     const [youtubeUrl, setYoutubeUrl] = useState('');
     const [isYoutubeSubmitting, setIsYoutubeSubmitting] = useState(false);
@@ -97,7 +153,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
 
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
-    const idTokenRef = useRef<string | null>(null); 
+    const idTokenRef = useRef<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState("chat"); 
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -258,28 +315,23 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             });
     };
 
-    const handleSend = async (message: string, files: File[]) => {
+    const handleSend = async (message: string, files: File[] = []) => {
+        if (!message.trim() && files.length === 0) return;
+        
+        setIsSending(true);
+        
         try {
-            setIsSending(true); 
-            
-            capture(AnalyticsEvents.CHAT_MESSAGE_SENT, createEventProperties({
-                message_length: message.length,
-                has_attachments: files.length > 0,
-                file_count: files.length,
-                file_types: files.map(file => file.type),
-                language: selectedLanguage,
-                comprehension_level: comprehensionLevel,
-            }));
-
+            // Handle file uploads if any
             if (files.length > 0) {
+                const startTime = Date.now();
                 const formData = new FormData();
-                for (let i = 0; i < files.length; i++) {
-                    formData.append("files", files[i]);
-                }
+                files.forEach(file => {
+                    formData.append('files', file);
+                });
+                
                 try {
-                    const startTime = Date.now();
                     const fileDataResponse = await callApiWithToken(
-                        `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                        'api/v1/files/upload',
                         'POST',
                         formData
                     );
@@ -299,28 +351,20 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             comprehension_level: comprehensionLevel,
                         });
                         
-                        addToast(fileData.message, 'success'); 
+                        addToast('Files uploaded successfully!', 'success');
                         
-                        loadUserFiles(1, filePagination.pageSize); 
+                        // Refresh the file list
+                        await loadUserFiles(1, 10);
                     } else {
-                        capture(AnalyticsEvents.FILE_UPLOAD, {
-                            success: false,
-                            file_count: files.length,
-                            error: fileDataResponse ? await fileDataResponse.text() : 'No response',
-                            status: fileDataResponse?.status,
-                        });
-                        
-                        addToast('File upload failed. Please try again.', 'error'); 
+                        throw new Error('File upload failed');
                     }
                 } catch (error) {
-                    // Track file upload error
-                    trackError(error as Error, {
-                        action: 'file_upload',
-                        file_count: files.length,
-                    });
-                    
-                    addToast('An error occurred during file upload. Please try again.', 'error'); 
+                    console.error('Error uploading files:', error);
+                    addToast('An error occurred during file upload. Please try again.', 'error');
+                    setIsSending(false);
+                    return;
                 }
+                
                 if (!message.trim()) {
                     setIsSending(false); // Re-enable input if only uploading files
                     return;

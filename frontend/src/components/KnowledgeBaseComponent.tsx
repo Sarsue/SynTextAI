@@ -67,9 +67,10 @@ interface FileStatusEntry { isDeleting?: boolean; }
     }, [contextFileError]);
 
     // Initial load and load on page/pageSize change from context
+    // Refresh file list when component mounts and when files array changes
     useEffect(() => {
         loadUserFiles(filePagination.page, filePagination.pageSize);
-    }, [loadUserFiles, filePagination.page, filePagination.pageSize]);
+    }, [loadUserFiles, filePagination.page, filePagination.pageSize, files.length]);
 
 
 

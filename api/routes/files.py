@@ -520,11 +520,8 @@ async def retrieve_files(
         user_id = user_data['user_id']
         offset = (page - 1) * page_size
         
-        # Get the file repository and fetch files
-        store = user_data['store']
-        db_files = await store.file_repo.list_user_files(user_id, skip=offset, limit=page_size)
-        
-        # Get total count of files for pagination
+        # Get files and total count for pagination
+        db_files = await file_repo.list_user_files(user_id, skip=offset, limit=page_size)
         total_files = await file_repo.count(user_id=user_id)
         
         # Format the response to match the expected structure

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import './Home.css';
 import { useUserContext } from './UserContext';
 import { usePostHog } from './components/AnalyticsProvider';
+import { useToast } from './contexts/ToastContext';
+import { getAuth } from 'firebase/auth';
 
 const Home: React.FC = () => {
     const navigate = useNavigate();
@@ -21,13 +23,66 @@ const Home: React.FC = () => {
         navigate('/login');
     };
     
-    const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            setSelectedFile(e.target.files[0]);
-            posthog.capture('homepage_file_selected', {
-                file_type: e.target.files[0].type,
-                file_size: e.target.files[0].size
+    const { addToast } = useToast();
+    const { loadUserFiles } = useUserContext();
+
+    const handleFileUpload = useCallback(async (file: File) => {
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            const response = await fetch('/api/v1/files/upload', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${await getAuth().currentUser?.getIdToken()}`
+                },
+                body: formData,
             });
+
+            if (!response.ok) {
+                throw new Error('File upload failed');
+            }
+
+            const result = await response.json();
+            addToast('File uploaded successfully!', 'success');
+            
+            // Refresh the file list
+            await loadUserFiles(1, 10);
+            
+            return result;
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            addToast('Failed to upload file. Please try again.', 'error');
+            throw error;
+        }
+    }, [addToast, loadUserFiles]);
+
+    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files?.[0]) return;
+        
+        const file = e.target.files[0];
+        setSelectedFile(file);
+        
+        posthog.capture('homepage_file_selected', {
+            file_type: file.type,
+            file_size: file.size
+        });
+        
+        try {
+            // If user is logged in, upload the file immediately
+            if (getAuth().currentUser) {
+                await handleFileUpload(file);
+            } else {
+                // If not logged in, redirect to login with file in state
+                navigate('/login', { state: { fileToUpload: file } });
+            }
+        } catch (error) {
+            console.error('File upload error:', error);
+        } finally {
+            // Reset the file input
+            e.target.value = '';
         }
     };
     

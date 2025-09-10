@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool, QueuePool
 from sqlalchemy.exc import OperationalError, TimeoutError, SQLAlchemyError
-from sqlalchemy import event, Engine as SyncEngine
+from sqlalchemy import create_engine, event, Engine as SyncEngine
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 

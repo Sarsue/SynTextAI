@@ -62,34 +62,10 @@ async def apply_posthog_middleware(request: Request, call_next):
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Initialize Firebase on application startup
-@app.on_event("startup")
-async def startup_event():
-    """
-    Initializes application services. This must be run before the app starts
-    accepting requests to ensure all services are ready.
-    """
-    try:
-        # Initialize Firebase
-        initialize_firebase()
-        
-        # Initialize database connection
-        await db_startup()
-        
-        # Initialize repository manager
-        RepositoryManager.initialize()
-        
-        # Register agents
-        register_agents()
-            
-        logger.info("Application startup complete")
-        
-    except ImportError as e:
-        logger.error(f"Import error during application startup: {e}", exc_info=True)
-    except Exception as e:
-        logger.error(f"Error during application startup: {e}", exc_info=True)
-        raise  # Re-raise to prevent the app from starting with errors
+# Initialize repository manager as None, will be set during startup
+app.state.store = None
 
+# Database configuration
 database_config = {
     'dbname': os.getenv("DATABASE_NAME"),
     'user': os.getenv("DATABASE_USER"),
@@ -98,25 +74,67 @@ database_config = {
     'port': os.getenv("DATABASE_PORT"),
 }
 
-# Use asyncpg driver for async SQLAlchemy
-DATABASE_URL = (
-    f"postgresql+asyncpg://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-)
+async def startup_event():
+    """Initialize application services."""
+    try:
+        logger.info("Starting application initialization...")
+        
+        # Initialize Firebase
+        initialize_firebase()
+        logger.info("Firebase initialized")
+        
+        # Initialize database connection
+        await db_startup()
+        logger.info("Database connection established")
+        
+        # Initialize repository manager
+        database_url = (
+            f"postgresql+asyncpg://{database_config['user']}:"
+            f"{database_config['password']}@{database_config['host']}:"
+            f"{database_config['port']}/{database_config['dbname']}"
+        )
+        from .repositories.repository_manager import get_repository_manager
+        repo_manager = get_repository_manager(database_url)
+        await repo_manager.initialize()
+        app.state.store = repo_manager
+        logger.info("Repository manager initialized")
+        
+        # Register agents
+        register_agents()
+        logger.info("Agents registered")
+        
+        logger.info("Application startup complete")
+        
+    except ImportError as e:
+        logger.error(f"Import error during application startup: {e}", exc_info=True)
+        raise
+    except Exception as e:
+        logger.error(f"Error during application startup: {e}", exc_info=True)
+        raise
 
-# Initialize repository manager with database URL
-store = RepositoryManager(database_url=DATABASE_URL)
-app.state.store = store
+# Register startup and shutdown event handlers
+@app.on_event("startup")
+async def on_startup():
+    await startup_event()
 
-# Add shutdown handler to clean up resources
 @app.on_event("shutdown")
 async def shutdown_event():
     """Handle application shutdown."""
     logger.info("Shutting down application...")
-    # Close database connections
+    
+    # Clean up repository manager if it was initialized
+    if hasattr(app.state, 'store') and app.state.store is not None:
+        try:
+            await app.state.store.close()
+            logger.info("Repository manager closed")
+        except Exception as e:
+            logger.error(f"Error closing repository manager: {e}", exc_info=True)
+    
+    # Clean up database connections
     await db_shutdown()
-    # Clean up other resources
-    logger.info("Application shutdown complete.")
+    logger.info("Database connections closed")
+    
+    logger.info("Application shutdown complete")
 
 # Dependency to get the store
 def get_store(request: Request):

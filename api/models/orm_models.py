@@ -2,13 +2,34 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-import sqlalchemy as sa
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Boolean, text, CheckConstraint
+from enum import Enum as PyEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Boolean, text, CheckConstraint, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
+from typing import List, Optional, TypeVar, Type, Any
+
+
+class SubscriptionStatus(str, PyEnum):
+    """Enum for subscription status values."""
+    ACTIVE = "active"
+    TRIALING = "trialing"
+    CANCELED = "canceled"
+    PAST_DUE = "past_due"
+    UNPAID = "unpaid"
+    INCOMPLETE = "incomplete"
+    INCOMPLETE_EXPIRED = "incomplete_expired"
+    
+    @classmethod
+    def is_valid(cls, status: str) -> bool:
+        """Check if a status string is a valid subscription status."""
+        try:
+            cls(status)
+            return True
+        except ValueError:
+            return False
 
 Base = declarative_base()
 
@@ -29,33 +50,88 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
     
     id = Column(Integer, primary_key=True)
-    stripe_customer_id = Column(String, nullable=False)
-    stripe_subscription_id = Column(String, nullable=True)
-    status = Column(String, nullable=False)
-    current_period_end = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    stripe_customer_id = Column(String, nullable=False, index=True)
+    stripe_subscription_id = Column(String, nullable=True, index=True)
+    status = Column(Enum(SubscriptionStatus), nullable=False)
+    current_period_end = Column(DateTime, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
     trial_end = Column(DateTime, nullable=True)
     
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    # Add indexes for frequently queried fields
+    __table_args__ = (
+        # Index for looking up active subscriptions
+        {'sqlite_autoincrement': True},
+    )
+    
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     user = relationship("User", back_populates="subscriptions")
     
     # Link to CardDetails
-    card_details = relationship("CardDetails", back_populates="subscription", cascade="all, delete-orphan")
+    card_details = relationship(
+        "CardDetails", 
+        back_populates="subscription", 
+        uselist=False,  # One-to-one relationship
+        cascade="all, delete-orphan"
+    )
+    
+    def to_dict(self) -> dict:
+        """Convert subscription to dictionary with all relevant fields."""
+        result = {
+            'id': self.id,
+            'stripe_customer_id': self.stripe_customer_id,
+            'stripe_subscription_id': self.stripe_subscription_id,
+            'status': self.status.value if self.status else None,
+            'current_period_end': self.current_period_end,
+            'trial_end': self.trial_end,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at,
+            'user_id': self.user_id,
+        }
+        
+        # Add card details if they exist
+        if self.card_details:
+            result.update({
+                'card_last4': self.card_details.card_last4,
+                'card_brand': self.card_details.card_type,
+                'card_exp_month': self.card_details.exp_month,
+                'card_exp_year': self.card_details.exp_year,
+            })
+            
+        return result
 
 class CardDetails(Base):
     __tablename__ = "card_details"
     
     id = Column(Integer, primary_key=True)
-    subscription_id = Column(Integer, ForeignKey("subscriptions.id", ondelete="CASCADE"), nullable=False)  # Link to the Subscription table
+    subscription_id = Column(
+        Integer, 
+        ForeignKey("subscriptions.id", ondelete="CASCADE"), 
+        nullable=False,
+        unique=True  # Ensure one-to-one relationship
+    )
     card_last4 = Column(String(4), nullable=False)  # Last 4 digits of the card
     card_type = Column(String(50), nullable=False)  # Card type (e.g., Visa, Mastercard)
-    exp_month = Column(Integer, nullable=False)  # Expiration month
-    exp_year = Column(Integer, nullable=False)  # Expiration year
-    created_at = Column(DateTime, default=datetime.utcnow)
+    exp_month = Column(Integer, nullable=False)  # Expiration month (1-12)
+    exp_year = Column(Integer, nullable=False)   # Expiration year (4 digits)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
     
     # Relationship
     subscription = relationship("Subscription", back_populates="card_details")
+    
+    def to_dict(self) -> dict:
+        """Convert card details to dictionary."""
+        return {
+            'id': self.id,
+            'subscription_id': self.subscription_id,
+            'card_last4': self.card_last4,
+            'card_type': self.card_type,
+            'exp_month': self.exp_month,
+            'exp_year': self.exp_year,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
 
 class File(Base):
     __tablename__ = "files"
@@ -63,12 +139,11 @@ class File(Base):
     id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
     file_name = Column(String)
     file_url = Column(String)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     file_type = Column(String, nullable=True)  # 'pdf', 'youtube', etc.
-    # Using direct PostgreSQL enum type with string literal
     processing_status = Column(
-        String,  # Using String instead of Enum type to avoid case sensitivity issues
+        String,
         default="uploaded",
         nullable=False,
         index=True
@@ -78,12 +153,7 @@ class File(Base):
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
-    key_concepts = relationship(
-        "KeyConcept",
-        back_populates="file",
-        cascade="all, delete-orphan",
-        lazy="selectin"
-    )
+    key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
     flashcards = relationship("Flashcard", back_populates="file", cascade="all, delete-orphan")
     quiz_questions = relationship("QuizQuestion", back_populates="file", cascade="all, delete-orphan")
 
@@ -126,34 +196,24 @@ class Chunk(Base):
 
 class KeyConcept(Base):
     __tablename__ = "key_concepts"
-    __table_args__ = (
-        # Ensure end timestamp is after start timestamp for video segments
-        sa.CheckConstraint(
-            'source_video_timestamp_end_seconds IS NULL OR '
-            'source_video_timestamp_start_seconds IS NULL OR '
-            'source_video_timestamp_end_seconds >= source_video_timestamp_start_seconds',
-            name='check_video_timestamps_valid'
-        ),
-    )
 
     id = Column(Integer, primary_key=True, index=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    concept_title = Column(String(500), nullable=False)  # Added reasonable max length
+    concept_title = Column(String, nullable=False)
     concept_explanation = Column(Text, nullable=False)
     
-    source_page_number = Column(Integer, nullable=True, index=True)
-    source_video_timestamp_start_seconds = Column(Integer, nullable=True, index=True)
+    source_page_number = Column(Integer, nullable=True) 
+    source_video_timestamp_start_seconds = Column(Integer, nullable=True)
     source_video_timestamp_end_seconds = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    is_custom = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_custom = Column(Boolean, default=False, nullable=False)
     
     # Relationships
-    file = relationship("File", back_populates="key_concepts")
     flashcards = relationship("Flashcard", back_populates="key_concept", cascade="all, delete-orphan")
     quiz_questions = relationship("QuizQuestion", back_populates="key_concept", cascade="all, delete-orphan")
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     def __repr__(self):
         return f"<KeyConcept(id={self.id}, file_id={self.file_id}, title='{self.concept_title[:30]}...')>"
@@ -175,7 +235,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True)
     content = Column(Text)
     sender = Column(String)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     chat_history_id = Column(Integer, ForeignKey("chat_histories.id", ondelete="CASCADE"))
     
@@ -202,28 +262,17 @@ class Flashcard(Base):
 
 class QuizQuestion(Base):
     __tablename__ = "quiz_questions"
-    __table_args__ = (
-        # Ensure question_type is one of the allowed values
-        sa.CheckConstraint(
-            "question_type IN ('MCQ', 'true_false', 'short_answer')",
-            name='check_question_type_valid'
-        ),
-    )
     
-    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
-    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="SET NULL"), nullable=True, index=True)
-    question = Column(String(1000), nullable=False)  # Added reasonable max length
-    question_type = Column(String(50), nullable=False, index=True)
-    correct_answer = Column(Text, nullable=False)  # Changed to Text for longer answers
-    distractors = Column(JSON, nullable=True)  # For multiple choice options
-    is_custom = Column(Boolean, nullable=False, server_default='false', index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
+    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
+    question = Column(String, nullable=False)
+    question_type = Column(String, nullable=False)
+    correct_answer = Column(String, nullable=False)
+    distractors = Column(JSON, nullable=True)
+    is_custom = Column(Boolean, nullable=False, server_default='false')
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
     
     # Relationships
     file = relationship("File", back_populates="quiz_questions")
     key_concept = relationship("KeyConcept", back_populates="quiz_questions")
-    
-    def __repr__(self):
-        return f"<QuizQuestion(id={self.id}, question='{self.question[:50]}...', type={self.question_type})>"

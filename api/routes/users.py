@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
@@ -76,10 +76,9 @@ async def create_user( # Function name remains 'create_user'
         name = email 
 
     # Check if user already exists by email
-    existing_user = await store.user_repo.get_user_by_email(email)
-    if existing_user:
-        logger.info(f"POST /users: User with email {email} already exists with ID {existing_user.id}. Returning 200 OK.")
-        existing_user_id = existing_user.id
+    existing_user_id = await store.get_user_id_from_email(email)
+    if existing_user_id is not None:
+        logger.info(f"POST /users: User with email {email} already exists with ID {existing_user_id}. Returning 200 OK.")
         return JSONResponse(
             content={"message": "User already registered", "email": email, "user_id": existing_user_id}, 
             status_code=200
@@ -88,8 +87,8 @@ async def create_user( # Function name remains 'create_user'
     # If user does not exist, create them
     try:
         logger.info(f"POST /users: Creating new user with email {email} and name {name}.")
-        # Await the async add_user method
-        new_user_id = await store.add_user(email, name, firebase_uid=firebase_uid)
+        # Create the user with just email and name
+        new_user_id = await store.add_user(email, name)
         logger.info(f"POST /users: Successfully created new user with ID: {new_user_id}")
         return JSONResponse(
             content={"message": "User created successfully", "email": email, "user_id": new_user_id},
@@ -115,39 +114,43 @@ async def delete_user_data(user_id: str, user_gc_id: str, store: RepositoryManag
     logger.warning("delete_user_data helper is deprecated. Use RepositoryManager.delete_user_data instead.")
     return await store.delete_user_data(user_id=user_id, user_gc_id=user_gc_id)
 
+async def delete_user_task(user_id: str, user_email: str, store: RepositoryManager):
+    try:
+        success = await store.delete_user_data(user_id=user_id, user_gc_id=user_id)  # Using user_id as GC ID for backward compatibility
+        if not success:
+            logger.error(f"Failed to delete user data for {user_email}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to delete user data"
+            )
+    except HTTPException:
+        # Re-raise HTTP exceptions as they are
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user account: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while deleting the user account"
+        )
+
 # Route to delete a user
 @users_router.delete("", status_code=200)
 async def delete_user(
+    background_tasks: BackgroundTasks,
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
         user_info = user_data["user_info"]
-        user_gc_id = str(user_id)  # Using user_id as GC ID
+        user_email = user_info['email']
 
-        # Delete user data using RepositoryManager
-        success = await store.delete_user_data(
-            user_id=user_id,
-            user_gc_id=user_gc_id
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete user data"
-            )
-            
-        return {
-            "message": "User account and all associated data have been deleted.",
-            "email": user_info['email']
-        }
-        
-    except HTTPException:
-        raise
+        # Trigger background task to delete user and associated files
+        background_tasks.add_task(delete_user_task, user_id, user_email, store)
+        return {"message": "User deletion in progress", "email": user_email}
+    except IntegrityError:
+        logger.error(f"Database error while deleting user {user_email}")
+        raise HTTPException(status_code=500, detail="Failed to delete user due to database constraints")
     except Exception as e:
-        logger.error(f"Error deleting user account: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the user account"
-        )
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")

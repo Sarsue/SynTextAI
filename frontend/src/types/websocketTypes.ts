@@ -20,9 +20,9 @@ export interface AuthMessagePayload {
 // Specific payload for 'file_status_update' event
 export interface FileStatusUpdatePayload {
     file_id: number;
-    status: ProcessingStatus; // Use the specific type from components/types.ts
-    error_message?: string | null;
-    // Add other relevant fields like progress if available
+    status: ProcessingStatus;
+    error_message?: string; // Make error_message strictly string | undefined to match UploadedFile
+    progress?: number; // Progress value between 0 and 1
 }
 
 // Specific payload for 'file_processed' event (when backend signals completion/failure of a file)

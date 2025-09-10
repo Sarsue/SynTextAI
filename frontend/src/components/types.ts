@@ -21,7 +21,8 @@ export interface UploadedFile {
     created_at?: string;
     file_type: 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'youtube';
     status: ProcessingStatus; // Current processing state
-
+    progress?: number; // Progress percentage (0-1)
+    error_message?: string; // Error message if processing failed
 }
 
 export interface KeyConcept {

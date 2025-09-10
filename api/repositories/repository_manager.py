@@ -8,6 +8,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession, AsyncEngine
+from api.models import User
 
 from .domain_models import Flashcard, QuizQuestion
 from .session_manager import SessionContextManager
@@ -152,6 +153,62 @@ class RepositoryManager:
             from .async_file_repository import AsyncFileRepository
             self._file_repo = AsyncFileRepository(self)
         return self._file_repo
+        
+    async def get_user_id_from_email(self, email: str) -> Optional[int]:
+        """
+        Get a user's ID from their email address.
+        
+        Args:
+            email: Email address to look up
+            
+        Returns:
+            Optional[int]: User ID if found, None otherwise
+        """
+        user = await self.user_repo.get_user_by_email(email)
+        return user.id if user else None
+        
+    async def add_user(self, email: str, name: str) -> int:
+        """
+        Add a new user to the database.
+        
+        Args:
+            email: User's email address
+            name: User's display name
+            
+        Returns:
+            int: The ID of the newly created user
+            
+        Raises:
+            IntegrityError: If a user with the email already exists
+            Exception: For other database errors
+        """
+        return await self.user_repo.add_user(email, name)
+        
+    async def delete_user_data(self, user_id: str, user_gc_id: str) -> bool:
+        """
+        Delete a user and all their associated data.
+        
+        Args:
+            user_id: The ID of the user to delete
+            user_gc_id: The Google Cloud ID of the user (unused, kept for backward compatibility)
+            
+        Returns:
+            bool: True if deletion was successful, False otherwise
+        """
+        try:
+            async with self.session_scope() as session:
+                # Delete the user, which will cascade to related data due to cascade="all, delete-orphan"
+                user = await session.get(User, user_id)
+                if user:
+                    await session.delete(user)
+                    await session.commit()
+                    return True
+                return False
+        except Exception as e:
+            logger.error(f"Error deleting user {user_id}: {str(e)}", exc_info=True)
+            if 'session' in locals():
+                await session.rollback()
+            return False
 
     # Learning material operations are handled by AsyncLearningMaterialRepository
 
