@@ -8,17 +8,42 @@ EMAIL="osas@osas-inc.com"
 NGINX_CONFIG="/etc/nginx/sites-available/syntextaiapp"
 FIREBASE_PROJECT="docsynth-fbb02"
 
-# Function to ensure Docker is running
+# Function to ensure Docker is installed and running
 ensure_docker_running() {
     if ! command -v docker &> /dev/null; then
-        echo "Error: Docker is not installed. Please install Docker first."
-        exit 1
-    fi
-    
-    if ! sudo systemctl is-active --quiet docker; then
+        echo "Docker not found. Installing Docker..."
+        # Update the apt package index and install required packages
+        sudo apt-get update
+        sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+        
+        # Add Docker's official GPG key
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+        
+        # Add Docker repository
+        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+        
+        # Update package index again and install Docker CE
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+        
+        # Add current user to docker group to avoid sudo
+        sudo usermod -aG docker $USER
+        
+        # Enable and start Docker service
+        sudo systemctl enable docker
+        sudo systemctl start docker
+    elif ! sudo systemctl is-active --quiet docker; then
         echo "Starting Docker service..."
         sudo systemctl start docker
     fi
+    
+    # Verify Docker is running
+    if ! sudo docker info &> /dev/null; then
+        echo "Failed to start Docker. Please check Docker installation."
+        exit 1
+    fi
+    
+    echo "Docker is installed and running."
 }
 
 # Main deployment function
