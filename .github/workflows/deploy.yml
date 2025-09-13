@@ -108,25 +108,16 @@ jobs:
         script_stop: true
         script: |
           cd /home/root/
-          docker pull osasdeeon/syntextai:latest
           
-          # Recreate .env file from GitHub secrets
+          # Create .env file from GitHub secrets
           echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
-          chmod 600 .env  # Secure file permissions
+          chmod 600 .env
           
-          # Create Firebase credentials directory and file
+          # Create Firebase credentials
           mkdir -p api/config
           echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
           chmod 600 api/config/credentials.json
           
-          # Make sure the deploy script is executable and run it
+          # Make deploy script executable and run it
           chmod +x deploy.sh
-          
-          # Run deploy script - handle errors gracefully
-          ./deploy.sh || { 
-            echo "⚠️ Deploy script failed, but proceeding with container restart..."
-            # Stop previous container if running
-            docker-compose down || true
-            # Start new container with updated image
-            docker-compose up -d
-          }
+          ./deploy.sh
