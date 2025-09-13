@@ -228,3 +228,6 @@ env/
 .conda/
 .flaskenv
 *.gguf
+# GitHub Actions SSH keys
+do_github_actions*
+
