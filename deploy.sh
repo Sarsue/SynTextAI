@@ -15,11 +15,15 @@ echo "Updating system and installing dependencies..."
 sudo apt-get update
 sudo apt-get install -y docker.io nginx certbot python3-certbot-nginx curl
 
-# Step 2: Install Docker Compose
-echo "Installing Docker Compose..."
-DOCKER_COMPOSE_VERSION="v2.28.1"
-sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
+# Step 2: Install Docker Compose if not already installed
+if ! command -v docker-compose &> /dev/null; then
+    echo "Docker Compose not found. Installing..."
+    DOCKER_COMPOSE_VERSION="v2.28.1"
+    sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+else
+    echo "Docker Compose is already installed."
+fi
 
 # Step 3: Start and enable Docker
 echo "Starting Docker..."
@@ -129,8 +133,13 @@ if ! sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-to
     exit 1
 fi
 
-# Step 10: Bring up the Docker containers using Docker Compose
-echo "Bringing up Docker containers with Docker Compose..."
-sudo docker-compose -f docker-compose.yml up -d
+# Step 10: Clean up and restart containers
+echo "Cleaning up old containers and images..."
+sudo docker-compose down || true
+sudo docker system prune -af --volumes
+
+echo "Pulling latest images and starting containers..."
+sudo docker-compose pull
+sudo docker-compose -f docker-compose.yml up -d --force-recreate
 
 echo "Deployment completed successfully!"
