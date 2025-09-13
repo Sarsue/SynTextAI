@@ -16,9 +16,30 @@ DOMAIN="syntextai.com"
 EMAIL="osas@osas-inc.com"
 NGINX_CONFIG="/etc/nginx/sites-available/syntextaiapp"
 
+# Function to run commands with error handling
 run_command() {
     log_info "Running: $*"
     "$@" || log_error "Command failed: $*"
+}
+
+# Function to install required packages
+install_required_packages() {
+    log_info "Installing required system packages..."
+    
+    # Update package lists
+    run_command sudo apt-get update
+    
+    # Install Docker Compose plugin if not present
+    if ! docker compose version &> /dev/null; then
+        log_info "Installing Docker Compose plugin..."
+        run_command sudo apt-get install -y docker-compose-plugin
+    fi
+    
+    # Install Certbot for SSL
+    if ! command -v certbot &> /dev/null; then
+        log_info "Installing Certbot..."
+        run_command sudo apt-get install -y certbot python3-certbot-nginx
+    fi
 }
 
 ensure_docker_running() {
@@ -49,6 +70,8 @@ ensure_docker_running() {
 deploy() {
     log_info "Starting deployment..."
 
+    # Install required system packages first
+    install_required_packages
     ensure_docker_running
 
     log_info "Preparing application directory: $APP_DIR"
@@ -98,9 +121,9 @@ EOL
 
     log_info "Deploying Docker containers..."
     cd $APP_DIR
-    sudo docker-compose down || true
-    sudo docker-compose pull
-    sudo docker-compose up -d --force-recreate
+    sudo docker compose down || true
+    sudo docker compose pull
+    sudo docker compose up -d --force-recreate
 
     log_info "Deployment completed successfully!"
 }
