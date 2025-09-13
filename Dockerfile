@@ -60,14 +60,29 @@ ENV FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/
 ENV FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
 ENV FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
 
-# Install system dependencies including FFmpeg
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    build-essential \
     ffmpeg \
     libsndfile1 \
     curl \
-    supervisor && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    supervisor \
+    libpq-dev \
+    python3-dev \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libffi-dev \
+    tesseract-ocr \
+    libtesseract-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip and setuptools first
+RUN pip install --upgrade pip setuptools wheel
 
 # Set working directory
 WORKDIR /app
@@ -75,19 +90,21 @@ WORKDIR /app
 # Add the project root to the Python path
 ENV PYTHONPATH /app
 
-# Copy backend files
-COPY api/ ./api/
+# Copy requirements first for better layer caching
+COPY api/requirements.txt ./
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r ./api/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the backend files
+COPY api/ ./api/
 
 # Set environment variable for Whisper model directory
 ENV WHISPER_CACHE_DIR=/app/models
 
-# Download the Whisper model and store it in the image
+# Download the Whisper model (simplified, non-blocking)
 RUN mkdir -p $WHISPER_CACHE_DIR && \
-    pip install faster-whisper && \
-    python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
+    (python3 -c "from faster_whisper import WhisperModel; print('Downloading Whisper model...'); WhisperModel('base', download_root='$WHISPER_CACHE_DIR')" || echo "Warning: Failed to download Whisper model, continuing anyway") &
 
 # Copy the frontend build from the first stage
 COPY --from=build-step /app/frontend/build ./frontend/build

@@ -1,3 +1,4 @@
+# Core dependencies
 aiohttp==3.9.5
 aiosignal==1.3.1
 annotated-types==0.6.0
@@ -21,12 +22,15 @@ dataclasses-json==0.6.6
 Deprecated==1.2.14
 dirtyjson==1.0.8
 distro==1.9.0
-dspy
+# Pinned to avoid PyArrow conflicts
+dspy>=2.0.0,<3.0.0
 exceptiongroup==1.2.1
 filelock==3.14.0
 frozenlist==1.4.1
 fsspec==2024.5.0
-google-api-core
+
+# Google Cloud
+google-api-core>=2.11.0
 google-api-python-client
 google-auth==2.40.3
 google-auth-httplib2
@@ -41,11 +45,20 @@ grpcio
 grpcio-status
 grpcio-tools
 google-generativeai
+
+# Whisper and related
 faster-whisper==1.1.0
+# Pinning PyArrow to a version compatible with the datasets library
+pyarrow>=11.0.0,<12.0.0
+datasets>=2.14.0,<3.0.0
+
+# Web framework
 flask
 firebase-admin==6.8.0
 flask-cors
 flask-sse==1.0.0
+
+# Document processing
 pdfminer.six
 Pillow
 pytesseract
