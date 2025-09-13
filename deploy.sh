@@ -1,97 +1,108 @@
 #!/bin/bash
 set -e
 
-# Variables
+# Colors for better output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
 APP_DIR="/home/root/app"
 DOMAIN="syntextai.com"
 EMAIL="osas@osas-inc.com"
 NGINX_CONFIG="/etc/nginx/sites-available/syntextaiapp"
-FIREBASE_PROJECT="docsynth-fbb02"
 
-# Function to ensure Docker is installed and running
-ensure_docker_running() {
-    if ! command -v docker &> /dev/null; then
-        echo "Docker not found. Installing Docker..."
-        # Update the apt package index and install required packages
-        sudo apt-get update
-        sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-        
-        # Add Docker's official GPG key
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-        
-        # Add Docker repository
-        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-        
-        # Update package index again and install Docker CE
-        sudo apt-get update
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-        
-        # Add current user to docker group to avoid sudo
-        sudo usermod -aG docker $USER
-        
-        # Enable and start Docker service
-        sudo systemctl enable docker
-        sudo systemctl start docker
-    elif ! sudo systemctl is-active --quiet docker; then
-        echo "Starting Docker service..."
-        sudo systemctl start docker
-    fi
-    
-    # Verify Docker is running
-    if ! sudo docker info &> /dev/null; then
-        echo "Failed to start Docker. Please check Docker installation."
-        exit 1
-    fi
-    
-    echo "Docker is installed and running."
+run_command() {
+    log_info "Running: $*"
+    "$@" || log_error "Command failed: $*"
 }
 
-# Main deployment function
+ensure_docker_running() {
+    log_info "Checking Docker installation..."
+    
+    if ! command -v docker &> /dev/null; then
+        log_info "Docker not found. Installing Docker..."
+        echo 'Acquire::ForceIPv4 "true";' | sudo tee /etc/apt/apt.conf.d/99force-ipv4
+        run_command sudo apt-get update
+        run_command sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common
+        run_command sudo mkdir -p /etc/apt/keyrings
+        run_command curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+            | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        run_command sudo apt-get update
+        run_command sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        run_command sudo usermod -aG docker root
+        run_command sudo systemctl enable docker
+        run_command sudo systemctl start docker
+    elif ! sudo systemctl is-active --quiet docker; then
+        run_command sudo systemctl start docker
+    fi
+    
+    sudo docker info &> /dev/null || log_error "Docker is not running"
+    log_info "Docker is installed and running"
+}
+
 deploy() {
-    # Ensure Docker is running
+    log_info "Starting deployment..."
+
     ensure_docker_running
 
-    # Set up application directory
-    echo "Setting up application directory..."
-    mkdir -p $APP_DIR
+    log_info "Preparing application directory: $APP_DIR"
+    run_command mkdir -p $APP_DIR
 
-    # Copy environment files if they exist
     if [ -f /home/root/.env ]; then
-        echo "Copying environment file..."
-        cp /home/root/.env $APP_DIR
+        log_info "Copying .env file..."
+        run_command cp /home/root/.env $APP_DIR
+    else
+        log_warn "No .env file found at /home/root/.env"
     fi
 
-    # Configure Nginx
-    echo "Configuring Nginx..."
+    if ! command -v nginx &> /dev/null; then
+        log_info "Installing Nginx..."
+        run_command sudo apt-get update
+        run_command sudo apt-get install -y nginx
+    fi
+
+    log_info "Configuring Nginx..."
     sudo tee $NGINX_CONFIG > /dev/null <<EOL
-# [Previous Nginx config remains exactly the same]
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+
+    root /home/root/app;
+    index index.html index.htm;
+
+    location / {
+        try_files \$uri /index.html;
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
 EOL
 
-    # Enable Nginx configuration
     sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
     sudo mkdir -p /var/www/html/.well-known/acme-challenge
     sudo chown -R www-data:www-data /var/www/html/.well-known
 
-    # Test and reload Nginx
-    echo "Reloading Nginx..."
-    if ! sudo nginx -t; then
-        echo "Nginx configuration test failed. Exiting."
-        exit 1
-    fi
+    sudo nginx -t || log_error "Nginx config test failed"
     sudo systemctl reload nginx
 
-    # Try to obtain SSL certificate (non-blocking)
-    echo "Attempting to obtain SSL certificate..."
-    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL --quiet || true
+    log_info "Attempting SSL certificate..."
+    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL --quiet || log_warn "Certbot failed"
 
-    # Deploy containers
-    echo "Deploying containers..."
+    log_info "Deploying Docker containers..."
     cd $APP_DIR
     sudo docker-compose down || true
     sudo docker-compose pull
     sudo docker-compose up -d --force-recreate
 
-    echo "Deployment completed successfully!"
+    log_info "Deployment completed successfully!"
 }
 
 deploy
