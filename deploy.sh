@@ -1,55 +1,133 @@
 #!/bin/bash
 set -e
 
-APP_NAME="syntextai"
+# Variables
 APP_DIR="/home/root/app"
-DOCKER_COMPOSE_FILE="docker-compose.yml"
-DOCKER_IMAGE="osasdeeon/syntextai:latest"
+DOMAIN="syntextai.com"
+EMAIL="osas@osas-inc.com"
+NGINX_CONFIG="/etc/nginx/sites-available/syntextaiapp"
+FIREBASE_PROJECT="docsynth-fbb02"
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Step 1: Install dependencies
+echo "Updating system and installing dependencies..."
+sudo apt-get update
+sudo apt-get install -y docker.io nginx certbot python3-certbot-nginx curl ufw
 
-status() { echo -e "${GREEN}[+]${NC} $1"; }
-warning() { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[!] ERROR:${NC} $1"; exit 1; }
+# Step 2: Install Docker Compose
+echo "Installing Docker Compose..."
+DOCKER_COMPOSE_VERSION="v2.28.1"
+sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
 
-cd "$APP_DIR" || cd ~
-
-DOCKER_COMPOSE_CMD="docker compose"
-if command -v docker-compose &> /dev/null; then
-  DOCKER_COMPOSE_CMD="docker-compose"
+# Step 3: Start Docker
+echo "Starting Docker..."
+sudo systemctl start docker
+sudo systemctl enable docker
+if ! sudo systemctl is-active --quiet docker; then
+    echo "Docker failed to start. Exiting."
+    exit 1
 fi
 
-# Fallback mode only stops and restarts containers
-if [ "$1" == "fallback" ]; then
-  $DOCKER_COMPOSE_CMD down || true
-  $DOCKER_COMPOSE_CMD up -d --force-recreate
-  exit 0
+# Step 4: Ensure app directory exists
+mkdir -p $APP_DIR
+
+# Step 5: Copy .env
+if [ -f /home/root/.env ]; then
+    echo "Copying .env file..."
+    cp /home/root/.env $APP_DIR
+else
+    echo "Error: .env file missing at /home/root/.env"
+    exit 1
 fi
 
-status "Pulling latest Docker image..."
-docker pull "$DOCKER_IMAGE" || warning "Failed to pull image, using local"
-
-status "Starting zero-downtime deployment..."
-# Start new containers without stopping old ones
-$DOCKER_COMPOSE_CMD up -d --pull always --build --remove-orphans
-
-status "Waiting for containers to be healthy..."
-for i in {1..30}; do
-  HEALTH=$(curl -s http://localhost:3000/health || true)
-  if [[ "$HEALTH" == *"OK"* ]]; then
-    status "✅ Application is healthy"
-    break
-  fi
-  sleep 5
-done
-
-# Run DB migrations safely
-if docker ps | grep -q "${APP_NAME}_api"; then
-  status "Running database migrations..."
-  docker exec -it ${APP_NAME}_api_1 alembic upgrade head || warning "Migrations failed"
+# Step 6: Ensure Firebase config is present
+if [ ! -f "$APP_DIR/api/config/credentials.json" ]; then
+    echo "Copying Firebase credentials..."
+    mkdir -p $APP_DIR/api/config
+    cp /home/root/api/config/credentials.json $APP_DIR/api/config/
 fi
 
-status "Deployment complete!"
+# Step 7: Configure Nginx
+echo "Setting up Nginx config..."
+sudo tee $NGINX_CONFIG > /dev/null <<EOL
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name $DOMAIN www.$DOMAIN;
+
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    client_max_body_size 2G;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        send_timeout 300s;
+        try_files \$uri \$uri/ /index.html;
+    }
+
+    location /ws/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /__/auth {
+        proxy_pass https://$FIREBASE_PROJECT.firebaseapp.com;
+        proxy_ssl_server_name on;
+        proxy_set_header Host $FIREBASE_PROJECT.firebaseapp.com;
+    }
+}
+EOL
+
+sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
+
+# Step 8: Allow HTTP/HTTPS through firewall
+sudo ufw allow 80
+sudo ufw allow 443
+
+# Step 9: Create Certbot validation directory
+sudo mkdir -p /var/www/html/.well-known/acme-challenge
+sudo chown -R www-data:www-data /var/www/html/.well-known
+
+# Step 10: Reload Nginx
+sudo nginx -t
+sudo systemctl reload nginx
+
+# Step 11: Obtain or renew SSL certificate
+if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+    echo "Obtaining SSL certificate..."
+    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL
+else
+    echo "Renewing SSL certificate if needed..."
+    sudo certbot renew --quiet
+fi
+
+# Step 12: Start Docker containers
+echo "Starting Docker containers..."
+sudo docker-compose -f $APP_DIR/docker-compose.yml pull
+sudo docker-compose -f $APP_DIR/docker-compose.yml up -d --build
+
+echo "✅ Deployment complete with SSL and Firebase config!"

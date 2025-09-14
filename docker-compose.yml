@@ -12,11 +12,6 @@ services:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     deploy:
       resources:
         limits:
@@ -37,11 +32,6 @@ services:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
-    healthcheck:
-      test: ["CMD", "pgrep", "python"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     deploy:
       resources:
         limits:
@@ -60,11 +50,6 @@ services:
       - INSTANCE_NAME=SynTextAI
     networks:
       - syntextai_network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     deploy:
       resources:
         limits:
