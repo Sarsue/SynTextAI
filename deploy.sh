@@ -31,10 +31,43 @@ fi
 
 # Nginx config
 cat > /etc/nginx/sites-available/syntextai << 'EOL'
+# HTTP server - redirect to HTTPS
 server {
     listen 80;
+    listen [::]:80;
+    server_name syntextai.com www.syntextai.com;
+    
+    # Let's Encrypt verification
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    
+    # Redirect all other HTTP traffic to HTTPS
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name syntextai.com www.syntextai.com;
 
+    # SSL configuration will be managed by certbot
+    ssl_certificate /etc/letsencrypt/live/syntextai.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/syntextai.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header Referrer-Policy "strict-origin";
+
+    # Main application
     location / {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
@@ -45,8 +78,12 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
     }
 
+    # SearxNG search functionality
     location /search/ {
         proxy_pass http://localhost:8080/;
         proxy_http_version 1.1;
@@ -54,15 +91,43 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
     }
 
     client_max_body_size 100M;
 }
 EOL
 
+# Create certbot directory for challenges
+mkdir -p /var/www/certbot
+
 # Enable site
 ln -sf /etc/nginx/sites-available/syntextai /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx || error_exit "Failed to reload nginx"
+nginx -t && systemctl reload nginx || echo "Nginx reload failed, but continuing with deployment..."
+
+# Install certbot if not installed
+if ! command -v certbot &>/dev/null; then
+    echo "Installing certbot..."
+    apt-get update
+    apt-get install -y certbot python3-certbot-nginx || echo "Failed to install certbot, continuing without SSL..."
+fi
+
+# Check if SSL certificate exists, if not, request one
+if [ ! -f "/etc/letsencrypt/live/syntextai.com/fullchain.pem" ]; then
+    echo "Requesting Let's Encrypt certificate..."
+    certbot --nginx -d syntextai.com -d www.syntextai.com --non-interactive --agree-tos --email osas@osas-inc.com --redirect || \
+        echo "Failed to obtain SSL certificate, continuing with HTTP only..."
+    
+    # Set up automatic renewal
+    echo "Setting up automatic certificate renewal..."
+    (crontab -l 2>/dev/null; echo "0 0,12 * * * /usr/bin/certbot renew --quiet") | crontab - || \
+        echo "Failed to set up automatic renewal, certificates will need to be renewed manually"
+else
+    echo "SSL certificate already exists, skipping certificate request..."
+    certbot renew --quiet || echo "Certificate renewal check failed, continuing..."
+fi
 
 # Pull & start containers
 docker-compose pull || error_exit "Failed to pull images"
