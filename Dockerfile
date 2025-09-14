@@ -13,15 +13,14 @@ WORKDIR /app/frontend
 # Copy only package files first to leverage caching
 COPY frontend/package.json frontend/package-lock.json ./
 
-# Install dependencies (including dev dependencies needed for build)
-RUN npm ci
+# Install all dependencies including dev dependencies
+RUN npm install --include=dev
 
 # Copy the remaining files
 COPY frontend/ ./
 
-# Install production dependencies and build
-RUN npm install && \
-    npm run build && \
+# Build the application
+RUN npm run build && \
     npm cache clean --force
 
 # Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
