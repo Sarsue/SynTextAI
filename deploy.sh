@@ -71,21 +71,50 @@ else
     echo -e "${YELLOW}⚠️ Warning: .env file not found${NC}"
 fi
 
-# Stop and clean up existing containers
-echo -e "${GREEN}🛑 Stopping existing project containers...${NC}"
-docker-compose down --remove-orphans || echo -e "${YELLOW}⚠️ No existing containers to stop${NC}"
+# Stop and remove any running containers
+echo -e "${GREEN}🛑 Stopping and removing any running containers...${NC}"
+if [ "$(docker ps -aq)" ]; then
+    docker stop $(docker ps -aq) || true
+    docker rm -f $(docker ps -aq) || true
+fi
 
-# Cleanup unused Docker resources
-echo -e "${GREEN}🧹 Cleaning up unused Docker resources...${NC}"
-docker system prune -af --volumes || echo -e "${YELLOW}⚠️ Docker cleanup failed but continuing...${NC}"
+# Remove any existing networks
+echo -e "${GREEN}🧹 Removing any existing networks...${NC}"
+if [ "$(docker network ls -q -f name=syntextai)" ]; then
+    docker network rm $(docker network ls -q -f name=syntextai) || true
+fi
+
+# Clean up Docker resources
+echo -e "${GREEN}🧹 Cleaning up Docker resources...${NC}"
+docker system prune -af --volumes --filter "label!=com.docker.compose.project=syntextai" || true
 
 # Pull latest images
 echo -e "${GREEN}🐳 Pulling latest images...${NC}"
 docker-compose pull || error_exit "Failed to pull Docker images"
 
-# Start containers
-echo -e "${GREEN}🚀 Starting containers...${NC}"
-docker-compose up -d --remove-orphans --build --force-recreate || error_exit "Failed to start containers"
+# Start containers with retry logic
+MAX_RETRIES=3
+RETRY_DELAY=10
+
+start_containers() {
+    echo -e "${GREEN}🚀 Starting containers (Attempt $1/$MAX_RETRIES)...${NC}"
+    docker-compose up -d --remove-orphans --build --force-recreate
+    return $?
+}
+
+# Try starting containers with retries
+for ((i=1; i<=$MAX_RETRIES; i++)); do
+    if start_containers $i; then
+        echo -e "${GREEN}✅ Containers started successfully!${NC}"
+        break
+    else
+        if [ $i -eq $MAX_RETRIES ]; then
+            error_exit "Failed to start containers after $MAX_RETRIES attempts"
+        fi
+        echo -e "${YELLOW}⚠️ Attempt $i failed, retrying in $RETRY_DELAY seconds...${NC}"
+        sleep $RETRY_DELAY
+    fi
+done
 
 # Function to check container health
 check_container_health() {
