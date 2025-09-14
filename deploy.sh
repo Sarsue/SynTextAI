@@ -58,6 +58,13 @@ fi
 # Change to app directory
 cd "$APP_DIR" || error_exit "Failed to change to app directory"
 
+# Load environment variables from .env file
+if [ -f ".env" ]; then
+    echo -e "${GREEN}🔧 Loading environment variables...${NC}"
+    # Export all variables except those with spaces or special characters
+    export $(grep -v '^#' .env | xargs -d '\n')
+fi
+
 # Stop and clean up existing containers
 echo -e "${GREEN}🛑 Stopping existing project containers...${NC}"
 docker-compose down --remove-orphans || echo -e "${YELLOW}⚠️ No existing containers to stop${NC}"

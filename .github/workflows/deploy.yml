@@ -121,8 +121,7 @@ jobs:
             # Make deploy script executable
             chmod +x deploy.sh
 
-            # Run deployment with proper environment
-            export $(grep -v '^#' .env | xargs)  # Load .env variables
+            # Run deployment
             ./deploy.sh || { 
               echo "⚠️ Deploy script failed, attempting fallback..."
               docker-compose down || true
