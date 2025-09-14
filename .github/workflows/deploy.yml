@@ -95,7 +95,7 @@ jobs:
             mkdir -p frontend api/config
 
             # Generate .env using environment variables
-            cat > .env <<EOF
+            cat > .env << 'EOF'
 REACT_APP_FIREBASE_API_KEY="$REACT_APP_FIREBASE_API_KEY"
 REACT_APP_FIREBASE_AUTH_DOMAIN="$REACT_APP_FIREBASE_AUTH_DOMAIN"
 REACT_APP_FIREBASE_PROJECT_ID="$REACT_APP_FIREBASE_PROJECT_ID"
