@@ -181,11 +181,11 @@ setup_ssl || echo -e "${YELLOW}⚠️ SSL setup failed, continuing without HTTPS
 # Pull and start containers
 echo -e "${GREEN}✓ Starting Docker containers...${NC}"
 if ! docker-compose pull; then
-    echo -e "${YELLOW}⚠️ Failed to pull some images, trying to continue with local images...${NC}
+    echo -e "${YELLOW}⚠️ Failed to pull some images, trying to continue with local images...${NC}"
 fi
 
 if ! docker-compose up -d --build --force-recreate; then
-    echo -e "${YELLOW}⚠️ Failed to start containers, trying to continue...${NC}
+    echo -e "${YELLOW}⚠️ Failed to start containers, trying to continue...${NC}"
     docker-compose up -d || error_exit "Failed to start containers after retry"
 fi
 
