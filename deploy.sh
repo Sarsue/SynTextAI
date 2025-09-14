@@ -1,13 +1,11 @@
 #!/bin/bash
 set -e
 
-# Configuration
 APP_DIR="/home/root/app"
 ENV_FILE="$APP_DIR/.env"
 DOMAIN="syntextai.com"
 EMAIL="osas@osas-inc.com"
 
-# Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -15,17 +13,21 @@ NC='\033[0m'
 
 echo -e "${GREEN}🚀 Starting SynTextAI deployment...${NC}"
 
-# Error handler
 error_exit() {
     echo -e "${RED}❌ $1${NC}" >&2
     exit 1
 }
 
-# Ensure required directories
+# Ensure required dirs
 mkdir -p "$APP_DIR/api/config" "$APP_DIR/searxng"
 
-# Firebase credentials
-echo -e "${GREEN}✓ Setting up Firebase credentials...${NC}"
+# Check Firebase vars
+for var in FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY FIREBASE_CLIENT_EMAIL; do
+  [ -z "${!var}" ] && error_exit "Missing required env var: $var"
+done
+
+# Write Firebase credentials
+echo -e "${GREEN}✓ Writing Firebase credentials...${NC}"
 cat > "$APP_DIR/api/config/credentials.json" << EOF
 {
   "type": "service_account",
@@ -42,62 +44,58 @@ cat > "$APP_DIR/api/config/credentials.json" << EOF
 }
 EOF
 chmod 600 "$APP_DIR/api/config/credentials.json"
+chown root:root "$APP_DIR/api/config/credentials.json"
 
-# Stop old containers
-echo -e "${GREEN}✓ Cleaning up old containers...${NC}"
+# Clean old containers (safe)
+echo -e "${GREEN}✓ Stopping old containers...${NC}"
 docker compose down -v --remove-orphans || true
-docker system prune -af --volumes || true
 
-# Install Nginx if missing
+# Ensure nginx installed
 if ! command -v nginx &>/dev/null; then
-    echo -e "${YELLOW}Installing Nginx...${NC}"
-    apt-get update && apt-get install -y nginx || error_exit "Failed to install nginx"
+  echo -e "${YELLOW}Installing nginx...${NC}"
+  apt-get update && apt-get install -y nginx || error_exit "Failed to install nginx"
 fi
 
-# Nginx baseline config (HTTP redirect + dummy SSL)
-echo -e "${GREEN}✓ Configuring Nginx...${NC}"
+# Ensure baseline nginx config
+if [ ! -f /etc/nginx/sites-available/syntextai ]; then
 cat > /etc/nginx/sites-available/syntextai << 'EOL'
 server {
     listen 80;
-    listen [::]:80;
     server_name _;
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { return 301 https://$host$request_uri; }
 }
-
-server {
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2;
-    server_name _;
-    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
-    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
-
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options nosniff;
-    add_header X-XSS-Protection "1; mode=block";
-    add_header X-Frame-Options "SAMEORIGIN";
-    add_header Referrer-Policy "strict-origin";
-
-    location / {
-        return 200 'SynTextAI is being configured. Please wait.';
-        add_header Content-Type text/plain;
-    }
-}
 EOL
-
-mkdir -p /var/www/certbot
 ln -sf /etc/nginx/sites-available/syntextai /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx || echo -e "${YELLOW}⚠️ Nginx reload failed (continuing)...${NC}"
-
-# Install certbot if missing
-if ! command -v certbot &>/dev/null; then
-    echo -e "${YELLOW}Installing certbot...${NC}"
-    apt-get update
-    apt-get install -y certbot python3-certbot-nginx || echo -e "${YELLOW}⚠️ Certbot install failed, continuing without SSL...${NC}"
+mkdir -p /var/www/certbot
 fi
 
-# SSL setup
-setup_ssl() {
-    echo -e "${GREEN}✓ Setting up
+systemctl reload nginx || true
+
+# Ensure certbot
+if ! command -v certbot &>/dev/null; then
+  apt-get install -y certbot python3-certbot-nginx || echo -e "${YELLOW}⚠️ Certbot not installed${NC}"
+fi
+
+# SSL only if not present
+if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+  echo -e "${GREEN}✓ Obtaining SSL cert for $DOMAIN...${NC}"
+  systemctl stop nginx || true
+  certbot certonly --standalone -d "$DOMAIN" -d "www.$DOMAIN" \
+    --non-interactive --agree-tos --email "$EMAIL" \
+    --preferred-challenges http-01 || echo -e "${YELLOW}⚠️ Certbot failed, continuing without SSL${NC}"
+  systemctl start nginx || true
+fi
+
+# Start containers
+echo -e "${GREEN}✓ Starting Docker containers...${NC}"
+docker compose pull || echo -e "${YELLOW}⚠️ Pull failed, using local images${NC}"
+docker compose up -d --build --force-recreate || error_exit "Docker compose up failed"
+
+# Setup auto-renew once
+if ! crontab -l 2>/dev/null | grep -q certbot; then
+  (crontab -l 2>/dev/null; echo "0 0,12 * * * certbot renew --quiet --deploy-hook 'systemctl reload nginx'") | crontab -
+fi
+
+echo -e "${GREEN}✅ Deployment complete!${NC}"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
