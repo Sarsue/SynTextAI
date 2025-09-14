@@ -16,9 +16,13 @@ COPY frontend/package.json frontend/package-lock.json ./
 # Install dependencies (including dev dependencies needed for build)
 RUN npm ci
 
-# Copy the remaining files and build
+# Copy the remaining files
 COPY frontend/ ./
-RUN npm run build && npm cache clean --force
+
+# Install production dependencies and build
+RUN npm install && \
+    npm run build && \
+    npm cache clean --force
 
 # Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
 FROM python:3.10-slim AS base
