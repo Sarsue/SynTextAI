@@ -1,54 +1,75 @@
-version: '3.8'
-
 services:
   syntextaiapp:
     image: osasdeeon/syntextai:latest
     container_name: syntextaiapp
+    restart: unless-stopped
     ports:
       - "3000:3000"
-    env_file:
-      - .env
+    env_file: .env
+    environment:
+      - NODE_ENV=production
     volumes:
-      - ./api/config:/app/api/config
+      - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
-          memory: 4G  # Limit to 4GB
+          cpus: '2'
+          memory: 4G
           
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
     command: python -m api.worker
-    env_file:
-      - .env
+    restart: unless-stopped
+    env_file: .env
     environment:
+      - NODE_ENV=production
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
     volumes:
-      - ./api/config:/app/api/config
+      - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
+    healthcheck:
+      test: ["CMD", "pgrep", "python"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
-          memory: 2G  # Worker needs less memory than the API
-    restart: unless-stopped
+          cpus: '1'
+          memory: 2G
 
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./settings.yml:/etc/searxng/settings.yml
+      - ./searxng:/etc/searxng:ro
+    environment:
+      - INSTANCE_NAME=SynTextAI
     networks:
       - syntextai_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
-          memory: 8G  # Limit to 4GB
+          cpus: '2'
+          memory: 8G
 
 networks:
   syntextai_network:
