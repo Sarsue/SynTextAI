@@ -43,9 +43,10 @@ if [ ! -f "$APP_DIR/api/config/credentials.json" ] && [ -n "$FIREBASE_CREDENTIAL
     chmod 600 $APP_DIR/api/config/credentials.json
 fi
 
-# 6️⃣ Stop old containers to avoid name conflicts
-echo "🛑 Stopping old containers if they exist..."
-docker-compose down --remove-orphans || true
+# 6️⃣ Clean up old containers/images/volumes
+echo "💣 Cleaning up old Docker resources..."
+docker-compose down --volumes --remove-orphans || true
+docker system prune -a --volumes -f
 
 # 7️⃣ Pull latest images and start containers
 echo "🐳 Pulling latest images and starting containers..."
