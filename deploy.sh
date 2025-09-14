@@ -58,11 +58,17 @@ fi
 # Change to app directory
 cd "$APP_DIR" || error_exit "Failed to change to app directory"
 
-# Load environment variables from .env file
+# Load environment variables from .env file safely
 if [ -f ".env" ]; then
     echo -e "${GREEN}🔧 Loading environment variables...${NC}"
-    # Export all variables except those with spaces or special characters
-    export $(grep -v '^#' .env | xargs -d '\n')
+    # Use set -a to automatically export all variables
+    set -a
+    # Source the .env file directly
+    . ./.env
+    set +a
+    echo -e "${GREEN}✅ Environment variables loaded${NC}"
+else
+    echo -e "${YELLOW}⚠️ Warning: .env file not found${NC}"
 fi
 
 # Stop and clean up existing containers

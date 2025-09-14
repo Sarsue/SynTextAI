@@ -92,26 +92,26 @@ jobs:
             # Create necessary directories
             mkdir -p frontend api/config
             
-            # Create root .env file for Docker Compose
-            cat << 'EOF' > .env
-            # Database
-            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            
-            # Redis
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-            
-            # Frontend Environment Variables
-            REACT_APP_FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
-            REACT_APP_FIREBASE_AUTH_DOMAIN=${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}
-            REACT_APP_FIREBASE_PROJECT_ID=${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
-            REACT_APP_FIREBASE_STORAGE_BUCKET=${{ secrets.REACT_APP_FIREBASE_STORAGE_BUCKET }}
-            REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
-            REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
-            REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
-            REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
-            EOF
+            # Create root .env file for Docker Compose with proper quoting
+            {
+              echo '# Database'
+              echo "POSTGRES_DB=\"${{ secrets.POSTGRES_DB }}\""
+              echo "POSTGRES_USER=\"${{ secrets.POSTGRES_USER }}\""
+              echo "POSTGRES_PASSWORD=\"${{ secrets.POSTGRES_PASSWORD }}\""
+              echo ''
+              echo '# Redis'
+              echo "REDIS_PASSWORD=\"${{ secrets.REDIS_PASSWORD }}\""
+              echo ''
+              echo '# Frontend Environment Variables'
+              echo "REACT_APP_FIREBASE_API_KEY=\"${{ secrets.REACT_APP_FIREBASE_API_KEY }}\""
+              echo "REACT_APP_FIREBASE_AUTH_DOMAIN=\"${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}\""
+              echo "REACT_APP_FIREBASE_PROJECT_ID=\"${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}\""
+              echo "REACT_APP_FIREBASE_STORAGE_BUCKET=\"${{ secrets.REACT_APP_FIREBASE_STORAGE_BUCKET }}\""
+              echo "REACT_APP_FIREBASE_MESSAGING_SENDER_ID=\"${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}\""
+              echo "REACT_APP_FIREBASE_APP_ID=\"${{ secrets.REACT_APP_FIREBASE_APP_ID }}\""
+              echo "REACT_APP_STRIPE_API_KEY=\"${{ secrets.REACT_APP_STRIPE_API_KEY }}\""
+              echo "REACT_APP_POST_HOG_API_KEY=\"${{ secrets.REACT_APP_POST_HOG_API_KEY }}\""
+            } > .env
             chmod 600 .env
 
             # Create Firebase credentials
