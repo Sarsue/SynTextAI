@@ -189,35 +189,6 @@ if ! docker-compose up -d --build --force-recreate; then
     docker-compose up -d || error_exit "Failed to start containers after retry"
 fi
 
-# Create certbot directory for challenges
-mkdir -p /var/www/certbot
-
-# Enable site
-ln -sf /etc/nginx/sites-available/syntextai /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx || echo "Nginx reload failed, but continuing with deployment..."
-
-# Install certbot if not installed
-if ! command -v certbot &>/dev/null; then
-    echo "Installing certbot..."
-    apt-get update
-    apt-get install -y certbot python3-certbot-nginx || echo "Failed to install certbot, continuing without SSL..."
-fi
-
-# Check if SSL certificate exists, if not, request one
-if [ ! -f "/etc/letsencrypt/live/syntextai.com/fullchain.pem" ]; then
-    echo "Requesting Let's Encrypt certificate..."
-    certbot --nginx -d syntextai.com -d www.syntextai.com --non-interactive --agree-tos --email osas@osas-inc.com --redirect || \
-        echo "Failed to obtain SSL certificate, continuing with HTTP only..."
-    
-    # Set up automatic renewal
-    echo "Setting up automatic certificate renewal..."
-    (crontab -l 2>/dev/null; echo "0 0,12 * * * /usr/bin/certbot renew --quiet") | crontab - || \
-        echo "Failed to set up automatic renewal, certificates will need to be renewed manually"
-else
-    echo "SSL certificate already exists, skipping certificate request..."
-    certbot renew --quiet || echo "Certificate renewal check failed, continuing..."
-fi
-
 # Final status
 echo -e "\n${GREEN}✅ Deployment complete! SynTextAI is live!${NC}\n"
 echo -e "${YELLOW}📋 Container status:${NC}"
