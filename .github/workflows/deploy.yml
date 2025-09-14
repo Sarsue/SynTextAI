@@ -29,14 +29,14 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    # 🔹 Bootstrap step ensures Docker + Compose exist on fresh VM
-    - name: Bootstrap VM (Docker + Docker Compose)
+    - name: Bootstrap VM (Docker + Compose)
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.DO_HOST }}
         username: ${{ secrets.DO_USERNAME }}
         key: ${{ secrets.DO_SSH_KEY }}
         script_stop: true
+        timeout: 7200s  # 2 hour timeout
         script: |
           if ! command -v docker >/dev/null 2>&1; then
             echo "Installing Docker..."
@@ -91,61 +91,28 @@ jobs:
         host: ${{ secrets.DO_HOST }}
         username: ${{ secrets.DO_USERNAME }}
         key: ${{ secrets.DO_SSH_KEY }}
-        timeout: 3600  # 1 hour timeout
+        timeout: 7200s  # 2 hour timeout
         script_stop: true
         script: |
           set -e
           cd /home/root/
-          
+
           echo "🚀 Starting deployment process..."
-          
-          # Ensure deploy script is executable
+
           chmod +x deploy.sh || true
-          
-          # Ensure .env file exists
+
           if [ ! -f /home/root/.env ] && [ -n "${{ secrets.ENV_FILE_CONTENT }}" ]; then
               echo "ℹ️ Creating .env file from secrets..."
               echo "${{ secrets.ENV_FILE_CONTENT }}" > /home/root/.env
               chmod 600 /home/root/.env
           fi
-          
-          # Ensure Firebase credentials exist
+
           if [ ! -f /home/root/api/config/credentials.json ] && [ -n "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" ]; then
               echo "ℹ️ Setting up Firebase credentials..."
               mkdir -p /home/root/api/config
               echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > /home/root/api/config/credentials.json
               chmod 600 /home/root/api/config/credentials.json
           fi
-          
-          # Run the deployment script with error handling
+
           echo "🚀 Running deployment script..."
-          if ! ./deploy.sh; then
-              echo "❌ Deployment script failed. Attempting fallback..."
-              # Fallback: Try to ensure the app is running with the current setup
-              cd /home/root/app || cd /home/root
-              docker compose down || true
-              docker compose up -d --force-recreate
-              
-              # Verify the app is running
-              if ! docker ps | grep -q syntextaiapp; then
-                  echo "❌ Fallback deployment failed. Check logs and try again."
-                  exit 1
-              fi
-              echo "⚠️  Fallback deployment completed with manual container restart"
-          else
-              echo "✅ Deployment completed successfully!"
-          fi
-          
-          # Final verification
-          echo "🔍 Verifying deployment..."
-          cd /home/root/app || cd /home/root
-          if ! docker ps | grep -q syntextaiapp; then
-              echo "❌ Application container is not running after deployment!"
-              echo "📋 Container status:"
-              docker ps -a
-              echo "📜 Application logs:"
-              docker compose logs || true
-              exit 1
-          fi
-          
-          echo "🚀 Deployment verification complete!"
+          ./deploy.sh || (echo "⚠️ Deployment script failed. Attempting fallback..." && ./deploy.sh fallback)
