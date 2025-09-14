@@ -1,27 +1,12 @@
 # Stage 1: Build the frontend
 FROM node:18-alpine AS build-step
 
-# Define build arguments for environment variables
-ARG REACT_APP_FIREBASE_API_KEY
-ARG REACT_APP_FIREBASE_AUTH_DOMAIN
-ARG REACT_APP_FIREBASE_PROJECT_ID
-ARG REACT_APP_FIREBASE_STORAGE_BUCKET
-ARG REACT_APP_FIREBASE_MESSAGING_SENDER_ID
-ARG REACT_APP_FIREBASE_APP_ID
-ARG REACT_APP_STRIPE_API_KEY
-ARG REACT_APP_STRIPE_SECRET
-ARG REACT_APP_STRIPE_ENDPOINT_SECRET
+# No build-time secrets - these will be injected at runtime
+ENV PUBLIC_URL=/
+ENV NODE_ENV=production
 
-# Set as environment variables for the build
-ENV REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
-ENV REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
-ENV REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
-ENV REACT_APP_FIREBASE_STORAGE_BUCKET=${REACT_APP_FIREBASE_STORAGE_BUCKET}
-ENV REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
-ENV REACT_APP_FIREBASE_APP_ID=${REACT_APP_FIREBASE_APP_ID}
-ENV REACT_APP_STRIPE_API_KEY=${REACT_APP_STRIPE_API_KEY}
-ENV REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
-ENV REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
+# Only include non-sensitive environment variables
+ENV REACT_APP_ENV=production
 
 WORKDIR /app/frontend
 
@@ -38,34 +23,17 @@ RUN npm run build && npm cache clean --force
 # Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
 FROM python:3.10-slim AS base
 
-# Define build arguments for Firebase credentials
-ARG FIREBASE_PROJECT_ID
-ARG FIREBASE_PRIVATE_KEY
-ARG FIREBASE_CLIENT_EMAIL
-ARG FIREBASE_PRIVATE_KEY_ID
-ARG FIREBASE_CLIENT_ID
-ARG FIREBASE_CLIENT_CERT_URL
-ARG FIREBASE_AUTH_URI
-ARG FIREBASE_TOKEN_URI
-ARG FIREBASE_AUTH_PROVIDER_CERT_URL
-
-# Set as environment variables
-ENV FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-ENV FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-ENV FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-ENV FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
-ENV FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
-ENV FIREBASE_CLIENT_CERT_URL=${FIREBASE_CLIENT_CERT_URL}
-ENV FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
-ENV FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
-ENV FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONPATH=/app
 
 # Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    ffmpeg \
     libsndfile1 \
+    ffmpeg \
     curl \
     supervisor \
     libpq-dev \
@@ -96,9 +64,10 @@ COPY api/requirements.txt ./
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create config directory and copy credentials if they exist
+# Create config directory and handle credentials securely
 RUN mkdir -p /app/api/config
-COPY --chown=root:root api/config/credentials.json /app/api/config/credentials.json || echo "No local credentials file found, using environment variables"
+# Create an empty credentials file (will be mounted at runtime)
+RUN echo '{}' > /app/api/config/credentials.json && chmod 644 /app/api/config/credentials.json
 
 # Copy the rest of the backend files
 COPY api/ ./api/
