@@ -7,29 +7,19 @@ networks:
 services:
 
   # Main application (includes frontend and API)
+  # Main application (frontend + API)
   app:
     build:
       context: .
       dockerfile: Dockerfile
-      # Build args are now passed via .env file
     container_name: syntextaiapp
     restart: unless-stopped
     env_file: .env
-    expose:
-      - "3000"
-    environment:
-      - VIRTUAL_HOST=${DOMAIN:-localhost}
-      - VIRTUAL_PORT=3000
-      - LETSENCRYPT_HOST=${DOMAIN:-localhost}
-      - LETSENCRYPT_EMAIL=${ADMIN_EMAIL}
-    networks:
-      - syntextai_network
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
-      - VIRTUAL_HOST=syntextai.com,www.syntextai.com
-      - LETSENCRYPT_HOST=syntextai.com,www.syntextai.com
-      - LETSENCRYPT_EMAIL=osas@osas-inc.com
-      # Pass required environment variables
+      # Frontend environment variables
       - REACT_APP_FIREBASE_API_KEY
       - REACT_APP_FIREBASE_AUTH_DOMAIN
       - REACT_APP_FIREBASE_PROJECT_ID
@@ -38,14 +28,14 @@ services:
       - REACT_APP_FIREBASE_APP_ID
       - REACT_APP_STRIPE_API_KEY
       - REACT_APP_POST_HOG_API_KEY
+      # Cloud database connection
+      - DATABASE_URL
+      - REDIS_URL
     volumes:
       - ./api/config:/app/api/config:ro
-      - /app/node_modules  # Preserve node_modules in container
+      - /app/node_modules
     networks:
       - syntextai_network
-    depends_on:
-      - db
-      - redis
     deploy:
       resources:
         limits:
@@ -63,16 +53,15 @@ services:
     command: python -m api.worker
     environment:
       - NODE_ENV=production
-    networks:
-      - syntextai_network
-    depends_on:
-      - app
+      # Cloud database connection
+      - DATABASE_URL
+      - REDIS_URL
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
-      - db
-      - redis
+    depends_on:
+      - app
     deploy:
       resources:
         limits:
@@ -84,13 +73,14 @@ services:
     image: searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
-    expose:
-      - "8080"
+    ports:
+      - "8080:8080"
     environment:
       - INSTANCE_NAME=SynTextAI
-      - BASE_URL=https://${DOMAIN:-localhost}/search/
+      - BASE_URL=http://localhost/search/
       - AUTOCOMPLETE=google
       - ULTRA_SECRET_KEY=${SEARXNG_SECRET_KEY}
+      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
     volumes:
       - ./searxng:/etc/searxng:ro
     networks:
@@ -101,45 +91,8 @@ services:
           cpus: '2'
           memory: 8G
 
-  # PostgreSQL database
-  db:
-    image: postgres:15-alpine
-    container_name: syntextai-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - syntextai_network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Redis for caching and task queue
-  redis:
-    image: redis:7-alpine
-    container_name: syntextai-redis
-    restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - redis_data:/data
-    networks:
-      - syntextai_network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
 networks:
   syntextai_network:
     driver: bridge
 
-volumes:
-  postgres_data:
-  redis_data:
