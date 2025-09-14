@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   nginx-proxy:
     image: jwilder/nginx-proxy:latest
@@ -39,10 +37,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - NODE_ENV=production
-      - VIRTUAL_HOST=syntextai.com,www.syntextai.com
-      - LETSENCRYPT_HOST=syntextai.com,www.syntextai.com
-      - LETSENCRYPT_EMAIL=osas@osas-inc.com
+      NODE_ENV: production
+      VIRTUAL_HOST: syntextai.com,www.syntextai.com
+      LETSENCRYPT_HOST: syntextai.com,www.syntextai.com
+      LETSENCRYPT_EMAIL: osas@osas-inc.com
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
@@ -60,9 +58,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - NODE_ENV=production
-      - MAX_CONCURRENT_TASKS=3
-      - POLL_INTERVAL=10
+      NODE_ENV: production
+      MAX_CONCURRENT_TASKS: 3
+      POLL_INTERVAL: 10
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
@@ -79,10 +77,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      - INSTANCE_NAME=SynTextAI
-      - VIRTUAL_HOST=search.syntextai.com
-      - LETSENCRYPT_HOST=search.syntextai.com
-      - LETSENCRYPT_EMAIL=osas@osas-inc.com
+      INSTANCE_NAME: SynTextAI
+      VIRTUAL_HOST: search.syntextai.com
+      LETSENCRYPT_HOST: search.syntextai.com
+      LETSENCRYPT_EMAIL: osas@osas-inc.com
     volumes:
       - ./searxng:/etc/searxng:ro
     networks:
