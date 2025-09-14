@@ -1,13 +1,51 @@
+version: '3.8'
+
 services:
+  # Reverse proxy
+  nginx-proxy:
+    image: jwilder/nginx-proxy:latest
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/nginx/certs:/etc/nginx/certs:ro
+      - /etc/nginx/vhost.d
+      - /usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks:
+      - syntextai_network
+
+  # Let's Encrypt companion
+  letsencrypt:
+    image: nginxproxy/acme-companion
+    container_name: letsencrypt
+    restart: unless-stopped
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
+    volumes:
+      - /etc/nginx/certs:/etc/nginx/certs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/nginx/vhost.d
+      - /usr/share/nginx/html
+    networks:
+      - syntextai_network
+    depends_on:
+      - nginx-proxy
+
+  # Main app
   syntextaiapp:
     image: osasdeeon/syntextai:latest
     container_name: syntextaiapp
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     env_file: .env
     environment:
       - NODE_ENV=production
+      - VIRTUAL_HOST=syntextai.com,www.syntextai.com
+      - LETSENCRYPT_HOST=syntextai.com,www.syntextai.com
+      - LETSENCRYPT_EMAIL=osas@osas-inc.com
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
@@ -17,7 +55,8 @@ services:
         limits:
           cpus: '2'
           memory: 4G
-          
+
+  # Background worker
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
@@ -38,16 +77,19 @@ services:
           cpus: '1'
           memory: 2G
 
+  # SearxNG search engine
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./searxng:/etc/searxng:ro
+    env_file: .env
     environment:
       - INSTANCE_NAME=SynTextAI
+      - VIRTUAL_HOST=search.syntextai.com
+      - LETSENCRYPT_HOST=search.syntextai.com
+      - LETSENCRYPT_EMAIL=osas@osas-inc.com
+    volumes:
+      - ./searxng:/etc/searxng:ro
     networks:
       - syntextai_network
     deploy:

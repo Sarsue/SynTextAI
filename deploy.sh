@@ -1,141 +1,76 @@
 #!/bin/bash
 set -e
 
+# -------------------------------
 # Configuration
+# -------------------------------
 APP_DIR="/home/root/app"
-NGINX_CONFIG="/etc/nginx/sites-available/syntextai"
 DOMAIN="syntextai.com"
 EMAIL="osas@osas-inc.com"
 
-# Step 1: Install dependencies (idempotent)
-echo "🚀 Installing dependencies..."
+# Docker Compose file location
+DOCKER_COMPOSE_FILE="$APP_DIR/docker-compose.yml"
+
+# -------------------------------
+# Step 1: Install dependencies
+# -------------------------------
+echo "🚀 Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y docker.io curl ufw nginx certbot python3-certbot-nginx
+sudo apt-get install -y docker.io curl ufw
 
-# Step 2: Install Docker Compose
-echo "📦 Installing Docker Compose..."
-DOCKER_COMPOSE_VERSION="v2.28.1"
-sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# Step 3: Start Docker
-echo "🐳 Starting Docker..."
+# Enable and start Docker
 sudo systemctl enable --now docker
 if ! sudo systemctl is-active --quiet docker; then
     echo "❌ Docker failed to start. Exiting."
     exit 1
 fi
 
-# Step 4: Ensure app directory exists
+# -------------------------------
+# Step 2: Install Docker Compose
+# -------------------------------
+if ! command -v docker-compose >/dev/null 2>&1; then
+    echo "📦 Installing Docker Compose..."
+    DOCKER_COMPOSE_VERSION="v2.28.1"
+    sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+fi
+
+# -------------------------------
+# Step 3: Prepare app directory
+# -------------------------------
 echo "📂 Setting up app directory..."
-sudo mkdir -p $APP_DIR
+mkdir -p $APP_DIR
+cp -r ./* $APP_DIR/
 
-# Step 5: Copy .env and Firebase credentials
-echo "🔑 Setting up configuration..."
-sudo cp /home/root/.env $APP_DIR/
-sudo mkdir -p $APP_DIR/api/config
-sudo cp /home/root/api/config/credentials.json $APP_DIR/api/config/
-
-# Step 6: Configure firewall
+# -------------------------------
+# Step 4: Setup firewall
+# -------------------------------
 echo "🔥 Configuring firewall..."
 sudo ufw allow ssh
 sudo ufw allow http
 sudo ufw allow https
 sudo ufw --force enable
 
-# Step 7: Create temporary Nginx config for certbot
-echo "🌐 Setting up temporary Nginx config..."
-sudo tee $NGINX_CONFIG > /dev/null <<EOL
-server {
-    listen 80;
-    server_name $DOMAIN www.$DOMAIN;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    }
-
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
-}
-EOL
-
-# Enable the site
-sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
-
-# Step 8: Obtain SSL certificate if needed
-echo "🔐 Obtaining SSL certificate..."
-if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-    sudo certbot certonly --webroot -w /var/www/html -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL
-fi
-
-# Step 9: Update Nginx config with SSL
-echo "🔄 Updating Nginx config with SSL..."
-sudo tee $NGINX_CONFIG > /dev/null <<EOL
-server {
-    listen 80;
-    server_name $DOMAIN www.$DOMAIN;
-    return 301 https://\$host\$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name $DOMAIN www.$DOMAIN;
-
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-    client_max_body_size 2G;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        send_timeout 300s;
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    location /ws/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-
-    location /__/auth {
-        proxy_pass https://syntextai-7e4c6.firebaseapp.com;
-        proxy_ssl_server_name on;
-        proxy_set_header Host syntextai-7e4c6.firebaseapp.com;
-    }
-}
-EOL
-
-# Test and reload Nginx
-sudo nginx -t && sudo systemctl reload nginx
-
-# Step 10: Start Docker containers
-echo "🚀 Starting Docker containers..."
+# -------------------------------
+# Step 5: Launch Docker Compose
+# -------------------------------
+echo "🐳 Starting Docker Compose stack..."
 cd $APP_DIR
-sudo docker-compose pull
-sudo docker-compose up -d --remove-orphans --build
 
-echo "✅ Deployment complete! Your site should now be available at https://$DOMAIN"
+# Pull latest images and start containers
+sudo docker-compose -f $DOCKER_COMPOSE_FILE pull
+sudo docker-compose -f $DOCKER_COMPOSE_FILE up -d --remove-orphans --build
+
+# -------------------------------
+# Step 6: Wait for SSL certificates
+# -------------------------------
+echo "🔐 Waiting for Let's Encrypt certificates..."
+echo "ℹ️ First-time deployment may take 30–60 seconds to generate SSL certificates."
+sleep 30  # give acme-companion time to request certificates
+
+# -------------------------------
+# Step 7: Deployment complete
+# -------------------------------
+echo "✅ Deployment complete!"
+echo "🌐 Main app: https://$DOMAIN"
+echo "🔍 SearxNG search: https://search.$DOMAIN"
