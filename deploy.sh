@@ -1,54 +1,81 @@
 #!/bin/bash
 set -e
 
-# Variables
+# Configuration
 APP_DIR="/home/root/app"
+NGINX_CONFIG="/etc/nginx/sites-available/syntextai"
 DOMAIN="syntextai.com"
 EMAIL="osas@osas-inc.com"
-NGINX_CONFIG="/etc/nginx/sites-available/syntextaiapp"
-FIREBASE_PROJECT="docsynth-fbb02"
 
-# Step 1: Install dependencies
-echo "Updating system and installing dependencies..."
+# Step 1: Install dependencies (idempotent)
+echo "🚀 Installing dependencies..."
 sudo apt-get update
-sudo apt-get install -y docker.io nginx certbot python3-certbot-nginx curl ufw
+sudo apt-get install -y docker.io curl ufw nginx certbot python3-certbot-nginx
 
 # Step 2: Install Docker Compose
-echo "Installing Docker Compose..."
+echo "📦 Installing Docker Compose..."
 DOCKER_COMPOSE_VERSION="v2.28.1"
 sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
 
 # Step 3: Start Docker
-echo "Starting Docker..."
-sudo systemctl start docker
-sudo systemctl enable docker
+echo "🐳 Starting Docker..."
+sudo systemctl enable --now docker
 if ! sudo systemctl is-active --quiet docker; then
-    echo "Docker failed to start. Exiting."
+    echo "❌ Docker failed to start. Exiting."
     exit 1
 fi
 
 # Step 4: Ensure app directory exists
-mkdir -p $APP_DIR
+echo "📂 Setting up app directory..."
+sudo mkdir -p $APP_DIR
 
-# Step 5: Copy .env
-if [ -f /home/root/.env ]; then
-    echo "Copying .env file..."
-    cp /home/root/.env $APP_DIR
-else
-    echo "Error: .env file missing at /home/root/.env"
-    exit 1
+# Step 5: Copy .env and Firebase credentials
+echo "🔑 Setting up configuration..."
+sudo cp /home/root/.env $APP_DIR/
+sudo mkdir -p $APP_DIR/api/config
+sudo cp /home/root/api/config/credentials.json $APP_DIR/api/config/
+
+# Step 6: Configure firewall
+echo "🔥 Configuring firewall..."
+sudo ufw allow ssh
+sudo ufw allow http
+sudo ufw allow https
+sudo ufw --force enable
+
+# Step 7: Create temporary Nginx config for certbot
+echo "🌐 Setting up temporary Nginx config..."
+sudo tee $NGINX_CONFIG > /dev/null <<EOL
+server {
+    listen 80;
+    server_name $DOMAIN www.$DOMAIN;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+}
+EOL
+
+# Enable the site
+sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+
+# Step 8: Obtain SSL certificate if needed
+echo "🔐 Obtaining SSL certificate..."
+if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
+    sudo certbot certonly --webroot -w /var/www/html -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL
 fi
 
-# Step 6: Ensure Firebase config is present
-if [ ! -f "$APP_DIR/api/config/credentials.json" ]; then
-    echo "Copying Firebase credentials..."
-    mkdir -p $APP_DIR/api/config
-    cp /home/root/api/config/credentials.json $APP_DIR/api/config/
-fi
-
-# Step 7: Configure Nginx
-echo "Setting up Nginx config..."
+# Step 9: Update Nginx config with SSL
+echo "🔄 Updating Nginx config with SSL..."
 sudo tee $NGINX_CONFIG > /dev/null <<EOL
 server {
     listen 80;
@@ -95,39 +122,20 @@ server {
     }
 
     location /__/auth {
-        proxy_pass https://$FIREBASE_PROJECT.firebaseapp.com;
+        proxy_pass https://syntextai-7e4c6.firebaseapp.com;
         proxy_ssl_server_name on;
-        proxy_set_header Host $FIREBASE_PROJECT.firebaseapp.com;
+        proxy_set_header Host syntextai-7e4c6.firebaseapp.com;
     }
 }
 EOL
 
-sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
+# Test and reload Nginx
+sudo nginx -t && sudo systemctl reload nginx
 
-# Step 8: Allow HTTP/HTTPS through firewall
-sudo ufw allow 80
-sudo ufw allow 443
+# Step 10: Start Docker containers
+echo "🚀 Starting Docker containers..."
+cd $APP_DIR
+sudo docker-compose pull
+sudo docker-compose up -d --remove-orphans --build
 
-# Step 9: Create Certbot validation directory
-sudo mkdir -p /var/www/html/.well-known/acme-challenge
-sudo chown -R www-data:www-data /var/www/html/.well-known
-
-# Step 10: Reload Nginx
-sudo nginx -t
-sudo systemctl reload nginx
-
-# Step 11: Obtain or renew SSL certificate
-if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-    echo "Obtaining SSL certificate..."
-    sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL
-else
-    echo "Renewing SSL certificate if needed..."
-    sudo certbot renew --quiet
-fi
-
-# Step 12: Start Docker containers
-echo "Starting Docker containers..."
-sudo docker-compose -f $APP_DIR/docker-compose.yml pull
-sudo docker-compose -f $APP_DIR/docker-compose.yml up -d --build
-
-echo "✅ Deployment complete with SSL and Firebase config!"
+echo "✅ Deployment complete! Your site should now be available at https://$DOMAIN"
