@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Load .env file if it exists
+if [ -f ".env" ]; then
+    set -a
+    . .env
+    set +a
+fi
+
 # Configuration
 APP_DIR="/home/root/app"
 ENV_FILE="$APP_DIR/.env"
