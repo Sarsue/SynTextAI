@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Reverse proxy
   nginx-proxy:
     image: jwilder/nginx-proxy:latest
     container_name: nginx-proxy
@@ -17,7 +16,6 @@ services:
     networks:
       - syntextai_network
 
-  # Let's Encrypt companion
   letsencrypt:
     image: nginxproxy/acme-companion
     container_name: letsencrypt
@@ -35,7 +33,6 @@ services:
     depends_on:
       - nginx-proxy
 
-  # Main app
   syntextaiapp:
     image: osasdeeon/syntextai:latest
     container_name: syntextaiapp
@@ -56,7 +53,6 @@ services:
           cpus: '2'
           memory: 4G
 
-  # Background worker
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
@@ -77,7 +73,6 @@ services:
           cpus: '1'
           memory: 2G
 
-  # SearxNG search engine
   searxng:
     image: searxng/searxng:latest
     container_name: searxng

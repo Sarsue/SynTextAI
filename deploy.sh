@@ -1,33 +1,16 @@
 #!/bin/bash
 set -e
 
-# -------------------------------
-# Configuration
-# -------------------------------
 APP_DIR="/home/root/app"
-DOMAIN="syntextai.com"
-EMAIL="osas@osas-inc.com"
 
-# Docker Compose file location
-DOCKER_COMPOSE_FILE="$APP_DIR/docker-compose.yml"
+echo "🚀 Starting deployment process..."
 
-# -------------------------------
-# Step 1: Install dependencies
-# -------------------------------
-echo "🚀 Installing system dependencies..."
+# 1️⃣ Install system dependencies
+echo "📦 Installing dependencies..."
 sudo apt-get update
 sudo apt-get install -y docker.io curl ufw
 
-# Enable and start Docker
-sudo systemctl enable --now docker
-if ! sudo systemctl is-active --quiet docker; then
-    echo "❌ Docker failed to start. Exiting."
-    exit 1
-fi
-
-# -------------------------------
-# Step 2: Install Docker Compose
-# -------------------------------
+# 2️⃣ Install Docker Compose if missing
 if ! command -v docker-compose >/dev/null 2>&1; then
     echo "📦 Installing Docker Compose..."
     DOCKER_COMPOSE_VERSION="v2.28.1"
@@ -35,42 +18,34 @@ if ! command -v docker-compose >/dev/null 2>&1; then
     sudo chmod +x /usr/local/bin/docker-compose
 fi
 
-# -------------------------------
-# Step 3: Prepare app directory
-# -------------------------------
-echo "📂 Setting up app directory..."
+# 3️⃣ Start Docker
+sudo systemctl enable --now docker
+if ! sudo systemctl is-active --quiet docker; then
+    echo "❌ Docker failed to start"
+    exit 1
+fi
+
+# 4️⃣ Ensure app directory exists
 mkdir -p $APP_DIR
-cp -r ./* $APP_DIR/
-
-# -------------------------------
-# Step 4: Setup firewall
-# -------------------------------
-echo "🔥 Configuring firewall..."
-sudo ufw allow ssh
-sudo ufw allow http
-sudo ufw allow https
-sudo ufw --force enable
-
-# -------------------------------
-# Step 5: Launch Docker Compose
-# -------------------------------
-echo "🐳 Starting Docker Compose stack..."
 cd $APP_DIR
 
-# Pull latest images and start containers
-sudo docker-compose -f $DOCKER_COMPOSE_FILE pull
-sudo docker-compose -f $DOCKER_COMPOSE_FILE up -d --remove-orphans --build
+# 5️⃣ Copy secrets if missing
+if [ ! -f "$APP_DIR/.env" ] && [ -n "$ENV_FILE_CONTENT" ]; then
+    echo "ℹ️ Creating .env..."
+    echo "$ENV_FILE_CONTENT" > $APP_DIR/.env
+    chmod 600 $APP_DIR/.env
+fi
 
-# -------------------------------
-# Step 6: Wait for SSL certificates
-# -------------------------------
-echo "🔐 Waiting for Let's Encrypt certificates..."
-echo "ℹ️ First-time deployment may take 30–60 seconds to generate SSL certificates."
-sleep 30  # give acme-companion time to request certificates
+if [ ! -f "$APP_DIR/api/config/credentials.json" ] && [ -n "$FIREBASE_CREDENTIALS_JSON" ]; then
+    echo "ℹ️ Creating Firebase credentials..."
+    mkdir -p $APP_DIR/api/config
+    echo "$FIREBASE_CREDENTIALS_JSON" > $APP_DIR/api/config/credentials.json
+    chmod 600 $APP_DIR/api/config/credentials.json
+fi
 
-# -------------------------------
-# Step 7: Deployment complete
-# -------------------------------
-echo "✅ Deployment complete!"
-echo "🌐 Main app: https://$DOMAIN"
-echo "🔍 SearxNG search: https://search.$DOMAIN"
+# 6️⃣ Start or update containers
+echo "🐳 Pulling latest images and starting containers..."
+docker-compose pull
+docker-compose up -d --remove-orphans --build
+
+echo "✅ Deployment complete! Your site is live and SSL should be automatically handled by nginx-proxy + acme-companion."
