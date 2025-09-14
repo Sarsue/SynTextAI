@@ -89,11 +89,20 @@ jobs:
             set -e
             cd /home/root/
 
-            # Ensure frontend directory exists
-            mkdir -p frontend
+            # Create necessary directories
+            mkdir -p frontend api/config
             
-            # Recreate frontend .env file
-            cat << 'EOF' > frontend/.env
+            # Create root .env file for Docker Compose
+            cat << 'EOF' > .env
+            # Database
+            POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+            POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            
+            # Redis
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            
+            # Frontend Environment Variables
             REACT_APP_FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
             REACT_APP_FIREBASE_AUTH_DOMAIN=${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}
             REACT_APP_FIREBASE_PROJECT_ID=${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
@@ -103,17 +112,17 @@ jobs:
             REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
             REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
             EOF
-            chmod 600 frontend/.env
+            chmod 600 .env
 
             # Create Firebase credentials
-            mkdir -p api/config
             echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
             chmod 600 api/config/credentials.json
 
-            # Ensure deploy script is executable
+            # Make deploy script executable
             chmod +x deploy.sh
 
-            # Run deployment
+            # Run deployment with proper environment
+            export $(grep -v '^#' .env | xargs)  # Load .env variables
             ./deploy.sh || { 
               echo "⚠️ Deploy script failed, attempting fallback..."
               docker-compose down || true

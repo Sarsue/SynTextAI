@@ -1,4 +1,7 @@
+version: '3.8'
+
 services:
+  # Reverse proxy for HTTPS termination
   nginx-proxy:
     image: jwilder/nginx-proxy:latest
     container_name: nginx-proxy
@@ -14,6 +17,7 @@ services:
     networks:
       - syntextai_network
 
+  # SSL certificate management
   letsencrypt:
     image: nginxproxy/acme-companion
     container_name: letsencrypt
@@ -31,56 +35,79 @@ services:
     depends_on:
       - nginx-proxy
 
-  syntextaiapp:
-    image: osasdeeon/syntextai:latest
-    container_name: syntextaiapp
+  # Main application (includes frontend and API)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Build args are now passed via .env file
+    container_name: syntextai-app
     restart: unless-stopped
     env_file: .env
     environment:
-      NODE_ENV: production
-      VIRTUAL_HOST: syntextai.com,www.syntextai.com
-      LETSENCRYPT_HOST: syntextai.com,www.syntextai.com
-      LETSENCRYPT_EMAIL: osas@osas-inc.com
+      - NODE_ENV=production
+      - VIRTUAL_HOST=syntextai.com,www.syntextai.com
+      - LETSENCRYPT_HOST=syntextai.com,www.syntextai.com
+      - LETSENCRYPT_EMAIL=osas@osas-inc.com
+      # Pass required environment variables
+      - REACT_APP_FIREBASE_API_KEY
+      - REACT_APP_FIREBASE_AUTH_DOMAIN
+      - REACT_APP_FIREBASE_PROJECT_ID
+      - REACT_APP_FIREBASE_STORAGE_BUCKET
+      - REACT_APP_FIREBASE_MESSAGING_SENDER_ID
+      - REACT_APP_FIREBASE_APP_ID
+      - REACT_APP_STRIPE_API_KEY
+      - REACT_APP_POST_HOG_API_KEY
     volumes:
       - ./api/config:/app/api/config:ro
+      - /app/node_modules  # Preserve node_modules in container
     networks:
       - syntextai_network
+    depends_on:
+      - db
+      - redis
     deploy:
       resources:
         limits:
           cpus: '2'
           memory: 4G
 
+  # Background worker for async tasks
   worker:
-    image: osasdeeon/syntextai:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: syntextai-worker
     command: python -m api.worker
     restart: unless-stopped
     env_file: .env
     environment:
-      NODE_ENV: production
-      MAX_CONCURRENT_TASKS: 3
-      POLL_INTERVAL: 10
+      - NODE_ENV=production
+      - MAX_CONCURRENT_TASKS=3
+      - POLL_INTERVAL=10
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
+    depends_on:
+      - db
+      - redis
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 2G
 
+  # Search functionality
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
-    env_file: .env
     environment:
-      INSTANCE_NAME: SynTextAI
-      VIRTUAL_HOST: search.syntextai.com
-      LETSENCRYPT_HOST: search.syntextai.com
-      LETSENCRYPT_EMAIL: osas@osas-inc.com
+      - INSTANCE_NAME=SynTextAI
+      - VIRTUAL_HOST=search.syntextai.com
+      - LETSENCRYPT_HOST=search.syntextai.com
+      - LETSENCRYPT_EMAIL=osas@osas-inc.com
     volumes:
       - ./searxng:/etc/searxng:ro
     networks:
@@ -91,6 +118,45 @@ services:
           cpus: '2'
           memory: 8G
 
+  # PostgreSQL database
+  db:
+    image: postgres:15-alpine
+    container_name: syntextai-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - syntextai_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and task queue
+  redis:
+    image: redis:7-alpine
+    container_name: syntextai-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - syntextai_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   syntextai_network:
     driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
