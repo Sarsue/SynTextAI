@@ -84,6 +84,45 @@ if [ "$(docker network ls -q -f name=syntextai)" ]; then
     docker network rm $(docker network ls -q -f name=syntextai) || true
 fi
 
+# Function to check if a port is available
+port_available() {
+    ! lsof -i :$1 -sTCP:LISTEN -t >/dev/null
+}
+
+# Try default ports first
+HTTP_PORT=80
+HTTPS_PORT=443
+
+# Check if default ports are available
+if ! port_available $HTTP_PORT || ! port_available $HTTPS_PORT; then
+    echo -e "${YELLOW}⚠️ Default ports (80/443) are in use. Trying alternative ports...${NC}"
+    
+    # Try common alternative ports
+    ALTERNATIVE_PORTS=(8080 8081 8443 8888)
+    for port in "${ALTERNATIVE_PORTS[@]}"; do
+        if port_available $port; then
+            if [ $port -lt 1024 ] && [ "$(id -u)" != "0" ]; then
+                echo -e "${YELLOW}⚠️ Port $port requires root privileges, skipping...${NC}"
+                continue
+            fi
+            
+            if [ $HTTP_PORT -eq 80 ]; then
+                HTTP_PORT=$port
+                echo -e "${GREEN}✅ Found available HTTP port: $HTTP_PORT${NC}"
+            elif [ $HTTPS_PORT -eq 443 ]; then
+                HTTPS_PORT=$port
+                echo -e "${GREEN}✅ Found available HTTPS port: $HTTPS_PORT${NC}"
+                break
+            fi
+        fi
+    done
+    
+    # Export the ports to be used by docker-compose
+export NGINX_HTTP_PORT=$HTTP_PORT
+export NGINX_HTTPS_PORT=$HTTPS_PORT
+echo -e "${GREEN}🔧 Using ports - HTTP: $HTTP_PORT, HTTPS: $HTTPS_PORT${NC}"
+fi
+
 # Clean up Docker resources
 echo -e "${GREEN}🧹 Cleaning up Docker resources...${NC}"
 docker system prune -af --volumes --filter "label!=com.docker.compose.project=syntextai" || true
