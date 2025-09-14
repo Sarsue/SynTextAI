@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   syntextai_network:
     driver: bridge
@@ -17,40 +15,32 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
-      # Frontend environment variables (from .env)
-      - REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
-      - REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
-      - REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
-      - REACT_APP_FIREBASE_STORAGE_BUCKET=${REACT_APP_FIREBASE_STORAGE_BUCKET}
-      - REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
-      - REACT_APP_FIREBASE_APP_ID=${REACT_APP_FIREBASE_APP_ID}
-      - REACT_APP_STRIPE_API_KEY=${REACT_APP_STRIPE_API_KEY}
-      - REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
-      - REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
-      - REACT_APP_POST_HOG_API_KEY=${REACT_APP_POST_HOG_API_KEY}
+      NODE_ENV: production
+      # Frontend env vars
+      REACT_APP_FIREBASE_API_KEY: ${REACT_APP_FIREBASE_API_KEY}
+      REACT_APP_FIREBASE_AUTH_DOMAIN: ${REACT_APP_FIREBASE_AUTH_DOMAIN}
+      REACT_APP_FIREBASE_PROJECT_ID: ${REACT_APP_FIREBASE_PROJECT_ID}
+      REACT_APP_FIREBASE_STORAGE_BUCKET: ${REACT_APP_FIREBASE_STORAGE_BUCKET}
+      REACT_APP_FIREBASE_MESSAGING_SENDER_ID: ${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
+      REACT_APP_FIREBASE_APP_ID: ${REACT_APP_FIREBASE_APP_ID}
+      REACT_APP_STRIPE_API_KEY: ${REACT_APP_STRIPE_API_KEY}
+      REACT_APP_STRIPE_SECRET: ${REACT_APP_STRIPE_SECRET}
+      REACT_APP_STRIPE_ENDPOINT_SECRET: ${REACT_APP_STRIPE_ENDPOINT_SECRET}
+      REACT_APP_POST_HOG_API_KEY: ${REACT_APP_POST_HOG_API_KEY}
       # Backend Firebase Admin
-      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
-      - FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
-      - FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
-      - FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
-      - FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
-      - FIREBASE_CLIENT_CERT_URL=${FIREBASE_CLIENT_CERT_URL}
-      - FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
-      - FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
-      - FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+      FIREBASE_PRIVATE_KEY_ID: ${FIREBASE_PRIVATE_KEY_ID}
+      FIREBASE_CLIENT_ID: ${FIREBASE_CLIENT_ID}
+      FIREBASE_CLIENT_CERT_URL: ${FIREBASE_CLIENT_CERT_URL}
+      FIREBASE_AUTH_URI: ${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+      FIREBASE_TOKEN_URI: ${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
+      FIREBASE_AUTH_PROVIDER_CERT_URL: ${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
     volumes:
-      # Mount credentials.json if it exists, otherwise use the empty file from the image
       - ./api/config/credentials.json:/app/api/config/credentials.json:ro
-      # Prevent overriding node_modules with host's directory
-      - /app/node_modules
     networks:
       - syntextai_network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
 
   # Worker for background tasks
   worker:
@@ -62,26 +52,20 @@ services:
     env_file: .env
     command: python -m api.worker
     environment:
-      - NODE_ENV=production
-      # Backend Firebase Admin
-      - FIREBASE_PROJECT_ID
-      - FIREBASE_PRIVATE_KEY
-      - FIREBASE_CLIENT_EMAIL
-      - FIREBASE_PRIVATE_KEY_ID
-      - FIREBASE_CLIENT_ID
-      - FIREBASE_CLIENT_CERT_URL
-      - FIREBASE_AUTH_URI
-      - FIREBASE_TOKEN_URI
-      - FIREBASE_AUTH_PROVIDER_CERT_URL
+      NODE_ENV: production
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+      FIREBASE_PRIVATE_KEY_ID: ${FIREBASE_PRIVATE_KEY_ID}
+      FIREBASE_CLIENT_ID: ${FIREBASE_CLIENT_ID}
+      FIREBASE_CLIENT_CERT_URL: ${FIREBASE_CLIENT_CERT_URL}
+      FIREBASE_AUTH_URI: ${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+      FIREBASE_TOKEN_URI: ${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
+      FIREBASE_AUTH_PROVIDER_CERT_URL: ${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 2G
 
   # SearxNG search engine
   searxng:
@@ -91,17 +75,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - INSTANCE_NAME=SynTextAI
-      - BASE_URL=http://localhost/search/
-      - AUTOCOMPLETE=google
-      - ULTRA_SECRET_KEY=${SEARXNG_SECRET_KEY}
-      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+      INSTANCE_NAME: SynTextAI
+      BASE_URL: https://syntextai.com/search/
+      AUTOCOMPLETE: google
+      SEARXNG_SETTINGS_PATH: /etc/searxng/settings.yml
     volumes:
       - ./searxng:/etc/searxng:ro
     networks:
       - syntextai_network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 8G

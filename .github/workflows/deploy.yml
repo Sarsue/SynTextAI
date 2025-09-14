@@ -25,55 +25,10 @@ jobs:
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
           echo "📝 Message: ${{ github.event.inputs.deploy_message }}"
         fi
-        
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    # Create Firebase credentials.json from secrets
-    - name: Create Firebase credentials
-      run: |
-        mkdir -p api/config
-        cat > api/config/credentials.json << 'EOF'
-        {
-          "type": "service_account",
-          "project_id": "${{ secrets.FIREBASE_PROJECT_ID }}",
-          "private_key_id": "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}",
-          "private_key": "${{ secrets.FIREBASE_PRIVATE_KEY }}",
-          "client_email": "${{ secrets.FIREBASE_CLIENT_EMAIL }}",
-          "client_id": "${{ secrets.FIREBASE_CLIENT_ID }}",
-          "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-          "token_uri": "https://oauth2.googleapis.com/token",
-          "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-          "client_x509_cert_url": "${{ secrets.FIREBASE_CLIENT_CERT_URL }}",
-          "universe_domain": "googleapis.com"
-        }
-        EOF
-        
-        # Set environment variables for Docker build
-        echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> $GITHUB_ENV
-        echo "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" >> $GITHUB_ENV
-        echo "FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}" >> $GITHUB_ENV
-        echo "FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" >> $GITHUB_ENV
-        echo "FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}" >> $GITHUB_ENV
-        echo "FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}" >> $GITHUB_ENV
-        echo "FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth" >> $GITHUB_ENV
-        echo "FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token" >> $GITHUB_ENV
-        echo "FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs" >> $GITHUB_ENV
-        
-    # Create frontend .env file with Firebase web config
-    - name: Create frontend environment file
-      run: |
-        cat << EOF > frontend/.env
-        REACT_APP_FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
-        REACT_APP_FIREBASE_AUTH_DOMAIN=${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}
-        REACT_APP_FIREBASE_PROJECT_ID=${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
-        REACT_APP_FIREBASE_STORAGE_BUCKET=${{ secrets.REACT_APP_FIREBASE_STORAGE_BUCKET }}
-        REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
-        REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
-        REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
-        EOF
-        chmod 600 frontend/.env
-    
     - name: Login to DockerHub
       uses: docker/login-action@v2
       with:
@@ -88,7 +43,7 @@ jobs:
         tags: ${{ secrets.DOCKER_USERNAME }}/syntextai:latest
         file: ./Dockerfile
 
-    - name: Copy deploy files to Digital Ocean
+    - name: Copy deploy files to server
       uses: appleboy/scp-action@v0.1.3
       with:
         host: ${{ secrets.DO_HOST }}
@@ -97,7 +52,7 @@ jobs:
         source: "deploy.sh,docker-compose.yml"
         target: "/home/root/"
 
-    - name: Deploy to Digital Ocean
+    - name: Deploy to server
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.DO_HOST }}
@@ -106,9 +61,9 @@ jobs:
         script_stop: true
         script: |
           cd /home/root/
-          docker pull osasdeeon/syntextai:latest
-          
-          # Create .env file with all required environment variables
+          docker pull ${{ secrets.DOCKER_USERNAME }}/syntextai:latest
+
+          # Write .env file
           cat > .env << 'EOF'
           # Frontend/Firebase
           REACT_APP_FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
@@ -121,22 +76,22 @@ jobs:
           REACT_APP_STRIPE_SECRET=${{ secrets.REACT_APP_STRIPE_SECRET }}
           REACT_APP_STRIPE_ENDPOINT_SECRET=${{ secrets.REACT_APP_STRIPE_ENDPOINT_SECRET }}
           REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
-          
+
           # Backend Firebase Admin
           FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}'
+          FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}
           FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
           FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}
           FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}
-          FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
-          FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
-          FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+          FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth
+          FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token
+          FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
           EOF
-          
+
           chmod 600 .env
-          
-          # Create Firebase credentials file
+
+          # Write credentials.json
           mkdir -p api/config
           cat > api/config/credentials.json << 'EOF'
           {
@@ -153,17 +108,13 @@ jobs:
             "universe_domain": "googleapis.com"
           }
           EOF
-          
+
           chmod 600 api/config/credentials.json
-          
-          # Make sure the deploy script is executable and run it
+
+          # Run deploy
           chmod +x deploy.sh
-          
-          # Run deploy script - handle errors gracefully
-          ./deploy.sh || { 
-            echo "⚠️ Deploy script failed, but proceeding with container restart..."
-            # Stop previous container if running
+          ./deploy.sh || {
+            echo "⚠️ Deploy script failed, restarting containers..."
             docker-compose down || true
-            # Start new container with updated image
             docker-compose up -d
           }
