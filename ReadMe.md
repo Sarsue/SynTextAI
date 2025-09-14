@@ -1,1 +1,23 @@
 AI Powered Engine for PDF and Youtube Videos. (QA, Chat, Flashcards, Summarization... Transalation and other features coming)
+
+# Firebase
+REACT_APP_FIREBASE_API_KEY=
+REACT_APP_FIREBASE_AUTH_DOMAIN=
+REACT_APP_FIREBASE_PROJECT_ID=
+REACT_APP_FIREBASE_STORAGE_BUCKET=
+REACT_APP_FIREBASE_MESSAGING_SENDER_ID=
+REACT_APP_FIREBASE_APP_ID=
+
+# Stripe
+REACT_APP_STRIPE_API_KEY=
+
+# PostHog
+REACT_APP_POST_HOG_API_KEY=
+
+# Backend settings
+NODE_ENV=production
+PORT=3000
+
+# Worker settings
+MAX_CONCURRENT_TASKS=3
+POLL_INTERVAL=10

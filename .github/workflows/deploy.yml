@@ -19,7 +19,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Display deployment information
+      - name: Display deployment info
         run: |
           echo "🚀 Building and deploying SynTextAI"
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -53,16 +53,16 @@ jobs:
             REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
             REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
 
-      - name: Copy deploy files to Digital Ocean
+      - name: Copy deploy files to DigitalOcean
         uses: appleboy/scp-action@v0.1.3
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USERNAME }}
           key: ${{ secrets.DO_SSH_KEY }}
-          source: "deploy.sh,docker-compose.yml,.env,api/config/credentials.json"
+          source: "deploy.sh,docker-compose.yml"
           target: "/home/root/"
 
-      - name: Deploy to Digital Ocean
+      - name: Deploy to DigitalOcean
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.DO_HOST }}
@@ -75,4 +75,6 @@ jobs:
             cd /home/root/
             echo "🚀 Running deployment script..."
             chmod +x deploy.sh
+            ENV_FILE_CONTENT="${{ secrets.ENV_FILE_CONTENT }}"
+            FIREBASE_CREDENTIALS_JSON="${{ secrets.FIREBASE_CREDENTIALS_JSON }}"
             ./deploy.sh || (echo "⚠️ Deployment script failed. Attempting fallback..." && ./deploy.sh fallback)
