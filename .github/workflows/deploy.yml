@@ -84,9 +84,12 @@ jobs:
             # Create required directories
             mkdir -p frontend api/config
 
-            # Create root .env file for Docker Compose with proper quoting
+            # Write .env from GitHub secrets
             {
-              echo '# Frontend Environment Variables'
+              echo "POSTGRES_DB=\"${{ secrets.POSTGRES_DB }}\""
+              echo "POSTGRES_USER=\"${{ secrets.POSTGRES_USER }}\""
+              echo "POSTGRES_PASSWORD=\"${{ secrets.POSTGRES_PASSWORD }}\""
+              echo "REDIS_PASSWORD=\"${{ secrets.REDIS_PASSWORD }}\""
               echo "REACT_APP_FIREBASE_API_KEY=\"${{ secrets.REACT_APP_FIREBASE_API_KEY }}\""
               echo "REACT_APP_FIREBASE_AUTH_DOMAIN=\"${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}\""
               echo "REACT_APP_FIREBASE_PROJECT_ID=\"${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}\""
@@ -96,46 +99,36 @@ jobs:
               echo "REACT_APP_STRIPE_API_KEY=\"${{ secrets.REACT_APP_STRIPE_API_KEY }}\""
               echo "REACT_APP_POST_HOG_API_KEY=\"${{ secrets.REACT_APP_POST_HOG_API_KEY }}\""
             } > .env
-            chmod 600 .env
 
-            # Set environment variables for Firebase credentials
-            echo "FIREBASE_PROJECT_ID=\"${{ secrets.FIREBASE_PROJECT_ID }}\"" >> .env
-            echo "FIREBASE_PRIVATE_KEY=\"${{ secrets.FIREBASE_PRIVATE_KEY }}\"" >> .env
-            echo "FIREBASE_CLIENT_EMAIL=\"${{ secrets.FIREBASE_CLIENT_EMAIL }}\"" >> .env
-            echo "FIREBASE_PRIVATE_KEY_ID=\"${{ secrets.FIREBASE_PRIVATE_KEY_ID }}\"" >> .env
-            echo "FIREBASE_CLIENT_ID=\"${{ secrets.FIREBASE_CLIENT_ID }}\"" >> .env
-            echo "FIREBASE_CLIENT_CERT_URL=\"${{ secrets.FIREBASE_CLIENT_CERT_URL }}\"" >> .env
-            
-            # Set default values for optional Firebase URIs
-            FIREBASE_AUTH_URI="${{ secrets.FIREBASE_AUTH_URI || 'https://accounts.google.com/o/oauth2/auth' }}"
-            FIREBASE_TOKEN_URI="${{ secrets.FIREBASE_TOKEN_URI || 'https://oauth2.googleapis.com/token' }}"
-            FIREBASE_AUTH_PROVIDER_CERT_URL="${{ secrets.FIREBASE_AUTH_PROVIDER_CERT_URL || 'https://www.googleapis.com/oauth2/v1/certs' }}"
-            
+            # Set environment variables with defaults inside Bash
+            FIREBASE_PROJECT_ID="${{ secrets.FIREBASE_PROJECT_ID }}"
+            FIREBASE_PRIVATE_KEY="${{ secrets.FIREBASE_PRIVATE_KEY }}"
+            FIREBASE_CLIENT_EMAIL="${{ secrets.FIREBASE_CLIENT_EMAIL }}"
+            FIREBASE_PRIVATE_KEY_ID="${{ secrets.FIREBASE_PRIVATE_KEY_ID }}"
+            FIREBASE_CLIENT_ID="${{ secrets.FIREBASE_CLIENT_ID }}"
+            FIREBASE_CLIENT_CERT_URL="${{ secrets.FIREBASE_CLIENT_CERT_URL }}"
+            FIREBASE_AUTH_URI="${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}"
+            FIREBASE_TOKEN_URI="${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}"
+            FIREBASE_AUTH_PROVIDER_CERT_URL="${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}"
+
+            echo "FIREBASE_PROJECT_ID=\"$FIREBASE_PROJECT_ID\"" >> .env
+            echo "FIREBASE_PRIVATE_KEY=\"$FIREBASE_PRIVATE_KEY\"" >> .env
+            echo "FIREBASE_CLIENT_EMAIL=\"$FIREBASE_CLIENT_EMAIL\"" >> .env
+            echo "FIREBASE_PRIVATE_KEY_ID=\"$FIREBASE_PRIVATE_KEY_ID\"" >> .env
+            echo "FIREBASE_CLIENT_ID=\"$FIREBASE_CLIENT_ID\"" >> .env
+            echo "FIREBASE_CLIENT_CERT_URL=\"$FIREBASE_CLIENT_CERT_URL\"" >> .env
             echo "FIREBASE_AUTH_URI=\"$FIREBASE_AUTH_URI\"" >> .env
             echo "FIREBASE_TOKEN_URI=\"$FIREBASE_TOKEN_URI\"" >> .env
             echo "FIREBASE_AUTH_PROVIDER_CERT_URL=\"$FIREBASE_AUTH_PROVIDER_CERT_URL\"" >> .env
-            
-            # Also write the credentials file directly for backward compatibility
-            mkdir -p api/config
+
+            chmod 600 .env
+
+            # Write Firebase credentials file for backward compatibility
             cat > api/config/credentials.json << 'CREDENTIALS_EOF'
-{
-  "type": "service_account",
-  "project_id": "'"${{ secrets.FIREBASE_PROJECT_ID }}"'",
-  "private_key_id": "'"${{ secrets.FIREBASE_PRIVATE_KEY_ID }}"'",
-  "private_key": "'"${{ secrets.FIREBASE_PRIVATE_KEY }}"'",
-  "client_email": "'"${{ secrets.FIREBASE_CLIENT_EMAIL }}"'",
-  "client_id": "'"${{ secrets.FIREBASE_CLIENT_ID }}"'",
-  "auth_uri": "'"$FIREBASE_AUTH_URI"'",
-  "token_uri": "'"$FIREBASE_TOKEN_URI"'",
-  "auth_provider_x509_cert_url": "'"$FIREBASE_AUTH_PROVIDER_CERT_URL"'",
-  "client_x509_cert_url": "'"${{ secrets.FIREBASE_CLIENT_CERT_URL }}"'",
-  "universe_domain": "googleapis.com"
-}
+${{ secrets.FIREBASE_CREDENTIALS_JSON }}
 CREDENTIALS_EOF
             chmod 600 api/config/credentials.json
 
-            # Make deploy script executable
+            # Make deploy script executable and run
             chmod +x deploy.sh
-
-            # Run deployment
             ./deploy.sh
