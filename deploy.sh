@@ -1,10 +1,28 @@
 #!/bin/bash
 set -e
 
+# Configuration
 APP_DIR="/home/root/app"
 ENV_FILE="$APP_DIR/.env"
 DOMAIN="syntextai.com"
 EMAIL="osas@osas-inc.com"
+
+# Validate required environment variables
+required_vars=(
+  "FIREBASE_PROJECT_ID"
+  "FIREBASE_PRIVATE_KEY"
+  "FIREBASE_CLIENT_EMAIL"
+  "FIREBASE_PRIVATE_KEY_ID"
+  "FIREBASE_CLIENT_ID"
+  "FIREBASE_CLIENT_CERT_URL"
+)
+
+for var in "${required_vars[@]}"; do
+  if [ -z "${!var}" ]; then
+    echo -e "${RED}❌ Missing required env var: $var${NC}"
+    exit 1
+  fi
+done
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
