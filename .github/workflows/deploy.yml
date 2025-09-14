@@ -117,7 +117,7 @@ jobs:
             
             # Also write the credentials file directly for backward compatibility
             mkdir -p api/config
-            cat > api/config/credentials.json << 'EOF'
+            cat > api/config/credentials.json << 'CREDENTIALS_EOF'
 {
   "type": "service_account",
   "project_id": "'"${{ secrets.FIREBASE_PROJECT_ID }}"'",
@@ -131,7 +131,7 @@ jobs:
   "client_x509_cert_url": "'"${{ secrets.FIREBASE_CLIENT_CERT_URL }}"'",
   "universe_domain": "googleapis.com"
 }
-EOF
+CREDENTIALS_EOF
             chmod 600 api/config/credentials.json
 
             # Make deploy script executable
