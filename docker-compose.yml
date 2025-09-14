@@ -1,41 +1,10 @@
 version: '3.8'
 
-services:
-  # Reverse proxy for HTTPS termination
-  nginx-proxy:
-    image: jwilder/nginx-proxy:latest
-    container_name: nginx-proxy
-    restart: unless-stopped
-    ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
-    environment:
-      - DEFAULT_HOST=${DEFAULT_HOST:-syntextai.com}
-    volumes:
-      - /etc/nginx/certs:/etc/nginx/certs:ro
-      - /etc/nginx/vhost.d
-      - /usr/share/nginx/html
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-    networks:
-      - syntextai_network
+networks:
+  syntextai_network:
+    driver: bridge
 
-  # SSL certificate management
-  letsencrypt:
-    image: nginxproxy/acme-companion
-    container_name: letsencrypt
-    restart: unless-stopped
-    environment:
-      - NGINX_PROXY_CONTAINER=nginx-proxy
-      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
-    volumes:
-      - /etc/nginx/certs:/etc/nginx/certs:rw
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /etc/nginx/vhost.d
-      - /usr/share/nginx/html
-    networks:
-      - syntextai_network
-    depends_on:
-      - nginx-proxy
+services:
 
   # Main application (includes frontend and API)
   app:
@@ -43,9 +12,18 @@ services:
       context: .
       dockerfile: Dockerfile
       # Build args are now passed via .env file
-    container_name: syntextai-app
+    container_name: syntextaiapp
     restart: unless-stopped
     env_file: .env
+    expose:
+      - "3000"
+    environment:
+      - VIRTUAL_HOST=${DOMAIN:-localhost}
+      - VIRTUAL_PORT=3000
+      - LETSENCRYPT_HOST=${DOMAIN:-localhost}
+      - LETSENCRYPT_EMAIL=${ADMIN_EMAIL}
+    networks:
+      - syntextai_network
     environment:
       - NODE_ENV=production
       - VIRTUAL_HOST=syntextai.com,www.syntextai.com
@@ -80,18 +58,19 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: syntextai-worker
-    command: python -m api.worker
     restart: unless-stopped
     env_file: .env
+    command: python -m api.worker
     environment:
       - NODE_ENV=production
-      - MAX_CONCURRENT_TASKS=3
-      - POLL_INTERVAL=10
+    networks:
+      - syntextai_network
+    depends_on:
+      - app
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
-    depends_on:
       - db
       - redis
     deploy:
@@ -105,11 +84,13 @@ services:
     image: searxng/searxng:latest
     container_name: searxng
     restart: unless-stopped
+    expose:
+      - "8080"
     environment:
       - INSTANCE_NAME=SynTextAI
-      - VIRTUAL_HOST=search.syntextai.com
-      - LETSENCRYPT_HOST=search.syntextai.com
-      - LETSENCRYPT_EMAIL=osas@osas-inc.com
+      - BASE_URL=https://${DOMAIN:-localhost}/search/
+      - AUTOCOMPLETE=google
+      - ULTRA_SECRET_KEY=${SEARXNG_SECRET_KEY}
     volumes:
       - ./searxng:/etc/searxng:ro
     networks:

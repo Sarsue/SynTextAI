@@ -84,43 +84,41 @@ if [ "$(docker network ls -q -f name=syntextai)" ]; then
     docker network rm $(docker network ls -q -f name=syntextai) || true
 fi
 
-# Function to check if a port is available
-port_available() {
-    ! lsof -i :$1 -sTCP:LISTEN -t >/dev/null
+# Check if nginx is running and stop it if needed
+if systemctl is-active --quiet nginx; then
+    echo -e "${YELLOW}⚠️ Nginx is running. We'll configure it to work with Docker containers...${NC}"
+    
+    # Create nginx config for the app
+    cat > /etc/nginx/sites-available/syntextai << 'EOL'
+server {
+    listen 80;
+    server_name syntextai.com www.syntextai.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location /search/ {
+        proxy_pass http://searxng:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
 }
+EOL
 
-# Try default ports first
-HTTP_PORT=80
-HTTPS_PORT=443
-
-# Check if default ports are available
-if ! port_available $HTTP_PORT || ! port_available $HTTPS_PORT; then
-    echo -e "${YELLOW}⚠️ Default ports (80/443) are in use. Trying alternative ports...${NC}"
+    # Enable the site if not already enabled
+    if [ ! -f /etc/nginx/sites-enabled/syntextai ]; then
+        ln -s /etc/nginx/sites-available/syntextai /etc/nginx/sites-enabled/
+    fi
     
-    # Try common alternative ports
-    ALTERNATIVE_PORTS=(8080 8081 8443 8888)
-    for port in "${ALTERNATIVE_PORTS[@]}"; do
-        if port_available $port; then
-            if [ $port -lt 1024 ] && [ "$(id -u)" != "0" ]; then
-                echo -e "${YELLOW}⚠️ Port $port requires root privileges, skipping...${NC}"
-                continue
-            fi
-            
-            if [ $HTTP_PORT -eq 80 ]; then
-                HTTP_PORT=$port
-                echo -e "${GREEN}✅ Found available HTTP port: $HTTP_PORT${NC}"
-            elif [ $HTTPS_PORT -eq 443 ]; then
-                HTTPS_PORT=$port
-                echo -e "${GREEN}✅ Found available HTTPS port: $HTTPS_PORT${NC}"
-                break
-            fi
-        fi
-    done
-    
-    # Export the ports to be used by docker-compose
-export NGINX_HTTP_PORT=$HTTP_PORT
-export NGINX_HTTPS_PORT=$HTTPS_PORT
-echo -e "${GREEN}🔧 Using ports - HTTP: $HTTP_PORT, HTTPS: $HTTPS_PORT${NC}"
+    # Test and reload nginx
+    nginx -t && systemctl reload nginx
 fi
 
 # Clean up Docker resources
@@ -131,29 +129,15 @@ docker system prune -af --volumes --filter "label!=com.docker.compose.project=sy
 echo -e "${GREEN}🐳 Pulling latest images...${NC}"
 docker-compose pull || error_exit "Failed to pull Docker images"
 
-# Start containers with retry logic
-MAX_RETRIES=3
-RETRY_DELAY=10
+# Start the application stack
+echo -e "${GREEN}🚀 Starting application stack...${NC}" 
+docker-compose up -d --build --force-recreate || error_exit "Failed to start containers"
 
-start_containers() {
-    echo -e "${GREEN}🚀 Starting containers (Attempt $1/$MAX_RETRIES)...${NC}"
-    docker-compose up -d --remove-orphans --build --force-recreate
-    return $?
-}
+echo -e "${GREEN}✅ Containers started successfully!${NC}"
 
-# Try starting containers with retries
-for ((i=1; i<=$MAX_RETRIES; i++)); do
-    if start_containers $i; then
-        echo -e "${GREEN}✅ Containers started successfully!${NC}"
-        break
-    else
-        if [ $i -eq $MAX_RETRIES ]; then
-            error_exit "Failed to start containers after $MAX_RETRIES attempts"
-        fi
-        echo -e "${YELLOW}⚠️ Attempt $i failed, retrying in $RETRY_DELAY seconds...${NC}"
-        sleep $RETRY_DELAY
-    fi
-done
+# Show container status
+echo -e "\n${GREEN}📊 Container Status:${NC}"
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 # Function to check container health
 check_container_health() {
