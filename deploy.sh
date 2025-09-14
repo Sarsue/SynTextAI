@@ -29,17 +29,24 @@ fi
 mkdir -p $APP_DIR
 cd $APP_DIR
 
-# 5️⃣ Clean up old containers/images/volumes
-echo "💣 Cleaning up old Docker resources..."
-# Stop and remove all containers for this project
-docker-compose down --rmi all --volumes --remove-orphans || true
+# 5️⃣ Nuclear cleanup of Docker resources
+echo "💣 Performing full Docker cleanup..."
 
-# Remove any leftover stopped containers/images/volumes not tied to Compose
-docker system prune -a --volumes -f
+# Stop and remove all containers
+docker ps -a -q | xargs -r docker rm -f
+
+# Remove all images
+docker images -a -q | xargs -r docker rmi -f
+
+# Remove all volumes
+docker volume ls -q | xargs -r docker volume rm -f
+
+# Remove all networks not used by default
+docker network ls -q | xargs -r docker network rm || true
 
 # 6️⃣ Pull latest images and start containers
 echo "🐳 Pulling latest images and starting containers..."
 docker-compose pull
-docker-compose up -d --remove-orphans --build
+docker-compose up -d --remove-orphans --build --force-recreate
 
-echo "✅ Deployment complete! Your site is live and SSL should be automatically handled by nginx-proxy + acme-companion."
+echo "✅ Deployment complete! All old containers/images/volumes are cleared, your site is live, and SSL should be automatically handled by nginx-proxy + acme-companion."
