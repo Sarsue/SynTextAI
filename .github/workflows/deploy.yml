@@ -25,30 +25,38 @@ jobs:
         if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
           echo "📝 Message: ${{ github.event.inputs.deploy_message }}"
         fi
+        
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Bootstrap VM (Docker + Compose)
-      uses: appleboy/ssh-action@v0.1.10
-      with:
-        host: ${{ secrets.DO_HOST }}
-        username: ${{ secrets.DO_USERNAME }}
-        key: ${{ secrets.DO_SSH_KEY }}
-        script_stop: true
-        timeout: 7200s  # 2 hour timeout
-        script: |
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "Installing Docker..."
-            sudo apt-get update
-            sudo apt-get install -y docker.io curl
-            sudo systemctl enable --now docker
-          fi
-          if ! command -v docker-compose >/dev/null 2>&1; then
-            echo "Installing Docker Compose..."
-            DOCKER_COMPOSE_VERSION="v2.28.1"
-            sudo curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
-          fi
+    # Set Firebase environment variables directly from secrets
+    - name: Set Firebase credentials
+      run: |
+        echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> $GITHUB_ENV
+        echo "FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}" >> $GITHUB_ENV
+        echo "FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}" >> $GITHUB_ENV
+        echo "FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" >> $GITHUB_ENV
+        echo "FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}" >> $GITHUB_ENV
+        echo "FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}" >> $GITHUB_ENV
+        # Set default values for optional fields
+        echo "FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth" >> $GITHUB_ENV
+        echo "FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token" >> $GITHUB_ENV 
+        echo "FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs" >> $GITHUB_ENV
+        
+    # Create frontend .env file with Firebase web config
+    - name: Create frontend environment file
+      run: |
+        cat << EOF > frontend/.env
+        REACT_APP_FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
+        REACT_APP_FIREBASE_AUTH_DOMAIN=${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}
+        REACT_APP_FIREBASE_PROJECT_ID=${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
+        REACT_APP_FIREBASE_STORAGE_BUCKET=${{ secrets.REACT_APP_FIREBASE_STORAGE_BUCKET }}
+        REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
+        REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
+        REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
+        EOF
+        chmod 600 frontend/.env
+    
     - name: Login to DockerHub
       uses: docker/login-action@v2
       with:
@@ -72,6 +80,15 @@ jobs:
           REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
           REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
+          FIREBASE_PROJECT_ID=${{ env.FIREBASE_PROJECT_ID }}
+          FIREBASE_PRIVATE_KEY=${{ env.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_CLIENT_EMAIL=${{ env.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY_ID=${{ env.FIREBASE_PRIVATE_KEY_ID }}
+          FIREBASE_CLIENT_ID=${{ env.FIREBASE_CLIENT_ID }}
+          FIREBASE_CLIENT_CERT_URL=${{ env.FIREBASE_CLIENT_CERT_URL }}
+          FIREBASE_AUTH_URI=${{ env.FIREBASE_AUTH_URI }}
+          FIREBASE_TOKEN_URI=${{ env.FIREBASE_TOKEN_URI }}
+          FIREBASE_AUTH_PROVIDER_CERT_URL=${{ env.FIREBASE_AUTH_PROVIDER_CERT_URL }}
     - name: Copy deploy files to Digital Ocean
       uses: appleboy/scp-action@v0.1.3
       with:
@@ -87,23 +104,28 @@ jobs:
         host: ${{ secrets.DO_HOST }}
         username: ${{ secrets.DO_USERNAME }}
         key: ${{ secrets.DO_SSH_KEY }}
-        timeout: 7200s  # 2 hour timeout
         script_stop: true
         script: |
-          set -e
           cd /home/root/
-          echo "🚀 Starting deployment process..."
-          chmod +x deploy.sh || true
-          if [ ! -f /home/root/.env ] && [ -n "${{ secrets.ENV_FILE_CONTENT }}" ]; then
-              echo "ℹ️ Creating .env file from secrets..."
-              echo "${{ secrets.ENV_FILE_CONTENT }}" > /home/root/.env
-              chmod 600 /home/root/.env
-          fi
-          if [ ! -f /home/root/api/config/credentials.json ] && [ -n "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" ]; then
-              echo "ℹ️ Setting up Firebase credentials..."
-              mkdir -p /home/root/api/config
-              echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > /home/root/api/config/credentials.json
-              chmod 600 /home/root/api/config/credentials.json
-          fi
-          echo "🚀 Running deployment script..."
-          ./deploy.sh || (echo "⚠️ Deployment script failed. Attempting fallback..." && ./deploy.sh fallback)
+          docker pull osasdeeon/syntextai:latest
+          
+          # Recreate .env file from GitHub secrets
+          echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+          chmod 600 .env  # Secure file permissions
+          
+          # Create Firebase credentials directory and file
+          mkdir -p api/config
+          echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
+          chmod 600 api/config/credentials.json
+          
+          # Make sure the deploy script is executable and run it
+          chmod +x deploy.sh
+          
+          # Run deploy script - handle errors gracefully
+          ./deploy.sh || { 
+            echo "⚠️ Deploy script failed, but proceeding with container restart..."
+            # Stop previous container if running
+            docker-compose down || true
+            # Start new container with updated image
+            docker-compose up -d
+          }
