@@ -1,82 +1,55 @@
 #!/bin/bash
 set -e
 
+APP_NAME="syntextai"
 APP_DIR="/home/root/app"
-DOMAIN="syntextai.com"
-EMAIL="osas@osas-inc.com"
-NGINX_CONFIG="/etc/nginx/sites-available/syntextaiapp"
-FIREBASE_PROJECT="docsynth-fbb02"
+DOCKER_COMPOSE_FILE="docker-compose.yml"
+DOCKER_IMAGE="osasdeeon/syntextai:latest"
 
-echo "🔧 Updating system and installing dependencies..."
-sudo apt-get update
-sudo apt-get install -y nginx certbot python3-certbot-nginx curl
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo "📂 Setting up application directory..."
-mkdir -p $APP_DIR
+status() { echo -e "${GREEN}[+]${NC} $1"; }
+warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+error() { echo -e "${RED}[!] ERROR:${NC} $1"; exit 1; }
 
-if [ -f /home/root/.env ]; then
-    echo "✅ Copying environment file..."
-    cp /home/root/.env $APP_DIR
-else
-    echo "❌ .env file missing at /home/root/.env"
-    exit 1
+cd "$APP_DIR" || cd ~
+
+DOCKER_COMPOSE_CMD="docker compose"
+if command -v docker-compose &> /dev/null; then
+  DOCKER_COMPOSE_CMD="docker-compose"
 fi
 
-echo "🌐 Configuring Nginx..."
-sudo tee $NGINX_CONFIG > /dev/null <<EOL
-server {
-    listen 80;
-    server_name $DOMAIN www.$DOMAIN;
-    return 301 https://\$host\$request_uri;
-}
-server {
-    listen 443 ssl;
-    server_name $DOMAIN www.$DOMAIN;
+# Fallback mode only stops and restarts containers
+if [ "$1" == "fallback" ]; then
+  $DOCKER_COMPOSE_CMD down || true
+  $DOCKER_COMPOSE_CMD up -d --force-recreate
+  exit 0
+fi
 
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+status "Pulling latest Docker image..."
+docker pull "$DOCKER_IMAGE" || warning "Failed to pull image, using local"
 
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_buffering off;
-    }
+status "Starting zero-downtime deployment..."
+# Start new containers without stopping old ones
+$DOCKER_COMPOSE_CMD up -d --pull always --build --remove-orphans
 
-    location /ws/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-    }
+status "Waiting for containers to be healthy..."
+for i in {1..30}; do
+  HEALTH=$(curl -s http://localhost:3000/health || true)
+  if [[ "$HEALTH" == *"OK"* ]]; then
+    status "✅ Application is healthy"
+    break
+  fi
+  sleep 5
+done
 
-    location /__/auth {
-        proxy_pass https://$FIREBASE_PROJECT.firebaseapp.com;
-        proxy_ssl_server_name on;
-        proxy_set_header Host $FIREBASE_PROJECT.firebaseapp.com;
-    }
-}
-EOL
+# Run DB migrations safely
+if docker ps | grep -q "${APP_NAME}_api"; then
+  status "Running database migrations..."
+  docker exec -it ${APP_NAME}_api_1 alembic upgrade head || warning "Migrations failed"
+fi
 
-sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-
-echo "🔒 Obtaining/renewing SSL certificate..."
-sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL || true
-
-echo "🐳 Cleaning up old Docker resources..."
-sudo docker compose down || true
-sudo docker system prune -af --volumes
-
-echo "⬇️ Pulling latest Docker images..."
-sudo docker compose pull
-
-echo "🚀 Starting containers..."
-sudo docker compose up -d --force-recreate
-
-echo "✅ Deployment completed successfully!"
+status "Deployment complete!"
