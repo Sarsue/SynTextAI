@@ -90,6 +90,11 @@ jobs:
           EOF
 
           chmod 600 .env
+          
+          # Debug: Show .env file contents (redacted)
+          echo "=== .env file contents ==="
+          sed 's/PRIVATE_KEY=.*/PRIVATE_KEY=***REDACTED***/g' .env | sed 's/SECRET=.*/SECRET=***REDACTED***/g'
+          echo "========================="
 
           # Write credentials.json
           mkdir -p api/config
