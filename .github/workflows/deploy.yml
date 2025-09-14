@@ -85,7 +85,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/syntextai:latest
+        tags: ${{ secrets.DOCKER_USERNAME }}/syntextai:latest
         file: ./Dockerfile
 
     - name: Copy deploy files to Digital Ocean
