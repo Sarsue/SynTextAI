@@ -6,8 +6,7 @@ networks:
 
 services:
 
-  # Main application (includes frontend and API)
-  # Main application (frontend + API)
+  # Main app (frontend + backend)
   app:
     build:
       context: .
@@ -19,7 +18,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      # Frontend environment variables
+      # Frontend/Firebase
       - REACT_APP_FIREBASE_API_KEY
       - REACT_APP_FIREBASE_AUTH_DOMAIN
       - REACT_APP_FIREBASE_PROJECT_ID
@@ -28,9 +27,16 @@ services:
       - REACT_APP_FIREBASE_APP_ID
       - REACT_APP_STRIPE_API_KEY
       - REACT_APP_POST_HOG_API_KEY
-      # Cloud database connection
-      - DATABASE_URL
-      - REDIS_URL
+      # Backend Firebase Admin
+      - FIREBASE_PROJECT_ID
+      - FIREBASE_PRIVATE_KEY
+      - FIREBASE_CLIENT_EMAIL
+      - FIREBASE_PRIVATE_KEY_ID
+      - FIREBASE_CLIENT_ID
+      - FIREBASE_CLIENT_CERT_URL
+      - FIREBASE_AUTH_URI
+      - FIREBASE_TOKEN_URI
+      - FIREBASE_AUTH_PROVIDER_CERT_URL
     volumes:
       - ./api/config:/app/api/config:ro
       - /app/node_modules
@@ -42,7 +48,7 @@ services:
           cpus: '2'
           memory: 4G
 
-  # Background worker for async tasks
+  # Worker for background tasks
   worker:
     build:
       context: .
@@ -53,22 +59,27 @@ services:
     command: python -m api.worker
     environment:
       - NODE_ENV=production
-      # Cloud database connection
-      - DATABASE_URL
-      - REDIS_URL
+      # Backend Firebase Admin
+      - FIREBASE_PROJECT_ID
+      - FIREBASE_PRIVATE_KEY
+      - FIREBASE_CLIENT_EMAIL
+      - FIREBASE_PRIVATE_KEY_ID
+      - FIREBASE_CLIENT_ID
+      - FIREBASE_CLIENT_CERT_URL
+      - FIREBASE_AUTH_URI
+      - FIREBASE_TOKEN_URI
+      - FIREBASE_AUTH_PROVIDER_CERT_URL
     volumes:
       - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
-    depends_on:
-      - app
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 2G
 
-  # Search functionality
+  # SearxNG search engine
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
@@ -90,9 +101,3 @@ services:
         limits:
           cpus: '2'
           memory: 8G
-
-
-networks:
-  syntextai_network:
-    driver: bridge
-

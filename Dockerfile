@@ -96,6 +96,10 @@ COPY api/requirements.txt ./
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create config directory and copy credentials if they exist
+RUN mkdir -p /app/api/config
+COPY --chown=root:root api/config/credentials.json /app/api/config/credentials.json || echo "No local credentials file found, using environment variables"
+
 # Copy the rest of the backend files
 COPY api/ ./api/
 

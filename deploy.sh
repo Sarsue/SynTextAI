@@ -20,6 +20,36 @@ error_exit() {
 # Ensure required directories
 mkdir -p "$APP_DIR/api/config" "$APP_DIR/searxng"
 
+# Create or update credentials file with proper escaping
+# Using printf to properly escape newlines in private key
+mkdir -p "$APP_DIR/api/config"
+echo "Ensuring Firebase credentials are properly configured..."
+cat > "$APP_DIR/api/config/credentials.json" << EOF
+{
+  "type": "service_account",
+  "project_id": "${FIREBASE_PROJECT_ID}",
+  "private_key_id": "${FIREBASE_PRIVATE_KEY_ID}",
+  "private_key": "$(printf "%s" "$FIREBASE_PRIVATE_KEY" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')",
+  "client_email": "${FIREBASE_CLIENT_EMAIL}",
+  "client_id": "${FIREBASE_CLIENT_ID}",
+  "auth_uri": "${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}",
+  "token_uri": "${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}",
+  "auth_provider_x509_cert_url": "${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}",
+  "client_x509_cert_url": "${FIREBASE_CLIENT_CERT_URL}",
+  "universe_domain": "googleapis.com"
+}
+EOF
+
+# Set strict permissions
+chmod 600 "$APP_DIR/api/config/credentials.json"
+
+# Verify the credentials file was created
+if [ ! -f "$APP_DIR/api/config/credentials.json" ]; then
+    error_exit "Failed to create Firebase credentials file"
+fi
+
+echo -e "${GREEN}✓ Firebase credentials configured${NC}"
+
 # Stop old containers
 docker-compose down -v --remove-orphans || true
 docker system prune -af --volumes || true

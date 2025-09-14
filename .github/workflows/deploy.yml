@@ -57,15 +57,7 @@ jobs:
             REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
             REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
             REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
-            FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-            FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}
-            FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}
-            FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
-            FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}
-            FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}
-            FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth
-            FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token
-            FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
+            FIREBASE_CREDENTIALS_JSON=${{ secrets.FIREBASE_CREDENTIALS_JSON }}
 
       # 6️⃣ Copy deploy files to server
       - name: Copy deploy files to DigitalOcean
@@ -89,19 +81,11 @@ jobs:
             set -e
             cd /home/root/
 
-            # Create necessary directories
+            # Create required directories
             mkdir -p frontend api/config
-            
+
             # Create root .env file for Docker Compose with proper quoting
             {
-              echo '# Database'
-              echo "POSTGRES_DB=\"${{ secrets.POSTGRES_DB }}\""
-              echo "POSTGRES_USER=\"${{ secrets.POSTGRES_USER }}\""
-              echo "POSTGRES_PASSWORD=\"${{ secrets.POSTGRES_PASSWORD }}\""
-              echo ''
-              echo '# Redis'
-              echo "REDIS_PASSWORD=\"${{ secrets.REDIS_PASSWORD }}\""
-              echo ''
               echo '# Frontend Environment Variables'
               echo "REACT_APP_FIREBASE_API_KEY=\"${{ secrets.REACT_APP_FIREBASE_API_KEY }}\""
               echo "REACT_APP_FIREBASE_AUTH_DOMAIN=\"${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}\""
@@ -114,16 +98,38 @@ jobs:
             } > .env
             chmod 600 .env
 
-            # Create Firebase credentials
-            echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
+            # Set environment variables for Firebase credentials
+            echo "FIREBASE_PROJECT_ID=\"${{ secrets.FIREBASE_PROJECT_ID }}\"" >> .env
+            echo "FIREBASE_PRIVATE_KEY=\"${{ secrets.FIREBASE_PRIVATE_KEY }}\"" >> .env
+            echo "FIREBASE_CLIENT_EMAIL=\"${{ secrets.FIREBASE_CLIENT_EMAIL }}\"" >> .env
+            echo "FIREBASE_PRIVATE_KEY_ID=\"${{ secrets.FIREBASE_PRIVATE_KEY_ID }}\"" >> .env
+            echo "FIREBASE_CLIENT_ID=\"${{ secrets.FIREBASE_CLIENT_ID }}\"" >> .env
+            echo "FIREBASE_CLIENT_CERT_URL=\"${{ secrets.FIREBASE_CLIENT_CERT_URL }}\"" >> .env
+            echo "FIREBASE_AUTH_URI=\"${{ secrets.FIREBASE_AUTH_URI || 'https://accounts.google.com/o/oauth2/auth' }}\"" >> .env
+            echo "FIREBASE_TOKEN_URI=\"${{ secrets.FIREBASE_TOKEN_URI || 'https://oauth2.googleapis.com/token' }}\"" >> .env
+            echo "FIREBASE_AUTH_PROVIDER_CERT_URL=\"${{ secrets.FIREBASE_AUTH_PROVIDER_CERT_URL || 'https://www.googleapis.com/oauth2/v1/certs' }}\"" >> .env
+            
+            # Also write the credentials file directly for backward compatibility
+            mkdir -p api/config
+            cat > api/config/credentials.json << EOF
+{
+  "type": "service_account",
+  "project_id": "${{ secrets.FIREBASE_PROJECT_ID }}",
+  "private_key_id": "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}",
+  "private_key": "${{ secrets.FIREBASE_PRIVATE_KEY }}",
+  "client_email": "${{ secrets.FIREBASE_CLIENT_EMAIL }}",
+  "client_id": "${{ secrets.FIREBASE_CLIENT_ID }}",
+  "auth_uri": "${{ secrets.FIREBASE_AUTH_URI || 'https://accounts.google.com/o/oauth2/auth' }}",
+  "token_uri": "${{ secrets.FIREBASE_TOKEN_URI || 'https://oauth2.googleapis.com/token' }}",
+  "auth_provider_x509_cert_url": "${{ secrets.FIREBASE_AUTH_PROVIDER_CERT_URL || 'https://www.googleapis.com/oauth2/v1/certs' }}",
+  "client_x509_cert_url": "${{ secrets.FIREBASE_CLIENT_CERT_URL }}",
+  "universe_domain": "googleapis.com"
+}
+EOF
             chmod 600 api/config/credentials.json
 
             # Make deploy script executable
             chmod +x deploy.sh
 
             # Run deployment
-            ./deploy.sh || { 
-              echo "⚠️ Deploy script failed, attempting fallback..."
-              docker-compose down || true
-              docker-compose up -d --build --force-recreate
-            }
+            ./deploy.sh
