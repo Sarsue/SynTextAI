@@ -82,24 +82,18 @@ jobs:
         username: ${{ secrets.DO_USERNAME }}
         key: ${{ secrets.DO_SSH_KEY }}
         script: |
-          cd /root/app
-          chmod +x deploy.sh
-          ./deploy.sh
-
-    - name: Verify deployment
-      uses: appleboy/ssh-action@v0.1.10
-      with:
-        host: ${{ secrets.DO_HOST }}
-        username: ${{ secrets.DO_USERNAME }}
-        key: ${{ secrets.DO_SSH_KEY }}
-        script: |
-          docker ps
-          curl -I https://syntextai.com || true
-        script_stop: true
-        script: |
+          # Set environment variables
+          export FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}'
+          export FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}'
+          export FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}'
+          export FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}'
+          export FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}'
+          export FIREBASE_CLIENT_CERT_URL='${{ secrets.FIREBASE_CLIENT_CERT_URL }}'
+          
+          # Navigate to app directory
           cd /root/
           
-          # Copy necessary files
+          # Clone or update repository
           if [ -d "app" ]; then
             echo "Updating existing app directory..."
             cd app
@@ -110,16 +104,11 @@ jobs:
             cd app
           fi
           
-          # Make deploy script executable
+          # Make deploy script executable and run it
           chmod +x deploy.sh
-          
-          # Export required environment variables
-          export FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}'
-          export FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}'
-          export FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}'
-          export FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}'
-          export FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}'
-          export FIREBASE_CLIENT_CERT_URL='${{ secrets.FIREBASE_CLIENT_CERT_URL }}'
-          
-          # Run the deploy script
           ./deploy.sh
+          
+          # Verify deployment
+          echo "Verifying deployment..."
+          docker ps
+          curl -I https://syntextai.com || true
