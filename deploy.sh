@@ -91,16 +91,25 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
+    # Add debug headers
+    add_header X-Debug-Server-Name $host;
+    add_header X-Debug-Request-URI $request_uri;
+    add_header X-Debug-Remote-Addr $remote_addr;
+
     location / {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Debug logging
+        access_log /var/log/nginx/app_access.log;
+        error_log /var/log/nginx/app_error.log;
     }
 
     location /__/auth {
@@ -116,10 +125,19 @@ echo "Enabling Nginx configuration..."
 sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
-# Create the validation directory for Certbot
-echo "Creating the validation directory for Certbot..."
+# Create necessary directories with proper permissions
+echo "Setting up Nginx directories..."
 sudo mkdir -p /var/www/html/.well-known/acme-challenge
+sudo mkdir -p /var/log/nginx/
+sudo touch /var/log/nginx/error.log
+sudo touch /var/log/nginx/access.log
+sudo touch /var/log/nginx/app_error.log
+sudo touch /var/log/nginx/app_access.log
+
+# Set proper ownership and permissions
 sudo chown -R www-data:www-data /var/www/html/.well-known
+sudo chown -R www-data:www-data /var/log/nginx/
+sudo chmod -R 755 /var/log/nginx/
 
 # Test Nginx configuration first
 echo "Testing Nginx configuration..."
