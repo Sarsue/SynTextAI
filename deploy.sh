@@ -48,56 +48,59 @@ else
     exit 1
 fi
 
-# Step 6: Configure Nginx for FastAPI and SSL
-echo "Setting up Nginx configuration for FastAPI and SSL..."
+# Step 4: Create self-signed certificate first
+echo "Creating self-signed certificate..."
+sudo mkdir -p /etc/ssl/certs /etc/ssl/private
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/nginx-selfsigned.key \
+    -out /etc/ssl/certs/nginx-selfsigned.crt \
+    -subj "/CN=$DOMAIN" \
+    -addext "subjectAltName=DNS:$DOMAIN,DNS:www.$DOMAIN"
+
+# Step 5: Set up initial Nginx configuration with self-signed cert
+echo "Setting up initial Nginx configuration..."
 sudo tee $NGINX_CONFIG > /dev/null <<EOL
 server {
     listen 80;
+    listen [::]:80;
     server_name $DOMAIN www.$DOMAIN;
-    return 301 https://\$host\$request_uri;
+    
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+    }
+    
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
 }
 
 server {
-    listen 443 ssl;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name $DOMAIN www.$DOMAIN;
 
-    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
-    client_max_body_size 2G;
+    ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
+    ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
+    
+    # SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH';
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-
-        # Increase timeout settings
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_connect_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        send_timeout 300s;
-
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /ws/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-
-        # Increase timeout settings
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
     location /__/auth {
@@ -111,25 +114,27 @@ EOL
 # Enable the Nginx configuration
 echo "Enabling Nginx configuration..."
 sudo ln -sf $NGINX_CONFIG /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
 
-# Step 7: Create the validation directory for Certbot
+# Create the validation directory for Certbot
 echo "Creating the validation directory for Certbot..."
 sudo mkdir -p /var/www/html/.well-known/acme-challenge
 sudo chown -R www-data:www-data /var/www/html/.well-known
 
-# Step 8: Reload Nginx to apply the configuration
-echo "Reloading Nginx..."
-if ! sudo nginx -t; then
-    echo "Nginx configuration test failed. Exiting."
-    exit 1
-fi
-sudo systemctl reload nginx
+# Reload Nginx with self-signed certificate
+echo "Reloading Nginx with self-signed certificate..."
+sudo systemctl restart nginx
 
-# Step 9: Obtain SSL certificate with Certbot
-echo "Obtaining SSL certificate..."
-if ! sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL; then
-    echo "Failed to obtain SSL certificate. Exiting."
-    exit 1
+# Step 6: Obtain Let's Encrypt certificate
+echo "Obtaining SSL certificate from Let's Encrypt..."
+if sudo certbot --nginx -d $DOMAIN -d www.$DOMAIN --non-interactive --agree-tos -m $EMAIL; then
+    echo "Successfully obtained Let's Encrypt certificate!"
+    # Update Nginx to use the new certificate
+    sudo sed -i 's|/etc/ssl/certs/nginx-selfsigned.crt|/etc/letsencrypt/live/$DOMAIN/fullchain.pem|' $NGINX_CONFIG
+    sudo sed -i 's|/etc/ssl/private/nginx-selfsigned.key|/etc/letsencrypt/live/$DOMAIN/privkey.pem|' $NGINX_CONFIG
+    sudo systemctl restart nginx
+else
+    echo "Failed to obtain Let's Encrypt certificate, continuing with self-signed certificate"
 fi
 
 # Step 10: Bring up the Docker containers using Docker Compose
