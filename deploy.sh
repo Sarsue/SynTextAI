@@ -45,7 +45,7 @@ fi
 # Install required packages if not exists
 install_required_packages() {
     print_status "Checking for required packages..."
-    local packages=("docker.io" "docker-compose-plugin" "jq" "curl")
+    local packages=("docker.io" "docker-compose-plugin" "jq" "curl" "git")
     local missing_packages=()
     
     for pkg in "${packages[@]}"; do
@@ -56,15 +56,19 @@ install_required_packages() {
     
     if [ ${#missing_packages[@]} -ne 0 ]; then
         print_status "Installing missing packages: ${missing_packages[*]}"
+        export DEBIAN_FRONTEND=noninteractive
         apt-get update
-        apt-get install -y "${missing_packages[@]}" || error_exit "Failed to install required packages"
+        apt-get install -y --no-install-recommends "${missing_packages[@]}" || error_exit "Failed to install required packages"
     fi
 }
 
 # Setup Docker environment
 setup_docker() {
     print_status "Setting up Docker environment..."
-    systemctl enable --now docker || error_exit "Failed to enable Docker service"
+    if ! systemctl is-active --quiet docker; then
+        systemctl start docker || error_exit "Failed to start Docker service"
+    fi
+    systemctl enable docker || print_warning "Failed to enable Docker service"
     usermod -aG docker "$SUDO_USER" || print_warning "Failed to add user to docker group"
 }
 
@@ -82,9 +86,29 @@ setup_app_directory() {
     chmod -R 755 "$APP_DIR"
 }
 
+# Verify Docker and Docker Compose are available
+verify_docker() {
+    if ! command_exists docker; then
+        error_exit "Docker is not installed. Please install Docker and try again."
+    fi
+    
+    if ! command_exists docker-compose; then
+        error_exit "Docker Compose is not installed. Please install Docker Compose and try again."
+    fi
+    
+    if ! docker info > /dev/null 2>&1; then
+        error_exit "Docker daemon is not running. Please start Docker and try again."
+    fi
+}
+
 # Deploy application using Docker Compose
 deploy_application() {
     cd "$APP_DIR" || error_exit "Failed to change to app directory"
+    
+    # Verify .env file exists
+    if [ ! -f "$ENV_FILE" ]; then
+        error_exit "$ENV_FILE not found in $APP_DIR"
+    fi
     
     # Stop and clean up existing containers
     print_status "Stopping and cleaning up existing containers..."
@@ -97,6 +121,19 @@ deploy_application() {
     # Start services
     print_status "Starting services..."
     docker-compose up -d --build --remove-orphans || error_exit "Failed to start services"
+    
+    # Wait for services to be healthy
+    print_status "Waiting for services to be healthy..."
+    for i in {1..10}; do
+        if docker ps --filter "health=healthy" --format '{{.Names}}' | grep -q "syntextai-app"; then
+            break
+        fi
+        if [ $i -eq 10 ]; then
+            print_warning "Services are taking too long to start. Continuing anyway..."
+            break
+        fi
+        sleep 5
+    done
     
     # Verify services
     print_status "Verifying services..."
@@ -111,8 +148,11 @@ deploy_application() {
 # Run database migrations
 run_migrations() {
     print_status "Running database migrations..."
-    docker-compose exec -T app alembic upgrade head || 
-        print_warning "Failed to run migrations (container might still be starting)"
+    if docker-compose exec -T app alembic upgrade head; then
+        print_status "Database migrations completed successfully"
+    else
+        print_warning "Failed to run database migrations. The database might be already up to date."
+    fi
 }
 
 # Verify deployment
@@ -120,40 +160,75 @@ verify_deployment() {
     print_status "Verifying deployment..."
     
     # Check if containers are running
-    if ! docker-compose ps | grep -q "Up"; then
-        error_exit "Some containers are not running"
+    local running_services
+    running_services=$(docker-compose ps --services --filter "status=running")
+    
+    if [ -z "$running_services" ]; then
+        error_exit "No services are running. Deployment failed."
     fi
     
+    print_status "Running services:\n$running_services"
+    
     # Check application health
-    local health_check_url="http://localhost/health"
-    local max_retries=30
+    local health_check_url="http://localhost:3000/health"
+    local max_retries=10
     local retry_count=0
     
-    print_status "Waiting for application to be ready..."
-    until curl -s -f "$health_check_url" >/dev/null; do
-        retry_count=$((retry_count + 1))
-        if [ $retry_count -ge $max_retries ]; then
-            error_exit "Application failed to start. Check container logs with: docker-compose logs"
+    print_status "Checking application health..."
+    while [ $retry_count -lt $max_retries ]; do
+        local status_code
+        status_code=$(curl -s -o /dev/null -w "%{http_code}" "$health_check_url" || true)
+        
+        if [ "$status_code" = "200" ]; then
+            print_status "Application is healthy!"
+            return 0
         fi
+        
+        retry_count=$((retry_count + 1))
+        print_status "Health check attempt $retry_count/$max_retries - Status: ${status_code:-Unable to connect}"
         sleep 5
-        echo -n "."
     done
     
-    echo -e "\n${GREEN}Application is up and running!${NC}"
+    print_warning "Application health check did not return 200 after $max_retries attempts"
+    
+    # Show logs for debugging
+    print_status "Showing application logs for debugging..."
+    docker-compose logs --tail=50 app || true
+    
+    error_exit "Deployment verification failed. Check the logs above for details."
 }
 
 # Main function
 main() {
-    print_status "Starting deployment of $APP_NAME..."
+    local start_time
+    start_time=$(date +%s)
+    
+    print_status "🚀 Starting deployment of $APP_NAME..."
+    print_status "Working directory: $(pwd)"
+    
+    # Show system information
+    print_status "System information:"
+    uname -a
+    lsb_release -a 2>/dev/null || true
     
     # Install required packages
+    print_status "🔧 Setting up system..."
     install_required_packages
     
     # Setup Docker
     setup_docker
     
+    # Verify Docker is working
+    verify_docker
+    
     # Setup app directory
     setup_app_directory
+    
+    # Show Docker information
+    print_status "🐳 Docker information:"
+    docker --version
+    docker-compose --version
+    docker system info
     
     # Deploy application
     deploy_application
@@ -161,75 +236,16 @@ main() {
     # Verify deployment
     verify_deployment
     
-    print_status "Deployment completed successfully!"
-    print_status "Application URL: https://syntextai.com"
-    print_status "Run 'docker-compose logs -f' to view logs"
-}
-
-# Execute main function
-main "$@"
-
-# Error handler
-error_exit() {
-    echo -e "${RED}❌ Error: $1${NC}" >&2
-    exit 1
-}
-
-# Install required system packages
-install_dependencies() {
-    echo -e "${GREEN}📦 Installing required packages...${NC}"
-    apt-get update
-    apt-get install -y \
-        nginx \
-        certbot \
-        python3-certbot-nginx \
-        docker.io \
-        docker-compose
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
     
-    # Ensure Docker is running
-    systemctl enable --now docker
-}
-
-# Configure Nginx
-setup_nginx() {
-    echo -e "${GREEN}🔧 Configuring Nginx...${NC}"
+    print_status "✅ Deployment completed successfully in ${duration} seconds!"
+    print_status "🌐 Application is now running at http://localhost:3000"
     
-    # Create Nginx config
-    cat > /etc/nginx/sites-available/${DOMAIN} << EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN} www.${DOMAIN};
-    
-    # Redirect HTTP to HTTPS
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
-    
-    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-    
-    # API requests
-    location /api/ {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
+    # Show running containers
+    print_status "🐳 Running containers:"
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;

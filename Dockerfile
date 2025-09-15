@@ -24,48 +24,50 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app \
-    PORT=3000
+    PORT=3000 \
+    DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
-RUN apt-get update && \
+# Install system dependencies in a single layer
+RUN set -ex && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-    build-essential \
-    libsndfile1 \
-    ffmpeg \
-    curl \
-    libpq-dev \
-    python3-dev \
-    gcc \
-    g++ \
-    make \
-    cmake \
-    pkg-config \
-    libssl-dev \
-    libffi-dev \
-    tesseract-ocr \
-    libtesseract-dev && \
-    rm -rf /var/lib/apt/lists/*
+        build-essential \
+        libsndfile1 \
+        ffmpeg \
+        curl \
+        libpq-dev \
+        python3-dev \
+        gcc \
+        g++ \
+        make \
+        cmake \
+        pkg-config \
+        libssl-dev \
+        libffi-dev \
+        tesseract-ocr \
+        libtesseract-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Install Python dependencies
+# Install Python dependencies first to leverage Docker cache
 COPY api/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Create config directory for runtime configuration
-RUN mkdir -p /app/api/config
+# Create necessary directories
+RUN mkdir -p /app/api/config /app/frontend/build && \
+    useradd -m appuser && \
+    chown -R appuser:appuser /app
 
 # Copy application code
-COPY api/ ./api/
+COPY --chown=appuser:appuser api/ ./api/
 
-# Copy frontend build
-COPY --from=build-step /app/frontend/build ./frontend/build
+# Copy frontend build from build stage
+COPY --from=build-step --chown=appuser:appuser /app/frontend/build ./frontend/build
 
-# Set up non-root user
-RUN useradd -m appuser && \
-    chown -R appuser:appuser /app
+# Switch to non-root user
 USER appuser
 
 # Set environment variable for Whisper model directory

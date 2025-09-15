@@ -4,7 +4,7 @@ services:
   app:
     build:
       context: .
-      target: builder
+      target: final
     image: osasdeeon/syntextai:latest
     container_name: syntextai-app
     restart: unless-stopped
@@ -13,8 +13,13 @@ services:
       - PORT=3000
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    ports:
+      - "3000:3000"
     volumes:
-      - ./api/config:/app/api/config
+      - app_data:/app/data
+      - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
     healthcheck:
@@ -22,6 +27,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -29,6 +35,11 @@ services:
           memory: 2G
         reservations:
           memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   worker:
     image: osasdeeon/syntextai:latest
@@ -39,10 +50,12 @@ services:
     environment:
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
     volumes:
-      - ./api/config:/app/api/config
+      - app_data:/app/data
+      - ./api/config:/app/api/config:ro
     networks:
       - syntextai_network
     deploy:
@@ -52,29 +65,16 @@ services:
           memory: 1G
         reservations:
           memory: 512M
-
-  searxng:
-    image: searxng/searxng:latest
-    container_name: syntextai-searxng
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml
-    networks:
-      - syntextai_network
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 2G
-        reservations:
-          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   syntextai_network:
     driver: bridge
 
 volumes:
-  searxng_data:
+  app_data:
     driver: local
