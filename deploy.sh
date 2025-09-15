@@ -1,15 +1,173 @@
 #!/bin/bash
+
+# Exit on error and print commands
 set -e
+set -o pipefail
 
 # Configuration
+APP_NAME="syntextai"
 APP_DIR="/root/app"
-DOMAIN="syntextai.com"
-EMAIL="osas@osas-inc.com"
+DOCKER_COMPOSE_FILE="docker-compose.yml"
+ENV_FILE=".env"
 
-# Colors
+# Colors for output
 GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m'  # No Color
+NC='\033[0m' # No Color
+
+# Function to print status messages
+print_status() {
+    echo -e "${GREEN}[+] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}"
+}
+
+# Function to print warnings
+print_warning() {
+    echo -e "${YELLOW}[!] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}" >&2
+}
+
+# Function to print errors and exit
+error_exit() {
+    echo -e "${RED}[ERROR] $(date +'%Y-%m-%d %H:%M:%S') - $1${NC}" >&2
+    exit 1
+}
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check if running as root
+if [ "$(id -u)" -ne 0 ]; then
+    error_exit "This script must be run as root"
+fi
+
+# Install required packages if not exists
+install_required_packages() {
+    print_status "Checking for required packages..."
+    local packages=("docker.io" "docker-compose-plugin" "jq" "curl")
+    local missing_packages=()
+    
+    for pkg in "${packages[@]}"; do
+        if ! dpkg -l | grep -q "^ii.*$pkg"; then
+            missing_packages+=("$pkg")
+        fi
+    done
+    
+    if [ ${#missing_packages[@]} -ne 0 ]; then
+        print_status "Installing missing packages: ${missing_packages[*]}"
+        apt-get update
+        apt-get install -y "${missing_packages[@]}" || error_exit "Failed to install required packages"
+    fi
+}
+
+# Setup Docker environment
+setup_docker() {
+    print_status "Setting up Docker environment..."
+    systemctl enable --now docker || error_exit "Failed to enable Docker service"
+    usermod -aG docker "$SUDO_USER" || print_warning "Failed to add user to docker group"
+}
+
+# Create app directory structure
+setup_app_directory() {
+    print_status "Setting up application directory..."
+    mkdir -p "$APP_DIR" || error_exit "Failed to create app directory"
+    
+    # Create necessary directories
+    mkdir -p "$APP_DIR/data"
+    mkdir -p "$APP_DIR/logs"
+    
+    # Set proper permissions
+    chown -R "$SUDO_USER:$SUDO_USER" "$APP_DIR"
+    chmod -R 755 "$APP_DIR"
+}
+
+# Deploy application using Docker Compose
+deploy_application() {
+    cd "$APP_DIR" || error_exit "Failed to change to app directory"
+    
+    # Stop and clean up existing containers
+    print_status "Stopping and cleaning up existing containers..."
+    docker-compose down --remove-orphans || print_warning "No running containers to stop"
+    
+    # Pull latest images
+    print_status "Pulling latest Docker images..."
+    docker-compose pull || error_exit "Failed to pull Docker images"
+    
+    # Start services
+    print_status "Starting services..."
+    docker-compose up -d --build --remove-orphans || error_exit "Failed to start services"
+    
+    # Verify services
+    print_status "Verifying services..."
+    if ! docker-compose ps | grep -q "Up"; then
+        error_exit "Some services failed to start"
+    fi
+    
+    # Run database migrations if needed
+    run_migrations
+}
+
+# Run database migrations
+run_migrations() {
+    print_status "Running database migrations..."
+    docker-compose exec -T app alembic upgrade head || 
+        print_warning "Failed to run migrations (container might still be starting)"
+}
+
+# Verify deployment
+verify_deployment() {
+    print_status "Verifying deployment..."
+    
+    # Check if containers are running
+    if ! docker-compose ps | grep -q "Up"; then
+        error_exit "Some containers are not running"
+    fi
+    
+    # Check application health
+    local health_check_url="http://localhost/health"
+    local max_retries=30
+    local retry_count=0
+    
+    print_status "Waiting for application to be ready..."
+    until curl -s -f "$health_check_url" >/dev/null; do
+        retry_count=$((retry_count + 1))
+        if [ $retry_count -ge $max_retries ]; then
+            error_exit "Application failed to start. Check container logs with: docker-compose logs"
+        fi
+        sleep 5
+        echo -n "."
+    done
+    
+    echo -e "\n${GREEN}Application is up and running!${NC}"
+}
+
+# Main function
+main() {
+    print_status "Starting deployment of $APP_NAME..."
+    
+    # Install required packages
+    install_required_packages
+    
+    # Setup Docker
+    setup_docker
+    
+    # Setup app directory
+    setup_app_directory
+    
+    # Deploy application
+    deploy_application
+    
+    # Verify deployment
+    verify_deployment
+    
+    print_status "Deployment completed successfully!"
+    print_status "Application URL: https://syntextai.com"
+    print_status "Run 'docker-compose logs -f' to view logs"
+}
+
+# Execute main function
+main "$@"
 
 # Error handler
 error_exit() {
