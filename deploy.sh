@@ -121,9 +121,25 @@ echo "Creating the validation directory for Certbot..."
 sudo mkdir -p /var/www/html/.well-known/acme-challenge
 sudo chown -R www-data:www-data /var/www/html/.well-known
 
+# Test Nginx configuration first
+echo "Testing Nginx configuration..."
+if ! sudo nginx -t; then
+    echo "Nginx configuration test failed. Showing error log:"
+    sudo tail -n 50 /var/log/nginx/error.log || echo "No error log found"
+    exit 1
+fi
+
 # Reload Nginx with self-signed certificate
 echo "Reloading Nginx with self-signed certificate..."
 sudo systemctl restart nginx
+
+# Check if Nginx started successfully
+if ! systemctl is-active --quiet nginx; then
+    echo "Nginx failed to start. Showing status and logs:"
+    sudo systemctl status nginx
+    sudo journalctl -u nginx -n 50 --no-pager
+    exit 1
+fi
 
 # Step 6: Obtain Let's Encrypt certificate
 echo "Obtaining SSL certificate from Let's Encrypt..."
