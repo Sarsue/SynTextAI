@@ -1,29 +1,44 @@
 version: '3.8'
 
 services:
-  syntextaiapp:
+  app:
+    build:
+      context: .
+      target: builder
     image: osasdeeon/syntextai:latest
-    container_name: syntextaiapp
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
+    container_name: syntextai-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=3000
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
     volumes:
       - ./api/config:/app/api/config
     networks:
       - syntextai_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
-          memory: 4G  # Limit to 4GB
-          
+          cpus: '2'
+          memory: 2G
+        reservations:
+          memory: 1G
+
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
     command: python -m api.worker
-    env_file:
-      - .env
+    restart: unless-stopped
+    env_file: .env
     environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
     volumes:
@@ -33,23 +48,33 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G  # Worker needs less memory than the API
-    restart: unless-stopped
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 512M
 
   searxng:
     image: searxng/searxng:latest
-    container_name: searxng
+    container_name: syntextai-searxng
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./settings.yml:/etc/searxng/settings.yml
+      - ./searxng/settings.yml:/etc/searxng/settings.yml
     networks:
       - syntextai_network
     deploy:
       resources:
         limits:
-          memory: 8G  # Limit to 4GB
+          cpus: '1'
+          memory: 2G
+        reservations:
+          memory: 1G
 
 networks:
   syntextai_network:
     driver: bridge
+
+volumes:
+  searxng_data:
+    driver: local

@@ -107,58 +107,29 @@ jobs:
         key: ${{ secrets.DO_SSH_KEY }}
         script_stop: true
         script: |
-          cd /home/root/
-          docker pull osasdeeon/syntextai:latest
+          cd /root/
           
-          # Create .env file with required environment variables
-          cat > .env << 'EOL'
-          DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-          SECRET_KEY=${{ secrets.SECRET_KEY }}
-          ALGORITHM=HS256
-          ACCESS_TOKEN_EXPIRE_MINUTES=43200
-          ALLOWED_ORIGINS=*
+          # Copy necessary files
+          if [ -d "app" ]; then
+            echo "Updating existing app directory..."
+            cd app
+            git pull
+          else
+            echo "Cloning repository..."
+            git clone https://github.com/${{ github.repository }}.git app
+            cd app
+          fi
           
-          # Firebase Configuration
-          FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}
-          FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
-          FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}
-          FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}
-          FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth
-          FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token
-          FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
-          EOL
-          
-          # Create Firebase credentials directory and file with proper JSON formatting
-          mkdir -p api/config
-          cat > api/config/credentials.json << 'EOL'
-          {
-            "type": "service_account",
-            "project_id": "${{ secrets.FIREBASE_PROJECT_ID }}",
-            "private_key_id": "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}",
-            "private_key": "$(echo "${{ secrets.FIREBASE_PRIVATE_KEY }}" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')",
-            "client_email": "${{ secrets.FIREBASE_CLIENT_EMAIL }}",
-            "client_id": "${{ secrets.FIREBASE_CLIENT_ID }}",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": "${{ secrets.FIREBASE_CLIENT_CERT_URL }}",
-            "universe_domain": "googleapis.com"
-          }
-          EOL
-          
-          # Set secure permissions
-          chmod 600 .env
-          chmod 600 api/config/credentials.json
-          
-          # Make sure the deploy script is executable and run it
+          # Make deploy script executable
           chmod +x deploy.sh
           
-          # Run deploy script - handle errors gracefully
-          ./deploy.sh || { 
-            echo "⚠️ Deploy script failed, but proceeding with container restart..."
-            # Stop previous container if running
-            docker-compose down || true
-            # Start new container with updated image
-            docker-compose up -d
-          }
+          # Export required environment variables
+          export FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}'
+          export FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}'
+          export FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}'
+          export FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}'
+          export FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}'
+          export FIREBASE_CLIENT_CERT_URL='${{ secrets.FIREBASE_CLIENT_CERT_URL }}'
+          
+          # Run the deploy script
+          ./deploy.sh
