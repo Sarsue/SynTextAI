@@ -246,105 +246,6 @@ main() {
     # Show running containers
     print_status "🐳 Running containers:"
     docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-    
-    # Frontend
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-
-    # Enable the site
-    ln -sf /etc/nginx/sites-available/${DOMAIN} /etc/nginx/sites-enabled/
-    rm -f /etc/nginx/sites-enabled/default
-    
-    # Test and reload Nginx
-    nginx -t && systemctl reload nginx
-}
-
-# Setup SSL with Certbot
-setup_ssl() {
-    echo -e "${GREEN}🔒 Setting up SSL with Certbot...${NC}"
-    
-    # Stop Nginx temporarily
-    systemctl stop nginx
-    
-    # Obtain SSL certificate
-    certbot certonly --standalone \
-        -d ${DOMAIN} \
-        -d www.${DOMAIN} \
-        --non-interactive \
-        --agree-tos \
-        --email ${EMAIL} \
-        --preferred-challenges http
-    
-    # Start Nginx
-    systemctl start nginx
-    
-    # Set up automatic renewal
-    (crontab -l 2>/dev/null; echo "0 0,12 * * * certbot renew --quiet") | crontab - || \
-        echo "Failed to set up automatic renewal"
-}
-
-# Deploy application with Docker Compose
-deploy_application() {
-    echo -e "${GREEN}🚀 Deploying application...${NC}"
-    cd "${APP_DIR}"
-    
-    # Create .env file if it doesn't exist
-    if [ ! -f ".env" ]; then
-        cat > .env << EOF
-# Application Settings
-ENVIRONMENT=production
-LOG_LEVEL=INFO
-
-# Database Settings
-DB_HOST=db
-DB_PORT=5432
-DB_NAME=${DB_NAME:-syntextai}
-DB_USER=${DB_USER:-postgres}
-DB_PASSWORD=${DB_PASSWORD:-changeme}
-
-# JWT Settings
-SECRET_KEY=${SECRET_KEY:-$(openssl rand -hex 32)}
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
-
-# CORS Settings
-ALLOWED_ORIGINS=*
-EOF
-    fi
-    
-    # Set proper permissions for .env
-    chmod 600 .env
-    
-    # Stop and remove existing containers
-    echo -e "${GREEN}🛑 Stopping existing containers...${NC}"
-    docker-compose down --remove-orphans || true
-
-    # Pull latest images
-    echo -e "${GREEN}⬇️  Pulling latest images...${NC}"
-    docker-compose pull
-
-    # Build and start services
-    echo -e "${GREEN}🚀 Starting services...${NC}"
-    docker-compose up -d --build
-    
-    # Show container status
-    echo -e "\n${GREEN}📊 Container status:${NC}"
-    docker-compose ps
 }
 
 # Main deployment
@@ -374,20 +275,13 @@ EOF
     # Install system dependencies
     install_dependencies
     
-    # Setup Nginx
-    setup_nginx
-    
-    # Setup SSL
-    setup_ssl
-    
     # Deploy the application
     deploy_application
 
     # Show completion message
     echo -e "\n${GREEN}✅ Deployment complete!${NC}"
-    echo -e "\n${GREEN}🌐 Access your application at:${NC}"
-    echo -e "- https://${DOMAIN}"
-    echo -e "- https://search.${DOMAIN}"
+    echo -e "\n${GREEN}🌐 Application is now running at:${NC}"
+    echo -e "- http://localhost:3000"
     
     # Show running containers
     echo -e "\n${GREEN}🐳 Running containers:${NC}"
