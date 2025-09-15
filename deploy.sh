@@ -248,6 +248,58 @@ main() {
     docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 }
 
+# Install system dependencies
+install_dependencies() {
+    print_status "Installing system dependencies..."
+    
+    # Update package lists
+    apt-get update -qq
+    
+    # Install required packages
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release \
+        apt-transport-https \
+        software-properties-common \
+        jq
+    
+    # Add Docker's official GPG key
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    
+    # Set up Docker repository
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    # Install Docker and Docker Compose
+    apt-get update -qq
+    apt-get install -y --no-install-recommends \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin
+    
+    # Start and enable Docker service
+    systemctl enable --now docker
+    
+    # Verify Docker installation
+    if ! docker --version > /dev/null 2>&1; then
+        error_exit "Failed to install Docker"
+    fi
+    
+    if ! docker compose version > /dev/null 2>&1; then
+        error_exit "Failed to install Docker Compose"
+    fi
+    
+    print_status "System dependencies installed successfully"
+}
+
 # Main deployment
 main() {
     # Create required directories

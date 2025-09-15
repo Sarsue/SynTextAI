@@ -29,7 +29,7 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    # Set Firebase environment variables
+    # Set Firebase environment variables directly from secrets
     - name: Set Firebase credentials
       run: |
         echo "FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}" >> $GITHUB_ENV
@@ -38,11 +38,12 @@ jobs:
         echo "FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}" >> $GITHUB_ENV
         echo "FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}" >> $GITHUB_ENV
         echo "FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}" >> $GITHUB_ENV
+        # Set default values for optional fields
         echo "FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth" >> $GITHUB_ENV
-        echo "FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token" >> $GITHUB_ENV
+        echo "FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token" >> $GITHUB_ENV 
         echo "FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs" >> $GITHUB_ENV
         
-    # Create frontend .env file
+    # Create frontend .env file with Firebase web config
     - name: Create frontend environment file
       run: |
         cat << EOF > frontend/.env
@@ -56,7 +57,6 @@ jobs:
         EOF
         chmod 600 frontend/.env
     
-    # Build and push Docker image
     - name: Login to DockerHub
       uses: docker/login-action@v2
       with:
@@ -69,8 +69,9 @@ jobs:
         context: .
         push: true
         tags: osasdeeon/syntextai:latest
+        cache-from: type=registry,ref=osasdeeon/syntextai:buildcache
+        cache-to: type=registry,ref=osasdeeon/syntextai:buildcache,mode=max
         build-args: |
-          # Frontend build args
           REACT_APP_FIREBASE_API_KEY=${{ secrets.REACT_APP_FIREBASE_API_KEY }}
           REACT_APP_FIREBASE_AUTH_DOMAIN=${{ secrets.REACT_APP_FIREBASE_AUTH_DOMAIN }}
           REACT_APP_FIREBASE_PROJECT_ID=${{ secrets.REACT_APP_FIREBASE_PROJECT_ID }}
@@ -78,19 +79,18 @@ jobs:
           REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.REACT_APP_FIREBASE_MESSAGING_SENDER_ID }}
           REACT_APP_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           REACT_APP_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
-          REACT_APP_STRIPE_SECRET=${{ secrets.REACT_APP_STRIPE_SECRET }}
-          REACT_APP_STRIPE_ENDPOINT_SECRET=${{ secrets.REACT_APP_STRIPE_ENDPOINT_SECRET }}
           REACT_APP_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
-          # Firebase backend args
-          FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_PRIVATE_KEY=${{ secrets.FIREBASE_PRIVATE_KEY }}
-          FIREBASE_CLIENT_EMAIL=${{ secrets.FIREBASE_CLIENT_EMAIL }}
-          FIREBASE_PRIVATE_KEY_ID=${{ secrets.FIREBASE_PRIVATE_KEY_ID }}
-          FIREBASE_CLIENT_ID=${{ secrets.FIREBASE_CLIENT_ID }}
-          FIREBASE_CLIENT_CERT_URL=${{ secrets.FIREBASE_CLIENT_CERT_URL }}
+          FIREBASE_PROJECT_ID=${{ env.FIREBASE_PROJECT_ID }}
+          FIREBASE_PRIVATE_KEY=${{ env.FIREBASE_PRIVATE_KEY }}
+          FIREBASE_CLIENT_EMAIL=${{ env.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY_ID=${{ env.FIREBASE_PRIVATE_KEY_ID }}
+          FIREBASE_CLIENT_ID=${{ env.FIREBASE_CLIENT_ID }}
+          FIREBASE_CLIENT_CERT_URL=${{ env.FIREBASE_CLIENT_CERT_URL }}
+          FIREBASE_AUTH_URI=${{ env.FIREBASE_AUTH_URI }}
+          FIREBASE_TOKEN_URI=${{ env.FIREBASE_TOKEN_URI }}
+          FIREBASE_AUTH_PROVIDER_CERT_URL=${{ env.FIREBASE_AUTH_PROVIDER_CERT_URL }}
 
-    # Deploy to server
-    - name: Copy deployment files to server
+    - name: Copy deploy files to Digital Ocean
       uses: appleboy/scp-action@v0.1.3
       with:
         host: ${{ secrets.DO_HOST }}
@@ -99,13 +99,25 @@ jobs:
         source: "deploy.sh,docker-compose.yml"
         target: "/home/root/"
 
-    - name: Run deployment on server
+    - name: Deploy to Digital Ocean
       uses: appleboy/ssh-action@v0.1.10
       with:
         host: ${{ secrets.DO_HOST }}
         username: ${{ secrets.DO_USERNAME }}
         key: ${{ secrets.DO_SSH_KEY }}
+        script_stop: true
         script: |
+          cd /home/root/
+          
+          # Create .env file from GitHub secrets
+          echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+          chmod 600 .env
+          
+          # Create Firebase credentials
+          mkdir -p api/config
+          echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
+          chmod 600 api/config/credentials.json
+          
           # Make deploy script executable and run it
-          chmod +x /home/root/deploy.sh
-          /home/root/deploy.sh
+          chmod +x deploy.sh
+          ./deploy.sh
