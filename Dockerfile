@@ -111,12 +111,45 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy the rest of the backend files
 COPY api/ ./api/
 
-# Create model directory and download Whisper model with retry logic
-RUN mkdir -p $WHISPER_CACHE_DIR && \
-    python3 -c "\
-import sys\n\
-print('📦 Downloading Whisper model...')\n\
-for attempt in range(3):\n    try:\n        from faster_whisper import WhisperModel\n        model = WhisperModel('base', download_root='$WHISPER_CACHE_DIR')\n        print('✅ Successfully downloaded Whisper model')\n        break\n    except Exception as e:\n        if attempt == 2:  # Last attempt\n            print(f'❌ Failed to download Whisper model after 3 attempts: {e}', file=sys.stderr)\n            sys.exit(1)\n        print(f'⚠️ Attempt {attempt + 1} failed, retrying... ({e})')\n        import time\n        time.sleep(5 * (attempt + 1))\n"
+# Create model directory
+RUN mkdir -p $WHISPER_CACHE_DIR && chmod 777 $WHISPER_CACHE_DIR
+
+# Create a script to download the model at runtime
+RUN echo '#!/bin/bash\
+set -e\
+\
+WHISPER_CACHE_DIR=${WHISPER_CACHE_DIR:-/app/models}\
+MODEL_PATH="$WHISPER_CACHE_DIR/faster-whisper-base"\
+\
+echo "📦 Checking for Whisper model in $MODEL_PATH"\
+\
+if [ -d "$MODEL_PATH" ]; then\
+    echo "✅ Found existing Whisper model"\
+    exit 0\
+fi\
+\
+# Create the directory if it doesn\'t exist\
+mkdir -p "$WHISPER_CACHE_DIR"\
+\
+# Download the model with retries\
+for i in {1..3}; do\
+    echo "Attempt $i/3: Downloading Whisper model..."\
+    if python3 -c "\
+import os\
+from faster_whisper import download_model\
+print(\"Starting model download...\")\n\
+try:\n    download_model(\"base\", output_dir=\"$WHISPER_CACHE_DIR\", local_files_only=False)\n    print(\"✅ Successfully downloaded Whisper model\")\n    import sys\n    sys.exit(0)\nexcept Exception as e:\n    print(f\"❌ Download failed: {str(e)}\")\n    import sys\n    sys.exit(1)\
+"; then\
+        echo "✅ Successfully downloaded Whisper model"\
+        exit 0\
+    fi\
+    \
+    if [ $i -lt 3 ]; then\
+        sleep $((i * 5))\
+    fi\ndone\n\
+echo "❌ Failed to download Whisper model after 3 attempts"\nexit 1\
+' > /usr/local/bin/download-whisper-model && \
+    chmod +x /usr/local/bin/download-whisper-model
 
 # Copy the frontend build from the first stage
 COPY --from=build-step /app/frontend/build ./frontend/build
@@ -134,8 +167,20 @@ RUN find /usr/local -depth \
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
+
+# Create a startup script that ensures the model is downloaded before starting the app
+RUN echo '#!/bin/bash\
+set -e\
+\
+# Download the model if it doesn\'t exist\nif ! /usr/local/bin/download-whisper-model; then\
+    echo "⚠️ Warning: Failed to download Whisper model. The app will start but may not function correctly."\
+fi\n\n# Start the application\nexec "$@"\n' > /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Command to start FastAPI from the project root
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

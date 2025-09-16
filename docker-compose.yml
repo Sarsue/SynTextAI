@@ -3,20 +3,22 @@ version: '3.8'
 services:
   syntextaiapp:
     image: osasdeeon/syntextai:latest
+    build: .
     container_name: syntextaiapp
+    restart: unless-stopped
     ports:
       - "3000:3000"
     env_file:
       - .env
-    volumes:
-      - ./api/config:/app/api/config
+    environment:
+      - WHISPER_CACHE_DIR=/app/models
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - db
     networks:
       - syntextai_network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
+    volumes:
+      - syntextai_models:/app/models
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
@@ -81,6 +83,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  syntextai_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./models
 
 networks:
   syntextai_network:
