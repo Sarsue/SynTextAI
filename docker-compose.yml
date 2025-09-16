@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   syntextaiapp:
     image: osasdeeon/syntextai:latest
@@ -14,8 +12,6 @@ services:
       - WHISPER_CACHE_DIR=/app/models
       - PYTHONUNBUFFERED=1
     # Database connection is handled via environment variables
-    networks:
-      - syntextai_network
     volumes:
       - syntextai_models:/app/models
     healthcheck:
@@ -41,8 +37,6 @@ services:
       - POLL_INTERVAL=10
     volumes:
       - ./api/config:/app/api/config
-    networks:
-      - syntextai_network
     deploy:
       resources:
         limits:
@@ -62,8 +56,6 @@ services:
       - "8080:8080"
     volumes:
       - ./settings.yml:/etc/searxng/settings.yml
-    networks:
-      - syntextai_network
     deploy:
       resources:
         limits:
@@ -91,7 +83,5 @@ volumes:
       device: ./models
 
 networks:
-  syntextai_network:
+  default:
     driver: bridge
-    driver_opts:
-      com.docker.network.bridge.name: syntextai_network
