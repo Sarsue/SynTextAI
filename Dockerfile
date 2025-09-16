@@ -170,17 +170,20 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-# Create a startup script that ensures the model is downloaded before starting the app
-RUN echo '#!/bin/bash\
-set -e\
-\
-# Download the model if it doesn\'t exist\nif ! /usr/local/bin/download-whisper-model; then\
-    echo "⚠️ Warning: Failed to download Whisper model. The app will start but may not function correctly."\
-fi\n\n# Start the application\nexec "$@"\n' > /usr/local/bin/entrypoint.sh && \
+# Create a directory for the entrypoint script
+RUN mkdir -p /usr/local/bin
+
+# Create the entrypoint script with proper line endings and permissions
+RUN printf '#!/bin/bash\n\nset -e\n\n# Download the model if it doesn\'\''t exist\nif ! /usr/local/bin/download-whisper-model; then\n    echo "⚠️ Warning: Failed to download Whisper model. The app will start but may not function correctly."\nfi\n\n# Start the application\nexec "$@"\n' > /usr/local/bin/entrypoint.sh && \
     chmod +x /usr/local/bin/entrypoint.sh
 
+# Verify the entrypoint script
+RUN ls -la /usr/local/bin/entrypoint.sh && \
+    file /usr/local/bin/entrypoint.sh && \
+    cat /usr/local/bin/entrypoint.sh
+
 # Set the entrypoint
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/entrypoint.sh"]
 
 # Command to start FastAPI from the project root
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]
