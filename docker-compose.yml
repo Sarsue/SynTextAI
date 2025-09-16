@@ -13,8 +13,7 @@ services:
     environment:
       - WHISPER_CACHE_DIR=/app/models
       - PYTHONUNBUFFERED=1
-    depends_on:
-      - db
+    # Database connection is handled via environment variables
     networks:
       - syntextai_network
     volumes:
