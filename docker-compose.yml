@@ -76,6 +76,7 @@ services:
 
 volumes:
   syntextai_models:
+    driver: local
 
 networks:
   default:
