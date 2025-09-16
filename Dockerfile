@@ -29,11 +29,13 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 
 # Install dependencies (including dev dependencies needed for build)
-RUN npm ci
+RUN npm ci --prefer-offline --no-audit --progress=false
 
 # Copy the remaining files and build
 COPY frontend/ ./
-RUN npm run build && npm cache clean --force
+RUN npm run build && \
+    npm cache clean --force && \
+    rm -rf /root/.npm /tmp/*
 
 # Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
 FROM python:3.10-slim AS base
@@ -60,8 +62,18 @@ ENV FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/
 ENV FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
 ENV FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
 
+# Set environment variables for Python
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100 \
+    POETRY_VERSION=1.5.1 \
+    WHISPER_CACHE_DIR=/app/models
+
 # Install system dependencies
-RUN apt-get update && \
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     ffmpeg \
@@ -79,10 +91,8 @@ RUN apt-get update && \
     libffi-dev \
     tesseract-ocr \
     libtesseract-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Upgrade pip and setuptools first
-RUN pip install --upgrade pip setuptools wheel
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Set working directory
 WORKDIR /app
@@ -93,24 +103,39 @@ ENV PYTHONPATH /app
 # Copy requirements first for better layer caching
 COPY api/requirements.txt ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with retry logic
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the backend files
 COPY api/ ./api/
 
-# Set environment variable for Whisper model directory
-ENV WHISPER_CACHE_DIR=/app/models
-
-# Download the Whisper model (simplified, non-blocking)
+# Create model directory and download Whisper model with retry logic
 RUN mkdir -p $WHISPER_CACHE_DIR && \
-    (python3 -c "from faster_whisper import WhisperModel; print('Downloading Whisper model...'); WhisperModel('base', download_root='$WHISPER_CACHE_DIR')" || echo "Warning: Failed to download Whisper model, continuing anyway") &
+    python3 -c "\
+import sys\n\
+print('📦 Downloading Whisper model...')\n\
+for attempt in range(3):\n    try:\n        from faster_whisper import WhisperModel\n        model = WhisperModel('base', download_root='$WHISPER_CACHE_DIR')\n        print('✅ Successfully downloaded Whisper model')\n        break\n    except Exception as e:\n        if attempt == 2:  # Last attempt\n            print(f'❌ Failed to download Whisper model after 3 attempts: {e}', file=sys.stderr)\n            sys.exit(1)\n        print(f'⚠️ Attempt {attempt + 1} failed, retrying... ({e})')\n        import time\n        time.sleep(5 * (attempt + 1))\n"
 
 # Copy the frontend build from the first stage
 COPY --from=build-step /app/frontend/build ./frontend/build
 
+# Clean up
+RUN find /usr/local -depth \
+    \( \
+        -type d -a -name "__pycache__" -o \
+        -type f -a -name "*.pyc" -o \
+        -type f -a -name "*.pyo" \
+    \) -exec rm -rf '{}' + && \
+    rm -rf /tmp/*
+
 # Expose the application port
 EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
 
 # Command to start FastAPI from the project root
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

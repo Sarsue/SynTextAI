@@ -152,8 +152,35 @@ else
     echo "⚠️ Failed to obtain Let's Encrypt certificate, continuing with self-signed."
 fi
 
+# Step 8.5: Pre-pull Docker images with retry logic
+echo "[8/9] Pre-pulling Docker images..."
+MAX_RETRIES=5
+RETRY_DELAY=15
+
+pull_image() {
+    local image=$1
+    for i in $(seq 1 $MAX_RETRIES); do
+        echo "  Attempt $i/$MAX_RETRIES: Pulling $image..."
+        if sudo docker pull $image; then
+            echo "  ✅ Successfully pulled $image"
+            return 0
+        fi
+        if [ $i -eq $MAX_RETRIES ]; then
+            echo "  ❌ Failed to pull $image after $MAX_RETRIES attempts"
+            return 1
+        fi
+        echo "  ⏳ Pull failed, retrying in $RETRY_DELAY seconds..."
+        sleep $RETRY_DELAY
+    done
+}
+
+# Pull all required images
+pull_image "osasdeeon/syntextai:latest" || exit 1
+pull_image "searxng/searxng:latest" || exit 1
+
 # Step 9: Bring up Docker containers
-echo "[8/9] Launching Docker containers..."
+echo "[9/9] Launching Docker containers..."
 sudo $COMPOSE_CMD -f docker-compose.yml up -d
 
-echo "✅ [9/9] Deployment completed successfully!"
+echo "✅ Deployment completed successfully!"
+echo "📦 Docker images pulled and services started"
