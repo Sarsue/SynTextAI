@@ -76,11 +76,6 @@ services:
 
 volumes:
   syntextai_models:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./models
 
 networks:
   default:
