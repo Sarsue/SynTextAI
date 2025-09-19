@@ -3,13 +3,26 @@ ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
 from enum import Enum as PyEnum
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Boolean, text, CheckConstraint, Enum
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    JSON,
+    Boolean,
+    text,
+    CheckConstraint,
+    Enum
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
-from typing import List, Optional, TypeVar, Type, Any
+from typing import List, Optional, TypeVar, Type, Any, Dict
 
 
 class SubscriptionStatus(str, PyEnum):
@@ -115,7 +128,6 @@ class CardDetails(Base):
     exp_month = Column(Integer, nullable=False)  # Expiration month (1-12)
     exp_year = Column(Integer, nullable=False)   # Expiration year (4 digits)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
     
     # Relationship
     subscription = relationship("Subscription", back_populates="card_details")
@@ -129,8 +141,7 @@ class CardDetails(Base):
             'card_type': self.card_type,
             'exp_month': self.exp_month,
             'exp_year': self.exp_year,
-            'created_at': self.created_at,
-            'updated_at': self.updated_at
+            'created_at': self.created_at
         }
 
 class File(Base):
@@ -276,3 +287,9 @@ class QuizQuestion(Base):
     # Relationships
     file = relationship("File", back_populates="quiz_questions")
     key_concept = relationship("KeyConcept", back_populates="quiz_questions")
+
+    def __repr__(self):
+        return f"<QuizQuestion(id={self.id}, question='{self.question}')>"
+
+
+# WebhookEvent model has been removed as webhook processing is now handled without database persistence

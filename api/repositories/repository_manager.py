@@ -27,10 +27,10 @@ class RepositoryManager:
         pass
     """
     
-    def __init__(self, database_url: str, echo: Optional[bool] = None):
-        self._database_url = database_url
+    def __init__(self, database_url_or_engine: str | AsyncEngine, echo: Optional[bool] = None):
+        self._database_url = database_url_or_engine if isinstance(database_url_or_engine, str) else None
         self._echo = echo
-        self.engine: Optional[AsyncEngine] = None
+        self.engine: Optional[AsyncEngine] = database_url_or_engine if not isinstance(database_url_or_engine, str) else None
         self.async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
         self._initialized = False
         self._closed = False
@@ -39,11 +39,26 @@ class RepositoryManager:
         self._file_repo = None
 
     async def initialize(self) -> None:
-        """Initialize database engine and session factory."""
+        """Initialize database engine (if not provided) and session factory."""
         if self._initialized or self._closed:
             return
         
         try:
+            # If engine was already provided, just create the session factory
+            if self.engine is not None:
+                self.async_session_factory = async_sessionmaker(
+                    bind=self.engine,
+                    expire_on_commit=False,
+                    class_=AsyncSession
+                )
+                self._initialized = True
+                logger.info("Database connection pool initialized with provided engine")
+                return
+                
+            # Otherwise, create the engine from URL
+            if not self._database_url:
+                raise ValueError("Either database URL or engine must be provided")
+                
             pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
             max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "20"))
             pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "60"))
@@ -51,7 +66,11 @@ class RepositoryManager:
             connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
             
             from sqlalchemy.engine.url import make_url
-            db_url = make_url(str(self._database_url))
+            try:
+                db_url = make_url(str(self._database_url))
+            except Exception as e:
+                logger.error(f"Failed to parse database URL: {self._database_url}")
+                raise ValueError(f"Invalid database URL: {e}")
             
             connect_args = {
                 "timeout": connect_timeout,
@@ -62,18 +81,66 @@ class RepositoryManager:
                 }
             }
 
-            self.engine = create_async_engine(
-                db_url,
-                echo=os.getenv("SQL_ECHO", "false").lower() == "true" if self._echo is None else self._echo,
-                future=True,
-                pool_pre_ping=True,
-                pool_size=pool_size,
-                max_overflow=max_overflow,
-                pool_timeout=pool_timeout,
-                pool_recycle=pool_recycle,
-                pool_use_lifo=True,
-                connect_args=connect_args
-            )
+            # Handle both string and SQLAlchemy URL objects
+            from urllib.parse import urlparse, parse_qs, urlunparse
+            from sqlalchemy.engine import URL
+            
+            if isinstance(db_url, URL):
+                # If it's already a URL object, convert to string without sslmode
+                clean_url = str(db_url)
+                # Extract sslmode from query parameters if present
+                sslmode = 'require'
+                if db_url.query and 'sslmode' in db_url.query:
+                    sslmode = db_url.query['sslmode']
+                    # Create a new URL without sslmode in query
+                    query = {k: v for k, v in db_url.query.items() if k != 'sslmode'}
+                    clean_url = str(db_url._replace(query=query))
+            else:
+                # Handle string URL
+                parsed = urlparse(str(db_url))
+                query = parse_qs(parsed.query)
+                
+                # Remove sslmode from query params if present
+                sslmode = query.pop('sslmode', ['require'])[0]
+                
+                # Rebuild URL without sslmode in query
+                clean_query = '&'.join(f"{k}={v[0]}" for k, v in query.items())
+                clean_url = parsed._replace(query=clean_query).geturl()
+            
+            # Set SSL parameters based on sslmode
+            ssl_params = {}
+            if sslmode == 'require':
+                ssl_params = {'ssl': 'require'}
+            elif sslmode == 'verify-ca':
+                ssl_params = {'ssl': 'verify-ca'}
+            elif sslmode == 'verify-full':
+                ssl_params = {'ssl': 'verify-full'}
+                
+            # Update connect args with SSL settings
+            connect_args.update(ssl_params)
+            
+            try:
+                self.engine = create_async_engine(
+                    db_url,
+                    echo=self._echo,
+                    pool_size=pool_size,
+                    max_overflow=max_overflow,
+                    pool_timeout=pool_timeout,
+                    pool_recycle=pool_recycle,
+                    connect_args=connect_args,
+                    pool_pre_ping=True  # Enable connection health checks
+                )
+                
+                # Test the connection
+                async with self.engine.connect() as conn:
+                    await conn.execute("SELECT 1")
+                    
+            except Exception as e:
+                logger.error(f"Failed to initialize database engine: {e}")
+                if self.engine:
+                    await self.engine.dispose()
+                    self.engine = None
+                raise
 
             self.async_session_factory = async_sessionmaker(
                 bind=self.engine,
@@ -212,6 +279,35 @@ class RepositoryManager:
 
     # Learning material operations are handled by AsyncLearningMaterialRepository
 
-def get_repository_manager(database_url: str) -> RepositoryManager:
-    """Return a new RepositoryManager instance."""
-    return RepositoryManager(database_url=str(database_url))
+def get_repository_manager(database_url: str | None = None) -> RepositoryManager:
+    """Return a new RepositoryManager instance.
+    
+    This is the single entry point for creating a RepositoryManager instance.
+    It ensures consistent behavior across the application by:
+    1. Getting the database URL from settings if not provided
+    2. Ensuring the URL is properly converted to a string
+    3. Creating and initializing the RepositoryManager
+    
+    Args:
+        database_url: Optional database URL. If not provided, will be fetched from settings.
+                     This parameter is primarily for testing or special cases.
+                     
+    Returns:
+        RepositoryManager: Initialized repository manager
+        
+    Raises:
+        ValueError: If no database URL can be determined
+    """
+    from api.core.config import settings
+    
+    # Use provided URL or fall back to settings
+    db_url = database_url or getattr(settings, 'DATABASE_URL', None)
+    
+    if not db_url:
+        raise ValueError("No database URL provided and none found in settings")
+        
+    # Ensure URL is a string
+    db_url = str(db_url)
+    
+    # Create and return the repository manager
+    return RepositoryManager(database_url_or_engine=db_url)

@@ -11,8 +11,10 @@ tenacity>=8.2.0,<9.0.0  # For retry logic with exponential backoff
 
 # Web framework
 fastapi>=0.100.0,<1.0.0
-uvicorn>=0.20.0,<1.0.0
+uvicorn[standard]>=0.20.0,<1.0.0
 python-multipart>=0.0.5,<1.0.0
+websockets>=11.0.0,<12.0.0
+slowapi>=0.1.8,<1.0.0
 
 # Database
 sqlalchemy>=2.0.0,<3.0.0

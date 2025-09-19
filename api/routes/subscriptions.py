@@ -1,4 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body, status
+from fastapi.responses import JSONResponse
+import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Union, Any
 import stripe
@@ -11,6 +14,7 @@ from dotenv import load_dotenv
 from ..repositories.async_user_repository import AsyncUserRepository, SubscriptionStatus
 from ..repositories.repository_manager import RepositoryManager, get_repository_manager
 from ..utils.utils import get_user_id
+from ..app import limiter
 
 # Load environment variables
 load_dotenv()
@@ -825,125 +829,345 @@ async def update_payment(
             'error': 'An unexpected error occurred while updating your payment method.'
         })
 
+# Define supported webhook events with their purposes
+SUPPORTED_EVENTS = {
+    'payment_method.attached': 'Update payment method details',
+    'customer.subscription.updated': 'Handle subscription changes',
+    'customer.subscription.deleted': 'Handle subscription cancellation',
+    'customer.subscription.trial_will_end': 'Handle upcoming trial end',
+    'invoice.payment_succeeded': 'Handle successful payments',
+    'invoice.payment_failed': 'Handle payment failures',
+    'invoice.upcoming': 'Notify about upcoming charges',
+    'customer.subscription.created': 'Handle new subscriptions'
+}
+
+# Subscription status transitions for validation
+ALLOWED_STATUS_TRANSITIONS = {
+    'trialing': ['active', 'past_due', 'canceled', 'unpaid'],
+    'active': ['past_due', 'canceled', 'unpaid'],
+    'past_due': ['active', 'canceled', 'unpaid'],
+    'unpaid': ['canceled', 'active'],
+    'canceled': []  # Final state
+}
+
 # Route to handle Stripe webhooks
 @subscriptions_router.post("/webhook", status_code=200)
+@limiter.limit("100/minute")  # Rate limiting
 async def webhook(
     request: Request,
     store: RepositoryManager = Depends(get_store)
 ):
+    """Handle Stripe webhook events with idempotency and detailed logging.
+    
+    This endpoint processes various Stripe webhook events related to subscriptions
+    and payment methods. It's designed to be idempotent, meaning duplicate events
+    will be detected and handled gracefully without side effects.
+    
+    Returns:
+        JSON response with status and details about the processed event
+    """
+    # Get raw payload and signature
     payload = await request.body()
     sig_header = request.headers.get('stripe-signature')
     
+    if not sig_header:
+        logger.error("Missing Stripe-Signature header")
+        raise HTTPException(status_code=400, detail="Missing Stripe-Signature header")
+    
     try:
+        # Verify webhook signature
         event = stripe.Webhook.construct_event(
-            payload, sig_header, endpoint_secret
+            payload,
+            sig_header,
+            endpoint_secret,
+            tolerance=300  # 5 minutes tolerance for clock drift
         )
-    except ValueError as e:
-        # Invalid payload
-        logger.error(f"Invalid payload in webhook: {str(e)}")
-        return format_subscription_response({
-            'status': 'error',
-            'error': 'Invalid payload'
-        })
-    except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
-        logger.error(f"Invalid signature in webhook: {str(e)}")
-        return format_subscription_response({
-            'status': 'error',
-            'error': 'Invalid signature'
-        })
-    
-    # Handle the event
-    event_type = event['type']
-    data = event['data']
-    
-    try:
-        if event_type == 'payment_method.attached':
-            payment_method = event['data']['object']  # contains a stripe.PaymentMethod
-            customer_id = payment_method.customer
-            
-            try:
-                # Get the subscription for this customer
-                subscriptions = stripe.Subscription.list(customer=customer_id, limit=1)
-                if subscriptions and len(subscriptions.data) > 0:
-                    subscription = subscriptions.data[0]
-                    
-                    # Update the subscription with the new payment method
-                    stripe.Subscription.modify(
-                        subscription.id,
-                        default_payment_method=payment_method.id
-                    )
-                    
-                    # Update our database
-                    await store.user_repo.add_or_update_subscription(
-                        user_id=None,  # We'll look up by customer_id
-                        subscription_data={
-                            'stripe_customer_id': customer_id,
-                            'stripe_payment_method_id': payment_method.id,
-                            'card_last4': payment_method.card.last4,
-                            'card_brand': payment_method.card.brand,
-                            'exp_month': payment_method.card.exp_month,
-                            'exp_year': payment_method.card.exp_year
-                        }
-                    )
-                    
-            except Exception as e:
-                logger.error(f"Error processing payment_method.attached: {str(e)}", exc_info=True)
-                raise
         
-        elif event_type == 'customer.subscription.updated':
-            subscription = event['data']['object']
-            customer_id = subscription.customer
+        event_type = event['type']
+        logger.info(f"Processing webhook: {event_type} (ID: {event['id']})")
+        
+        # Check if event type is supported
+        if event_type not in SUPPORTED_EVENTS:
+            logger.warning(f"Unsupported event type: {event_type}")
+            return {"status": "success", "message": "Unsupported event type"}
             
-            # Update subscription status in our database
-            subscription_data = {
+        # Handle different event types
+        if event_type == 'customer.subscription.updated':
+            subscription = event['data']['object']
+            customer_id = subscription['customer']
+            subscription_id = subscription.get('id', 'unknown')
+            
+            # Log subscription update details
+            logger.info(f"Processing subscription update for customer {customer_id} (Subscription: {subscription_id})")
+            logger.debug(f"Subscription data: {json.dumps(subscription, default=str)}")
+            
+            # Get current subscription from DB
+            current_sub = await store.user_repo.get_subscription_by_customer_id(customer_id)
+            
+            # Check if this is a duplicate event by comparing with current state
+            if current_sub:
+                current_period_end = current_sub.get('current_period_end')
+                subscription_period_end = subscription.get('current_period_end')
+                
+                # Check if this is a duplicate update
+                if (current_period_end and 
+                    subscription_period_end and 
+                    current_period_end.timestamp() == subscription_period_end and
+                    current_sub.get('status') == subscription.get('status')):
+                    logger.info(f"Skipping duplicate subscription update for customer {customer_id} (Status: {subscription['status']})")
+                    return {
+                        "status": "success", 
+                        "message": "Duplicate event - no changes detected",
+                        "event_id": event_id,
+                        "event_type": event_type
+                    }
+            
+            # Log status transitions
+            if current_sub and current_sub.get('status') != subscription.get('status'):
+                logger.info(f"Subscription status changed from {current_sub.get('status')} to {subscription['status']} for customer {customer_id}")
+            
+            # Handle trial end
+            if (current_sub and 
+                current_sub.get('status') == 'trialing' and 
+                subscription['status'] == 'active' and
+                'trial_end' in subscription and 
+                subscription['trial_end'] is not None and
+                subscription['trial_end'] <= datetime.now(timezone.utc).timestamp()):
+                logger.info(f"Trial ended for customer {customer_id}")
+                # Trigger any trial end notifications or actions
+            
+            # Prepare update data
+            update_data = {
                 'stripe_customer_id': customer_id,
-                'stripe_subscription_id': subscription.id,
-                'status': subscription.status,
-                'current_period_end': datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                'status': subscription['status'],
+                'stripe_subscription_id': subscription_id,
+                'current_period_end': datetime.fromtimestamp(subscription['current_period_end'], timezone.utc)
             }
             
-            # Handle trial end if it exists
-            if hasattr(subscription, 'trial_end') and subscription.trial_end:
-                subscription_data['trial_end'] = datetime.fromtimestamp(subscription.trial_end, tz=timezone.utc)
+            # Include trial end if it exists
+            if 'trial_end' in subscription and subscription['trial_end'] is not None:
+                update_data['trial_end'] = datetime.fromtimestamp(subscription['trial_end'], timezone.utc)
             
-            # If subscription is canceled at period end, update status
-            if getattr(subscription, 'cancel_at_period_end', False):
-                subscription_data['status'] = 'canceled'
+            # Log the update
+            logger.debug(f"Updating subscription with data: {json.dumps(update_data, default=str)}")
             
-            await store.user_repo.add_or_update_subscription(
-                user_id=None,  # Look up by customer_id
-                subscription_data=subscription_data
-            )
+            # Update subscription in database
+            await store.user_repo.upsert_subscription(**update_data)
+            logger.info(f"Successfully updated subscription {subscription_id} for customer {customer_id}")
             
-            logger.info(f"Updated subscription {subscription.id} for customer {customer_id}")
-        
+            # Log any important subscription changes
+            if current_sub:
+                for field in ['status', 'current_period_end']:
+                    if field in current_sub and current_sub[field] != update_data.get(field):
+                        logger.info(f"Subscription {field} changed from {current_sub[field]} to {update_data.get(field)}")
+            
         elif event_type == 'customer.subscription.deleted':
             subscription = event['data']['object']
-            customer_id = subscription.customer
+            customer_id = subscription['customer']
+            subscription_id = subscription.get('id', 'unknown')
             
-            # Mark subscription as canceled in our database
-            await store.user_repo.add_or_update_subscription(
-                user_id=None,  # Look up by customer_id
-                subscription_data={
-                    'stripe_customer_id': customer_id,
-                    'status': 'canceled',
-                    'current_period_end': datetime.fromtimestamp(
-                        subscription.current_period_end, 
-                        tz=timezone.utc
-                    ) if hasattr(subscription, 'current_period_end') else None,
-                    'stripe_subscription_id': subscription.id
+            logger.info(f"Processing subscription deletion for customer {customer_id} (Subscription: {subscription_id})")
+            
+            # Check if already canceled
+            current_sub = await store.user_repo.get_subscription_by_customer_id(customer_id)
+            if current_sub and current_sub.get('status') == 'canceled':
+                logger.info(f"Subscription already marked as canceled for customer {customer_id}")
+                return {
+                    "status": "success",
+                    "message": "Subscription already canceled",
+                    "event_id": event['id'],
+                    "event_type": event_type
                 }
-            )
             
-            logger.info(f"Marked subscription {subscription.id} as canceled for customer {customer_id}")
-    
-        # If we get here, the event was processed successfully
-        return format_subscription_response({'status': 'success'})
-
+            # Mark subscription as canceled
+            logger.debug(f"Marking subscription {subscription_id} as canceled for customer {customer_id}")
+            await store.user_repo.upsert_subscription(
+                stripe_customer_id=customer_id,
+                status='canceled',
+                stripe_subscription_id=subscription_id
+            )
+            logger.info(f"Successfully marked subscription {subscription_id} as canceled for customer {customer_id}")
+            
+        elif event_type == 'payment_method.attached':
+            payment_method = event['data']['object']
+            customer_id = payment_method['customer']
+            payment_method_id = payment_method.get('id', 'unknown')
+            
+            logger.info(f"Processing payment method attached for customer {customer_id} (Payment Method: {payment_method_id})")
+            
+            # Check if this is a card payment method
+            if payment_method['type'] != 'card' or not payment_method.get('card'):
+                logger.info(f"Skipping non-card payment method: {payment_method.get('type')}")
+                return {
+                    "status": "success",
+                    "message": "Non-card payment method skipped",
+                    "event_id": event['id'],
+                    "event_type": event_type
+                }
+            
+            # Check if this is a duplicate update
+            current_sub = await store.user_repo.get_subscription_by_customer_id(customer_id)
+            card = payment_method['card']
+            
+            if (current_sub and 
+                current_sub.get('stripe_payment_method_id') == payment_method_id and
+                current_sub.get('card_last4') == card['last4'] and
+                str(current_sub.get('exp_month')) == str(card['exp_month']) and
+                str(current_sub.get('exp_year')) == str(card['exp_year'])):
+                
+                logger.info(f"Skipping duplicate payment method update for customer {customer_id}")
+                return {
+                    "status": "success",
+                    "message": "Payment method already up to date",
+                    "event_id": event['id'],
+                    "event_type": event_type
+                }
+            
+            # Update payment method in database
+            logger.debug(f"Updating payment method for customer {customer_id} with card ending in {card['last4']}")
+            await store.user_repo.upsert_subscription(
+                stripe_customer_id=customer_id,
+                card_last4=card['last4'],
+                card_brand=card['brand'],
+                exp_month=card['exp_month'],
+                exp_year=card['exp_year'],
+                stripe_payment_method_id=payment_method_id
+            )
+            logger.info(f"Successfully updated payment method for customer {customer_id}")
+            
+            # If this is a payment method update after a failed payment
+            if current_sub and current_sub.get('status') in ['past_due', 'unpaid']:
+                logger.info(f"Processing payment method update for subscription in {current_sub['status']} status")
+                
+                try:
+                    # Get the most recent open invoice
+                    invoices = stripe.Invoice.list(
+                        customer=customer_id,
+                        limit=1,
+                        status='open'
+                    )
+                    
+                    if invoices.data:
+                        invoice = invoices.data[0]
+                        logger.info(f"Found open invoice {invoice.id} for customer {customer_id}")
+                        
+                        # Pay the invoice with the new payment method
+                        stripe.Invoice.pay(invoice.id, payment_method=payment_method_id)
+                        logger.info(f"Paid outstanding invoice {invoice.id} for customer {customer_id}")
+                        
+                        # Update subscription status if needed
+                        if current_sub['status'] != 'active':
+                            await store.user_repo.upsert_subscription(
+                                stripe_customer_id=customer_id,
+                                status='active'
+                            )
+                            logger.info(f"Updated subscription status to active for customer {customer_id}")
+                    else:
+                        logger.info(f"No open invoices found for customer {customer_id}")
+                        
+                except stripe.error.StripeError as e:
+                    error_msg = f"Failed to process payment for customer {customer_id}: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    # Don't fail the webhook - we'll log the error and continue
+        
+        # Log successful processing
+        logger.info(f"Successfully processed webhook: {event_type} (ID: {event.get('id')})")
+        return {
+            "status": "success",
+            "event_id": event.get('id'),
+            "event_type": event_type,
+            "processed_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except ValueError as e:
+        error_id = str(uuid.uuid4())
+        error_msg = f"Invalid payload (Error ID: {error_id}): {str(e)}"
+        logger.error(error_msg)
+        logger.debug(f"Request headers: {dict(request.headers)}")
+        logger.debug(f"Request body: {payload.decode('utf-8', errors='replace')}")
+        
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "code": "INVALID_PAYLOAD",
+                "message": "Invalid payload received",
+                "error_id": error_id,
+                "details": str(e)
+            }
+        )
+        
+    except stripe.error.SignatureVerificationError as e:
+        error_id = str(uuid.uuid4())
+        error_msg = f"Invalid webhook signature (Error ID: {error_id}): {str(e)}"
+        logger.warning(error_msg)
+        logger.debug(f"Request headers: {dict(request.headers)}")
+        logger.debug(f"Request body (first 1000 chars): {payload.decode('utf-8', errors='replace')[:1000]}")
+        
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "code": "INVALID_SIGNATURE",
+                "message": "Invalid webhook signature",
+                "error_id": error_id,
+                "details": "The webhook signature verification failed. Please verify your webhook secret and try again."
+            }
+        )
+        
+    except stripe.error.StripeError as e:
+        error_id = str(uuid.uuid4())
+        error_type = getattr(e, 'error', {}).get('type', 'stripe_error')
+        error_msg = f"Stripe API error during webhook processing (Error ID: {error_id}, Type: {error_type}): {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # Log additional Stripe error details if available
+        if hasattr(e, 'http_body'):
+            logger.debug(f"Stripe error response: {e.http_body}")
+        
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "code": "STRIPE_API_ERROR",
+                "message": "Error communicating with Stripe",
+                "error_id": error_id,
+                "error_type": error_type,
+                "details": str(e)
+            }
+        )
+        
     except Exception as e:
-        logger.error(f"Unexpected error in webhook: {str(e)}", exc_info=True)
-        return format_subscription_response({
-            'status': 'error',
-            'error': 'Internal server error'
-        })
+        error_id = str(uuid.uuid4())
+        error_msg = f"Unexpected error processing webhook {event.get('id', 'unknown')} (Error ID: {error_id}): {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        
+        # Log detailed error information
+        try:
+            # Log request details
+            logger.error(f"Request method: {request.method}")
+            logger.error(f"Request URL: {request.url}")
+            logger.error(f"Request headers: {dict(request.headers)}")
+            
+            # Try to log the event data if available
+            if 'event' in locals():
+                logger.error(f"Event type: {event.get('type', 'unknown')}")
+                logger.error(f"Event ID: {event.get('id', 'unknown')}")
+                logger.error(f"Event data: {json.dumps(event.get('data', {}), default=str, indent=2)}")
+            else:
+                logger.error("No event data available in error context")
+                
+        except Exception as log_error:
+            logger.error(f"Failed to log error details: {str(log_error)}")
+        
+        # Return a generic error message to the client
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected error occurred while processing the webhook",
+                "error_id": error_id,
+                "details": "Please contact support with the error ID for assistance"
+            }
+        )

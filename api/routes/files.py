@@ -19,6 +19,27 @@ from ..schemas.learning_content import (
     QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
 )
 from sqlalchemy import func
+from typing import Generic, TypeVar, List as TList
+from pydantic.generics import GenericModel
+
+# Generic type for paginated responses
+T = TypeVar('T')
+
+class PaginatedResponse(GenericModel, Generic[T]):
+    items: TList[T]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+class FileResponse(BaseModel):
+    id: int
+    file_name: str
+    file_url: str
+    file_type: str
+    status: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 class FileUploadResponse(BaseModel):
     id: int
@@ -510,46 +531,57 @@ async def save_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Route to retrieve files
-@files_router.get("", response_class=JSONResponse)
+@files_router.get("", response_model=PaginatedResponse[FileResponse])
 async def retrieve_files(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    user_data: Dict = Depends(authenticate_user)
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
 ):
+    """
+    Retrieve paginated list of files for the authenticated user.
+    
+    Args:
+        page: Page number (1-based)
+        page_size: Number of items per page (1-100)
+        user_data: Authenticated user data
+        store: Repository manager instance
+        
+    Returns:
+        Paginated list of files with metadata
+    """
     try:
         user_id = user_data['user_id']
         offset = (page - 1) * page_size
         
         # Get files and total count for pagination
+        file_repo = store.file_repo
         db_files = await file_repo.list_user_files(user_id, skip=offset, limit=page_size)
         total_files = await file_repo.count(user_id=user_id)
         
         # Format the response to match the expected structure
-        paginated_result = {
-            'items': db_files,
-            'total': total_files
-        }
-
-        # Construct the response to match the frontend's expectation
         response_items = [
-            {
-                "id": f.id,
-                "file_name": f.file_name,
-                "file_url": f.file_url,
-                "created_at": f.created_at.isoformat() if f.created_at else None,
-                "file_type": f.file_type,
-                "status": f.processing_status if hasattr(f, 'processing_status') and f.processing_status else "uploaded",
-            }
-            for f in db_files
+            FileResponse(
+                id=file.id,
+                file_name=file.file_name,
+                file_url=file.file_url,
+                file_type=file.file_type,
+                status=file.processing_status if hasattr(file, 'processing_status') and file.processing_status else "uploaded",
+                created_at=file.created_at.isoformat() if file.created_at else None,
+                updated_at=file.updated_at.isoformat() if hasattr(file, 'updated_at') and file.updated_at else None
+            )
+            for file in db_files
         ]
-
-        return {
-            "items": response_items,
-            "total": total_files,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": (total_files + page_size - 1) // page_size
-        }
+        
+        total_pages = (total_files + page_size - 1) // page_size if page_size > 0 else 0
+        
+        return PaginatedResponse[FileResponse](
+            items=response_items,
+            total=total_files,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages
+        )
 
     except Exception as e:
         logger.error(f"Error retrieving files for user {user_data.get('user_id', 'unknown')}: {str(e)}", exc_info=True)

@@ -287,6 +287,18 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     const isCardUpdateRequired = subscriptionData?.subscription_status &&
         !['none', 'active', 'deleted', 'canceled', 'trialing'].includes(subscriptionData.subscription_status);
 
+    // Show loading state while fetching subscription data
+    if (subscriptionData === null) {
+        return (
+            <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
+                <h3>Payment</h3>
+                <p>Loading subscription information...</p>
+            </div>
+        );
+    }
+
+    console.log('Subscription data:', subscriptionData);
+
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
             <h3>Payment</h3>
@@ -361,25 +373,39 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                     </button>
                 </>
             ) : (
-                // Default case: Prompt to subscribe if no status matches
-                <form onSubmit={handleSubscribe}>
-                    <CardElement
-                        options={{
-                            style: {
-                                base: {
-                                    color: darkMode ? "#ffffff" : "#000000", // White in dark mode
-                                    backgroundColor: darkMode ? "#333" : "#ffffff",
-                                    "::placeholder": {
-                                        color: darkMode ? "#bbbbbb" : "#888888", // Adjust placeholder color
+                // Default case: Show card form for new subscription
+                <div>
+                    <p>Subscribe to continue using our service</p>
+                    <form onSubmit={handleSubscribe}>
+                        <div className="card-element-container">
+                            <CardElement
+                                options={{
+                                    style: {
+                                        base: {
+                                            color: darkMode ? "#ffffff" : "#000000",
+                                            backgroundColor: darkMode ? "#333" : "#ffffff",
+                                            fontSize: '16px',
+                                            '::placeholder': {
+                                                color: darkMode ? "#bbbbbb" : "#888888",
+                                            },
+                                        },
+                                        invalid: {
+                                            color: '#ff5252',
+                                        },
                                     },
-                                },
-                            },
-                        }}
-                    />
-                    <button type="submit" disabled={isRequestPending}>
-                        {isRequestPending ? 'Processing...' : 'Subscribe'}
-                    </button>
-                </form>
+                                    hidePostalCode: true,
+                                }}
+                            />
+                        </div>
+                        <button 
+                            type="submit" 
+                            className="subscribe-button"
+                            disabled={isRequestPending}
+                        >
+                            {isRequestPending ? 'Processing...' : 'Subscribe'}
+                        </button>
+                    </form>
+                </div>
             )}
 
             {error && <p className="error">{error}</p>}

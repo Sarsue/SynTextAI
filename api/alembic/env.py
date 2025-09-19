@@ -9,7 +9,11 @@ import os
 # Add parent directory to Python path so we can import the models
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.orm_models import Base
+from api.core.config import settings
+
+# Load environment variables
 load_dotenv()
+
 # Alembic Config object
 config = context.config
 
@@ -20,19 +24,8 @@ if config.config_file_name is not None:
 # Metadata for autogenerate
 target_metadata = Base.metadata
 
-# Set the database URL dynamically
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT"),
-}
-
-DATABASE_URL = (
-    f"postgresql://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-)
+# Get database URL from settings
+DATABASE_URL = str(settings.DATABASE_URL).replace('+asyncpg', '')
 
 # Override the sqlalchemy.url option in the config object
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

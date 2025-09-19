@@ -32,11 +32,9 @@ from api.repositories.repository_manager import RepositoryManager
 from api.agents.ingestion_agent import IngestionAgent
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
-# Database configuration
-DATABASE_URL = (
-    f"postgresql+asyncpg://{os.getenv('DATABASE_USER')}:{os.getenv('DATABASE_PASSWORD')}"
-    f"@{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
-)
+from api.core.config import settings
+
+# Database configuration will be handled by settings.create_engine()
 
 # Worker configuration
 MAX_CONCURRENT_TASKS = int(os.getenv("WORKER_MAX_CONCURRENT_TASKS", "3"))
@@ -79,8 +77,12 @@ class WorkerContext:
     async def initialize(self) -> bool:
         """Initialize worker context and dependencies."""
         try:
+            # Create engine using settings
+            engine = settings.create_engine()
+            
+            # Initialize repository manager with the engine
             self.repo_manager = RepositoryManager(
-                DATABASE_URL,
+                engine,
                 echo=os.getenv("SQL_ECHO", "false").lower() == "true",
             )
             await self.repo_manager.initialize()

@@ -261,14 +261,37 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, []);
 
     const fetchSubscriptionStatus = useCallback(async () => {
-        if (!user) return;
-        const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
-        if (response?.ok) {
-            const data = await response.json();
-            setSubscriptionStatus(data.subscription_status ?? null);
-            setSubscriptionData(data);
-        } else {
-            console.error('Failed to fetch subscription status');
+        if (!user) {
+            setSubscriptionStatus('none');
+            setSubscriptionData({ subscription_status: 'none' });
+            return;
+        }
+        try {
+            const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
+            if (response?.ok) {
+                const data = await response.json();
+                console.log('Subscription status data:', data);
+                const status = data.status || data.subscription_status || 'none';
+                setSubscriptionStatus(status);
+                setSubscriptionData({
+                    subscription_status: status,
+                    card_last4: data.card_last4,
+                    card_brand: data.card_brand,
+                    card_exp_month: data.card_exp_month,
+                    card_exp_year: data.card_exp_year,
+                    trial_end: data.trial_end,
+                    message: data.message,
+                    error: data.error
+                });
+            } else {
+                console.error('Failed to fetch subscription status');
+                setSubscriptionStatus('none');
+                setSubscriptionData({ subscription_status: 'none' });
+            }
+        } catch (error) {
+            console.error('Error fetching subscription status:', error);
+            setSubscriptionStatus('none');
+            setSubscriptionData({ subscription_status: 'none' });
         }
     }, [user, _callApiWithTokenInternal]);
 

@@ -3,20 +3,30 @@ Async database session management with SQLAlchemy 2.0 and asyncpg.
 """
 
 import os
+import ssl
 import asyncio
 import logging
-from typing import AsyncGenerator, Optional, Generator, Any, Dict
-from contextlib import asynccontextmanager, contextmanager
-import atexit
+from typing import AsyncGenerator, Optional, Union
+from contextlib import asynccontextmanager
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, AsyncEngine
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import NullPool, QueuePool
-from sqlalchemy.exc import OperationalError, TimeoutError, SQLAlchemyError
-from sqlalchemy import create_engine, event, Engine as SyncEngine
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    AsyncSession,
+    async_sessionmaker,
+    AsyncEngine,
+)
+from sqlalchemy.engine import URL
+from sqlalchemy.exc import OperationalError, TimeoutError
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
 # -------------------------------------------------------------------
 # Logging setup
@@ -30,208 +40,219 @@ logger.setLevel(logging.INFO)
 # -------------------------------------------------------------------
 load_dotenv()
 
-DATABASE_URL = os.getenv("ASYNC_DATABASE_URL") or \
-    f"postgresql+asyncpg://{os.getenv('DATABASE_USER')}:{os.getenv('DATABASE_PASSWORD')}@" \
-    f"{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
+# Get environment variables with defaults
+DB_CONFIG = {
+    'user': os.getenv("DATABASE_USER"),
+    'password': os.getenv("DATABASE_PASSWORD"),
+    'host': os.getenv("DATABASE_HOST"),
+    'port': int(os.getenv("DATABASE_PORT", "5432")),
+    'database': os.getenv("DATABASE_NAME"),
+    'sslmode': os.getenv("DATABASE_SSLMODE", "require")
+}
 
-POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
-MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
-POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))
-POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+# URL-encode the password
+encoded_password = quote_plus(DB_CONFIG['password'])
+
+# Build database URL
+DATABASE_URL = (
+    f"postgresql+asyncpg://{DB_CONFIG['user']}:{encoded_password}@"
+    f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+)
+
+# Pool configuration
+POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "300"))  # 5 minutes
 CONNECT_RETRIES = int(os.getenv("DB_CONNECT_RETRIES", "3"))
-CONNECT_RETRY_DELAY = int(os.getenv("DB_RETRY_DELAY", "5"))
-
-# Default connection pool name (used in pg_stat_activity.application_name)
-# Connection timeouts
-ASYNC_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))  # Default 30 seconds
+ASYNC_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
 POOL_NAME = os.getenv("DB_POOL_NAME", "syntext")
 
 # -------------------------------------------------------------------
 # Engine creation with retry logic
 # -------------------------------------------------------------------
+def _build_ssl_context(sslmode: str) -> Optional[Union[ssl.SSLContext, bool]]:
+    """Create SSL context based on sslmode with support for self-signed certs."""
+    sslmode = (sslmode or "require").lower()
+    
+    if sslmode == "disable":
+        logger.info("SSL is disabled for database connection")
+        return False
+        
+    logger.info(f"Creating SSL context with mode: {sslmode}")
+    
+    # Create a default SSL context
+    ssl_context = ssl.create_default_context()
+    
+    # Handle different SSL modes
+    if sslmode == "require":
+        # Basic SSL without certificate verification
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        return ssl_context
+        
+    # For verify-ca and verify-full, try to load the CA certificate
+    cafile = os.getenv("DB_SSLROOTCERT")
+    if not cafile:
+        # Try default location
+        cafile = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'api', 'config', 'ca-certificate.crt'
+        )
+        
+    if os.path.exists(cafile):
+        logger.info(f"Using CA certificate: {cafile}")
+        ssl_context.load_verify_locations(cafile=cafile)
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        
+        if sslmode == "verify-full":
+            ssl_context.check_hostname = True
+        else:  # verify-ca
+            ssl_context.check_hostname = False
+            
+        return ssl_context
+        
+    # Fallback to basic SSL if no CA cert found
+    logger.warning("CA certificate not found, falling back to basic SSL")
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    return ssl_context
+
+
 @retry(
     stop=stop_after_attempt(CONNECT_RETRIES),
     wait=wait_exponential(multiplier=1, min=1, max=10),
     retry=retry_if_exception_type((OperationalError, TimeoutError, asyncio.TimeoutError)),
-    reraise=True
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
 )
-async def create_db_engine():
-    """Create async database engine with retry logic."""
-    logger.info(f"Creating async DB engine with pool '{POOL_NAME}' (timeout={ASYNC_CONNECT_TIMEOUT}s)...")
+async def create_db_engine() -> AsyncEngine:
+    """Create async database engine with proper configuration and retry logic."""
+    # URL-encode the password
+    encoded_password = quote_plus(DB_CONFIG['password'] or "")
     
-    try:
-        return create_async_engine(
-            DATABASE_URL,
-            echo=os.getenv("SQL_ECHO", "false").lower() == "true",
-            future=True,
-            pool_pre_ping=True,
-            pool_size=POOL_SIZE,
-            max_overflow=MAX_OVERFLOW,
-            pool_timeout=POOL_TIMEOUT,
-            pool_recycle=POOL_RECYCLE,
-            pool_use_lifo=True,  # Better for most web apps
-            connect_args={
-                "timeout": ASYNC_CONNECT_TIMEOUT,  # asyncpg connection timeout
-                "server_settings": {
-                    "application_name": POOL_NAME,
-                    "statement_timeout": "30000",  # 30s
-                    "idle_in_transaction_session_timeout": "300000"  # 5 min
-                }
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error creating database engine: {e}", exc_info=True)
-        raise
+    # Build connection string
+    db_url = (
+        f"postgresql+asyncpg://{DB_CONFIG['user']}:{encoded_password}@"
+        f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    )
+    
+    # Get SSL context
+    ssl_context = _build_ssl_context(DB_CONFIG['sslmode'])
+    
+    # Connection arguments
+    connect_args = {
+        "timeout": ASYNC_CONNECT_TIMEOUT,
+        "server_settings": {
+            "application_name": POOL_NAME,
+            "statement_timeout": "30000",  # 30s
+            "idle_in_transaction_session_timeout": "300000",  # 5 min
+        },
+    }
+    
+    if ssl_context is not None:
+        connect_args["ssl"] = ssl_context
+    
+    # Create safe URL for logging (without password)
+    safe_url = db_url.replace(encoded_password, "***")
+    logger.info(f"Creating async DB engine for {safe_url} (timeout={ASYNC_CONNECT_TIMEOUT}s)")
+    
+    # Create the engine with our configuration
+    return create_async_engine(
+        db_url,
+        echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+        pool_pre_ping=True,  # Check connection health
+        pool_size=POOL_SIZE,
+        max_overflow=MAX_OVERFLOW,
+        pool_timeout=POOL_TIMEOUT,
+        pool_recycle=POOL_RECYCLE,
+        connect_args=connect_args,
+    )
+    
+    return engine
 
-# Initialize engines and session factories
+
+# -------------------------------------------------------------------
+# Globals
+# -------------------------------------------------------------------
 engine: Optional[AsyncEngine] = None
-sync_engine: Optional[SyncEngine] = None
 async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-sync_session_factory: Optional[sessionmaker] = None
 
+# -------------------------------------------------------------------
+# Startup / Shutdown
+# -------------------------------------------------------------------
 async def startup():
     """Initialize the database connection and session factory."""
-    global engine, async_session_factory, sync_engine, sync_session_factory
+    global engine, async_session_factory
     
-    try:
-        if engine is None:
-            engine = create_db_engine()
+    if engine is None:
+        try:
+            logger.info("Initializing database engine...")
+            engine = await create_db_engine()
+            
+            # Test the connection
+            from sqlalchemy import text
+            async with engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1"))
+                logger.info(f"Database connection test: {result.scalar() == 1}")
+            
+            # Create session factory
             async_session_factory = async_sessionmaker(
                 bind=engine,
                 expire_on_commit=False,
                 class_=AsyncSession,
-                autoflush=False
-            )
-        
-        # Initialize sync engine if needed for compatibility
-        if sync_engine is None:
-            sync_engine = create_engine(
-                DATABASE_URL.replace('+asyncpg', ''),
-                pool_size=POOL_SIZE,
-                max_overflow=MAX_OVERFLOW,
-                pool_timeout=POOL_TIMEOUT,
-                pool_recycle=POOL_RECYCLE,
-                pool_pre_ping=True,
-                pool_use_lifo=True,
-                pool_reset_on_return='commit'
-            )
-            sync_session_factory = sessionmaker(
-                bind=sync_engine,
-                autocommit=False,
                 autoflush=False,
-                expire_on_commit=False
             )
+            logger.info("Database engine and session factory initialized successfully")
             
-            # Register cleanup
-            atexit.register(cleanup_sync_engine)
-            logger.info("Database connection pool initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize database connection: {e}", exc_info=True)
-        raise
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {str(e)}")
+            if engine:
+                await engine.dispose()
+            raise
+
 
 async def shutdown():
-    """Properly close all database connections."""
-    global engine, sync_engine
+    """Properly close all database connections and clean up resources."""
+    global engine, async_session_factory
     if engine:
         await engine.dispose()
-        engine = None
-    
-    if sync_engine:
-        sync_engine.dispose()
-        sync_engine = None
+        logger.info("Database engine disposed")
+    engine = None
+    async_session_factory = None
 
-def cleanup_sync_engine():
-    """Clean up sync engine resources."""
-    global sync_engine
-    if sync_engine:
-        sync_engine.dispose()
-        sync_engine = None
-        logger.info("Database connection pool closed")
 
 # -------------------------------------------------------------------
-# Session factory
-# -------------------------------------------------------------------
-def get_async_session_factory():
-    if engine is None:
-        raise RuntimeError("Database engine is not initialized")
-    return async_session_factory
-
-# -------------------------------------------------------------------
-# Session context managers
+# Session manager
 # -------------------------------------------------------------------
 @asynccontextmanager
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager that provides a database session with auto-commit/rollback.
-    
-    Use this for write operations.
-    """
-    if not async_session_factory:
-        raise RuntimeError("Database not initialized. Call startup() first.")
-    
+async def get_async_session(commit_on_exit: bool = True) -> AsyncGenerator[AsyncSession, None]:
+    """Provide a session with optional commit at exit."""
+    if async_session_factory is None:
+        await startup()
+
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
-        except Exception as e:
+            if commit_on_exit:
+                await session.commit()
+        except Exception:
             await session.rollback()
-            logger.error(f"Session rollback due to error: {e}", exc_info=True)
             raise
+
+
+# Convenience wrappers
+def get_async_session_factory():
+    if async_session_factory is None:
+        raise RuntimeError("Database not initialized. Call startup() first.")
+    return async_session_factory
+
 
 @asynccontextmanager
 async def get_read_only_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Context manager that provides a read-only database session.
-    
-    Automatically rolls back any changes when the session is closed.
-    Use this for read-only operations.
-    """
-    if not async_session_factory:
-        raise RuntimeError("Database not initialized. Call startup() first.")
-    
-    async with async_session_factory() as session:
+    """Session that always rolls back (read-only)."""
+    async with get_async_session(commit_on_exit=False) as session:
         try:
             yield session
         finally:
-            await session.rollback()  # Always rollback read-only sessions
-
-@asynccontextmanager
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency for DB sessions with connection check + rollback on error."""
-    if async_session_factory is None:
-        await startup()
-    
-    async with async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception as e:
             await session.rollback()
-            logger.error(f"Database error: {e}", exc_info=True)
-            raise
-        finally:
-            await session.close()
-
-# Sync database session for compatibility
-@contextmanager
-def get_sync_session() -> Generator[Session, None, None]:
-    """Synchronous session context manager for compatibility."""
-    if sync_session_factory is None:
-        raise RuntimeError("Sync database not initialized. Call startup() first.")
-    
-    session = sync_session_factory()
-    try:
-        yield session
-        session.commit()
-    except SQLAlchemyError as e:
-        session.rollback()
-        logger.error(f"Sync database error: {e}", exc_info=True)
-        raise
-    finally:
-        session.close()
-
-# FastAPI dependency for sync sessions
-def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency for sync DB sessions."""
-    with get_sync_session() as session:
-        yield session

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -11,6 +12,9 @@ from fastapi import (
     Request, 
     status
 )
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +24,7 @@ from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import utils
-from .models.async_db import engine, get_db, startup as db_startup, shutdown as db_shutdown
+from .models.async_db import engine, startup as db_startup, shutdown as db_shutdown
 from .agents import register_agents
 
 # Configure logging
@@ -30,6 +34,9 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
 # Initialize FastAPI
 app = FastAPI(
     title="SynTextAI API",
@@ -37,6 +44,11 @@ app = FastAPI(
     version="1.0.0",
     max_request_body_size=2 * 1024 * 1024 * 1024
 )
+
+# Configure rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(429, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Middleware to add COOP and COEP headers
 @app.middleware("http")
@@ -65,14 +77,8 @@ logger = logging.getLogger(__name__)
 # Initialize repository manager as None, will be set during startup
 app.state.store = None
 
-# Database configuration
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT"),
-}
+# Import settings
+from api.core.config import settings
 
 async def startup_event():
     """Initialize application services."""
@@ -88,13 +94,8 @@ async def startup_event():
         logger.info("Database connection established")
         
         # Initialize repository manager
-        database_url = (
-            f"postgresql+asyncpg://{database_config['user']}:"
-            f"{database_config['password']}@{database_config['host']}:"
-            f"{database_config['port']}/{database_config['dbname']}"
-        )
         from .repositories.repository_manager import get_repository_manager
-        repo_manager = get_repository_manager(database_url)
+        repo_manager = get_repository_manager()
         await repo_manager.initialize()
         app.state.store = repo_manager
         logger.info("Repository manager initialized")
@@ -151,92 +152,187 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     - Connection management
     - Message routing
     - Heartbeats
+    - Subscriptions
     """
     logger.info(f"WebSocket connection attempt for user {user_id}")
     
+    # Timeout constants
+    CONNECTION_TIMEOUT = 10.0  # seconds to wait for initial setup
+    HEARTBEAT_INTERVAL = 30.0  # seconds between heartbeats
+    HEARTBEAT_TIMEOUT = 90.0   # seconds before considering connection dead
+    
+    # Client information
+    client_info = {
+        'user_agent': websocket.headers.get('user-agent', 'unknown'),
+        'ip': websocket.client.host if websocket.client else 'unknown',
+        'connected_at': datetime.utcnow().isoformat()
+    }
+    
     try:
-        # Accept the WebSocket connection
-        await websocket.accept()
+        # Accept the WebSocket connection with timeout
+        await asyncio.wait_for(websocket.accept(), timeout=CONNECTION_TIMEOUT)
+        logger.info(f"WebSocket connection accepted for user {user_id} from {client_info['ip']}")
         
-        # Wait for authentication message
+        # Wait for authentication message with timeout
         try:
-            data = await websocket.receive_json()
-            if data.get("type") != "auth":
-                logger.warning(f"WebSocket connection rejected: missing or invalid auth message")
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                return
-                
-            token = data.get("token")
+            auth_data = await asyncio.wait_for(websocket.receive_json(), timeout=CONNECTION_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning(f"WebSocket authentication timeout for user {user_id}")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid auth message format from {user_id}: {e}")
+            await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+            return
+        except Exception as e:
+            logger.error(f"Error receiving auth message from {user_id}: {e}")
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+            return
+        
+        # Validate auth message
+        if not isinstance(auth_data, dict) or auth_data.get("type") != "auth" or not auth_data.get("token"):
+            logger.warning(f"WebSocket auth failed: invalid auth message format from {user_id}")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+            
+        token = auth_data["token"]
+        logger.debug(f"Validating token for user {user_id}")
+        
+        # Verify token
+        try:
             success, user_info = utils.decode_firebase_token(token)
-            
             if not success or str(user_info.get('user_id')) != user_id:
-                logger.warning(f"WebSocket authentication failed for user {user_id}")
+                logger.warning(f"WebSocket auth failed: invalid token for user {user_id}")
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
+        except Exception as e:
+            logger.error(f"Error validating token for user {user_id}: {e}")
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+            return
                 
-            logger.info(f"WebSocket authenticated for user {user_id} ({user_info.get('email')})")
-            
-            # Register the connection
-            await websocket_manager.connect(user_id, websocket)
-            
-            # Send connection confirmation
-            await websocket.send_json({
-                "event": "connection_established",
-                "data": {
-                    "message": "Connected to WebSocket server",
-                    "user_id": user_id
-                }
-            })
-            
-            # Main message loop
-            while True:
+        logger.info(f"WebSocket authenticated for user {user_id} ({user_info.get('email')})")
+        
+        # Register the connection with client info
+        client_info.update({
+            'email': user_info.get('email'),
+            'user_id': user_id
+        })
+        
+        await websocket_manager.connect(user_id, websocket, client_info)
+        
+        # Send connection confirmation
+        await websocket.send_json({
+            "event": "connection_established",
+            "data": {
+                "message": "Connected to WebSocket server",
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "heartbeat_interval": HEARTBEAT_INTERVAL
+            }
+        })
+        
+        # Heartbeat tracking
+        last_heartbeat = time.time()
+        
+        # Main message loop
+        while True:
+            try:
+                # Wait for a message with timeout
                 try:
-                    # Wait for a message with timeout
-                    try:
-                        message = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
-                    except asyncio.TimeoutError:
-                        # Send a ping to keep the connection alive
-                        await websocket.send_json({"event": "ping"})
+                    message = await asyncio.wait_for(websocket.receive_json(), timeout=HEARTBEAT_INTERVAL)
+                    
+                    # Handle heartbeat pong
+                    if message.get("type") == "pong":
+                        last_heartbeat = time.time()
+                        logger.debug(f"Received pong from {user_id}")
                         continue
                         
-                    # Handle different message types
-                    message_type = message.get("type")
-                    
-                    if message_type == "ping":
-                        # Respond to pings
-                        await websocket.send_json({"event": "pong"})
-                        
-                    elif message_type == "subscribe":
-                        # Handle subscription requests (e.g., to specific channels)
-                        channel = message.get("channel")
-                        # TODO: Implement channel subscription logic
+                    # Handle subscription messages
+                    if message.get("type") == "subscribe" and isinstance(message.get("channels"), list):
+                        for channel in message["channels"]:
+                            await websocket_manager.subscribe(websocket, channel)
                         await websocket.send_json({
-                            "event": "subscribed",
-                            "data": {"channel": channel}
+                            "event": "subscription_updated",
+                            "data": {
+                                "channels": list(websocket_manager.get_connection_metadata(websocket).subscriptions),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
                         })
+                        continue
                         
-                    # Add more message handlers as needed
+                    # Handle unsubscription messages
+                    if message.get("type") == "unsubscribe" and isinstance(message.get("channels"), list):
+                        for channel in message["channels"]:
+                            await websocket_manager.unsubscribe(websocket, channel)
+                        await websocket.send_json({
+                            "event": "subscription_updated",
+                            "data": {
+                                "channels": list(websocket_manager.get_connection_metadata(websocket).subscriptions),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                        })
+                        continue
+                        
+                    # Handle ping messages
+                    if message.get("type") == "ping":
+                        await websocket.send_json({
+                            "event": "pong",
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                        continue
+                        
+                    # Echo the message back for testing
+                    if message.get("echo", False):
+                        await websocket.send_json({
+                            "event": "echo",
+                            "data": message,
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                        continue
                     
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received from user {user_id}")
+                    # Log other messages
+                    logger.debug(f"Received message from {user_id}: {json.dumps(message, indent=2)}")
+                    
+                except asyncio.TimeoutError:
+                    # Check if we've missed too many heartbeats
+                    time_since_heartbeat = time.time() - last_heartbeat
+                    if time_since_heartbeat > HEARTBEAT_TIMEOUT:
+                        logger.warning(f"No heartbeat from {user_id} for {time_since_heartbeat:.1f}s, closing connection")
+                        raise WebSocketDisconnect()
+                        
+                    # Send ping to check connection
                     await websocket.send_json({
-                        "event": "error",
-                        "error": "Invalid JSON format"
+                        "type": "ping",
+                        "timestamp": int(time.time())
                     })
                     
-        except WebSocketDisconnect as e:
-            logger.info(f"WebSocket disconnected for user {user_id}: {e}")
-            
-    except Exception as e:
-        logger.error(f"WebSocket error for user {user_id}: {str(e)}", exc_info=True)
-        try:
-            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
-        except:
-            pass
+            except json.JSONDecodeError as e:
+                logger.error(f"Invalid JSON received from {user_id}: {e}")
+                await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+                break
+            except Exception as e:
+                logger.error(f"WebSocket error for user {user_id}: {str(e)}", exc_info=True)
+                try:
+                    await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                except Exception as close_error:
+                    logger.error(f"Error closing WebSocket: {close_error}")
+                break
+            finally:
+                # Ensure any resources are cleaned up
+                pass
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for user {user_id}")
+    except asyncio.CancelledError:
+        logger.info(f"WebSocket connection cancelled for user {user_id}")
+        raise
     finally:
-        # Ensure the connection is properly cleaned up
-        websocket_manager.disconnect(websocket)
-        logger.info(f"User {user_id} disconnected")
+        # Clean up the connection
+        try:
+            await websocket_manager.disconnect(websocket)
+        except Exception as e:
+            logger.error(f"Error during WebSocket cleanup for {user_id}: {e}", exc_info=True)
+            
+        logger.info(f"WebSocket connection closed for user {user_id}")
 
 # Import routers after app is set up
 from .routes.files import files_router

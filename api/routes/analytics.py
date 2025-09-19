@@ -6,7 +6,7 @@ import os
 import time
 import posthog
 from sqlalchemy.ext.asyncio import AsyncSession
-from api.models.async_db import get_db
+from api.models.async_db import get_async_session
 from pydantic import BaseModel, Field
 
 # Initialize PostHog client
@@ -71,7 +71,7 @@ class AnalyticsPayload(BaseModel):
 async def receive_analytics(
     payload: AnalyticsPayload,
     request: Request,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_session)
 ):
     # Extract client info
     client_ip = request.client.host
@@ -151,7 +151,7 @@ async def receive_analytics(
 
 @router.get("/analytics/dashboard")
 async def analytics_dashboard(
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_async_session)
 ):
     """
     In a real implementation, this would return analytics dashboard data

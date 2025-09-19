@@ -40,11 +40,8 @@ def get_whisper_model(model_name: str = "base") -> whisper.Whisper:
     return whisper.load_model(model_name).to(device)
 
 def get_database_url() -> str:
-    from urllib.parse import quote_plus
-    return (
-        f"postgresql+asyncpg://{os.getenv('DATABASE_USER')}:{quote_plus(os.getenv('DATABASE_PASSWORD',''))}"
-        f"@{os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
-    )
+    from api.core.config import settings
+    return str(settings.DATABASE_URL)
 
 def extract_video_id(url: str) -> Optional[str]:
     patterns = [
@@ -263,8 +260,7 @@ class YouTubeProcessor(FileProcessor):
 
 async def process_youtube(url: str, file_id: int, user_id: int, filename: str = "", language: str = "en") -> Dict[str, Any]:
     try:
-        db_url = getattr(settings, "DATABASE_URL", None) or get_database_url()
-        repo = get_repository_manager(db_url)
+        repo = get_repository_manager()
         processor = YouTubeProcessor(repo)
 
         content = await processor.extract_content(url, file_id, user_id, filename, language)

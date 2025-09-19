@@ -5,76 +5,149 @@ This module handles loading and validating configuration from environment variab
 """
 
 import os
-from typing import Optional, List, Any
-from pydantic import Field, PostgresDsn, field_validator, ConfigDict
+import ssl
+import logging
+from urllib.parse import quote_plus
+from typing import List, Optional, Dict, Any
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     """Application settings with environment variable configuration."""
     
     # Application settings
     APP_NAME: str = "SynTextAI"
-    DEBUG: bool = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
+    DEBUG: bool = False
     
     # Database settings
-    DATABASE_URL: Optional[PostgresDsn] = Field(
-        default=None,
-        description="PostgreSQL connection string"
-    )
+    DATABASE_URL: Optional[str] = None
+    DATABASE_USER: Optional[str] = None
+    DATABASE_PASSWORD: Optional[str] = None
+    DATABASE_HOST: Optional[str] = None
+    DATABASE_PORT: str = "25060"
+    DATABASE_NAME: Optional[str] = None
+    DATABASE_SSLMODE: str = "require"
     
     # Stripe settings
-    STRIPE_SECRET: Optional[str] = Field(
-        default=os.getenv("STRIPE_SECRET"),
-        description="Stripe API secret key for payment processing"
-    )
-    STRIPE_PRICE_ID: Optional[str] = Field(
-        default=os.getenv("STRIPE_PRICE_ID"),
-        description="Stripe price ID for subscriptions"
-    )
-    STRIPE_ENDPOINT_SECRET: Optional[str] = Field(
-        default=os.getenv("STRIPE_ENDPOINT_SECRET"),
-        description="Stripe webhook endpoint secret for verifying webhook events"
-    )
+    STRIPE_SECRET: Optional[str] = None
+    STRIPE_PRICE_ID: Optional[str] = None
+    STRIPE_ENDPOINT_SECRET: Optional[str] = None
     
     # File processing
-    UPLOAD_FOLDER: str = os.getenv("UPLOAD_FOLDER", "uploads")
-    MAX_CONTENT_LENGTH: int = int(os.getenv("MAX_CONTENT_LENGTH", "16777216"))  # 16MB
+    UPLOAD_FOLDER: str = "uploads"
+    MAX_CONTENT_LENGTH: int = 16 * 1024 * 1024  # 16MB
     
     # LLM settings
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4")
+    LLM_MODEL: str = "gpt-4"
     
     # Web search settings
-    ENABLE_WEB_SEARCH: bool = os.getenv("ENABLE_WEB_SEARCH", "true").lower() == "true"
+    ENABLE_WEB_SEARCH: bool = True
     
     # CORS settings
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "https://syntextai.com"]
     
-    # Pydantic v2 config
-    model_config = ConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore"
-    )
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = True
+        extra = "ignore"
     
-    @field_validator("DATABASE_URL", mode='before')
-    @classmethod
-    def assemble_db_connection(cls, v: Optional[str], info: Any) -> Optional[str]:
-        if isinstance(v, str) and v:
-            return v
-            
-        # Build default connection string if not provided
-        db_user = os.getenv("DATABASE_USER")
-        db_password = os.getenv("DATABASE_PASSWORD")
-        db_host = os.getenv("DATABASE_HOST")
-        db_name = os.getenv("DATABASE_NAME")
-        db_port = os.getenv("DATABASE_PORT", "25060")
+    def get_ssl_context(self):
+        """Create SSL context based on DATABASE_SSLMODE."""
+        sslmode = (self.DATABASE_SSLMODE or "require").lower()
         
-        if not all([db_user, db_password, db_host, db_name]):
-            return None
+        if sslmode == "disable":
+            logger.info("SSL is disabled for database connection")
+            return False
             
-        # Construct the DSN as a string with asyncpg driver
-        return f"postgresql+asyncpg://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        logger.info(f"Creating SSL context with mode: {sslmode}")
+        
+        # Create a default SSL context
+        ssl_context = ssl.create_default_context()
+        
+        # Handle different SSL modes
+        if sslmode == "require":
+            # Basic SSL without certificate verification
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            return ssl_context
+            
+        # For verify-ca and verify-full, try to load the CA certificate
+        cafile = os.getenv("DATABASE_SSLROOTCERT")
+        if not cafile:
+            # Try default location
+            cafile = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'config',
+                'ca-certificate.crt'
+            )
+            
+        if os.path.exists(cafile):
+            logger.info(f"Using CA certificate: {cafile}")
+            ssl_context.load_verify_locations(cafile)
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+            
+            if sslmode == "verify-full":
+                ssl_context.check_hostname = True
+            else:  # verify-ca
+                ssl_context.check_hostname = False
+                
+            return ssl_context
+            
+        # Fallback to basic SSL if no CA cert found
+        logger.warning("CA certificate not found, falling back to basic SSL")
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        return ssl_context
+
+    def create_engine(self):
+        """Create a new async SQLAlchemy engine with proper configuration."""
+        from sqlalchemy.ext.asyncio import create_async_engine
+        
+        # URL-encode the password
+        encoded_password = quote_plus(self.DATABASE_PASSWORD or "")
+        
+        # Build connection string without sslmode
+        url = (
+            f"postgresql+asyncpg://{self.DATABASE_USER}:{encoded_password}@"
+            f"{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
+        )
+        
+        # Get SSL context
+        ssl_context = self.get_ssl_context()
+        connect_args = {}
+        if ssl_context:
+            connect_args["ssl"] = ssl_context
+            
+        logger.info(f"Connecting to database: {self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}")
+        
+        return create_async_engine(
+            url,
+            echo=True,
+            connect_args=connect_args,
+            pool_pre_ping=True,
+            pool_recycle=300,
+        )
+        
+    async def test_connection(self):
+        """Test the database connection."""
+        from sqlalchemy import text
+        
+        engine = self.create_engine()
+        try:
+            async with engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1"))
+                logger.info(f"✅ Connection test result: {result.scalar()}")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Connection failed: {e}")
+            return False
+        finally:
+            await engine.dispose()
 
 # Create settings instance
 settings = Settings()

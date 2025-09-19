@@ -15,39 +15,184 @@
     max-width: clamp(400px, 60vw, 600px);
     width: 90%;
     margin: clamp(15px, 2vw, 20px) auto;
-    padding: clamp(15px, 2vw, 20px);
+    padding: clamp(20px, 3vw, 30px);
     border: 1px solid var(--header-footer-bg);
-    border-radius: clamp(6px, 1vw, 8px);
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     background-color: var(--background-color);
     color: var(--text-color);
     box-sizing: border-box;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    transition: all 0.3s ease;
 }
 
-/* Input and StripeElement styling */
-.PaymentView input,
-.PaymentView .StripeElement {
+.PaymentView h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.5rem;
+    color: var(--text-color);
+    text-align: center;
+}
+
+.PaymentView p {
+    margin-bottom: 20px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+/* Stripe Card Element container */
+.card-element-container {
+    margin-bottom: 20px;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: var(--input-background-color);
+    border: 1px solid var(--border-color, #e0e0e0);
+    transition: all 0.3s ease;
+}
+
+.dark-mode .card-element-container {
+    background-color: var(--input-background-dark);
+    border-color: #444;
+}
+
+/* Stripe Card Element styling */
+.StripeElement {
     width: 100%;
-    padding: clamp(8px, 1vw, 10px);
-    margin-bottom: clamp(12px, 1.5vw, 16px);
-    border: 1px solid var(--header-footer-bg);
-    border-radius: clamp(3px, 0.5vw, 4px);
+    padding: 12px 15px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--input-text-color);
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    transition: all 0.3s ease;
+}
+
+.StripeElement--focus {
+    box-shadow: 0 0 0 2px var(--primary-color, #4a90e2);
+}
+
+.StripeElement--invalid {
+    color: #ff5252;
+}
+
+.StripeElement--webkit-autofill {
+    background: transparent !important;
+}
+
+/* Regular input styling */
+.PaymentView input {
+    width: 100%;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border-color, #e0e0e0);
+    border-radius: 6px;
     background-color: var(--input-background-color);
     color: var(--input-text-color);
-    transition: background-color 0.3s ease, color 0.3s ease;
+    font-size: 16px;
+    transition: all 0.3s ease;
     box-sizing: border-box;
 }
 
-/* For dark mode, define input-specific colors */
-.dark-mode .PaymentView input,
-.dark-mode .PaymentView .StripeElement {
+/* Dark mode overrides */
+.dark-mode .PaymentView input {
     background-color: var(--input-background-dark);
     color: var(--input-text-dark);
-    /* Ensure card number text is white */
+    border-color: #444;
+}
+
+dark-mode .StripeElement {
+    color: #fff;
+}
+
+.dark-mode .StripeElement--empty {
+    color: #bbb;
 }
 
 /* Button styling */
+.subscribe-button {
+    display: block;
+    width: 100%;
+    padding: 12px 20px;
+    background-color: var(--primary-color, #4a90e2);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 10px;
+}
+
+.subscribe-button:hover {
+    background-color: var(--primary-dark, #357abd);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.subscribe-button:active {
+    transform: translateY(0);
+}
+
+.subscribe-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Error message styling */
+.error {
+    color: #ff5252;
+    margin-top: 15px;
+    padding: 10px;
+    background-color: rgba(255, 82, 82, 0.1);
+    border-radius: 6px;
+    text-align: center;
+    font-size: 14px;
+}
+
+/* Card details display */
+.CardDetails {
+    background-color: var(--input-background-color);
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border-color, #e0e0e0);
+}
+
+.dark-mode .CardDetails {
+    background-color: var(--input-background-dark);
+    border-color: #444;
+}
+
+.CardDetails p {
+    margin: 8px 0;
+    text-align: left;
+}
+
+/* Loading state */
+.PaymentView .loading {
+    text-align: center;
+    padding: 30px 0;
+}
+
+.PaymentView .loading:after {
+    content: "";
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-left: 10px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
 .PaymentView button {
     width: clamp(150px, 50%, 300px);
     background-color: var(--button-bg);
