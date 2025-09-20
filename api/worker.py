@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger("worker")
 
 # Application imports
-from api.repositories.repository_manager import RepositoryManager
+from api.repositories.repository_manager import get_repository_manager
 from api.agents.ingestion_agent import IngestionAgent
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
@@ -77,15 +77,8 @@ class WorkerContext:
     async def initialize(self) -> bool:
         """Initialize worker context and dependencies."""
         try:
-            # Create engine using settings
-            engine = settings.create_engine()
-            
-            # Initialize repository manager with the engine
-            self.repo_manager = RepositoryManager(
-                engine,
-                echo=os.getenv("SQL_ECHO", "false").lower() == "true",
-            )
-            await self.repo_manager.initialize()
+            # Get repository manager with centralized database connection
+            self.repo_manager = get_repository_manager()
 
             self.agent = IngestionAgent(self.repo_manager)
 

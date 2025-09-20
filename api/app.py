@@ -24,7 +24,7 @@ from .websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import utils
-from .models.async_db import engine, startup as db_startup, shutdown as db_shutdown
+from .models.async_db import startup as db_startup, shutdown as db_shutdown, get_engine
 from .agents import register_agents
 
 # Configure logging
@@ -87,30 +87,27 @@ async def startup_event():
         
         # Initialize Firebase
         initialize_firebase()
-        logger.info("Firebase initialized")
         
-        # Initialize database connection
+        # Initialize database connection and session factory
         await db_startup()
-        logger.info("Database connection established")
         
-        # Initialize repository manager
-        from .repositories.repository_manager import get_repository_manager
-        repo_manager = get_repository_manager()
-        await repo_manager.initialize()
-        app.state.store = repo_manager
-        logger.info("Repository manager initialized")
+        # Test database connection
+        engine = await get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("Database connection successful")
         
         # Register agents
         register_agents()
-        logger.info("Agents registered")
         
         logger.info("Application startup complete")
         
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
+        raise
+        
     except ImportError as e:
         logger.error(f"Import error during application startup: {e}", exc_info=True)
-        raise
-    except Exception as e:
-        logger.error(f"Error during application startup: {e}", exc_info=True)
         raise
 
 # Register startup and shutdown event handlers
@@ -123,17 +120,17 @@ async def shutdown_event():
     """Handle application shutdown."""
     logger.info("Shutting down application...")
     
-    # Clean up repository manager if it was initialized
-    if hasattr(app.state, 'store') and app.state.store is not None:
-        try:
-            await app.state.store.close()
-            logger.info("Repository manager closed")
-        except Exception as e:
-            logger.error(f"Error closing repository manager: {e}", exc_info=True)
-    
-    # Clean up database connections
-    await db_shutdown()
-    logger.info("Database connections closed")
+    try:
+        # Close WebSocket connections
+        await websocket_manager.disconnect_all()
+        
+        # Close database connection
+        await db_shutdown()
+            
+        logger.info("Application shutdown complete")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}")
+        raise
     
     logger.info("Application shutdown complete")
 
