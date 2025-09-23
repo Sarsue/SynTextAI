@@ -42,15 +42,18 @@ Example Usage:
     flashcards = flashcard_result.get("flashcards", [])
     ```
 """
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, cast
 import json
 import logging
 import random
 from pydantic import BaseModel, Field, validator
-from sqlalchemy.orm import Session
 
 # Import agent decorator from agent_factory
 from .agent_factory import agent
+
+# Import repository manager
+from ..repositories import get_repository_manager
+from ..repositories.async_learning_material_repository import AsyncLearningMaterialRepository
 
 from .base_agent import BaseAgent, AgentConfig
 from .prompt_loader import PromptLoader
@@ -283,7 +286,7 @@ class QuizAgent(BaseAgent[QuizConfig]):
         """Return the default configuration for this agent."""
         return QuizConfig()
     
-    async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+    async def process(self, input_data: Dict[str, Any], db: Optional[Any] = None) -> Dict[str, Any]:
         """
         Process quiz or flashcard generation request.
         
@@ -309,34 +312,33 @@ class QuizAgent(BaseAgent[QuizConfig]):
         
         Args:
             input_data: Dictionary containing input parameters
-            db: Optional SQLAlchemy session for database operations
+            db: Optional repository manager (kept for backward compatibility but not used)
             
         Returns:
             Dictionary containing the generated questions in the format expected by the frontend
         """
+        action = input_data.get("action", "generate_questions").lower()
+        
         try:
-            action = input_data.get("action", "generate_questions")
-            
             if action == "generate_questions":
-                return await self._generate_quiz_questions(input_data, db)
+                return await self._generate_quiz_questions(input_data)
             elif action == "generate_flashcards":
-                return await self._generate_flashcards(input_data, db)
+                return await self._generate_flashcards(input_data)
             else:
-                raise ValueError(f"Unsupported action: {action}")
-            
+                raise ValueError(f"Unknown action: {action}")
+                
         except Exception as e:
-            logger.error(f"Error generating quiz: {str(e)}", exc_info=True)
+            logger.error(f"Error in QuizAgent: {str(e)}", exc_info=True)
             return {
                 "status": "error",
                 "error": str(e)
             }
     
-    async def _prepare_prompt(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> str:
+    async def _prepare_prompt(self, input_data: Dict[str, Any]) -> str:
         """Prepare the prompt for the LLM.
         
         Args:
             input_data: Dictionary containing the input data for the prompt
-            db: Optional SQLAlchemy session for database operations
             
         Returns:
             Formatted prompt string with key concepts from the database
@@ -345,106 +347,79 @@ class QuizAgent(BaseAgent[QuizConfig]):
             If key_concepts are provided in input_data, they'll be used directly.
             Otherwise, key concepts will be fetched from the database.
         """
-        content = input_data.get("file_content", "")
-        file_id = input_data.get("file_id")
-        
-        # Use provided key concepts, fetch from DB, or use empty list
+        # Use provided key concepts or fetch from database
         if "key_concepts" in input_data and input_data["key_concepts"]:
-            # Use provided key concepts
-            key_concepts = "\n".join(
-                f"- {kc.get('concept_title', kc.get('title', ''))}: {kc.get('concept_explanation', kc.get('explanation', ''))}"
-                for kc in input_data["key_concepts"]
-            )
-        elif db is not None and file_id is not None:
-            try:
-                # Fetch key concepts from database
-                concepts = db.query(KeyConcept).filter(
-                    KeyConcept.file_id == file_id,
-                    KeyConcept.is_custom == False  # Only use auto-generated concepts
-                ).order_by(KeyConcept.id.desc()).limit(10).all()  # Get most recent 10
-                
-                key_concepts = "\n".join(
-                    f"- {concept.concept_title}: {concept.concept_explanation}"
-                    for concept in concepts
-                )
-                logger.info(f"Fetched {len(concepts)} key concepts from database for file {file_id}")
-            except Exception as e:
-                logger.warning(f"Failed to fetch key concepts from database: {e}")
-                key_concepts = ""
+            key_concepts = input_data["key_concepts"]
         else:
-            logger.warning("No database session or file_id provided, using empty key concepts")
-            key_concepts = ""
+            if "file_id" not in input_data:
+                raise ValueError("file_id is required when key_concepts are not provided")
+                
+            # Get repository manager and learning material repository
+            repo_manager = await get_repository_manager()
+            learning_material_repo = await repo_manager.learning_material_repo
+            
+            # Fetch key concepts from the database
+            key_concepts_data = await learning_material_repo.get_key_concepts_by_file_id(input_data["file_id"])
+            key_concepts = [
+                {
+                    "concept": kc.concept,
+                    "definition": kc.definition,
+                    "examples": kc.examples
+                }
+                for kc in key_concepts_data
+            ]
         
-        return PromptLoader.render_instruction(
-            "quiz",
-            content=content,
-            key_concepts=key_concepts,
-            num_questions=self.config.num_questions,
-            difficulty=self.config.difficulty,
-            question_types=", ".join(self.config.question_types),
-            include_explanations=self.config.include_explanations
+        # Format the key concepts for the prompt
+        formatted_concepts = []
+        for concept in key_concepts:
+            formatted_concept = f"- {concept['concept']}"
+            if concept.get('definition'):
+                formatted_concept += f"\n  Definition: {concept['definition']}"
+            if concept.get('examples'):
+                formatted_concept += f"\n  Examples: {concept['examples']}"
+            formatted_concepts.append(formatted_concept)
+        
+        # Get the prompt template based on the action
+        action = input_data.get("action", "generate_questions").lower()
+        if action == "generate_questions":
+            prompt_template = self.prompt_loader.get_prompt("quiz_generation")
+        elif action == "generate_flashcards":
+            prompt_template = self.prompt_loader.get_prompt("flashcard_generation")
+        else:
+            raise ValueError(f"Unknown action: {action}")
+        
+        # Format the prompt with the content and key concepts
+        prompt = prompt_template.format(
+            content=input_data.get("file_content", ""),
+            key_concepts="\n".join(formatted_concepts),
+            count=input_data.get("count", 5),
+            difficulty=input_data.get("difficulty", "medium"),
+            question_types=", ".join(input_data.get("question_types", ["MCQ"]))
         )
-    
-    async def _call_llm(self, prompt: str) -> str:
-        """Call the LLM with the given prompt to generate quiz questions.
         
-        Args:
-            prompt: The formatted prompt to send to the LLM
-            
-        Returns:
-            Raw LLM response as a string containing the generated questions in JSON format
-            
-        Raises:
-            ValueError: If the LLM call fails or returns an invalid response
-        """
-        try:
-            # Call the LLM service with appropriate parameters
-            response = await llm_service.generate_text(
-                prompt=prompt,
-                temperature=0.7,  # Slightly higher temperature for more varied questions
-                max_tokens=2000,  # Enough for multiple questions
-                top_p=0.9,
-                frequency_penalty=0.5,  # Encourage diverse questions
-                presence_penalty=0.5
-            )
-            
-            logger.debug(f"LLM response: {response[:200]}...")  # Log first 200 chars
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error calling LLM service: {str(e)}", exc_info=True)
-            raise ValueError(f"Failed to generate quiz questions: {str(e)}")
+        return prompt
     
-    async def _generate_quiz_questions(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+    async def _generate_quiz_questions(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate quiz questions from content."""
-        if not input_data.get("file_content"):
-            raise ValueError("Input must contain 'file_content' for quiz generation")
-            
-        # Update config from input data if provided
-        if "count" in input_data:
-            self.config.num_questions = input_data["count"]
-        if "difficulty" in input_data:
-            self.config.difficulty = input_data["difficulty"]
-        if "question_types" in input_data:
-            self.config.question_types = input_data["question_types"]
+        # Prepare the prompt with content and key concepts
+        prompt = await self._prepare_prompt(input_data)
         
-        # Prepare the prompt with key concepts from DB if available
-        prompt = await self._prepare_prompt(input_data, db)
-        
-        # Call LLM to generate quiz
-        llm_response = await self._call_llm(prompt)
+        # Call the LLM to generate questions
+        response = await self._call_llm(prompt)
         
         # Parse and validate the response
-        questions = self._parse_llm_response(llm_response)
+        result = self._parse_llm_response(response)
         
-        # Format response to match frontend expectations
-        return {
-            "status": "success",
-            "questions": [q.dict(by_alias=True) for q in questions],
-            "file_id": input_data.get("file_id")
-        }
-
-    async def _generate_flashcards(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+        # Add metadata
+        result.update({
+            "file_id": input_data.get("file_id"),
+            "generated_at": datetime.utcnow().isoformat(),
+            "config": self.config.dict()
+        })
+        
+        return result
+    
+    async def _generate_flashcards(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate flashcards from key concepts."""
         file_id = input_data.get("file_id")
         if not file_id:
@@ -458,8 +433,21 @@ class QuizAgent(BaseAgent[QuizConfig]):
             
         # Get key concepts from input or database
         key_concepts = input_data.get("key_concepts")
-        if key_concepts is None and db is not None:
-            key_concepts = await self._get_key_concepts_from_db(db, file_id)
+        if key_concepts is None:
+            # Get repository manager and learning material repository
+            repo_manager = await get_repository_manager()
+            learning_material_repo = await repo_manager.learning_material_repo
+            
+            # Fetch key concepts from the database
+            key_concepts_data = await learning_material_repo.get_key_concepts_by_file_id(file_id)
+            key_concepts = [
+                {
+                    "concept": kc.concept,
+                    "definition": kc.definition,
+                    "examples": kc.examples
+                }
+                for kc in key_concepts_data
+            ]
         
         if not key_concepts:
             return {
@@ -484,22 +472,27 @@ class QuizAgent(BaseAgent[QuizConfig]):
             "file_id": file_id
         }
     
-    async def _get_key_concepts_from_db(self, db: Session, file_id: int) -> List[Dict[str, Any]]:
+    async def _get_key_concepts_from_db(self, file_id: int) -> List[Dict[str, Any]]:
         """Fetch key concepts from the database for a given file."""
         try:
-            concepts = db.query(KeyConcept).filter(
-                KeyConcept.file_id == file_id,
-                KeyConcept.is_custom == False  # Only use auto-generated concepts
-            ).order_by(KeyConcept.id.desc()).limit(20).all()  # Get most recent 20 concepts
+            # Get repository manager and learning material repository
+            repo_manager = await get_repository_manager()
+            learning_material_repo = await repo_manager.learning_material_repo
             
-            return [{
-                "id": str(concept.id),
-                "concept_title": concept.concept_title,
-                "concept_explanation": concept.concept_explanation,
-                "source_page": concept.source_page_number,
-                "source_timestamp_start": concept.source_video_timestamp_start_seconds,
-                "source_timestamp_end": concept.source_video_timestamp_end_seconds
-            } for concept in concepts]
+            # Fetch key concepts from the database
+            concepts = await learning_material_repo.get_key_concepts_by_file_id(file_id)
+            
+            # Convert to list of dictionaries
+            return [
+                {
+                    "concept": c.concept,
+                    "definition": c.definition,
+                    "examples": c.examples,
+                    "page_number": c.page_number,
+                    "created_at": c.created_at.isoformat() if c.created_at else None
+                }
+                for c in concepts
+            ]
             
         except Exception as e:
             logger.error(f"Error fetching key concepts from database: {str(e)}")

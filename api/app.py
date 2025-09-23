@@ -5,12 +5,14 @@ import os
 from datetime import datetime
 
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 from fastapi import (
     FastAPI, 
     WebSocket, 
     WebSocketDisconnect, 
     Request, 
-    status
+    status,
+    Depends
 )
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -21,10 +23,10 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .websocket_manager import websocket_manager
-from .repositories.repository_manager import RepositoryManager
+from .repositories import get_repository_manager, RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import utils
-from .models.async_db import startup as db_startup, shutdown as db_shutdown, get_engine
+from .models import init_db, close_db, get_engine
 from .agents import register_agents
 
 # Configure logging
@@ -37,12 +39,68 @@ load_dotenv()
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
-# Initialize FastAPI
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan events.
+    
+    This context manager handles startup and shutdown events for the application.
+    It ensures proper initialization and cleanup of resources.
+    """
+    # Startup logic
+    logger.info("Starting application...")
+    
+    # Initialize Firebase
+    try:
+        initialize_firebase()
+        logger.info("Firebase initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Firebase: {e}", exc_info=True)
+        raise
+    
+    # Initialize database
+    logger.info("Initializing database...")
+    await init_db()
+    logger.info("Database initialized successfully")
+    
+    # Initialize repository manager
+    try:
+        repo_manager = await get_repository_manager()
+        app.state.repo_manager = repo_manager
+        logger.info("Repository manager initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize repository manager: {e}", exc_info=True)
+        raise
+    
+    # Register agents
+    try:
+        register_agents()
+        logger.info("Agents registered successfully")
+    except Exception as e:
+        logger.error(f"Failed to register agents: {e}", exc_info=True)
+        raise
+    
+    yield  # Application runs here
+    
+    # Shutdown logic
+    logger.info("Shutting down application...")
+    
+    # Close repository manager
+    if hasattr(app.state, 'repo_manager') and app.state.repo_manager:
+        await app.state.repo_manager.close()
+        logger.info("Repository manager closed")
+    
+    # Shutdown database
+    logger.info("Shutting down database...")
+    await close_db()
+    logger.info("Database shutdown complete")
+
+# Initialize FastAPI with lifespan management
 app = FastAPI(
     title="SynTextAI API",
     description="API for SynTextAI - AI-powered learning assistant",
     version="1.0.0",
-    max_request_body_size=2 * 1024 * 1024 * 1024
+    max_request_body_size=2 * 1024 * 1024 * 1024,
+    lifespan=lifespan
 )
 
 # Configure rate limiting
@@ -89,13 +147,17 @@ async def startup_event():
         initialize_firebase()
         
         # Initialize database connection and session factory
-        await db_startup()
+        await init_db()
         
         # Test database connection
         engine = await get_engine()
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
         logger.info("Database connection successful")
+        
+        # Initialize repository manager
+        from api.repositories import get_repository_manager
+        app.state.store = await get_repository_manager()
         
         # Register agents
         register_agents()
@@ -110,12 +172,17 @@ async def startup_event():
         logger.error(f"Import error during application startup: {e}", exc_info=True)
         raise
 
-# Register startup and shutdown event handlers
-@app.on_event("startup")
+# Keep these for backward compatibility but they'll use the new lifespan manager
 async def on_startup():
-    await startup_event()
+    """Legacy startup handler for backwards compatibility."""
+    await init_db()
+app.add_event_handler("startup", on_startup)
 
-@app.on_event("shutdown")
+async def shutdown_event():
+    """Legacy shutdown handler for backwards compatibility."""
+    await close_db()
+app.add_event_handler("shutdown", shutdown_event)
+
 async def shutdown_event():
     """Handle application shutdown."""
     logger.info("Shutting down application...")
@@ -124,8 +191,8 @@ async def shutdown_event():
         # Close WebSocket connections
         await websocket_manager.disconnect_all()
         
-        # Close database connection
-        await db_shutdown()
+        # Shutdown database
+        await close_db()
             
         logger.info("Application shutdown complete")
     except Exception as e:
@@ -134,9 +201,26 @@ async def shutdown_event():
     
     logger.info("Application shutdown complete")
 
-# Dependency to get the store
-def get_store(request: Request):
-    return request.app.state.store
+# Dependency to get the repository manager
+async def get_repository_manager_dep() -> RepositoryManager:
+    """
+    FastAPI dependency to get the repository manager.
+    
+    This is the preferred way to get the repository manager in route handlers.
+    It ensures the repository manager is properly initialized.
+    
+    Returns:
+        RepositoryManager: The initialized repository manager
+    """
+    # Initialize database if not already done
+    if not _initialized:
+        await init_db()
+    return get_repository_manager()
+
+# For backward compatibility
+async def get_store() -> RepositoryManager:
+    """Legacy dependency for backward compatibility."""
+    return await get_repository_manager_dep()
 
 # WebSocket endpoint
 @app.websocket("/ws/{user_id}")

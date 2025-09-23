@@ -1,111 +1,113 @@
-# Stage 1: Base image with system dependencies
-FROM python:3.10-slim AS base
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    ffmpeg \
-    libsndfile1 \
-    git \
-    libpq-dev \
-    python3-dev \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgl1 \
-    libglib2.0-0 \
-    libsndfile1-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libtiff5-dev \
-    libjpeg-dev \
-    libpng-dev \
-    libwebp-dev \
-    libopenblas-dev \
-    liblapack-dev \
-    gfortran \
-    postgresql-server-dev-all \
-    libgomp1 \
-    libatomic1 \
-    && rm -rf /var/lib/apt/lists/*
+# ==========================
+# Stage 1: Build the frontend
+# ==========================
+FROM node:18-alpine AS build-step
 
-WORKDIR /app
+# Define build arguments for environment variables
+ARG REACT_APP_FIREBASE_API_KEY
+ARG REACT_APP_FIREBASE_AUTH_DOMAIN
+ARG REACT_APP_FIREBASE_PROJECT_ID
+ARG REACT_APP_FIREBASE_STORAGE_BUCKET
+ARG REACT_APP_FIREBASE_MESSAGING_SENDER_ID
+ARG REACT_APP_FIREBASE_APP_ID
+ARG REACT_APP_STRIPE_API_KEY
+ARG REACT_APP_STRIPE_SECRET
+ARG REACT_APP_STRIPE_ENDPOINT_SECRET
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1 \
-    PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PIP_DEFAULT_TIMEOUT=100 \
-    VENV_PATH="/app/.venv" \
-    WHISPER_CACHE_DIR=/root/.cache/whisper
+# Set build-time env vars
+ENV REACT_APP_FIREBASE_API_KEY=${REACT_APP_FIREBASE_API_KEY}
+ENV REACT_APP_FIREBASE_AUTH_DOMAIN=${REACT_APP_FIREBASE_AUTH_DOMAIN}
+ENV REACT_APP_FIREBASE_PROJECT_ID=${REACT_APP_FIREBASE_PROJECT_ID}
+ENV REACT_APP_FIREBASE_STORAGE_BUCKET=${REACT_APP_FIREBASE_STORAGE_BUCKET}
+ENV REACT_APP_FIREBASE_MESSAGING_SENDER_ID=${REACT_APP_FIREBASE_MESSAGING_SENDER_ID}
+ENV REACT_APP_FIREBASE_APP_ID=${REACT_APP_FIREBASE_APP_ID}
+ENV REACT_APP_STRIPE_API_KEY=${REACT_APP_STRIPE_API_KEY}
+ENV REACT_APP_STRIPE_SECRET=${REACT_APP_STRIPE_SECRET}
+ENV REACT_APP_STRIPE_ENDPOINT_SECRET=${REACT_APP_STRIPE_ENDPOINT_SECRET}
 
-# Install Python dependencies in multiple steps for better caching
-COPY api/requirements.txt .
-
-# Install pip-tools first
-RUN pip install --upgrade pip && \
-    pip install pip-tools
-
-# Install Python dependencies with retries
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install faster-whisper with specific version
-RUN pip install --no-cache-dir faster-whisper==0.9.0
-
-# Create cache directory with correct permissions
-RUN mkdir -p "$WHISPER_CACHE_DIR" && chmod 777 "$WHISPER_CACHE_DIR"
-
-# Copy the application code
-COPY api/ ./api/
-
-# Set environment variables for production
-ENV PYTHONPATH=/app \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8000 \
-    DEBIAN_FRONTEND=noninteractive
-
-# Stage 2: Frontend build
-FROM node:18-alpine AS frontend-builder
-
-# Set working directory
 WORKDIR /app/frontend
 
-# Copy package files first for better caching
+# Copy package files first to leverage caching
 COPY frontend/package.json frontend/package-lock.json ./
 
 # Install dependencies
-RUN npm ci --prefer-offline --no-audit --progress=false
+RUN npm ci
 
-# Copy remaining frontend files and build
+# Copy remaining files and build
 COPY frontend/ ./
-RUN npm run build && \
-    npm cache clean --force && \
-    rm -rf node_modules
+RUN npm run build && npm cache clean --force
 
-# Final stage
-FROM base
+# ==========================
+# Stage 2: Python backend
+# ==========================
+FROM python:3.10-slim AS base
 
-# Copy frontend build
-COPY --from=frontend-builder /app/frontend/build ./frontend/build
+# Install system dependencies and build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables for Firebase (will be overridden by docker-compose if needed)
-ENV FIREBASE_AUTH_URI=https://accounts.google.com/o/oauth2/auth \
-    FIREBASE_TOKEN_URI=https://oauth2.googleapis.com/token \
-    FIREBASE_AUTH_PROVIDER_CERT_URL=https://www.googleapis.com/oauth2/v1/certs
+# Set working directory
+WORKDIR /app
+ENV PYTHONPATH /app
 
-# Expose the application port
+# Define Firebase build args
+ARG FIREBASE_PROJECT_ID
+ARG FIREBASE_PRIVATE_KEY
+ARG FIREBASE_CLIENT_EMAIL
+ARG FIREBASE_PRIVATE_KEY_ID
+ARG FIREBASE_CLIENT_ID
+ARG FIREBASE_CLIENT_CERT_URL
+ARG FIREBASE_AUTH_URI
+ARG FIREBASE_TOKEN_URI
+ARG FIREBASE_AUTH_PROVIDER_CERT_URL
+
+# Set Firebase environment variables
+ENV FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+ENV FIREBASE_PRIVATE_KEY=${FIREBASE_PRIVATE_KEY}
+ENV FIREBASE_CLIENT_EMAIL=${FIREBASE_CLIENT_EMAIL}
+ENV FIREBASE_PRIVATE_KEY_ID=${FIREBASE_PRIVATE_KEY_ID}
+ENV FIREBASE_CLIENT_ID=${FIREBASE_CLIENT_ID}
+ENV FIREBASE_CLIENT_CERT_URL=${FIREBASE_CLIENT_CERT_URL}
+ENV FIREBASE_AUTH_URI=${FIREBASE_AUTH_URI:-https://accounts.google.com/o/oauth2/auth}
+ENV FIREBASE_TOKEN_URI=${FIREBASE_TOKEN_URI:-https://oauth2.googleapis.com/token}
+ENV FIREBASE_AUTH_PROVIDER_CERT_URL=${FIREBASE_AUTH_PROVIDER_CERT_URL:-https://www.googleapis.com/oauth2/v1/certs}
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    supervisor \
+    ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy backend code and CA certificate
+COPY api/ ./api/
+COPY api/config/ca-certificate.crt ./api/config/ca-certificate.crt
+
+# Environment variable for PostgreSQL CA cert
+ENV DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r ./api/requirements.txt
+
+# Whisper setup
+ENV WHISPER_CACHE_DIR=/app/models
+RUN mkdir -p $WHISPER_CACHE_DIR && \
+    pip install faster-whisper && \
+    python -c "from faster_whisper import WhisperModel; WhisperModel('base', download_root='$WHISPER_CACHE_DIR')"
+
+# Copy frontend build from first stage
+COPY --from=build-step /app/frontend/build ./frontend/build
+
+# Expose app port
 EXPOSE 3000
 
-# Set Python path to include the app directory
-ENV PYTHONPATH=/app:$PYTHONPATH
-
-# Command to run the application
-WORKDIR /app
+# Start FastAPI
 CMD ["python", "-m", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "3000"]

@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
-from api.repositories.repository_manager import RepositoryManager
+from api.repositories import RepositoryManager
 from api.services.llm_service import llm_service
 from api.services.embedding_service import embedding_service
 from api.utils.utils import chunk_text
@@ -44,8 +44,8 @@ async def process_text(
     """
     global _repo_manager
     if _repo_manager is None:
-        from api.repositories.repository_manager import get_repository_manager
-        _repo_manager = get_repository_manager()
+        from api.repositories import get_repository_manager
+        _repo_manager = await get_repository_manager()
         
     processor = TextProcessor(_repo_manager)
     return await processor.process(

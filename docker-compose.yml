@@ -8,15 +8,20 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
     volumes:
       - ./api/config:/app/api/config
+      - ./.env:/app/.env
     networks:
       - syntextai_network
     deploy:
       resources:
         limits:
-          memory: 4G  # Limit to 4GB
-          
+          memory: 4G
+    restart: unless-stopped
+
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
@@ -27,14 +32,16 @@ services:
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
       - PYTHONPATH=/app
+      - DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
     volumes:
       - ./api/config:/app/api/config
+      - ./.env:/app/.env
     networks:
       - syntextai_network
     deploy:
       resources:
         limits:
-          memory: 2G  # Worker needs less memory than the API
+          memory: 2G
     restart: unless-stopped
 
   searxng:
@@ -49,7 +56,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G  # Limit to 4GB
+          memory: 8G
+    restart: unless-stopped
 
 networks:
   syntextai_network:

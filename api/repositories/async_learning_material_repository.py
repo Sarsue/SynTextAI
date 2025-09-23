@@ -19,16 +19,23 @@ from ..models.orm_models import (
 from ..models.flashcard import FlashcardCreate, FlashcardUpdate
 from ..models.quiz import QuizQuestionCreate, QuizQuestionUpdate
 from .async_base_repository import AsyncBaseRepository
-from .repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
 class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, FlashcardCreate, FlashcardUpdate]):
     """Async repository for LearningMaterial model operations."""
 
-    def __init__(self, repository_manager: RepositoryManager):
-        super().__init__(FlashcardModel, repository_manager)
-        self._repository_manager = repository_manager
+    def __init__(self, repository_manager, session_factory=None):
+        """
+        Initialize the learning material repository.
+        
+        Args:
+            repository_manager: The repository manager instance
+            session_factory: Optional SQLAlchemy async session factory
+        """
+        super().__init__(repository_manager, session_factory)
+        self._model = FlashcardModel
+        self._initialized = True
 
     async def get_by_user(self, user_id: int) -> List[FlashcardModel]:
         """Get all learning materials for a specific user."""

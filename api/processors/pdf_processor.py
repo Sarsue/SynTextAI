@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 from api.processors.base_processor import FileProcessor
-from api.repositories.repository_manager import RepositoryManager
+from api.repositories import RepositoryManager
 from api.services.llm_service import llm_service
 from api.services.embedding_service import embedding_service
 from api.llm_compat import generate_key_concepts_dspy

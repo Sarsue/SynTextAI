@@ -11,7 +11,7 @@ from api.processors.base_processor import FileProcessor
 from api.processors.youtube_processor import YouTubeProcessor
 from api.processors.pdf_processor import PDFProcessor
 from api.processors.url_processor import URLProcessor
-from api.repositories.repository_manager import RepositoryManager
+from api.repositories import RepositoryManager
 from api.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)

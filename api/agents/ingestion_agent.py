@@ -5,8 +5,8 @@ with per-chunk summarization for ultra-long PDFs and YouTube videos.
 import asyncio
 import logging
 import os
+from datetime import datetime
 from typing import Dict, Any, Optional, Callable, Awaitable, List, Union
-from sqlalchemy.orm import Session
 
 from api.agents.base_agent import BaseAgent, AgentConfig, AgentError
 from api.agents.agent_factory import agent
@@ -14,6 +14,8 @@ from api.agents.summarization_agent import SummarizationAgent, SummarizationConf
 from api.utils.language_utils import validate_language
 from api.processors import process_pdf, process_youtube, process_text, process_url
 from api.services.embedding_service import embedding_service
+from api.repositories import get_repository_manager
+from api.repositories.async_file_repository import AsyncFileRepository
 
 logger = logging.getLogger(__name__)
 
@@ -342,18 +344,14 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
                             logger.error(f"Unexpected summary data format for chunk {chunk_idx + 1}")
                             return {}
                             
-                        # Update chunk with results
-                        chunk.update({
-                            "summary": str(summary_data.get("summary", "")),
-                            "key_concepts": list(summary_data.get("key_concepts", [])),
-                            "metadata": {
+                        # Process the summary data if available
+                        if isinstance(summary_data, dict):
+                            chunk["metadata"] = {
                                 **chunk.get("metadata", {}),
+                                "summary": summary_data.get("summary", ""),
+                                "key_concepts": summary_data.get("key_concepts", []),
                                 "processing_status": "completed"
                             }
-                        })
-                        
-                        return chunk
-                        
                     except Exception as e:
                         logger.error(f"Error processing chunk {chunk_idx + 1}: {e}", exc_info=True)
                         # Mark failed chunks but continue processing others
@@ -362,214 +360,95 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
                             "processing_status": "failed",
                             "error": str(e)
                         }
-                        return chunk
-            
-            # Process all chunks in parallel
-            tasks = [process_single_chunk(chunk, i) for i, chunk in enumerate(chunks)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Update chunks with results
-            success_count = 0
-            for i, chunk_result in enumerate(results):
-                if isinstance(chunk_result, dict) and chunk_result:
-                    chunks[i] = chunk_result
-                    if chunk_result.get("metadata", {}).get("processing_status") == "completed":
-                        success_count += 1
                 
-            logger.info(f"Processed {success_count}/{len(chunks)} chunks successfully")
-            
-            # Update content metadata
-            content_data["metadata"] = {
-                **metadata,
-                "processed_chunks": success_count,
-                "total_chunks": len(chunks),
-                "processing_status": "completed" if success_count > 0 else "failed"
-            }
-            
-            # Generate top-level summary if we have multiple successful chunks
-            if success_count > 1:
-                await self._generate_top_level_summary(content_data)
-                
-        except Exception as e:
-            logger.error(f"Error in chunk summarization: {e}", exc_info=True)
-            content_data["metadata"] = {
-                **metadata,
-                "processing_status": "failed",
-                "error": str(e)
-            }
-            raise AgentError(f"Failed to process chunks: {str(e)}")
-
-    async def _generate_chunk_embeddings(self, chunks: List[Dict[str, Any]], batch_size: int = 32) -> None:
-        """
-        Generate embeddings for chunks in batches.
-        
-        Args:
-            chunks: List of chunks to process
-            batch_size: Number of chunks to process in each batch
-        """
-        if not chunks:
-            return
-            
-        try:
-            # Process in batches to avoid overwhelming the API
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
-                texts = [chunk.get("text", "").strip() for chunk in batch if chunk.get("text")]
-                
-                if not texts:
-                    continue
-                    
+                # Get embeddings for the current batch
                 try:
-                    # Get embeddings for the current batch
-                    embeddings = await embedding_service.get_embeddings(
-                        texts=texts,
-                        provider=self.config.embedding_provider
-                    )
-                    
-                    # Update chunks with their embeddings
-                    for j, embedding in enumerate(embeddings):
-                        if embedding and i + j < len(chunks):
-                            chunks[i + j]["embedding"] = embedding
-                            
+                    texts = [chunk["text"] for chunk in batch if "text" in chunk]
+                    if texts:
+                        embeddings = await embedding_service.get_embeddings(
+                            texts=texts,
+                            provider=self.config.embedding_provider
+                        )
+                        # Update chunks with embeddings
+                        for i, chunk in enumerate(batch):
+                            if i < len(embeddings):
+                                chunk["embedding"] = embeddings[i]
                 except Exception as e:
-                    logger.error(f"Error in embedding batch {i//batch_size + 1}: {e}")
+                    logger.error(f"Error generating embeddings for batch: {e}")
                     # Continue with next batch even if one fails
-                    continue
+                    pass
                     
         except Exception as e:
-            logger.error(f"Unexpected error in batch embedding generation: {e}")
+            logger.error(f"Unexpected error in batch processing: {e}")
             raise
 
-    async def _generate_top_level_summary(self, content_data: Dict[str, Any]) -> None:
-        """
-        Generate a top-level summary from chunk summaries.
-        
-        This combines all chunk summaries and generates a coherent overall summary.
-        
-        Args:
-            content_data: Dictionary containing 'chunks' with processed content and 'metadata'
-        """
-        try:
-            chunks = content_data.get("chunks", [])
-            if not chunks:
-                logger.warning("No chunks available for top-level summary")
-                return
-                
-            # Get metadata for context
-            metadata = content_data.get("metadata", {})
-            source_type = metadata.get("source_type", "document")
-            
-            # Collect all chunk summaries with their positions and key concepts
-            chunk_summaries = []
-            all_key_concepts = []
-            
-            for i, chunk in enumerate(chunks):
-                chunk_meta = chunk.get("metadata", {})
-                if chunk_meta.get("processing_status") != "completed":
-                    continue
-                    
-                chunk_id = i + 1
-                summary = str(chunk.get("summary", "")).strip()
-                key_concepts = list(chunk.get("key_concepts", []))
-                
-                if summary:
-                    chunk_summaries.append({
-                        "chunk_id": chunk_id,
-                        "summary": summary,
-                        "start_time": chunk_meta.get("start_time") if source_type == "youtube" else None,
-                        "page_number": chunk_meta.get("page_number") if source_type == "pdf" else None
-                    })
-                
-                all_key_concepts.extend(key_concepts)
-            
-            if not chunk_summaries:
-                logger.warning("No valid chunk summaries found for top-level summary")
-                return
-                
-            # Format summaries for the LLM with source context
-            formatted_summaries = []
-            for cs in chunk_summaries:
-                source_context = ""
-                if source_type == "youtube" and cs.get("start_time") is not None:
-                    source_context = f" (at {cs['start_time']}s)"
-                elif source_type == "pdf" and cs.get("page_number") is not None:
-                    source_context = f" (page {cs['page_number']})"
-                    
-                formatted_summaries.append(
-                    f"## {'Segment' if source_type == 'youtube' else 'Section'} {cs['chunk_id']}{source_context}\n"
-                    f"{cs['summary']}"
-                )
-            
-            # Generate top-level summary prompt with source-specific context
-            source_context = {
-                "youtube": "video transcript",
-                "pdf": "document",
-                "url": "web page",
-                "text": "text"
-            }.get(source_type, "content")
-            
-            summary_prompt = (
-                f"Create a comprehensive summary that captures the main points from this {source_context}. "
-                "Focus on the key themes, arguments, and conclusions. "
-                "Maintain the original meaning while making it concise and clear.\n\n"
-                f"{source_context.capitalize()} Structure: {len(chunks)} {'segments' if source_type == 'youtube' else 'sections'}\n\n"
-                f"{chr(10).join(formatted_summaries)}"
-            )
-            
-            # Include language and comprehension level if available
-            llm_params = {
-                "content": summary_prompt,
-                "summary_type": "top_level",
-                "chunk_count": len(chunks),
-                "source_type": source_type
-            }
-            
-            if "language" in metadata:
-                llm_params["language"] = metadata["language"]
-            if "comprehension_level" in metadata:
-                llm_params["comprehension_level"] = metadata["comprehension_level"]
-            
-            # Generate the summary using the summarization agent
-            summary_data = await self.summarization_agent.process(llm_params)
-            
-            # Update content_data with top-level summary and aggregated concepts
-            if summary_data and isinstance(summary_data, dict):
-                content_data["summary"] = str(summary_data.get("summary", "")).strip()
-                
-                # Merge and deduplicate key concepts from chunks and top-level summary
-                all_key_concepts.extend(summary_data.get("key_concepts", []))
-                unique_key_concepts = []
-                seen_concepts = set()
-                
-                for concept in all_key_concepts:
-                    if isinstance(concept, dict) and "concept" in concept:
-                        concept_key = concept["concept"].lower().strip()
-                        if concept_key not in seen_concepts:
-                            seen_concepts.add(concept_key)
-                            unique_key_concepts.append(concept)
-                
-                if unique_key_concepts:
-                    content_data["key_concepts"] = unique_key_concepts
-                
-                # Update metadata
-                content_data["metadata"]["summary_generated"] = True
-                logger.info(f"Generated top-level summary with {len(unique_key_concepts)} key concepts")
-                    
-        except Exception as e:
-            logger.error(f"Error generating top-level summary: {e}", exc_info=True)
-            # Don't fail the whole process if top-level summary fails
-            content_data["metadata"]["summary_error"] = str(e)
+        # Generate top-level summary if requested
+        if content_data.get("generate_summary", True):
+            try:
+                summary_result = await self.summarization_agent.process({
+                    "content": [chunk.get("text", "") for chunk in chunks if chunk.get("text")],
+                    "language": metadata.get("language", "en"),
+                    "comprehension_level": metadata.get("comprehension_level", "intermediate")
+                })
+                if isinstance(summary_result, dict):
+                    content_data["metadata"]["summary"] = summary_result.get("summary", "")
+                    content_data["metadata"]["key_concepts"] = summary_result.get("key_concepts", [])
+            except Exception as e:
+                logger.error(f"Error generating top-level summary: {e}", exc_info=True)
+                # Don't fail the whole process if top-level summary fails
+                content_data["metadata"]["summary_error"] = str(e)
 
-    async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+    async def process(
+        self, 
+        input_data: Dict[str, Any], 
+        db: Optional[Any] = None,  # Kept for backward compatibility
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None
+    ) -> Dict[str, Any]:
         """Process input data based on source type."""
         try:
             await self.validate_input(input_data)
             source_type = input_data.get("source_type")
             if source_type not in self._processors:
                 raise AgentError(f"No processor for source type {source_type}")
-            result = await self._processors[source_type](input_data)
-            return {"status": "success", "source_type": source_type, "content": result, "file_id": input_data.get("file_id")}
+            
+            processor = self._processors[source_type]
+            result = await processor(input_data)
+            
+            # Update file status if file_id is provided
+            file_id = input_data.get("file_id")
+            if file_id:
+                try:
+                    repo_manager = await get_repository_manager()
+                    file_repo = await repo_manager.file_repo
+                    await file_repo.update(file_id, {
+                        'status': 'processed',
+                        'processing_completed_at': datetime.utcnow()
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to update file status to processed: {str(e)}")
+            
+            return {
+                "status": "success", 
+                "source_type": source_type, 
+                "content": result, 
+                "file_id": file_id
+            }
+            
         except Exception as e:
+            # Update file status to error if file_id is provided
+            file_id = input_data.get("file_id")
+            if file_id:
+                try:
+                    repo_manager = await get_repository_manager()
+                    file_repo = await repo_manager.file_repo
+                    await file_repo.update(file_id, {
+                        'status': 'error',
+                        'error_message': str(e),
+                        'processing_completed_at': datetime.utcnow()
+                    })
+                except Exception as update_error:
+                    logger.error(f"Failed to update file status to error: {str(update_error)}")
+            
             logger.error(f"Error processing {input_data.get('source_type')} content: {e}", exc_info=True)
             raise AgentError(f"Failed to process {input_data.get('source_type')} content: {e}")
 

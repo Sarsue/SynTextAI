@@ -1,108 +1,122 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
-from ..utils import get_user_id
-from ..repositories.repository_manager import RepositoryManager
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, Request, Header
+from fastapi.responses import JSONResponse
+from typing import Dict, List, Optional, Any
 import logging
-from typing import Dict
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+import os
+from datetime import datetime
+
+from ..repositories import RepositoryManager, get_repository_manager
+from ..models.orm_models import ChatHistory, Message
+from ..models.chat import ChatHistory, ChatHistoryCreate, ChatHistoryUpdate
+from ..dependencies import authenticate_user
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI router
+# Initialize router
 histories_router = APIRouter(prefix="/api/v1/histories", tags=["histories"])
 
-# Dependency to get the store
-def get_store(request: Request):
-    return request.app.state.store
-
-# Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
-    if not authorization:
-        logger.error("Missing Authorization token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    success, user_info = get_user_id(authorization)
-    if not success:
-        logger.error("Failed to authenticate user with token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    user = await store.user_repo.get_user_by_email(user_info['email'])
-    if not user:
-        logger.error(f"No user found with email: {user_info['email']}")
-        raise HTTPException(status_code=404, detail="User not found")
-    user_id = user.id
-
-    logger.info(f"Authenticated user_id: {user_id}")
-    return {"user_id": user_id, "user_info": user_info}
+# Get repository manager dependency
+async def get_repo_manager() -> RepositoryManager:
+    return await get_repository_manager()
 
 # Route to create a new chat history
-@histories_router.post("", status_code=201)
+@histories_router.post("", response_model=ChatHistory, status_code=201)
 async def create_history(
     title: str = Query(..., description="Title of the chat history"),
     user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store)
+    repo_manager: RepositoryManager = Depends(get_repo_manager)
 ):
     try:
         user_id = user_data["user_id"]
-        history = store.add_chat_history(title, user_id)
+        history = await repo_manager.chat_repo.create_chat_history(
+            title=title,
+            user_id=user_id
+        )
         return history
     except Exception as e:
-        logger.error(f"Error creating chat history: {e}")
+        logger.error(f"Error creating chat history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Route to get all chat histories for a user
-@histories_router.get("")
+@histories_router.get("", response_model=List[Dict[str, Any]])  # Using Dict for flexibility with message format
 async def get_history_messages(
     user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store)
+    repo_manager: RepositoryManager = Depends(get_repo_manager)
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = store.get_all_user_chat_histories(user_id)
-        return message_list
+        chat_histories = await repo_manager.chat_repo.get_user_chats(user_id=user_id)
+        return chat_histories
     except Exception as e:
-        logger.error(f"Error retrieving chat histories: {e}")
+        logger.error(f"Error retrieving chat histories: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Route to get messages for a specific chat history
-@histories_router.get("/messages")
+@histories_router.get("/{history_id}", response_model=ChatHistory)
 async def get_specific_history_messages(
-    history_id: int = Query(..., description="ID of the chat history"),
+    history_id: int = Path(..., description="ID of the chat history"),
     user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store)
+    repo_manager: RepositoryManager = Depends(get_repo_manager)
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = store.get_messages_for_chat_history(user_id, history_id)
-        return message_list
+        chat = await repo_manager.chat_repo.get_chat_with_messages(
+            chat_id=history_id,
+            include_messages=True
+        )
+        if not chat or chat.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Chat history not found")
+        return chat
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error retrieving messages for history {history_id}: {e}")
+        logger.error(f"Error retrieving messages for history {history_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Route to delete a specific chat history
-@histories_router.delete("", status_code=200)
+@histories_router.delete("/{history_id}", status_code=200)
 async def delete_specific_history_messages(
-    history_id: int = Query(..., description="ID of the chat history to delete"),
+    history_id: int = Path(..., description="ID of the chat history to delete"),
     user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store)
+    repo_manager: RepositoryManager = Depends(get_repo_manager)
 ):
     try:
         user_id = user_data["user_id"]
-        await store.chat_repo.delete_chat_history(user_id, history_id)
+        # First verify the chat belongs to the user
+        chat = await repo_manager.chat_repo.get_chat_with_messages(history_id)
+        if not chat or chat.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Chat history not found")
+            
+        # Delete the chat
+        success = await repo_manager.chat_repo.delete_chat(history_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete chat history")
+            
         return {"message": "History deleted successfully", "deletedHistoryId": history_id}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error deleting history {history_id}: {e}")
+        logger.error(f"Error deleting history {history_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # Route to delete all chat histories for a user
 @histories_router.delete("/all", status_code=200)
 async def delete_all_user_histories(
     user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store)
+    repo_manager: RepositoryManager = Depends(get_repo_manager)
 ):
     try:
         user_id = user_data["user_id"]
-        await store.chat_repo.delete_all_user_histories(user_id)
+        # Get all user's chats
+        chats = await repo_manager.chat_repo.get_user_chats(user_id=user_id)
+        
+        # Delete each chat
+        for chat in chats:
+            await repo_manager.chat_repo.delete_chat(chat.id)
+            
         return {"message": "All histories deleted successfully"}
     except Exception as e:
-        logger.error(f"Error deleting all histories for user {user_id}: {e}")
+        logger.error(f"Error deleting all histories for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

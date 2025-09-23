@@ -33,13 +33,13 @@ Example Usage:
     ```
 """
 import logging
-from typing import Dict, Any, List, Optional
-
-from sqlalchemy.orm import Session
+from typing import Dict, Any, List, Optional, cast
 
 from .base_agent import BaseAgent, AgentConfig, AgentError
 from .agent_factory import agent  # Import the agent decorator
 from .dspy_utils import extract_key_concepts
+from ..repositories import get_repository_manager
+from ..repositories.async_learning_material_repository import AsyncLearningMaterialRepository
 from ..models.orm_models import KeyConcept
 from ..utils.language_utils import validate_language, is_language_supported, get_supported_languages
 
@@ -133,7 +133,7 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
         super().__init__(config or SummarizationConfig())
         self.supported_levels = ["beginner", "intermediate", "advanced"]
     
-    async def process(self, input_data: Dict[str, Any], db: Optional[Session] = None) -> Dict[str, Any]:
+    async def process(self, input_data: Dict[str, Any], db: Optional[Any] = None) -> Dict[str, Any]:
         """
         Process the input content and generate a structured summary with key concepts.
         
@@ -157,8 +157,7 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                                             Overrides the default from config.
                 metadata (dict, optional): Additional metadata about the content.
                 
-            db (Session, optional): SQLAlchemy session for database operations.
-                                  Required if storing concepts in the database.
+            db: Kept for backward compatibility but not used. Will be removed in a future version.
                                   
         Returns:
             Dict[str, Any]: A dictionary containing:
@@ -170,7 +169,7 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                 
         Raises:
             AgentError: If input validation fails or processing encounters an error
-            
+                
         Example:
             ```python
             result = await agent.process({
@@ -204,7 +203,6 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                 content=content,
                 language=language,
                 level=level,
-                db=db,
                 file_id=file_id
             )
             
@@ -233,7 +231,7 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                     for chunk in content
                 )
             
-            # ✅ Ensure content is not a coroutine
+            # Ensure content is not a coroutine
             if callable(content) or hasattr(content, '__await__'):
                 content = await content
 
@@ -256,19 +254,19 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
             raise AgentError(f"Failed to generate summary: {str(e)}")
     
     async def _extract_key_concepts(
-        self, 
-        content: Any, 
-        language: str,
-        level: str,
-        db: Optional[Session] = None,
-        file_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+            self, 
+            content: Any, 
+            language: str,
+            level: str,
+            file_id: Optional[int] = None
+        ) -> List[Dict[str, Any]]:
         """Extract key concepts from the content using DSPy.
         
         Args:
             content: The content to extract concepts from (string or list of chunks)
             language: Language of the content (e.g., 'english', 'spanish')
             level: Comprehension level ('beginner', 'intermediate', 'advanced')
+            file_id: Optional file ID to associate with the concepts
             
         Returns:
             List of key concepts with titles, explanations, and metadata
@@ -317,17 +315,38 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                 formatted_concepts.append(formatted_concept)
                 
                 # Create database object if session is provided
-                if db is not None and file_id is not None:
-                    db_concept = KeyConcept(
-                        file_id=file_id,
-                        concept_title=formatted_concept["concept_title"],
-                        concept_explanation=formatted_concept["concept_explanation"],
-                        source_page_number=formatted_concept["source_page_number"],
-                        source_video_timestamp_start_seconds=formatted_concept["source_video_timestamp_start_seconds"],
-                        source_video_timestamp_end_seconds=formatted_concept["source_video_timestamp_end_seconds"],
-                        is_custom=False
-                    )
-                    db_concepts.append(db_concept)
+                if file_id is not None:
+                    try:
+                        # Get repository manager and learning material repository
+                        repo_manager = await get_repository_manager()
+                        learning_material_repo = await repo_manager.learning_material_repo
+                        
+                        # Delete existing concepts for this file first
+                        await learning_material_repo.delete_key_concepts_by_file_id(file_id)
+                        
+                        # Add new concepts
+                        for concept in concepts:
+                            concept_data = {
+                                "file_id": file_id,
+                                "concept": concept["title"],
+                                "definition": concept.get("explanation", ""),
+                                "examples": concept.get("examples", ""),
+                                "relevance": concept.get("relevance", 0.0),
+                                "page_number": concept.get("page_number"),
+                                "metadata": {
+                                    "tags": concept.get("tags", []),
+                                    "category": concept.get("category"),
+                                    "language": language,
+                                    "comprehension_level": level
+                                }
+                            }
+                            await learning_material_repo.create_key_concept(concept_data)
+                        
+                        logger.info(f"Stored {len(concepts)} key concepts for file {file_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error storing key concepts in database: {str(e)}")
+                        # Don't fail the whole operation if database storage fails
             
             # Ensure formatted_concepts is a list and sort by confidence (highest first)
             if not isinstance(formatted_concepts, list):
@@ -347,28 +366,6 @@ class SummarizationAgent(BaseAgent[SummarizationConfig]):
                     db_concepts = db_concepts[:max_concepts]
                 else:
                     db_concepts = []
-            
-            # Save to database if session is provided
-            if db is not None and file_id is not None and db_concepts:
-                try:
-                    # Delete existing auto-generated concepts for this file
-                    db.query(KeyConcept).filter(
-                        KeyConcept.file_id == file_id,
-                        KeyConcept.is_custom == False
-                    ).delete(synchronize_session=False)
-                    
-                    # Add new concepts
-                    db.add_all(db_concepts)
-                    db.commit()
-                    
-                    # Update formatted_concepts with database IDs
-                    for i, db_concept in enumerate(db_concepts):
-                        if i < len(formatted_concepts):
-                            formatted_concepts[i]["id"] = db_concept.id
-                except Exception as e:
-                    db.rollback()
-                    logger.error(f"Error saving key concepts to database: {str(e)}", exc_info=True)
-                    # Continue with in-memory concepts even if DB save fails
             
             return formatted_concepts
             

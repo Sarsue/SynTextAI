@@ -26,10 +26,11 @@ services:
     volumes:
       - ./api:/app/api
       - ./.env:/app/.env
+      # Mount CA certificate for PostgreSQL SSL
+      - ./api/config/ca-certificate.crt:/app/api/config/ca-certificate.crt:ro
     networks:
       - syntextai_network
     
-    # Resource limits and health check
     deploy:
       resources:
         limits:
@@ -37,8 +38,7 @@ services:
           memory: 4G
         reservations:
           memory: 2G
-    
-
+    restart: unless-stopped
 
   worker:
     build:
@@ -65,13 +65,15 @@ services:
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
       - WHISPER_CACHE_DIR=/root/.cache/whisper
+      # PostgreSQL SSL cert path
+      - DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
     volumes:
       - ./api:/app/api
       - ./.env:/app/.env
+      - ./api/config/ca-certificate.crt:/app/api/config/ca-certificate.crt:ro
     networks:
       - syntextai_network
     
-    # Resource limits and restart policy
     deploy:
       resources:
         limits:
@@ -79,8 +81,6 @@ services:
           memory: 2G
         reservations:
           memory: 1G
-    
-
     restart: unless-stopped
 
   searxng:
@@ -101,7 +101,6 @@ services:
     networks:
       - syntextai_network
     
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -109,9 +108,6 @@ services:
           memory: 1G
         reservations:
           memory: 512M
-    
-
-    
     restart: unless-stopped
 
 networks:

@@ -129,7 +129,7 @@ async def generate_learning_materials_for_concept(
     results: List[LearningMaterialResult] = []
 
     # Fetch file once (avoid duplicate DB calls)
-    repo_manager = get_repository_manager()
+    repo_manager = await get_repository_manager()
     file_repo = AsyncFileRepository(repo_manager)
     file_result = await file_repo.get_file_by_id(file_id=file_id)
     user_id = file_result.user_id if file_result else None

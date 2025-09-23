@@ -2,17 +2,15 @@
 Async Chat Repository implementation.
 Handles all database operations for Chat and Message models using async SQLAlchemy.
 """
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlalchemy import select, update, delete, or_
 from sqlalchemy.orm import selectinload, joinedload
 import logging
 
 from .async_base_repository import AsyncBaseRepository
-from .repository_manager import RepositoryManager
 from ..models.orm_models import ChatHistory, Message, File
 from ..models.chat import ChatHistoryCreate, ChatHistoryUpdate
-
 logger = logging.getLogger(__name__)
 
 class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, ChatHistoryUpdate]):
@@ -20,9 +18,17 @@ class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, Ch
     Async repository for ChatHistory and Message model operations.
     """
     
-    def __init__(self, repository_manager: RepositoryManager):
-        super().__init__(ChatHistory, repository_manager)
-        self._repository_manager = repository_manager
+    def __init__(self, repository_manager, session_factory=None):
+        """
+        Initialize the chat repository.
+        
+        Args:
+            repository_manager: The repository manager instance
+            session_factory: Optional SQLAlchemy async session factory
+        """
+        super().__init__(repository_manager, session_factory)
+        self._model = ChatHistory
+        self._initialized = True
     
     async def get_chat_with_messages(
         self, 
@@ -31,7 +37,7 @@ class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, Ch
         message_limit: int = 100,
         message_offset: int = 0
     ) -> Optional[ChatHistory]:
-        async with self._repository_manager.session_scope() as session:
+        async with self.session_scope() as session:
             stmt = select(ChatHistory).where(ChatHistory.id == chat_id)
             
             if include_messages:
@@ -183,12 +189,12 @@ class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, Ch
             return []
             
         # Format messages for the LLM
-        formatted_messages = []
-        for message in sorted(chat.messages, key=lambda m: m.timestamp):
-            role = "user" if message.sender == "user" else "assistant"
-            formatted_messages.append({
-                "role": role,
+        formatted_messages = [
+            {
+                "role": message.role,
                 "content": message.content
-            })
+            }
+            for message in sorted(chat.messages, key=lambda m: m.timestamp)
+        ]
             
         return formatted_messages

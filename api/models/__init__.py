@@ -1,10 +1,25 @@
 """
-SQLAlchemy ORM models and Pydantic schemas for the application.
+SQLAlchemy ORM models, Pydantic schemas, and database utilities for the application.
+
+This module provides:
+- Database models (SQLAlchemy ORM)
+- Pydantic schemas for request/response validation
+- Database connection and session management
+- Common database operations and utilities
 """
+
+# Database utilities
+from .db_utils import (
+    get_engine,
+    get_session_factory,
+    get_async_session,
+    init_db,
+    close_db,
+    Base,
+)
 
 # ORM Models
 from .orm_models import (
-    Base,
     User,
     Subscription,
     CardDetails,
@@ -39,8 +54,15 @@ from .quiz import (
 )
 
 __all__ = [
-    # ORM Models
+    # Database utilities
+    'get_engine',
+    'get_session_factory',
+    'get_async_session',
+    'init_db',
+    'close_db',
     'Base',
+    
+    # ORM Models
     'User',
     'Subscription',
     'CardDetails',

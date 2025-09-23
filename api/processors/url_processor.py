@@ -19,7 +19,7 @@ from typing import Dict, Any, List, Optional
 
 from .base_processor import FileProcessor
 from ..services.embedding_service import EmbeddingService
-from ..repositories.repository_manager import RepositoryManager
+from ..repositories import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,8 @@ async def process_url(
     """
     global _repo_manager
     if _repo_manager is None:
-        from api.repositories.repository_manager import get_repository_manager
-        _repo_manager = get_repository_manager()
+        from ..repositories import get_repository_manager
+        _repo_manager = await get_repository_manager()
         
     processor = URLProcessor()
     return await processor.process(

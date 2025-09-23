@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger("worker")
 
 # Application imports
-from api.repositories.repository_manager import get_repository_manager
+from api.repositories import get_repository_manager
 from api.agents.ingestion_agent import IngestionAgent
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
@@ -77,10 +77,22 @@ class WorkerContext:
     async def initialize(self) -> bool:
         """Initialize worker context and dependencies."""
         try:
+            # Initialize database connection first
+            from api.models.db_utils import get_engine, init_db
+            
+            # Initialize the database
+            await init_db()
+            
+            # Get the engine
+            engine = get_engine()
+                
             # Get repository manager with centralized database connection
-            self.repo_manager = get_repository_manager()
-
-            self.agent = IngestionAgent(self.repo_manager)
+            self.repo_manager = await get_repository_manager()
+            # Pass the repository manager to the agent
+            self.agent = IngestionAgent()
+            # Set the repository manager on the agent if it has the attribute
+            if hasattr(self.agent, 'repo_manager'):
+                self.agent.repo_manager = self.repo_manager
 
             if await self.check_database_connection():
                 self._db_initialized = True
@@ -102,7 +114,12 @@ class WorkerContext:
         try:
             from sqlalchemy import select
             from sqlalchemy.sql.expression import literal
-
+            
+            # Ensure repo_manager is properly initialized
+            if not hasattr(self.repo_manager, 'session_scope'):
+                logger.error("Repository manager missing session_scope method")
+                return False
+                
             async with self.repo_manager.session_scope() as session:
                 result = await session.scalar(select(literal(1)))
                 return result == 1
@@ -111,10 +128,13 @@ class WorkerContext:
             return False
 
     async def _safe_close_repository_manager(self) -> None:
-        if self.repo_manager:
+        if self.repo_manager is not None:
             try:
-                await self.repo_manager.close()
-                logger.info("Repository manager closed successfully")
+                if hasattr(self.repo_manager, 'close') and callable(self.repo_manager.close):
+                    await self.repo_manager.close()
+                    logger.info("Repository manager closed successfully")
+                else:
+                    logger.warning("Repository manager does not have a close method")
             except Exception as e:
                 logger.error(f"Error closing repository manager: {e}", exc_info=True)
             finally:
@@ -273,20 +293,25 @@ async def shutdown(sig: signal.Signals, context: WorkerContext) -> None:
 
 async def main() -> None:
     context = WorkerContext()
-    if not await context.initialize():
-        logger.critical("Failed to initialize worker context")
-        return
+    try:
+        if not await context.initialize():
+            logger.critical("Failed to initialize worker context")
+            return
 
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, context)))
-        except NotImplementedError:
-            # Windows does not support signal handlers
-            pass
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, context)))
+            except NotImplementedError:
+                # Windows does not support signal handlers
+                pass
 
-    logger.info("Starting worker loop...")
-    await worker_loop(context)
+        logger.info("Starting worker loop...")
+        await worker_loop(context)
+    except Exception as e:
+        logger.critical(f"Unexpected error in worker: {e}", exc_info=True)
+    finally:
+        await context.shutdown()
 
 
 if __name__ == "__main__":

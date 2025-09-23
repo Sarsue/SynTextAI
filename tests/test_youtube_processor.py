@@ -9,7 +9,7 @@ from pathlib import Path
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from api.repositories.repository_manager import RepositoryManager
+from api.repositories import RepositoryManager
 from api.processors.youtube_processor import YouTubeProcessor, process_youtube
 
 # Test YouTube video ID (a short, public domain video)

@@ -11,22 +11,23 @@ from sqlalchemy.orm import selectinload, joinedload
 from ..models.orm_models import File as FileModel, Chunk, Segment, KeyConcept
 from ..models.file import File, FileCreate, FileUpdate
 from .async_base_repository import AsyncBaseRepository
-from .repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
 class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
     """Asynchronous repository for file operations."""
     
-    def __init__(self, repository_manager: RepositoryManager):
+    def __init__(self, repository_manager, session_factory=None):
         """
-        Initialize with repository manager.
+        Initialize the file repository.
         
         Args:
-            repository_manager: RepositoryManager instance for session management
+            repository_manager: The repository manager instance
+            session_factory: Optional SQLAlchemy async session factory
         """
-        super().__init__(FileModel, repository_manager)
-        self._repository_manager = repository_manager
+        super().__init__(repository_manager, session_factory)
+        self._model = FileModel
+        self._initialized = True
 
     async def get_file_by_id(self, file_id: int) -> Optional[File]:
         """Get a file by its ID."""
@@ -34,7 +35,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
 
     async def list_user_files(self, user_id: int, skip: int = 0, limit: int = 100) -> List[File]:
         """List all files for a user with pagination."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
                 select(FileModel)
                 .where(FileModel.user_id == user_id)
@@ -45,7 +46,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
 
     async def get_file_by_name(self, user_id: int, filename: str) -> Optional[File]:
         """Get a file by user ID and filename."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
                 select(FileModel)
                 .where(FileModel.user_id == user_id, FileModel.file_name == filename)
@@ -102,7 +103,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
         """
         from ..models.file import FileUpdate  # local import to avoid circulars in some setups
         
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             try:
                 # Get or create the file record
                 result = await session.execute(
@@ -206,7 +207,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
         Returns:
             bool: True if the user owns the file, False otherwise
         """
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
                 select(FileModel)
                 .where(FileModel.id == file_id, FileModel.user_id == user_id)
@@ -236,7 +237,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
         from sqlalchemy import text
         
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 # Using SQLAlchemy's text() for raw SQL with parameters
                 if similarity_type.lower() == 'cosine':
                     similarity_sql = """
@@ -293,7 +294,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
     async def search_files(self, user_id: int, query: str, limit: int = 10) -> List[File]:
         """Search files by filename or content."""
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 result = await session.execute(
                     select(FileModel)
                     .outerjoin(Segment, FileModel.id == Segment.file_id)
@@ -351,7 +352,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
             List of segment dictionaries with their chunks
         """
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 query = (
                     select(Segment)
                     .options(selectinload(Segment.chunks))
@@ -411,7 +412,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
         from sqlalchemy import update, and_
         
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 # Start a transaction
                 async with session.begin():
                     # Build base query
@@ -475,7 +476,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
             List of segment dictionaries with their chunks
         """
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 result = await session.execute(
                     select(Segment)
                     .options(selectinload(Segment.chunks))
@@ -527,7 +528,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
         from sqlalchemy import update
         
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 update_data = {
                     'processing_status': status
                 }
@@ -559,7 +560,7 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
             List of file dictionaries with their data
         """
         try:
-            async with self.session_scope as session:
+            async with self.session_scope() as session:
                 result = await session.execute(
                     select(FileModel)
                     .where(FileModel.processing_status == status)

@@ -23,7 +23,7 @@ from aiohttp import ClientSession
 from whisper.audio import SAMPLE_RATE
 
 from api.processors.base_processor import FileProcessor
-from api.repositories.repository_manager import RepositoryManager, get_repository_manager
+from api.repositories import RepositoryManager, get_repository_manager
 from api.services.embedding_service import embedding_service
 from api.services.llm_service import llm_service
 from api.core.config import settings
@@ -258,29 +258,29 @@ class YouTubeProcessor(FileProcessor):
         return sorted(all_concepts, key=lambda x: x.get("relevance", 0), reverse=True)
 
 
-async def process_youtube(url: str, file_id: int, user_id: int, filename: str = "", language: str = "en") -> Dict[str, Any]:
-    try:
-        repo = get_repository_manager()
-        processor = YouTubeProcessor(repo)
-
-        content = await processor.extract_content(url, file_id, user_id, filename, language)
-        if not content.get("success"):
-            return {"success": False, "error": content["error"]}
-
-        emb = await processor.generate_embeddings(content)
-        if not emb.get("success"):
-            return {"success": False, "error": emb["error"]}
-
-        content["processed_segments"] = emb["processed_segments"]
-        concepts = await processor.generate_key_concepts(content)
-
-        return {
-            "success": True,
-            "content": content,
-            "key_concepts": concepts,
-            "metadata": {"type": "youtube", "source": url, "language": language}
-        }
-
-    except Exception as e:
-        logger.error(f"process_youtube failed: {e}", exc_info=True)
-        return {"success": False, "error": str(e), "content": None, "key_concepts": None, "metadata": {}}
+async def process_youtube(url: str, file_id: int, user_id: int, filename: str = "", language: str = "en"):
+    """Process a YouTube URL and return structured data.
+    
+    Args:
+        url: YouTube URL or video ID
+        file_id: Database file ID
+        user_id: User ID
+        filename: Optional filename
+        language: Language for transcription (default: "en")
+        
+    Returns:
+        Dict containing processed video data
+    """
+    from api.repositories import get_repository_manager
+    
+    repo_manager = await get_repository_manager()
+    processor = YouTubeProcessor(repo_manager)
+    
+    async with processor:
+        return await processor.extract_content(
+            file_data=url,
+            file_id=file_id,
+            user_id=user_id,
+            filename=filename or url,
+            language=language
+        )

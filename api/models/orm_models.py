@@ -245,7 +245,7 @@ class Message(Base):
     
     id = Column(Integer, primary_key=True)
     content = Column(Text)
-    sender = Column(String)
+    sender = Column(String, nullable=False)  # 'user' or 'bot'
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     chat_history_id = Column(Integer, ForeignKey("chat_histories.id", ondelete="CASCADE"))
@@ -253,6 +253,11 @@ class Message(Base):
     # Relationships
     user = relationship("User", back_populates="messages")
     chat_history = relationship("ChatHistory", back_populates="messages")
+    
+    @property
+    def role(self) -> str:
+        """Get the role for LLM context (maps sender to role)."""
+        return 'assistant' if self.sender == 'bot' else 'user'
 
 
 class Flashcard(Base):
