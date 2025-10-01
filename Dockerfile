@@ -87,12 +87,11 @@ RUN apt-get update && \
     ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy backend code and CA certificate
+# Copy backend code (includes the CA certificate)
 COPY api/ ./api/
-COPY api/config/ca-certificate.crt ./api/config/ca-certificate.crt
 
-# Environment variable for PostgreSQL CA cert
-ENV DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
+# Environment variable for PostgreSQL CA cert location
+ENV DB_SSL_ROOT_CERT=/app/api/config/ca-certificate.crt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r ./api/requirements.txt

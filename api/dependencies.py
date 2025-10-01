@@ -152,7 +152,8 @@ async def authenticate_user(
             )
             
         # Get the internal user ID from the Firebase UID
-        user = await repo_manager.user_repo.get_user_by_firebase_id(user_info.get('uid'))
+        user_repo = await repo_manager.user_repo
+        user = await user_repo.get_user_by_firebase_id(user_info.get('uid'))
         
         if not user:
             logger.error(f"No user found for Firebase UID: {user_info.get('uid')}")

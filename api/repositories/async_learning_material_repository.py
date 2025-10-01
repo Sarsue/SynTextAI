@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, FlashcardCreate, FlashcardUpdate]):
     """Async repository for LearningMaterial model operations."""
-
+    
+    # Define the model class attribute required by AsyncBaseRepository
+    model = FlashcardModel
+    
     def __init__(self, repository_manager, session_factory=None):
         """
         Initialize the learning material repository.

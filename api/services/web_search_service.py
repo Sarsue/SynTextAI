@@ -32,8 +32,8 @@ class WebSearchService:
         """Initialize available search providers."""
         providers = {}
         
-        if SEARXNG_URL:
-            providers['searxng'] = self._search_searxng
+        # if SEARXNG_URL:
+        #     providers['searxng'] = self._search_searxng
         
         if TAVILY_API_KEY:
             providers['tavily'] = self._search_tavily
@@ -128,39 +128,39 @@ class WebSearchService:
             
         return []
     
-    async def _search_searxng(
-        self, 
-        query: str, 
-        max_results: int,
-        timeout: int
-    ) -> List[Dict[str, Any]]:
-        """Search using SearxNG instance."""
-        params = {
-            "q": query, 
-            "format": "json",
-            "language": "en",
-            "safesearch": 1,
-            "pageno": 1,
-            "time_range": None  # Can be 'day', 'week', 'month', 'year'
-        }
+    # async def _search_searxng(
+    #     self, 
+    #     query: str, 
+    #     max_results: int,
+    #     timeout: int
+    # ) -> List[Dict[str, Any]]:
+    #     """Search using SearxNG instance."""
+    #     params = {
+    #         "q": query, 
+    #         "format": "json",
+    #         "language": "en",
+    #         "safesearch": 1,
+    #         "pageno": 1,
+    #         "time_range": None  # Can be 'day', 'week', 'month', 'year'
+    #     }
         
-        response = requests.get(SEARXNG_URL, params=params, timeout=timeout)
+    #     response = requests.get(SEARXNG_URL, params=params, timeout=timeout)
         
-        if response.status_code == 200:
-            data = response.json()
-            results = []
+    #     if response.status_code == 200:
+    #         data = response.json()
+    #         results = []
             
-            for result in data.get('results', [])[:max_results]:
-                results.append({
-                    'title': result.get('title', ''),
-                    'content': result.get('content', ''),
-                    'url': result.get('url', ''),
-                    'score': result.get('score', 0)
-                })
+    #         for result in data.get('results', [])[:max_results]:
+    #             results.append({
+    #                 'title': result.get('title', ''),
+    #                 'content': result.get('content', ''),
+    #                 'url': result.get('url', ''),
+    #                 'score': result.get('score', 0)
+    #             })
             
-            return results
+    #         return results
             
-        return []
+    #     return []
     
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=5))
     async def fetch_page_content(self, url: str, timeout: int = DEFAULT_TIMEOUT) -> Optional[str]:

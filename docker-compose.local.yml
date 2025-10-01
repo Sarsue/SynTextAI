@@ -83,33 +83,6 @@ services:
           memory: 1G
     restart: unless-stopped
 
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng-local
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./searxng:/etc/searxng
-    user: "1000:1000"
-    environment:
-      - INSTANCE_NAME=SyntextAI
-      - BASE_URL=http://localhost:8080/
-      - AUTOCOMPLETE=google
-      - SEARCH_FORMAT=json
-      - SAFE_SEARCH=0
-      - AUTOCORRECT=1
-    networks:
-      - syntextai_network
-    
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 1G
-        reservations:
-          memory: 512M
-    restart: unless-stopped
-
 networks:
   syntextai_network:
     driver: bridge

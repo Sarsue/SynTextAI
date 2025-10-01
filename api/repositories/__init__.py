@@ -18,11 +18,13 @@ Usage:
     await repo_manager.initialize()
     
     # Use repositories through the manager
-    user = await repo_manager.user_repo.get_user_by_id(user_id=1)
+    user_repo = await repo_manager.user_repo
+    user = await user_repo.get_user_by_id(user_id=1)
     
     # Or use as a context manager
     async with RepositoryManager() as repo_manager:
-        user = await repo_manager.user_repo.get_user_by_id(user_id=1)
+        user_repo = await repo_manager.user_repo
+        user = await user_repo.get_user_by_id(user_id=1)
 """
 from typing import TYPE_CHECKING, Type, TypeVar
 

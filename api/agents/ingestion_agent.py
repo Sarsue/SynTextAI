@@ -421,7 +421,7 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
                     repo_manager = await get_repository_manager()
                     file_repo = await repo_manager.file_repo
                     await file_repo.update(file_id, {
-                        'status': 'processed',
+                        'processing_status': 'processed',
                         'processing_completed_at': datetime.utcnow()
                     })
                 except Exception as e:
@@ -442,7 +442,7 @@ class IngestionAgent(BaseAgent[IngestionConfig]):
                     repo_manager = await get_repository_manager()
                     file_repo = await repo_manager.file_repo
                     await file_repo.update(file_id, {
-                        'status': 'error',
+                        'processing_status': 'error',
                         'error_message': str(e),
                         'processing_completed_at': datetime.utcnow()
                     })

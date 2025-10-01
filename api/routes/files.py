@@ -94,7 +94,7 @@ async def authenticate_user(
             logger.error("Failed to authenticate user with token")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
-        user = await repo_manager.user_repo.get_user_by_email(user_info['email'])
+        user = await repo_manager.user_repo.get_by_email(user_info['email'])
         if not user:
             logger.error(f"No user found with email: {user_info['email']}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -562,8 +562,9 @@ async def retrieve_files(
         offset = (page - 1) * page_size
         
         # Get files and total count for pagination
-        db_files = await repo_manager.file_repo.list_user_files(user_id, skip=offset, limit=page_size)
-        total_files = await repo_manager.file_repo.count(user_id=user_id)
+        file_repo = await repo_manager.file_repo
+        db_files = await file_repo.list_user_files(user_id, skip=offset, limit=page_size)
+        total_files = await file_repo.count(user_id=user_id)
         
         # Format the response to match the expected structure
         response_items = [
@@ -607,7 +608,8 @@ async def delete_file(
         user_gc_id = user_data["user_gc_id"]
 
         repo_manager = user_data['store']
-        file_to_delete = await repo_manager.file_repo.get_file_by_id(file_id)
+        file_repo = await repo_manager.file_repo
+        file_to_delete = await file_repo.get_file_by_id(file_id)
         if not file_to_delete or file_to_delete.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
 
@@ -615,7 +617,8 @@ async def delete_file(
              delete_from_gcs(file_to_delete.file_url, user_gc_id)
 
         # Delete the file record
-        if not await repo_manager.file_repo.delete(id=file_id):
+        file_repo = await repo_manager.file_repo
+        if not await file_repo.delete(id=file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -649,21 +652,23 @@ async def get_quiz_questions_for_file(
     try:
         # Verify file ownership
         repo_manager = user_data['store']
-        if not await repo_manager.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+        file_repo = await repo_manager.file_repo
+        if not await file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found or you don't have permission to access it."
             )
         
-        # Get paginated quiz questions
-        quiz_questions = await repo_manager.learning_material_repo.get_quiz_questions_for_file(
+        # Get learning material repository and fetch quiz questions
+        learning_material_repo = await repo_manager.learning_material_repo
+        quiz_questions = await learning_material_repo.get_quiz_questions_for_file(
             file_id=file_id,
             page=page,
             page_size=page_size
         )
         
         # Get total count for pagination
-        total_count = await repo_manager.learning_material_repo.count_quiz_questions_for_file(file_id)
+        total_count = await learning_material_repo.count_quiz_questions_for_file(file_id)
         
         # Format response
         formatted_questions = []
@@ -711,7 +716,8 @@ async def get_quiz_questions_for_file(
 async def check_ownership(file_id: int, user_data: Dict):
     """Helper function to check if the user owns the file."""
     repo_manager = user_data['store']
-    if not await repo_manager.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+    file_repo = await repo_manager.file_repo
+    if not await file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found or you don't have permission to access it."
@@ -742,12 +748,14 @@ async def get_flashcards_for_file(
         
         # Get file details for context
         repo_manager = user_data['store']
-        file = await repo_manager.file_repo.get_file_by_id(file_id)
+        file_repo = await repo_manager.file_repo
+        file = await file_repo.get_file_by_id(file_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
         
         # Get existing flashcards from the database
-        db_flashcards = await repo_manager.learning_material_repo.get_flashcards_for_file(
+        learning_material_repo = await repo_manager.learning_material_repo
+        db_flashcards = await learning_material_repo.get_flashcards_for_file(
             file_id=file_id,
             page=page,
             page_size=page_size
@@ -783,7 +791,8 @@ async def get_flashcards_for_file(
             formatted_flashcards.append(formatted_card)
         
         # Get total count for pagination
-        total_count = await repo_manager.learning_material_repo.count_flashcards_for_file(file_id=file_id)
+        learning_material_repo = await repo_manager.learning_material_repo
+        total_count = await learning_material_repo.count_flashcards_for_file(file_id=file_id)
         
         logger.info(f"[API] Successfully retrieved {len(formatted_flashcards)} flashcards for file {file_id}")
         return {
@@ -827,11 +836,13 @@ async def generate_flashcards(
         
         # Get file and key concepts for context
         repo_manager = user_data['store']
-        file = await repo_manager.file_repo.get_file_by_id(file_id)
+        file_repo = await repo_manager.file_repo
+        file = await file_repo.get_file_by_id(file_id)
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
             
-        key_concepts_data = await repo_manager.learning_material_repo.get_key_concepts_for_file(file_id)
+        learning_material_repo = await repo_manager.learning_material_repo
+        key_concepts_data = await learning_material_repo.get_key_concepts_for_file(file_id)
         key_concepts = [
             {"id": kc["id"], "title": kc["concept_title"], "explanation": kc["concept_explanation"]}
             for kc in key_concepts_data
@@ -839,7 +850,8 @@ async def generate_flashcards(
         
         # Get file content
         # Get file content using the file repository
-        file_content = await repo_manager.file_repo.get_file_content(file_id)
+        file_repo = await repo_manager.file_repo
+        file_content = await file_repo.get_file_content(file_id)
         if not file_content:
             file_content = ''
         
@@ -858,9 +870,10 @@ async def generate_flashcards(
         )
         
         # Store generated flashcards
+        learning_material_repo = await repo_manager.learning_material_repo
         saved_flashcards = []
         for card in flashcard_data.get('flashcards', []):
-            flashcard = await repo_manager.learning_material_repo.add_flashcard(
+            flashcard = await learning_material_repo.add_flashcard(
                 file_id=file_id,
                 user_id=user_data["user_id"],
                 question=card.question if hasattr(card, 'question') else card['question'],
@@ -921,7 +934,8 @@ async def add_flashcard_for_file(
         await check_ownership(file_id, user_data)
         
         # Add the flashcard and get the new flashcard
-        flashcard = await repo_manager.learning_material_repo.add_flashcard(
+        learning_material_repo = await repo_manager.learning_material_repo
+        flashcard = await learning_material_repo.add_flashcard(
             file_id=file_id,
             flashcard_data=flashcard_data.dict()
         )
@@ -985,7 +999,8 @@ async def update_flashcard(
         await check_ownership(file_id, user_data)
         
         # Update the flashcard - the repository will verify it belongs to the user
-        updated_flashcard = await repo_manager.learning_material_repo.update_flashcard(
+        learning_material_repo = await repo_manager.learning_material_repo
+        updated_flashcard = await learning_material_repo.update_flashcard(
             flashcard_id=flashcard_id,
             update_data=flashcard_update_data.dict(exclude_unset=True),
             user_id=user_data["user_id"]
@@ -1105,14 +1120,15 @@ async def get_key_concepts_for_file(
         await check_ownership(file_id, user_data)
             
         # Get paginated key concepts
-        concepts = await repo_manager.learning_material_repo.get_key_concepts_for_file(
+        learning_material_repo = await repo_manager.learning_material_repo
+        concepts = await learning_material_repo.get_key_concepts_for_file(
             file_id=file_id,
             page=page,
             page_size=page_size
         )
         
         # Get total count for pagination
-        total_count = await repo_manager.learning_material_repo.count_key_concepts_for_file(file_id)
+        total_count = await learning_material_repo.count_key_concepts_for_file(file_id)
         
         # Format the response to match frontend expectations
         formatted_concepts = []

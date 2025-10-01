@@ -81,9 +81,18 @@ class BaseRepositoryManager:
         
         Args:
             session_factory: Optional async session factory.
-            engine: Optional SQLAlchemy async engine.
+            engine: Optional SQLAlchemy async engine. If provided, this engine
+                  will be used instead of creating a new one, and it won't be
+                  disposed when the repository manager is closed.
             **engine_kwargs: Additional engine configuration options.
         """
+        # Track which resources were provided (shared)
+        if engine is not None:
+            self._engine_provided = True
+            
+        if session_factory is not None:
+            self._session_factory_provided = True
+            
         self._engine = engine
         self._session_factory = session_factory
         self._engine_kwargs = engine_kwargs
@@ -105,11 +114,14 @@ class BaseRepositoryManager:
         
         This method:
         1. Closes all database connections in the connection pool
-        2. Disposes of the engine
+        2. Disposes of the engine (if not shared)
         3. Cleans up any remaining resources
         4. Marks the manager as closed
         
         After calling this method, the manager cannot be used anymore.
+        
+        Note: If the engine was provided during initialization (shared),
+        it won't be disposed here as it might be used by other components.
         
         Raises:
             Exception: If an error occurs during shutdown
@@ -120,15 +132,27 @@ class BaseRepositoryManager:
         try:
             logger.info("Closing RepositoryManager...")
             
-            # Close the database engine
-            if self._engine is not None:
-                await self._engine.dispose()
-                self._engine = None
+            # Get the engine before we clear the reference
+            engine = self._engine
             
-            # Reset other state
-            self._session_factory = None
+            # Clear references first to prevent any new operations
+            if hasattr(self, '_session_factory_provided'):
+                logger.debug("Not clearing provided session factory reference")
+                # We don't set to None as it might be used by other components
+            else:
+                self._session_factory = None
+                
             self._initialized = False
             self._closed = True
+            
+            # Only dispose the engine if we created it ourselves
+            # (i.e., it wasn't passed in during initialization)
+            if engine is not None and not hasattr(self, '_engine_provided'):
+                try:
+                    logger.info("Disposing repository manager's engine...")
+                    await engine.dispose()
+                except Exception as e:
+                    logger.error("Error disposing repository manager engine: %s", str(e), exc_info=True)
             
             # Log final metrics
             uptime = time.time() - self._metrics['start_time']
@@ -159,14 +183,20 @@ class BaseRepositoryManager:
         - Server-side statement timeouts
         - Automatic reconnection on connection loss
         
+        If the engine was provided during initialization, that engine will be returned
+        instead of creating a new one.
+        
         Returns:
             AsyncEngine: Configured SQLAlchemy async engine
             
         Raises:
             RuntimeError: If database connection cannot be established
         """
-        if self._engine is None:
+        if self._engine is None and not hasattr(self, '_engine_provided'):
             try:
+                # Only create a new engine if one wasn't provided during initialization
+                logger.info("Creating new database engine for RepositoryManager")
+                
                 # Default engine configuration
                 engine_kwargs = {
                     'echo': settings.SQL_ECHO,
@@ -361,10 +391,15 @@ class BaseRepositoryManager:
         The session factory is responsible for creating new database sessions
         with the current engine configuration.
         
+        If a session factory was provided during initialization, that factory
+        will be used instead of creating a new one.
+        
         Returns:
             SessionFactory: Configured async session factory
         """
-        if self._session_factory is None:
+        if self._session_factory is None and not hasattr(self, '_session_factory_provided'):
+            # Only create a new session factory if one wasn't provided during initialization
+            logger.info("Creating new session factory for RepositoryManager")
             self._session_factory = async_sessionmaker(
                 bind=self.engine,
                 class_=AsyncSession,
@@ -380,9 +415,11 @@ class BaseRepositoryManager:
         Set a custom async session factory.
         
         Args:
-            factory: The async session factory to use
+            factory: The async session factory to use. If this is set, the factory
+                   will be marked as provided and won't be automatically created.
         """
         self._session_factory = factory
+        self._session_factory_provided = True
 
     def _add_engine_event_listeners(self) -> None:
         """

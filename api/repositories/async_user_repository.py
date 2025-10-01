@@ -46,8 +46,7 @@ T = TypeVar('T', bound=User)
 
 
 class AsyncUserRepository(AsyncBaseRepository[User, UserCreate, UserUpdate]):
-    """
-    Asynchronous repository for user operations.
+    """Asynchronous repository for user operations.
     
     This class provides methods for all database operations related to users,
     including CRUD operations, authentication, and user management.
@@ -56,6 +55,8 @@ class AsyncUserRepository(AsyncBaseRepository[User, UserCreate, UserUpdate]):
         session_factory: Optional async session factory function. If not provided,
                         will use the default from the base repository.
     """
+    # Define the model class attribute required by AsyncBaseRepository
+    model: Type[User] = User
     
     def __init__(self, repository_manager, session_factory=None):
         """
@@ -66,7 +67,6 @@ class AsyncUserRepository(AsyncBaseRepository[User, UserCreate, UserUpdate]):
             session_factory: Optional SQLAlchemy async session factory
         """
         super().__init__(repository_manager, session_factory)
-        self._model = User
         self._initialized = True
 
     # ---------------------- USER METHODS ----------------------

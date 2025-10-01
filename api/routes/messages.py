@@ -24,7 +24,10 @@ def get_store(request: Request):
 
 # Get repository manager dependency
 async def get_repo_manager() -> RepositoryManager:
-    return await get_repository_manager()
+    repo_manager = await get_repository_manager()
+    if not repo_manager._repos_initialized:
+        await repo_manager._initialize_repositories()
+    return repo_manager
 
 # Route to create a new message
 async def process_message_with_qa_agent(
@@ -37,8 +40,9 @@ async def process_message_with_qa_agent(
 ):
     """Process a user message using the QAAgent."""
     try:
-        # Get conversation history in formatted form
-        formatted_history = await repo_manager.chat_repo.format_user_chat_history(history_id, user_id)
+        # Get chat repository and format history
+        chat_repo = await repo_manager.chat_repo
+        formatted_history = await chat_repo.format_user_chat_history(history_id, user_id)
         
         # Use the QAAgent to process the message
         response = await agent_service.process_content(
@@ -53,7 +57,7 @@ async def process_message_with_qa_agent(
         )
         
         # Save the bot's response to the history
-        bot_response = await repo_manager.chat_repo.add_message_to_chat(
+        bot_response = await chat_repo.add_message_to_chat(
             chat_id=history_id,
             content=response.get("answer", "I couldn't process your request. Please try again."),
             sender='bot',
@@ -65,8 +69,9 @@ async def process_message_with_qa_agent(
     except Exception as e:
         logger.error(f"Error processing message with QAAgent: {e}", exc_info=True)
         try:
-# Save error message to chat history
-            error_msg = await repo_manager.chat_repo.add_message_to_chat(
+            # Get chat repository and save error message to chat history
+            chat_repo = await repo_manager.chat_repo
+            error_msg = await chat_repo.add_message_to_chat(
                 chat_id=history_id,
                 content="Sorry, I encountered an error processing your message. Please try again.",
                 sender='bot',
@@ -92,16 +97,20 @@ async def create_message(
         message_content = message_data.message
         language = message_data.language if hasattr(message_data, 'language') else 'en'
 
+        # Get chat repository
+        chat_repo = await repo_manager.chat_repo
+        
         # Verify the chat history exists and belongs to the user
-        chat = await repo_manager.chat_repo.get_chat_with_messages(history_id)
+        chat = await chat_repo.get_chat_with_messages(history_id)
         if not chat or chat.user_id != user_id:
             raise HTTPException(status_code=404, detail="Chat history not found")
 
-        # Save the user message to the history
-        user_message = await repo_manager.chat_repo.add_message_to_chat(
-            chat_id=history_id,
+        # Create the user message in the database
+        chat_repo = await repo_manager.chat_repo
+        user_message = await chat_repo.create_message(
+            history_id=history_id,
             content=message_content,
-            sender='user',
+            role="user",
             user_id=user_id
         )
         

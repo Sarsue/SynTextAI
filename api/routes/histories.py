@@ -19,7 +19,10 @@ histories_router = APIRouter(prefix="/api/v1/histories", tags=["histories"])
 
 # Get repository manager dependency
 async def get_repo_manager() -> RepositoryManager:
-    return await get_repository_manager()
+    repo_manager = await get_repository_manager()
+    if not repo_manager._repos_initialized:
+        await repo_manager._initialize_repositories()
+    return repo_manager
 
 # Route to create a new chat history
 @histories_router.post("", response_model=ChatHistory, status_code=201)
@@ -30,7 +33,8 @@ async def create_history(
 ):
     try:
         user_id = user_data["user_id"]
-        history = await repo_manager.chat_repo.create_chat_history(
+        chat_repo = await repo_manager.chat_repo
+        history = await chat_repo.create_chat_history(
             title=title,
             user_id=user_id
         )
@@ -47,8 +51,9 @@ async def get_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        chat_histories = await repo_manager.chat_repo.get_user_chats(user_id=user_id)
-        return chat_histories
+        chat_repo = await repo_manager.chat_repo
+        histories = await chat_repo.get_chat_histories(user_id=user_data["user_id"])
+        return histories
     except Exception as e:
         logger.error(f"Error retrieving chat histories: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -62,13 +67,14 @@ async def get_specific_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        chat = await repo_manager.chat_repo.get_chat_with_messages(
+        chat_repo = await repo_manager.chat_repo
+        history = await chat_repo.get_chat_with_messages(
             chat_id=history_id,
             include_messages=True
         )
-        if not chat or chat.user_id != user_id:
+        if not history or history.user_id != user_id:
             raise HTTPException(status_code=404, detail="Chat history not found")
-        return chat
+        return history
     except HTTPException:
         raise
     except Exception as e:
@@ -84,16 +90,16 @@ async def delete_specific_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        # First verify the chat belongs to the user
-        chat = await repo_manager.chat_repo.get_chat_with_messages(history_id)
-        if not chat or chat.user_id != user_id:
+        # Get chat repository
+        chat_repo = await repo_manager.chat_repo
+        
+        # First verify the history exists and belongs to the user
+        history = await chat_repo.get_chat_history(history_id)
+        if not history or history.user_id != user_id:
             raise HTTPException(status_code=404, detail="Chat history not found")
             
-        # Delete the chat
-        success = await repo_manager.chat_repo.delete_chat(history_id)
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to delete chat history")
-            
+        # Delete the history
+        await chat_repo.delete_chat_history(history_id)
         return {"message": "History deleted successfully", "deletedHistoryId": history_id}
     except HTTPException:
         raise
@@ -109,12 +115,15 @@ async def delete_all_user_histories(
 ):
     try:
         user_id = user_data["user_id"]
+        # Get chat repository
+        chat_repo = await repo_manager.chat_repo
+        
         # Get all user's chats
-        chats = await repo_manager.chat_repo.get_user_chats(user_id=user_id)
+        chats = await chat_repo.get_user_chats(user_id=user_id)
         
         # Delete each chat
         for chat in chats:
-            await repo_manager.chat_repo.delete_chat(chat.id)
+            await chat_repo.delete_chat(chat.id)
             
         return {"message": "All histories deleted successfully"}
     except Exception as e:

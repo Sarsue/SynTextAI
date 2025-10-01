@@ -55,8 +55,9 @@ endpoint_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 # Get repository manager dependency
 async def get_repo_manager() -> RepositoryManager:
-    repo_manager = RepositoryManager()
-    await repo_manager.initialize()
+    repo_manager = await get_repository_manager()
+    if not repo_manager._repos_initialized:
+        await repo_manager._initialize_repositories()
     return repo_manager
 
 # Pydantic Models
@@ -170,10 +171,8 @@ async def get_subscription_with_card(
     """
     try:
         repo_manager = user_data['repo_manager']
-        subscription = await repo_manager.user_repo.get_subscription(
-            user_id=user_data['internal_user_id'],
-            include_payment_methods=True
-        )
+        subscription_repo = await repo_manager.subscription_repo
+        subscription = await subscription_repo.get_subscription_by_user_id(user_id=user_data["internal_user_id"], include_payment_methods=True)
         if not subscription:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -196,9 +195,8 @@ async def get_user_subscription(
     """
     try:
         repo_manager = user_data['repo_manager']
-        subscription = await repo_manager.user_repo.get_subscription(
-            user_id=user_data['internal_user_id']
-        )
+        subscription_repo = await repo_manager.subscription_repo
+        subscription = await subscription_repo.get_subscription_by_user_id(user_id=user_data["internal_user_id"])
         if not subscription:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -226,8 +224,10 @@ async def update_subscription(
     """
     try:
         repo_manager = user_data['repo_manager']
+        subscription_repo = await repo_manager.subscription_repo
+        
         # Get the subscription
-        subscription = await repo_manager.user_repo.get_subscription_by_id(subscription_id)
+        subscription = await subscription_repo.get_subscription_by_id(subscription_id)
         if not subscription:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -254,11 +254,13 @@ async def update_subscription(
             })
             
         # Update subscription in database
-        updated_sub = await repo_manager.user_repo.update_subscription(
+        await subscription_repo.update_subscription(
             subscription_id=subscription_id,
             **update_data
         )
         
+        # Get updated subscription data
+        updated_sub = await subscription_repo.get_subscription_by_id(subscription_id)
         if not updated_sub:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -288,6 +290,7 @@ async def update_subscription_status(
     """
     try:
         repo_manager = user_data['repo_manager']
+        user_repo = await repo_manager.user_repo
         update_data = data.dict(exclude_unset=True, exclude_none=True)
         
         # Extract card details if present
@@ -309,7 +312,7 @@ async def update_subscription_status(
             )
         
         # Update the subscription status
-        success = await repo_manager.user_repo.update_subscription_status(**update_data)
+        success = await user_repo.update_subscription_status(**update_data)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -360,8 +363,9 @@ async def start_trial(
                 detail="Email is required"
             )
 
-        # Check if the user already has a subscription
-        subscription = await repo_manager.user_repo.get_user_subscription(user_id)
+        # Get user repository and check for existing subscription
+        user_repo = await repo_manager.user_repo
+        subscription = await user_repo.get_user_subscription(user_id)
         if subscription:
             # If subscription exists, check its status
             if subscription.status == 'active':
@@ -500,8 +504,10 @@ async def cancel_sub(
     """
     try:
         repo_manager = user_data['repo_manager']
+        user_repo = await repo_manager.user_repo
+        
         # Get the subscription using the internal user ID from auth context
-        subscription = await repo_manager.user_repo.get_subscription(
+        subscription = await user_repo.get_subscription(
             user_id=user_data['internal_user_id']
         )
         if not subscription or not subscription.get('stripe_subscription_id'):
@@ -536,13 +542,13 @@ async def cancel_sub(
             }
             
             # Update subscription in database
-            await repo_manager.user_repo.update_subscription(
+            await user_repo.update_subscription(
                 user_id=user_data['internal_user_id'],
                 **subscription_update
             )
             
             # Get updated subscription data
-            updated_sub = await repo_manager.user_repo.get_subscription(
+            updated_sub = await user_repo.get_subscription(
                 user_id=user_data['internal_user_id']
             )
             response = updated_sub  # Already formatted by the repository
@@ -552,13 +558,14 @@ async def cancel_sub(
         except stripe.error.InvalidRequestError as e:
             if "No such subscription" in str(e):
                 # If subscription doesn't exist in Stripe, mark as canceled locally
-                await repo_manager.user_repo.update_subscription(
+                await user_repo.update_subscription(
                     user_id=user_data['internal_user_id'],
                     status='canceled',
-                    current_period_end=datetime.now(timezone.utc)
+                    current_period_end=datetime.utcnow()
                 )
                 
-                updated_sub = await repo_manager.user_repo.get_subscription(
+                # Get the updated subscription
+                updated_sub = await user_repo.get_subscription(
                     user_id=user_data['internal_user_id']
                 )
                 response = updated_sub  # Already formatted by the repository
@@ -617,8 +624,10 @@ async def create_subscription(
             )
 
         repo_manager = user_data['repo_manager']
+        user_repo = await repo_manager.user_repo
+        
         # Check if user already has a subscription
-        existing_sub = await repo_manager.user_repo.get_subscription(user_id=user_id)
+        existing_sub = await user_repo.get_subscription(user_id=user_id)
         if existing_sub and existing_sub.status in ['active', 'trialing']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -668,33 +677,28 @@ async def create_subscription(
                 off_session=True
             )
 
-            # Prepare subscription data for database
+            # Create subscription in our database
             subscription_data = {
                 'user_id': user_id,
+                'status': 'active',
                 'stripe_customer_id': customer_id,
                 'stripe_subscription_id': subscription.id,
-                'status': subscription.status,
                 'current_period_end': datetime.fromtimestamp(
-                    subscription.current_period_end, 
+                    subscription.current_period_end,
                     tz=timezone.utc
-                ) if hasattr(subscription, 'current_period_end') else None
+                ) if hasattr(subscription, 'current_period_end') else None,
+                'plan_id': price_id,
+                'card_last4': payment_method.card.last4 if hasattr(payment_method, 'card') else None,
+                'card_brand': payment_method.card.brand if hasattr(payment_method, 'card') else None,
+                'exp_month': payment_method.card.exp_month if hasattr(payment_method, 'card') else None,
+                'exp_year': payment_method.card.exp_year if hasattr(payment_method, 'card') else None,
+                'stripe_payment_method_id': payment_method_id
             }
-
-            # Add card details if available
-            if hasattr(payment_method, 'card'):
-                subscription_data.update({
-                    'card_last4': payment_method.card.last4,
-                    'card_brand': payment_method.card.brand,
-                    'card_exp_month': payment_method.card.exp_month,
-                    'card_exp_year': payment_method.card.exp_year,
-                    'stripe_payment_method_id': payment_method_id
-                })
-
-            # Save subscription to database
-            await repo_manager.user_repo.create_or_update_subscription(subscription_data)
+            
+            subscription = await user_repo.create_subscription(**subscription_data)
 
             # Get the updated subscription with all details
-            subscription_data = await repo_manager.user_repo.get_user_subscription(user_id)
+            subscription_data = await user_repo.get_user_subscription(user_id)
 
             # Format the response
             response = await format_subscription_response(subscription_data, repo_manager)
@@ -772,8 +776,10 @@ async def update_payment(
             )
         
         repo_manager = user_data['repo_manager']
+        user_repo = await repo_manager.user_repo
+        
         # Get current subscription
-        subscription = await repo_manager.user_repo.get_subscription(user_id=user_id)
+        subscription = await user_repo.get_subscription(user_id=user_id)
         if not subscription or not subscription.stripe_customer_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -811,13 +817,13 @@ async def update_payment(
                     'card_exp_year': payment_method.card.exp_year
                 })
             
-            await repo_manager.user_repo.update_subscription(
+            await user_repo.update_subscription(
                 user_id=user_id,
                 **update_data
             )
             
             # Get updated subscription data
-            updated_sub = await repo_manager.user_repo.get_user_subscription(user_id)
+            updated_sub = await user_repo.get_user_subscription(user_id)
             response = await format_subscription_response(updated_sub, repo_manager)
             response['message'] = "Payment method updated successfully"
             return response
@@ -912,16 +918,19 @@ async def webhook(
         # Create a new repository manager for the webhook
         repo_manager = RepositoryManager()
         await repo_manager.initialize()
-        logger.info(f"Processing webhook: {event_type} (ID: {event_id})")
+        logger.info(f"Processing webhook: {event['type']} (ID: {event['id']})")
+        
+        # Get the user repository
+        user_repo = await repo_manager.user_repo
         
         # Check if event type is supported
-        if event_type not in SUPPORTED_EVENTS:
-            logger.warning(f"Unsupported event type: {event_type}")
+        if event['type'] not in SUPPORTED_EVENTS:
+            logger.warning(f"Unsupported event type: {event['type']}")
             return {
                 "status": "success", 
                 "message": "Unsupported event type",
-                "event_id": event_id,
-                "event_type": event_type
+                "event_id": event['id'],
+                "event_type": event['type']
             }
             
         # Handle different event types
@@ -934,7 +943,7 @@ async def webhook(
             logger.info(f"Processing subscription update for customer {customer_id} (Subscription: {subscription_id})")
             
             # Get current subscription from DB
-            current_sub = await repo_manager.user_repo.get_subscription_by_customer_id(customer_id)
+            current_sub = await user_repo.get_subscription_by_customer_id(customer_id)
             
             if current_sub:
                 # Check if this is a duplicate event by comparing with current state
@@ -985,10 +994,11 @@ async def webhook(
             logger.debug(f"Updating subscription with data: {json.dumps(update_data, default=str)}")
             
             # Use update_subscription with proper parameters
-            await repo_manager.user_repo.update_subscription(
-                user_id=current_sub.user_id if current_sub else None,
-                **{k: v for k, v in update_data.items() if k != 'user_id'}
-            )
+            if current_sub:  # Only update if we found a subscription
+                await user_repo.update_subscription(
+                    user_id=current_sub.user_id,
+                    **{k: v for k, v in update_data.items() if k != 'user_id'}
+                )
             logger.info(f"Successfully updated subscription {subscription_id} for customer {customer_id}")
             
         elif event_type == 'customer.subscription.deleted':
@@ -999,14 +1009,14 @@ async def webhook(
             logger.info(f"Processing subscription deletion for customer {customer_id} (Subscription: {subscription_id})")
             
             # Check if already canceled
-            current_sub = await repo_manager.user_repo.get_subscription_by_customer_id(customer_id)
+            current_sub = await user_repo.get_subscription_by_customer_id(customer_id)
             if current_sub and current_sub.status == 'canceled':
                 logger.info(f"Subscription already marked as canceled for customer {customer_id}")
                 return {
                     "status": "success",
                     "message": "Subscription already canceled",
-                    "event_id": event_id,
-                    "event_type": event_type
+                    "event_id": event['id'],
+                    "event_type": event['type']
                 }
             
             # Mark subscription as canceled
@@ -1020,10 +1030,11 @@ async def webhook(
                 'cancelled_at': datetime.now(timezone.utc)
             }
             
-            await repo_manager.user_repo.update_subscription(
-                user_id=current_sub.user_id if current_sub else None,
-                **update_data
-            )
+            if current_sub:  # Only update if we found a subscription
+                await user_repo.update_subscription(
+                    user_id=current_sub.user_id,
+                    **update_data
+                )
             logger.info(f"Successfully marked subscription {subscription_id} as canceled for customer {customer_id}")
             
         elif event_type == 'payment_method.attached':
@@ -1044,7 +1055,7 @@ async def webhook(
                 }
             
             # Check if this is a duplicate update
-            current_sub = await repo_manager.user_repo.get_subscription_by_customer_id(customer_id)
+            current_sub = await user_repo.get_subscription_by_customer_id(customer_id)
             card = payment_method['card']
             
             if (current_sub and 
@@ -1057,8 +1068,8 @@ async def webhook(
                 return {
                     "status": "success",
                     "message": "Payment method already up to date",
-                    "event_id": event_id,
-                    "event_type": event_type
+                    "event_id": event['id'],
+                    "event_type": event['type']
                 }
             
             # Update payment method in database
@@ -1074,10 +1085,11 @@ async def webhook(
                 'stripe_payment_method_id': payment_method_id
             }
             
-            await repo_manager.user_repo.update_subscription(
-                user_id=current_sub.user_id if current_sub else None,
-                **update_data
-            )
+            if current_sub:  # Only update if we found a subscription
+                await user_repo.update_subscription(
+                    user_id=current_sub.user_id,
+                    **update_data
+                )
             logger.info(f"Successfully updated payment method for customer {customer_id}")
             
             # If this is a payment method update after a failed payment
@@ -1102,7 +1114,7 @@ async def webhook(
                         
                         # Update subscription status if needed
                         if current_sub.status != 'active':
-                            await repo_manager.user_repo.update_subscription(
+                            await user_repo.update_subscription(
                                 user_id=current_sub.user_id,
                                 status='active'
                             )
@@ -1116,11 +1128,11 @@ async def webhook(
                     # Don't fail the webhook - we'll log the error and continue
         
         # Log successful processing
-        logger.info(f"Successfully processed webhook: {event_type} (ID: {event_id})")
+        logger.info(f"Successfully processed webhook: {event['type']} (ID: {event['id']})")
         return {
             "status": "success",
-            "event_id": event_id,
-            "event_type": event_type
+            "event_id": event['id'],
+            "event_type": event['type']
         }
         
     except stripe.error.SignatureVerificationError as e:

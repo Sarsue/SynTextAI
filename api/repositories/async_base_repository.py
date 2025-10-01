@@ -22,7 +22,8 @@ from sqlalchemy import select, update, delete, func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
 from sqlalchemy.exc import (
     SQLAlchemyError, IntegrityError, NoResultFound,
-    MultipleResultsFound, DBAPIError, InterfaceError
+    MultipleResultsFound, DBAPIError, InterfaceError,
+    OperationalError
 )
 from sqlalchemy.orm import (
     joinedload, selectinload, load_only, 

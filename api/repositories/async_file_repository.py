@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
     """Asynchronous repository for file operations."""
     
+    # Define the model class attribute required by AsyncBaseRepository
+    model = FileModel
+    
     def __init__(self, repository_manager, session_factory=None):
         """
         Initialize the file repository.
@@ -26,7 +29,6 @@ class AsyncFileRepository(AsyncBaseRepository[File, FileCreate, FileUpdate]):
             session_factory: Optional SQLAlchemy async session factory
         """
         super().__init__(repository_manager, session_factory)
-        self._model = FileModel
         self._initialized = True
 
     async def get_file_by_id(self, file_id: int) -> Optional[File]:

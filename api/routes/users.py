@@ -9,7 +9,10 @@ from ..repositories import RepositoryManager, get_repository_manager
 
 # Get repository manager dependency
 async def get_repo_manager() -> RepositoryManager:
-    return await get_repository_manager()
+    repo_manager = await get_repository_manager()
+    if not repo_manager._repos_initialized:
+        await repo_manager._initialize_repositories()
+    return repo_manager
 from ..models.orm_models import User
 from ..models.user_schemas import UserCreate, UserResponse, UserInDB, UserUpdate, UserRole
 from ..dependencies import authenticate_user, decode_firebase_token
@@ -76,14 +79,19 @@ async def create_user(
         logger.error("POST /users: Email missing from Firebase token info.")
         raise HTTPException(status_code=400, detail="Email missing from token.")
 
-    # Check if user already exists by email
-    existing_user = await repo_manager.user_repo.get_user_by_email(email)
-    if existing_user:
-        logger.info(f"User with email {email} already exists. Returning 200 OK.")
-        return JSONResponse(
-            content={"message": "User already registered", "email": email, "user_id": str(existing_user.id)}, 
-            status_code=200
-        )
+    # Get user repository and check if user already exists by email
+    try:
+        user_repo = await repo_manager.user_repo
+        existing_user = await user_repo.get_by_email(email)
+        if existing_user:
+            logger.info(f"User with email {email} already exists. Returning 200 OK.")
+            return JSONResponse(
+                content={"message": "User already registered", "email": email, "user_id": str(existing_user.id)}, 
+                status_code=200
+            )
+    except Exception as e:
+        logger.error(f"Error accessing user repository: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error while accessing user data")
 
     # Create new user
     try:
@@ -96,8 +104,9 @@ async def create_user(
             is_verified=True
         )
         
-        # Use RepositoryManager to create user
-        new_user = await repo_manager.user_repo.create(user_create)
+        # Get user repository and create user
+        user_repo = await repo_manager.user_repo
+        new_user = await user_repo.create(user_create)
         logger.info(f"Successfully created new user with ID: {new_user.id}")
         
         return JSONResponse(
@@ -119,16 +128,24 @@ async def delete_user_task(
     """Background task to handle user data deletion."""
     try:
         logger.info(f"Starting user data deletion for {user_email}")
+        # Get the user repository first
+        user_repo = await repo_manager.user_repo
+        
+        # Delete user data
         success = await repo_manager.delete_user_data(user_id=user_id, user_gc_id=user_id)
+        
         if not success:
             logger.error(f"Failed to delete user data for {user_email}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to delete user data"
             )
+            
         logger.info(f"Successfully deleted data for user {user_email}")
     except Exception as e:
         logger.error(f"Error in delete_user_task for {user_email}: {str(e)}", exc_info=True)
+        # Re-raise to ensure the task is marked as failed
+        raise
         raise
 
 # Route to delete a user
@@ -142,17 +159,25 @@ async def delete_user(
         user_id = user_data["user_id"]
         user_email = user_data["user_info"]['email']
 
-        # Verify user exists and get email
-        user = await repo_manager.user_repo.get(user_id)
-        if not user:
-            logger.warning(f"User {user_id} not found for deletion")
+        # Get user repository and verify user exists
+        try:
+            user_repo = await repo_manager.user_repo
+            user = await user_repo.get(user_id)
+            if not user:
+                logger.warning(f"User {user_id} not found for deletion")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found"
+                )
+                
+            # Use email from user record if not provided
+            user_email = user_email or user.email
+        except Exception as e:
+            logger.error(f"Error accessing user repository: {e}", exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error accessing user data"
             )
-            
-        # Use email from user record if not provided
-        user_email = user_email or user.email
 
         # Trigger background task to delete user and associated files
         background_tasks.add_task(delete_user_task, str(user_id), user_email, repo_manager)

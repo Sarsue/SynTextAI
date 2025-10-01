@@ -17,6 +17,8 @@ class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, Ch
     """
     Async repository for ChatHistory and Message model operations.
     """
+    # Define the model class attribute required by AsyncBaseRepository
+    model = ChatHistory
     
     def __init__(self, repository_manager, session_factory=None):
         """
@@ -27,7 +29,6 @@ class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, Ch
             session_factory: Optional SQLAlchemy async session factory
         """
         super().__init__(repository_manager, session_factory)
-        self._model = ChatHistory
         self._initialized = True
     
     async def get_chat_with_messages(

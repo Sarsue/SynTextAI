@@ -267,7 +267,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
         try {
-            const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
+            const response = await _callApiWithTokenInternal('/api/v1/subscriptions/subscription', 'GET');
             if (response?.ok) {
                 const data = await response.json();
                 console.log('Subscription status data:', data);
