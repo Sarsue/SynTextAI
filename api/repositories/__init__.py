@@ -12,17 +12,14 @@ Key Components:
 
 Usage:
     # Get the repository manager (singleton)
-    repo_manager = get_repository_manager()
-    
-    # Initialize the repository manager (typically done at app startup)
-    await repo_manager.initialize()
+    repo_manager = await get_repository_manager()
     
     # Use repositories through the manager
     user_repo = await repo_manager.user_repo
     user = await user_repo.get_user_by_id(user_id=1)
     
     # Or use as a context manager
-    async with RepositoryManager() as repo_manager:
+    async with await get_repository_manager() as repo_manager:
         user_repo = await repo_manager.user_repo
         user = await user_repo.get_user_by_id(user_id=1)
 """

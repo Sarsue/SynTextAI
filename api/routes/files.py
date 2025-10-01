@@ -10,7 +10,6 @@ from ..models.orm_models import File
 from fastapi.responses import JSONResponse
 from ..dependencies import authenticate_user
 from ..services.agent_service import agent_service
-from pydantic import BaseModel
 from ..models.learning_content import (
     StandardResponse,
     KeyConceptCreate, KeyConceptResponse, KeyConceptUpdate, FlashcardCreate,
@@ -18,46 +17,13 @@ from ..models.learning_content import (
     QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
 )
 from sqlalchemy import func
-from typing import Generic, TypeVar, List as TList
-from pydantic.generics import GenericModel
-
-# Generic type for paginated responses
-T = TypeVar('T')
-
-class PaginatedResponse(GenericModel, Generic[T]):
-    items: TList[T]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
-
-class FileResponse(BaseModel):
-    id: int
-    file_name: str
-    file_url: str
-    file_type: str
-    status: str
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-class FileUploadResponse(BaseModel):
-    id: int
-    file_name: str
-    file_url: str
-    status: str
-
-class YouTubeURLRequest(BaseModel):
-    url: str
-    type: str = "youtube"
-    language: Optional[str] = "en"
-    comprehension_level: Optional[str] = "beginner"
-
-class UploadResponse(BaseModel):
-    message: str
-    files: List[FileUploadResponse] = []
-    file_id: Optional[int] = None  # For backward compatibility
-    file_name: Optional[str] = None  # For backward compatibility
-    job_id: Optional[str] = None  # For backward compatibility
+from ..models.file_schemas import (
+    PaginatedResponse,
+    FileResponse,
+    FileUploadResponse,
+    YouTubeURLRequest,
+    UploadResponse
+)
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')

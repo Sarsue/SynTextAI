@@ -100,7 +100,6 @@ async def create_user(
             email=email,
             name=name,
             firebase_uid=firebase_uid,
-            is_active=True,
             is_verified=True
         )
         
@@ -120,76 +119,100 @@ async def create_user(
         logger.error(f"Unexpected error creating user {email}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during user creation.")
 
-async def delete_user_task(
-    user_id: str, 
-    user_email: str, 
-    repo_manager: RepositoryManager
-) -> None:
-    """Background task to handle user data deletion."""
-    try:
-        logger.info(f"Starting user data deletion for {user_email}")
-        # Get the user repository first
-        user_repo = await repo_manager.user_repo
-        
-        # Delete user data
-        success = await repo_manager.delete_user_data(user_id=user_id, user_gc_id=user_id)
-        
-        if not success:
-            logger.error(f"Failed to delete user data for {user_email}")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to delete user data"
-            )
-            
-        logger.info(f"Successfully deleted data for user {user_email}")
-    except Exception as e:
-        logger.error(f"Error in delete_user_task for {user_email}: {str(e)}", exc_info=True)
-        # Re-raise to ensure the task is marked as failed
-        raise
-        raise
-
 # Route to delete a user
 @users_router.delete("", status_code=200, response_model=Dict[str, str])
 async def delete_user(
-    background_tasks: BackgroundTasks,
-    user_data: Dict[str, Any] = Depends(authenticate_user),
+    request: Request,
+    user_data: Dict = Depends(authenticate_user),
     repo_manager: RepositoryManager = Depends(get_repo_manager)
 ) -> Dict[str, str]:
+    """
+    Delete a user account and all associated data.
+    
+    This endpoint performs a soft delete of the user account by:
+    1. Marking the user as inactive
+    2. Anonymizing personal data
+    3. Cleaning up related resources (subscriptions, files, etc.)
+    
+    The frontend should handle the response by:
+    - Showing a success message
+    - Clearing local storage/session
+    - Redirecting to the home page
+    
+    Request Headers:
+        - Authorization: Bearer <firebase_token>
+        
+    Returns:
+        {
+            "status": "success"|"error",
+            "message": "Operation status message",
+            "email": "user@example.com"
+        }
+    """
+    user_id = user_data["user_id"]
+    user_email = user_data["user_info"]['email']
+    
+    # Log the deletion attempt with request context
+    logger.info(
+        "Initiating user deletion",
+        extra={
+            "user_id": user_id,
+            "email": user_email,
+            "action": "account_deletion",
+            "client_ip": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent")
+        }
+    )
+    
     try:
-        user_id = user_data["user_id"]
-        user_email = user_data["user_info"]['email']
-
-        # Get user repository and verify user exists
-        try:
-            user_repo = await repo_manager.user_repo
-            user = await user_repo.get(user_id)
-            if not user:
-                logger.warning(f"User {user_id} not found for deletion")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
-                
-            # Use email from user record if not provided
-            user_email = user_email or user.email
-        except Exception as e:
-            logger.error(f"Error accessing user repository: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error accessing user data"
+        # Get user repository
+        user_repo = await repo_manager.user_repo
+        
+        # Perform the deletion
+        success = await user_repo.delete_user_account(user_id)
+        
+        if not success:
+            logger.error(
+                "Failed to delete user account",
+                extra={"user_id": user_id, "action": "account_deletion_failed"}
             )
-
-        # Trigger background task to delete user and associated files
-        background_tasks.add_task(delete_user_task, str(user_id), user_email, repo_manager)
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to process account deletion"
+            )
+        
+        # Log successful deletion
+        logger.info(
+            "User account successfully deleted",
+            extra={
+                "user_id": user_id,
+                "email": user_email,
+                "action": "account_deletion_success"
+            }
+        )
         
         return {
             "status": "success",
-            "message": "User deletion in progress", 
+            "message": "Your account and all associated data have been deleted.",
             "email": user_email
         }
         
     except HTTPException:
+        # Re-raise HTTP exceptions as-is
         raise
+        
     except Exception as e:
-        logger.error(f"Unexpected error in delete_user: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred")
+        # Log unexpected errors
+        logger.critical(
+            "Unexpected error during user deletion",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "action": "account_deletion_failed"
+            },
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred while processing your request"
+        )

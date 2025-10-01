@@ -267,11 +267,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
         try {
-            const response = await _callApiWithTokenInternal('/api/v1/subscriptions/subscription', 'GET');
+            const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
             if (response?.ok) {
                 const data = await response.json();
                 console.log('Subscription status data:', data);
-                const status = data.status || data.subscription_status || 'none';
+                const status = data.subscription_status || 'none';
                 setSubscriptionStatus(status);
                 setSubscriptionData({
                     subscription_status: status,
@@ -280,18 +280,24 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     card_exp_month: data.card_exp_month,
                     card_exp_year: data.card_exp_year,
                     trial_end: data.trial_end,
-                    message: data.message,
-                    error: data.error
+                    message: data.message
                 });
             } else {
-                console.error('Failed to fetch subscription status');
+                const errorData = await response?.json().catch(() => ({}));
+                console.error('Failed to fetch subscription status:', errorData);
                 setSubscriptionStatus('none');
-                setSubscriptionData({ subscription_status: 'none' });
+                setSubscriptionData({ 
+                    subscription_status: 'none',
+                    error: errorData?.detail || 'Failed to fetch subscription status'
+                });
             }
         } catch (error) {
             console.error('Error fetching subscription status:', error);
             setSubscriptionStatus('none');
-            setSubscriptionData({ subscription_status: 'none' });
+            setSubscriptionData({ 
+                subscription_status: 'none',
+                error: 'An unexpected error occurred'
+            });
         }
     }, [user, _callApiWithTokenInternal]);
 

@@ -51,16 +51,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
         if (!confirmed) return;
 
         if (!user) {
-            alert("No user found.");
+            alert("No user found. Please sign in again.");
             return;
         }
 
         try {
             const idToken = await user.getIdToken();
             if (!idToken) {
-                console.error('User token not available');
-                alert("Authentication failed. Please try logging in again.");
-                return;
+                throw new Error('Failed to get authentication token');
             }
 
             const response = await fetch('/api/v1/users', {
@@ -73,18 +71,27 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 credentials: 'include',
             });
 
-            if (response.ok) {
-                alert("✅ Your account has been successfully deleted.");
-                setUser(null);  // Assuming setUser is available from your UserContext
-                navigate('/');
-            } else {
-                const errorData = await response.json();
-                console.error("Delete error:", errorData);
-                alert(`❌ Failed to delete account: ${errorData.error || "Unknown error"}`);
+            const result = await response.json();
+            
+            if (!response.ok) {
+                console.error("Delete error:", result);
+                throw new Error(result.detail || "Failed to delete account");
             }
+
+            // Success case
+            alert(`✅ ${result.message || 'Your account has been successfully deleted.'}`);
+            
+            // Clear user context and redirect
+            setUser(null);
+            localStorage.clear(); // Clear any stored data
+            sessionStorage.clear();
+            
+            // Redirect to home page after a short delay
+            setTimeout(() => navigate('/'), 1000);
+            
         } catch (error) {
             console.error("Error deleting account:", error);
-            alert("⚠️ A network error occurred. Please try again later.");
+            alert(`❌ Error: ${error instanceof Error ? error.message : 'Failed to delete account. Please try again.'}`);
         }
     };
 

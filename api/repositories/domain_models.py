@@ -22,6 +22,32 @@ class User:
         return f"User(id={self.id}, email='{self.email}', username='{self.username}')"
 
 
+class UserInDB(User):
+    """User domain model with authentication details.
+    
+    Note: Soft deletion is implemented by setting the email to 'deleted_{user_id}@deleted.com'.
+    This pattern is used to track deleted users while maintaining referential integrity.
+    """
+    def __init__(
+        self,
+        id: Optional[int] = None,
+        email: str = "",
+        username: str = "",
+        hashed_password: Optional[str] = None,
+        is_superuser: bool = False,
+        created_at: Optional[datetime] = None,
+        updated_at: Optional[datetime] = None
+    ):
+        super().__init__(id=id, email=email, username=username)
+        self.hashed_password = hashed_password
+        self.is_superuser = is_superuser
+        self.created_at = created_at or datetime.utcnow()
+        self.updated_at = updated_at or datetime.utcnow()
+    
+    def __repr__(self) -> str:
+        return f"UserInDB(id={self.id}, email='{self.email}')"
+
+
 class Subscription:
     """Subscription domain model."""
     def __init__(
@@ -240,8 +266,11 @@ class Flashcard:
 
 
 class QuizQuestion:
-    """Domain model for a quiz question."""
+    """Domain model for a quiz question.
     
+    This represents the core data stored in the database. Frontend-specific fields
+    should be added in API response models, not here.
+    """
     def __init__(
         self,
         id: Optional[int] = None,
@@ -252,9 +281,6 @@ class QuizQuestion:
         correct_answer: str = None,
         distractors: List[str] = None,
         created_at: Optional[datetime] = None,
-        # These fields don't exist in DB but kept as None for frontend compatibility
-        explanation: Optional[str] = None,
-        difficulty: Optional[str] = None,
         is_custom: bool = False
     ):
         self.id = id
@@ -262,16 +288,12 @@ class QuizQuestion:
         self.key_concept_id = key_concept_id
         self.question = question
         self.question_type = question_type
-        # Alias for backwards compatibility with frontend
+        # Alias for backwards compatibility
         self.question_text = question
         self.correct_answer = correct_answer
         self.distractors = distractors if distractors is not None else []
         self.created_at = created_at
-        
-        # Fields that don't exist in DB but kept for frontend compatibility
-        self.explanation = None
-        self.difficulty = None
-        self.is_custom = False
+        self.is_custom = is_custom
     
     def __repr__(self) -> str:
         return f"QuizQuestion(id={self.id}, question='{self.question_text[:20]}...')"

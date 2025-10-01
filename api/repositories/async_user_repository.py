@@ -94,9 +94,6 @@ class AsyncUserRepository(AsyncBaseRepository[User, UserCreate, UserUpdate]):
             try:
                 query = select(User).where(User.email == email)
                 
-                if not include_inactive:
-                    query = query.where(User.is_active == True)
-                
                 if include_relationships:
                     query = query.options(
                         selectinload(User.subscription),
@@ -161,8 +158,7 @@ class AsyncUserRepository(AsyncBaseRepository[User, UserCreate, UserUpdate]):
                     await session.delete(user)
                     logger.info("Hard deleted user with ID: %s", user_id)
                 else:
-                    # Soft delete - mark as inactive and anonymize
-                    user.is_active = False
+                    # Soft delete - anonymize the user
                     user.email = f"deleted_{user.id}_{user.email}"
                     user.updated_at = datetime.now(timezone.utc)
                     logger.info("Soft deleted user with ID: %s", user_id)
@@ -326,49 +322,86 @@ class AsyncUserRepository(AsyncBaseRepository[User, UserCreate, UserUpdate]):
                 raise
 
     async def delete_user_account(self, user_id: int) -> bool:
+        """
+        Soft deletes a user account and all associated data.
+        
+        This method performs a soft delete by marking the user as inactive and anonymizing their data,
+        while preserving referential integrity in the database.
+        
+        Args:
+            user_id: The ID of the user to delete
+            
+        Returns:
+            bool: True if deletion was successful, False otherwise
+            
+        Raises:
+            ValueError: If user_id is invalid
+            SQLAlchemyError: If there's a database error
+        """
         if not isinstance(user_id, int) or user_id <= 0:
             raise ValueError("Invalid user_id provided")
 
         async with self.session_scope() as session:
             try:
-                user = await self.get_user_by_id(user_id)
+                # Get user with a lock to prevent concurrent modifications
+                user = await session.get(User, user_id, with_for_update=True)
                 if not user:
                     logger.warning(f"User {user_id} not found")
                     return False
 
-                logger.info(f"Deleting all data for user {user_id}")
+                logger.info(f"Initiating soft delete for user {user_id}")
+                
+                # 1. Handle subscription cleanup
+                subscription = await self._get_subscription_by_criteria(user_id=user_id, session=session)
+                if subscription:
+                    # Cancel any active subscriptions (handled by Stripe webhook)
+                    if subscription.stripe_subscription_id:
+                        await session.execute(
+                            update(Subscription)
+                            .where(Subscription.id == subscription.id)
+                            .values(status=SubscriptionStatus.canceled)
+                        )
+                    
+                    # Clear payment methods
+                    await session.execute(
+                        delete(CardDetails)
+                        .where(CardDetails.subscription_id == subscription.id)
+                    )
 
-                # Soft delete files
+                # 2. Soft delete user data
+                # Mark files as deleted
                 await session.execute(
                     update(File)
                     .where(File.user_id == user_id)
-                    .values(is_deleted=True, deleted_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                    .values(
+                        is_deleted=True,
+                        deleted_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow()
+                    )
                 )
 
-                # Delete chat history
-                await session.execute(delete(ChatHistory).where(ChatHistory.user_id == user_id))
-
-                # Delete subscription & card
-                subscription = await self._get_subscription_by_criteria(user_id=user_id, session=session)
-                if subscription:
-                    await session.execute(delete(CardDetails).where(CardDetails.subscription_id == subscription.id))
-                    await session.delete(subscription)
-
-                # Delete key concepts
+                # Clear chat history
                 await session.execute(
-                    delete(KeyConcept)
-                    .join(File, KeyConcept.file_id == File.id)
-                    .where(File.user_id == user_id)
+                    update(ChatHistory)
+                    .where(ChatHistory.user_id == user_id)
+                    .values(
+                        title="[Deleted]",
+                        updated_at=datetime.utcnow()
+                    )
                 )
 
-                # Delete user-file associations
-                await session.execute(delete(UserFile).where(UserFile.user_id == user_id))
-
-                # Delete user
-                await session.delete(user)
-
+                # Anonymize user data
+                user.email = f"deleted_{user_id}@deleted.com"
+                user.updated_at = datetime.utcnow()
+                
+                # Clear sensitive data
+                if hasattr(user, 'hashed_password'):
+                    user.hashed_password = None
+                if hasattr(user, 'firebase_uid'):
+                    user.firebase_uid = None
+                
                 await session.commit()
-                logger.info(f"Successfully deleted user {user_id} and all related data")
+                logger.info(f"Successfully soft-deleted user {user_id}")
                 return True
 
             except SQLAlchemyError as e:

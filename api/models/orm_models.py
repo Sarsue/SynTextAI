@@ -155,7 +155,6 @@ class File(Base):
     file_type = Column(String, nullable=True)  # 'pdf', 'youtube', etc.
     processing_status = Column(
         String,
-        default="uploaded",
         nullable=False,
         index=True
     )
@@ -233,7 +232,7 @@ class ChatHistory(Base):
     __tablename__ = "chat_histories"
     
     id = Column(Integer, primary_key=True)
-    title = Column(String, default="Untitled")
+    title = Column(String)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
     # Relationships
@@ -268,7 +267,7 @@ class Flashcard(Base):
     key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
     question = Column(String)
     answer = Column(String)
-    is_custom = Column(Boolean, nullable=False, server_default='false')
+    is_custom = Column(Boolean, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
     
     # Relationships
@@ -286,7 +285,7 @@ class QuizQuestion(Base):
     question_type = Column(String, nullable=False)
     correct_answer = Column(String, nullable=False)
     distractors = Column(JSON, nullable=True)
-    is_custom = Column(Boolean, nullable=False, server_default='false')
+    is_custom = Column(Boolean, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
     
     # Relationships

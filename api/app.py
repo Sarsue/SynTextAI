@@ -215,7 +215,7 @@ async def get_repository_manager_dep() -> RepositoryManager:
     # Initialize database if not already done
     if not _initialized:
         await init_db()
-    return get_repository_manager()
+    return await get_repository_manager()
 
 # For backward compatibility
 async def get_store() -> RepositoryManager:

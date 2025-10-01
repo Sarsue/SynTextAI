@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from typing import Dict, Any, Optional, AsyncGenerator
-from .repositories import get_repository_manager, RepositoryManager
+from .repositories.base_repository_manager import get_repository_manager, RepositoryManager
 from .utils import decode_firebase_token
 import logging
 
@@ -23,22 +23,21 @@ async def get_repository_manager_ctx() -> AsyncGenerator[RepositoryManager, None
     """
     Context manager for the repository manager.
     
-    This ensures proper initialization and cleanup of the repository manager.
+    This ensures proper cleanup of the repository manager when done.
     Should be used in an async context:
     
     async with get_repository_manager_ctx() as repo_manager:
         # Use repo_manager here
         pass
     """
-    repo_manager = get_repository_manager()
+    repo_manager = await get_repository_manager()
     try:
-        await repo_manager.initialize()
         yield repo_manager
     except Exception as e:
         logger.error(f"Error in repository manager context: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initialize repository manager"
+            detail="Repository manager operation failed"
         ) from e
     finally:
         await repo_manager.close()
@@ -48,26 +47,17 @@ async def get_repository_manager() -> RepositoryManager:
     """
     FastAPI dependency to get the repository manager instance.
     
-    This initializes the repository manager if it hasn't been already.
-    This is the preferred way to get a repository manager in route handlers.
-    
-    Returns:
-        RepositoryManager: An initialized repository manager
-        
-    Raises:
-        HTTPException: If the repository manager cannot be initialized
+    Returns the singleton instance of the repository manager.
     """
-    repo_manager = get_repository_manager()
-    if not repo_manager._initialized:
-        try:
-            await repo_manager.initialize()
-        except Exception as e:
-            logger.error(f"Error initializing repository manager: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to initialize repository manager"
-            ) from e
-    return repo_manager
+    try:
+        from .repositories.base_repository_manager import get_repository_manager as get_repo_manager
+        return await get_repo_manager()
+    except Exception as e:
+        logger.error(f"Error getting repository manager: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get repository manager"
+        ) from e
 
 
 async def get_store() -> RepositoryManager:
@@ -99,17 +89,15 @@ async def get_request_store(request: Request) -> RepositoryManager:
         HTTPException: If the repository manager cannot be initialized
     """
     if not hasattr(request.app.state, 'repo_manager') or request.app.state.repo_manager is None:
-        repo_manager = get_repository_manager()
-        if not repo_manager._initialized:
-            try:
-                await repo_manager.initialize()
-            except Exception as e:
-                logger.error(f"Error initializing repository manager: {e}", exc_info=True)
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to initialize repository manager"
-                ) from e
-        request.app.state.repo_manager = repo_manager
+        try:
+            repo_manager = await get_repository_manager()
+            request.app.state.repo_manager = repo_manager
+        except Exception as e:
+            logger.error(f"Error getting repository manager: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to get repository manager"
+            ) from e
     return request.app.state.repo_manager
 
 

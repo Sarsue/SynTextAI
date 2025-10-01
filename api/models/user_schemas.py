@@ -15,7 +15,6 @@ class UserBase(BaseModel):
     """Base user model with common fields."""
     email: EmailStr
     full_name: Optional[str] = None
-    is_active: bool = True
     role: UserRole = UserRole.USER
     metadata_: Optional[Dict[str, Any]] = Field(default_factory=dict, alias="metadata")
 
@@ -31,7 +30,6 @@ class UserUpdate(BaseModel):
     """Schema for updating an existing user."""
     email: Optional[EmailStr] = None
     full_name: Optional[str] = None
-    is_active: Optional[bool] = None
     role: Optional[UserRole] = None
     metadata_: Optional[Dict[str, Any]] = Field(default=None, alias="metadata")
     
@@ -54,8 +52,13 @@ class UserResponse(UserInDBBase):
     pass
 
 class UserInDB(UserInDBBase):
-    """User model with sensitive data for internal use."""
+    """User model with sensitive data for internal use.
+    
+    Note: Soft deletion is implemented by setting the email to 'deleted_{user_id}@deleted.com'.
+    This pattern is used to track deleted users while maintaining referential integrity.
+    """
     hashed_password: Optional[str] = None
+    is_superuser: bool = False
     
     class Config:
         from_attributes = True

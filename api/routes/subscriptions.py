@@ -1,1187 +1,587 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body, status
-from fastapi.responses import JSONResponse
-import json
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, List, Union, Any, cast
-import stripe
+from datetime import datetime
+from typing import Dict, Optional, Any, List, Union, cast
 import logging
 import os
-from pydantic import BaseModel, Field, validator
-from enum import Enum
-from dotenv import load_dotenv
 
-from ..repositories import RepositoryManager
-from ..dependencies import authenticate_user
-from ..app import limiter
+import stripe
+from dotenv import load_dotenv
+from fastapi import (
+    APIRouter, 
+    Depends, 
+    HTTPException, 
+    Request, 
+    Body, 
+    status,
+    Response
+)
+from fastapi.responses import JSONResponse
+from pydantic import validator
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.repositories.base_repository_manager import get_repository_manager
+from api.repositories.async_user_repository import AsyncUserRepository
+from api.repositories.domain_models import UserInDB, Subscription
+from api.models.subscription_schemas import (
+    CardDetailsResponse,
+    SubscriptionResponse,
+    SubscriptionCreate,
+    SubscriptionUpdate,
+    WebhookEvent
+)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI router
+router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
 
 # Load environment variables
 load_dotenv()
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
-
-def handle_stripe_error(e: stripe.error.StripeError) -> HTTPException:
-    """Helper function to handle Stripe errors consistently."""
-    error_type = getattr(e, 'error', {}).get('type', 'stripe_error')
-    error_message = getattr(e, 'user_message', str(e))
-    logger.error(f"Stripe error ({error_type}): {error_message}", exc_info=True)
-    
-    # Map common Stripe errors to user-friendly messages
-    error_map = {
-        'card_error': 'There was an error processing your card. Please try again or use a different card.',
-        'invalid_request_error': 'Invalid request. Please check your information and try again.',
-        'api_connection_error': 'Unable to connect to our payment processor. Please try again later.',
-        'api_error': 'An error occurred while processing your request. Please try again.',
-        'authentication_error': 'Unable to authenticate with our payment processor. Please try again later.',
-        'rate_limit_error': 'Too many requests. Please try again in a moment.',
-        'validation_error': 'Validation error. Please check your information and try again.'
-    }
-    
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=error_map.get(error_type, error_message)
-    )
-
-# Initialize FastAPI router
-subscriptions_router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
-
 # Stripe configuration
-price_id = os.getenv('STRIPE_PRICE_ID')
-stripe.api_key = os.getenv('STRIPE_SECRET')
-# Use consistent environment variable name for webhook secret
-endpoint_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+STRIPE_PRICE_ID = os.getenv('STRIPE_PRICE_ID')
+stripe.api_key = STRIPE_SECRET_KEY
 
-# Get repository manager dependency
-async def get_repo_manager() -> RepositoryManager:
+# Type aliases
+JSONType = Dict[str, Any]
+
+# Use models from api.models.subscription_schemas
+
+async def get_current_user(
+    request: Request,
+    authorization: str = Header(..., description="Bearer token")
+) -> Dict[str, Any]:
+    """Get current user from authorization token"""
+    if not authorization:
+        logger.error("Missing Authorization token")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Get repository manager
     repo_manager = await get_repository_manager()
-    if not repo_manager._repos_initialized:
-        await repo_manager._initialize_repositories()
-    return repo_manager
+    user_repo = repo_manager.user_repo
 
-# Pydantic Models
-class SubscriptionStatusEnum(str, Enum):
-    ACTIVE = "active"
-    TRIALING = "trialing"
-    PAST_DUE = "past_due"
-    CANCELED = "canceled"
-    UNPAID = "unpaid"
-    INCOMPLETE = "incomplete"
-    INCOMPLETE_EXPIRED = "incomplete_expired"
-    PAUSED = "paused"
+    try:
+        # Get user info from token
+        success, user_info = get_user_id(authorization)
+        if not success or not user_info.get('email'):
+            logger.error("Failed to authenticate user with token")
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
-class CardDetailsInput(BaseModel):
-    last4: str = Field(..., min_length=4, max_length=4, description="Last 4 digits of the card")
-    brand: str = Field(..., description="Card brand (e.g., 'visa', 'mastercard')")
-    exp_month: int = Field(..., ge=1, le=12, description="Expiration month (1-12)")
-    exp_year: int = Field(..., description="Expiration year (4 digits)")
-    
-    @validator('exp_year')
-    def validate_exp_year(cls, v):
-        current_year = datetime.now().year
-        if v < current_year:
-            raise ValueError('Card has expired')
-        if v > current_year + 20:  # Cards are typically valid for up to 20 years
-            raise ValueError('Invalid expiration year')
-        return v
-    stripe_payment_method_id: Optional[str] = Field(None, description="Stripe payment method ID")
+        # Get user from database
+        user = await user_repo.get_by_email(user_info['email'])
+        if not user:
+            logger.error(f"No user found for email: {user_info['email']}")
+            raise HTTPException(status_code=404, detail="User not found")
 
-class UpdateSubscriptionRequest(BaseModel):
-    status: Optional[SubscriptionStatusEnum] = None
-    current_period_end: Optional[datetime] = None
-    stripe_customer_id: Optional[str] = None
-    stripe_subscription_id: Optional[str] = None
-    card_details: Optional[CardDetailsInput] = None
+        logger.info(f"Authenticated user_id: {user.id}")
+        return {
+            "user_id": user.id,
+            "user_info": user_info,
+            "user_repo": user_repo
+        }
+    except Exception as e:
+        logger.error(f"Error in get_current_user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while authenticating user"
+        )
 
-class UpdateSubscriptionStatusRequest(BaseModel):
-    status: SubscriptionStatusEnum
-    user_id: Optional[int] = None
-    stripe_customer_id: Optional[str] = None
-    stripe_subscription_id: Optional[str] = None
-    current_period_end: Optional[datetime] = None
-    card_details: Optional[CardDetailsInput] = None
-
-class SubscriptionResponse(BaseModel):
-    id: int
-    user_id: int
-    status: str
-    current_period_end: Optional[datetime] = None
-    stripe_customer_id: Optional[str] = None
-    stripe_subscription_id: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    card_details: Optional[Dict[str, Any]] = None
-
-    class Config:
-        orm_mode = True
-
-async def format_subscription_response(
-    subscription_data: Optional[Dict],
-    repo_manager: RepositoryManager
-) -> Optional[Dict]:
-    """Format subscription response consistently across all endpoints.
-    
-    Handles both raw database rows and processed subscription data.
-    """
-    if not subscription_data:
-        return None
+@router.get("/status", response_model=SubscriptionResponse)
+async def get_subscription_status(
+    current_user: Dict = Depends(get_current_user)
+) -> SubscriptionResponse:
+    """Get the current user's subscription status"""
+    try:
+        user_id = current_user["user_id"]
+        user_repo = current_user["user_repo"]
         
-    # Convert SQLAlchemy model to dict if needed
-    if hasattr(subscription_data, '_asdict'):
-        subscription_data = subscription_data._asdict()
-    elif hasattr(subscription_data, '__dict__'):
-        subscription_data = subscription_data.__dict__
-        # Remove SQLAlchemy instance state
-        subscription_data.pop('_sa_instance_state', None)
-    
-    # Get user details if user_id is present
-    if 'user_id' in subscription_data and subscription_data['user_id']:
-        user = await repo_manager.user_repo.get_user(subscription_data['user_id'])
-        if user:
-            subscription_data['user_email'] = user.email
-    
-    # Convert datetime objects to ISO format
-    for key, value in subscription_data.items():
-        if isinstance(value, datetime):
-            subscription_data[key] = value.isoformat()
-    
-    # Ensure all expected fields are present
-    result = {
-        'id': subscription_data.get('id'),
-        'user_id': subscription_data.get('user_id'),
-        'status': subscription_data.get('status'),
-        'current_period_end': subscription_data.get('current_period_end'),
-        'stripe_customer_id': subscription_data.get('stripe_customer_id'),
-        'stripe_subscription_id': subscription_data.get('stripe_subscription_id'),
-        'created_at': subscription_data.get('created_at'),
-        'updated_at': subscription_data.get('updated_at'),
-        'card_details': subscription_data.get('card_details')
-    }
-    
-    return {k: v for k, v in result.items() if v is not None}
-
-# Route to get subscription status
-@subscriptions_router.get("/subscription/details", response_model=Dict[str, Any])
-async def get_subscription_with_card(
-    user_data: Dict = Depends(authenticate_user)
-):
-    """
-    Return full subscription info including payment methods for the current user.
-    """
-    try:
-        repo_manager = user_data['repo_manager']
-        subscription_repo = await repo_manager.subscription_repo
-        subscription = await subscription_repo.get_subscription_by_user_id(user_id=user_data["internal_user_id"], include_payment_methods=True)
-        if not subscription:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No subscription found for this user"
+        # Get subscription from database
+        subscription_data = await user_repo._get_subscription_base(user_id, include_payment_methods=True)
+        
+        if not subscription_data:
+            return SubscriptionResponse(
+                subscription_status='none'
             )
-        return subscription
+        
+        return SubscriptionResponse(
+            subscription_status=subscription_data.get('status', 'none'),
+            card_last4=subscription_data.get('card_details', {}).get('last4') if subscription_data.get('card_details') else None,
+            card_brand=subscription_data.get('card_details', {}).get('brand') if subscription_data.get('card_details') else None,
+            card_exp_month=subscription_data.get('card_details', {}).get('exp_month') if subscription_data.get('card_details') else None,
+            card_exp_year=subscription_data.get('card_details', {}).get('exp_year') if subscription_data.get('card_details') else None,
+            trial_end=subscription_data.get('trial_end')
+        )
+        
     except Exception as e:
-        logger.error(f"Error getting subscription with card: {str(e)}", exc_info=True)
+        logger.error(f"Error in get_subscription_status: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while fetching subscription details"
+            detail="An error occurred while getting subscription status"
         )
 
-@subscriptions_router.get("/subscription", response_model=SubscriptionResponse)
-async def get_user_subscription(
-    user_data: Dict = Depends(authenticate_user)
+@router.post("/start-trial", status_code=201)
+async def start_trial(
+    current_user: Dict = Depends(get_current_user)
 ):
-    """
-    Return basic subscription info for the current user.
-    """
+    """Start a trial subscription for the current user"""
     try:
-        repo_manager = user_data['repo_manager']
-        subscription_repo = await repo_manager.subscription_repo
-        subscription = await subscription_repo.get_subscription_by_user_id(user_id=user_data["internal_user_id"])
-        if not subscription:
+        user_id = current_user["user_id"]
+        user_info = current_user["user_info"]
+        user_repo = current_user["user_repo"]
+        
+        # Check if user already has a subscription
+        existing_sub = await user_repo._get_subscription_base(user_id)
+        if existing_sub and existing_sub.get('status') in ['active', 'trialing']:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No subscription found for this user"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Trial or active subscription already exists"
             )
-        return subscription
+        
+        # Create or get Stripe customer
+        customer = None
+        if 'email' in user_info:
+            existing_customers = stripe.Customer.list(email=user_info['email'])
+            if existing_customers.data:
+                customer = existing_customers.data[0]
+        
+        if not customer:
+            customer = stripe.Customer.create(
+                email=user_info.get('email'),
+                name=user_info.get('name', '')
+            )
+        
+        # Create trial subscription
+        trial_sub = stripe.Subscription.create(
+            customer=customer.id,
+            items=[{'price': STRIPE_PRICE_ID}],
+            trial_period_days=14,
+            payment_behavior='default_incomplete'
+        )
+        
+        # Save to database
+        async with user_repo.session_scope() as session:
+            # Update or create subscription
+            subscription_data = {
+                'user_id': user_id,
+                'stripe_customer_id': customer.id,
+                'stripe_subscription_id': trial_sub.id,
+                'status': 'trialing',
+                'current_period_end': datetime.fromtimestamp(trial_sub.current_period_end),
+                'trial_end': datetime.fromtimestamp(trial_sub.trial_end)
+            }
+            
+            # Use the repository method to update or create subscription
+            subscription = await user_repo._get_subscription_by_criteria(
+                user_id=user_id, 
+                session=session
+            )
+            
+            if subscription:
+                for key, value in subscription_data.items():
+                    setattr(subscription, key, value)
+                session.add(subscription)
+            else:
+                subscription = Subscription(**subscription_data)
+                session.add(subscription)
+            
+            await session.commit()
+            await session.refresh(subscription)
+        
+        return {
+            'message': 'Trial started successfully',
+            'subscription_id': trial_sub.id,
+            'status': 'trialing',
+            'trial_end': datetime.fromtimestamp(trial_sub.trial_end).isoformat(),
+            'current_period_end': datetime.fromtimestamp(trial_sub.current_period_end).isoformat()
+        }
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error in start_trial: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
-        logger.error(f"Error getting subscription: {str(e)}", exc_info=True)
+        logger.error(f"Error in start_trial: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while fetching subscription"
+            detail="An error occurred while starting trial"
         )
 
-@subscriptions_router.put("/{subscription_id}", response_model=SubscriptionResponse)
+@router.post("/create", status_code=201)
+async def create_subscription(
+    subscription_data: SubscriptionCreate,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Create a new subscription"""
+    try:
+        user_id = current_user["user_id"]
+        user_info = current_user["user_info"]
+        user_repo = current_user["user_repo"]
+        
+        # Get or create Stripe customer
+        customer = None
+        if 'email' in user_info:
+            existing_customers = stripe.Customer.list(email=user_info['email'])
+            if existing_customers.data:
+                customer = existing_customers.data[0]
+        
+        if not customer and 'email' in user_info:
+            customer = stripe.Customer.create(
+                email=user_info.get('email'),
+                name=user_info.get('name', ''),
+                payment_method=subscription_data.payment_method_id,
+                invoice_settings={
+                    'default_payment_method': subscription_data.payment_method_id
+                }
+            )
+        
+        # Create subscription in Stripe
+        subscription = await user_repo.create_subscription(
+            user_id=user_id,
+            subscription_data={
+                **subscription_data.dict(),
+                'customer_id': customer.id if customer else None
+            }
+        )
+        
+        return {
+            'status': 'success',
+            'subscription_id': subscription.id,
+            'client_secret': getattr(getattr(subscription, 'latest_invoice', None), 'payment_intent', {}).get('client_secret') if hasattr(subscription, 'latest_invoice') else None,
+            'status': getattr(subscription, 'status', 'active')
+        }
+        
+    except stripe.error.CardError as e:
+        logger.error(f"Card error in create_subscription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error in create_subscription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error in create_subscription: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating subscription"
+        )
+
+@router.put("/{subscription_id}", response_model=Dict[str, Any])
 async def update_subscription(
-    subscription_id: int,
-    data: UpdateSubscriptionRequest,
-    user_data: Dict = Depends(authenticate_user)
+    subscription_id: str,
+    update_data: SubscriptionUpdate,
+    current_user: Dict = Depends(get_current_user)
 ):
-    """
-    Update a subscription's details.
-    
-    - **subscription_id**: The ID of the subscription to update
-    - **data**: The subscription data to update
-    """
+    """Update an existing subscription"""
     try:
-        repo_manager = user_data['repo_manager']
-        subscription_repo = await repo_manager.subscription_repo
+        user_id = current_user["user_id"]
+        user_repo = current_user["user_repo"]
         
-        # Get the subscription
-        subscription = await subscription_repo.get_subscription_by_id(subscription_id)
-        if not subscription:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Subscription not found"
+        async with user_repo.session_scope() as session:
+            # Get subscription from database
+            subscription = await user_repo._get_subscription_by_criteria(
+                user_id=user_id,
+                session=session
             )
             
-        # Check if user owns this subscription
-        if subscription['user_id'] != user_data['internal_user_id']:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this subscription"
-            )
+            if not subscription:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Subscription not found"
+                )
             
-        # Update subscription data
-        update_data = data.dict(exclude_unset=True)
-        if 'card_details' in update_data:
-            card_data = update_data.pop('card_details')
-            update_data.update({
-                'card_last4': card_data.last4,
-                'card_brand': card_data.brand,
-                'exp_month': card_data.exp_month,
-                'exp_year': card_data.exp_year,
-                'stripe_payment_method_id': card_data.stripe_payment_method_id
-            })
+            # Update subscription in Stripe
+            update_params = {}
+            if update_data.cancel_at_period_end is not None:
+                update_params['cancel_at_period_end'] = update_data.cancel_at_period_end
             
-        # Update subscription in database
-        await subscription_repo.update_subscription(
-            subscription_id=subscription_id,
-            **update_data
+            if update_data.status:
+                update_params['status'] = update_data.status
+            
+            if update_params:
+                stripe.Subscription.modify(
+                    subscription.stripe_subscription_id,
+                    **update_params
+                )
+            
+            # Update in database
+            for key, value in update_data.dict(exclude_none=True).items():
+                setattr(subscription, key, value)
+            
+            session.add(subscription)
+            await session.commit()
+            
+            return {
+                'message': 'Subscription updated successfully',
+                'subscription_id': subscription.id,
+                'status': subscription.status,
+                'cancel_at_period_end': subscription.cancel_at_period_end
+            }
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error in update_subscription: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
-        
-        # Get updated subscription data
-        updated_sub = await subscription_repo.get_subscription_by_id(subscription_id)
-        if not updated_sub:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update subscription"
-            )
-            
-        return updated_sub
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error updating subscription: {str(e)}", exc_info=True)
+        logger.error(f"Error in update_subscription: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while updating subscription"
         )
 
-@subscriptions_router.patch("/subscriptions/status", status_code=status.HTTP_200_OK, response_model=Dict[str, Any])
-async def update_subscription_status(
-    data: UpdateSubscriptionStatusRequest,
-    user_data: Dict = Depends(authenticate_user)
+@router.post("/cancel", status_code=200)
+async def cancel_subscription(
+    current_user: Dict = Depends(get_current_user)
 ):
-    """
-    Update a subscription's status.
-    
-    - **data**: The status update data
-    """
+    """Cancel the current user's subscription"""
     try:
-        repo_manager = user_data['repo_manager']
-        user_repo = await repo_manager.user_repo
-        update_data = data.dict(exclude_unset=True, exclude_none=True)
+        user_id = current_user["user_id"]
+        user_repo = current_user["user_repo"]
         
-        # Extract card details if present
-        card_details = update_data.pop("card_details", None)
-        if card_details:
-            update_data.update({
-                "card_last4": card_details.last4,
-                "card_brand": card_details.brand,
-                "exp_month": card_details.exp_month,
-                "exp_year": card_details.exp_year,
-                "stripe_payment_method_id": card_details.stripe_payment_method_id
-            })
-        
-        # Check if the user is authorized to update this subscription
-        if update_data.get("user_id") and update_data["user_id"] != user_data["internal_user_id"] and not user_data.get("is_admin", False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this subscription"
-            )
-        
-        # Update the subscription status
-        success = await user_repo.update_subscription_status(**update_data)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Failed to update subscription status"
+        async with user_repo.session_scope() as session:
+            # Get subscription from database
+            subscription = await user_repo._get_subscription_by_criteria(
+                user_id=user_id,
+                session=session
             )
             
-        return {"success": True, "message": "Subscription status updated successfully"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating subscription status: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update subscription status: {str(e)}"
-        )
-
-# Keep existing Stripe integration routes below
-# Route to start a trial
-@subscriptions_router.post("/start-trial", status_code=status.HTTP_201_CREATED)
-async def start_trial(
-    request: Dict = Body(...),
-    user_data: Dict = Depends(authenticate_user)
-):
-    """
-    Start a trial subscription for a user.
-    
-    - **payment_method**: Stripe payment method ID (optional for free trials)
-    - **price_id**: Stripe price ID for the subscription
-    """
-    try:
-        payment_method = request.get('payment_method')
-        price_id = request.get('price_id')
-        
-        if not price_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Price ID is required"
-            )
-            
-        user_id = user_data["internal_user_id"]
-        user_info = user_data["user_info"]
-        email = user_info.get('email')
-        
-        if not email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email is required"
-            )
-
-        # Get user repository and check for existing subscription
-        user_repo = await repo_manager.user_repo
-        subscription = await user_repo.get_user_subscription(user_id)
-        if subscription:
-            # If subscription exists, check its status
-            if subscription.status == 'active':
-                return {"message": "You already have an active subscription"}
-            elif subscription.status == 'trialing':
-                return {"message": "You are already in a trial period"}
-
-        # Create a new trial subscription in Stripe
-        trial_end_dt = datetime.utcnow() + timedelta(days=7)  # 7 days from now
-        trial_end_timestamp = int(trial_end_dt.timestamp())
-        
-        # Create a customer in Stripe if they don't exist
-        stripe_customer_id = user_info.get('stripe_customer_id')
-        customer_data = {
-            'email': email,
-            'metadata': {'user_id': str(user_id)}
-        }
-        
-        # Add payment method if provided
-        if payment_method:
-            customer_data.update({
-                'payment_method': payment_method,
-                'invoice_settings': {
-                    'default_payment_method': payment_method
-                }
-            })
-        
-        # Create or update customer in Stripe
-        if not stripe_customer_id:
-            customer = stripe.Customer.create(**customer_data)
-            stripe_customer_id = customer.id
-            
-            # Save the customer ID to the user's profile
-            await repo_manager.user_repo.update_user(
-                user_id, 
-                {'stripe_customer_id': stripe_customer_id}
-            )
-        else:
-            # Update existing customer with new payment method if provided
-            if payment_method:
-                stripe.Customer.modify(
-                    stripe_customer_id,
-                    **customer_data
+            if not subscription:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No active subscription found"
                 )
-        
-        # Create trial subscription in Stripe
-        subscription_data = {
-            'customer': stripe_customer_id,
-            'items': [{'price': price_id}],
-            'trial_end': trial_end_timestamp,
-            'expand': ['latest_invoice.payment_intent']
-        }
-        
-        # Add payment behavior for trials that require a payment method
-        if payment_method:
-            subscription_data.update({
-                'payment_behavior': 'default_incomplete',
-                'payment_settings': {'save_default_payment_method': 'on_subscription'}
-            })
-        
-        subscription = stripe.Subscription.create(**subscription_data)
-        
-        # Save subscription to database
-        subscription_data = {
-            'user_id': user_id,
-            'status': 'trialing',
-            'stripe_subscription_id': subscription.id,
-            'stripe_customer_id': stripe_customer_id,
-            'current_period_end': datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
-        }
-        
-        await repo_manager.user_repo.create_or_update_subscription(subscription_data)
-        
-        # Format the response
-        response_data = {
-            'status': 'success',
-            'subscription_id': subscription.id,
-            'subscription_status': subscription.status,
-            'trial_end': trial_end_timestamp,
-            'client_secret': (
-                subscription.latest_invoice.payment_intent.client_secret 
-                if hasattr(subscription, 'latest_invoice') and 
-                   hasattr(subscription.latest_invoice, 'payment_intent')
-                else None
-            )
-        }
-        
-        return response_data
-
-    except stripe.error.SignatureVerificationError as e:
-        logger.error(f"Webhook signature verification failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid webhook signature"
-        )
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error in webhook: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Stripe error: {str(e)}"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in webhook: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while processing the webhook"
-        )
-
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error starting trial: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Payment processing error: {str(e)}"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error starting trial: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while starting your trial"
-        )
-
-# Route to cancel a subscription
-@subscriptions_router.post("/cancel", status_code=status.HTTP_200_OK)
-async def cancel_sub(
-    user_data: Dict = Depends(authenticate_user)
-):
-    """
-    Cancel the current user's subscription at the end of the billing period.
-    
-    This will schedule the subscription for cancellation at the end of the current
-    billing period. The user will retain access until that time.
-    """
-    try:
-        repo_manager = user_data['repo_manager']
-        user_repo = await repo_manager.user_repo
-        
-        # Get the subscription using the internal user ID from auth context
-        subscription = await user_repo.get_subscription(
-            user_id=user_data['internal_user_id']
-        )
-        if not subscription or not subscription.get('stripe_subscription_id'):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No active subscription found"
-            )
-        
-        if subscription.status == 'canceled':
-            return {
-                'status': 'canceled',
-                'message': 'Subscription is already canceled',
-                'current_period_end': subscription.current_period_end.isoformat() if subscription.current_period_end else None
-            }
-        
-        stripe_sub_id = subscription.stripe_subscription_id
-        
-        try:
-            # Cancel the subscription at period end in Stripe
-            stripe_sub = stripe.Subscription.modify(
-                stripe_sub_id,
-                cancel_at_period_end=True
-            )
             
-            # Update subscription in our database
-            subscription_update = {
-                'status': 'canceled',
-                'current_period_end': datetime.fromtimestamp(
-                    stripe_sub.current_period_end, 
-                    tz=timezone.utc
-                ) if hasattr(stripe_sub, 'current_period_end') else None
-            }
-            
-            # Update subscription in database
-            await user_repo.update_subscription(
-                user_id=user_data['internal_user_id'],
-                **subscription_update
-            )
-            
-            # Get updated subscription data
-            updated_sub = await user_repo.get_subscription(
-                user_id=user_data['internal_user_id']
-            )
-            response = updated_sub  # Already formatted by the repository
-            response['message'] = "Subscription will be canceled at the end of the billing period"
-            return response
-            
-        except stripe.error.InvalidRequestError as e:
-            if "No such subscription" in str(e):
-                # If subscription doesn't exist in Stripe, mark as canceled locally
-                await user_repo.update_subscription(
-                    user_id=user_data['internal_user_id'],
-                    status='canceled',
-                    current_period_end=datetime.utcnow()
+            # Cancel subscription in Stripe
+            if subscription.stripe_subscription_id:
+                stripe.Subscription.modify(
+                    subscription.stripe_subscription_id,
+                    cancel_at_period_end=True
                 )
-                
-                # Get the updated subscription
-                updated_sub = await user_repo.get_subscription(
-                    user_id=user_data['internal_user_id']
-                )
-                response = updated_sub  # Already formatted by the repository
-                response['message'] = "Subscription was already canceled and removed from Stripe"
-                return response
-                
-            raise handle_stripe_error(e)
+            
+            # Update subscription status in database
+            subscription.status = 'canceled'
+            subscription.canceled_at = datetime.utcnow()
+            
+            session.add(subscription)
+            await session.commit()
+            
+            return {"message": "Subscription will be canceled at the end of the billing period"}
             
     except stripe.error.StripeError as e:
-        logger.error(f"Stripe error in cancel_sub: {str(e)}", exc_info=True)
+        logger.error(f"Stripe error in cancel_subscription: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An error occurred while canceling your subscription"
+            detail=str(e)
         )
-            
-    except HTTPException:
-        raise
-        
     except Exception as e:
-        logger.error(f"Unexpected error in cancel_sub: {str(e)}", exc_info=True)
+        logger.error(f"Error in cancel_subscription: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while canceling your subscription"
+            detail="An error occurred while canceling subscription"
         )
 
-# Route to create a subscription
-@subscriptions_router.post("/create", status_code=status.HTTP_201_CREATED)
-async def create_subscription(
-    request: Dict = Body(...),
-    user_data: Dict = Depends(authenticate_user)
+@router.post("/update-payment", status_code=200)
+async def update_payment_method(
+    payment_method: Dict[str, Any] = Body(...),
+    current_user: Dict = Depends(get_current_user)
 ):
-    """
-    Create a new subscription for the current user.
-    
-    - **payment_method_id**: Stripe payment method ID (required)
-    - **price_id**: Stripe price ID for the subscription (required)
-    """
+    """Update the payment method for the current user's subscription"""
     try:
-        # Validate required fields
-        payment_method_id = request.get('payment_method_id')
-        price_id = request.get('price_id')
+        user_id = current_user["user_id"]
+        user_repo = current_user["user_repo"]
         
-        if not payment_method_id or not price_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Payment method ID and price ID are required"
+        async with user_repo.session_scope() as session:
+            # Get subscription from database
+            subscription = await user_repo._get_subscription_by_criteria(
+                user_id=user_id,
+                session=session
             )
-
-        user_id = user_data["internal_user_id"]
-        email = user_data.get("email")
-        
-        if not email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User email is required"
-            )
-
-        repo_manager = user_data['repo_manager']
-        user_repo = await repo_manager.user_repo
-        
-        # Check if user already has a subscription
-        existing_sub = await user_repo.get_subscription(user_id=user_id)
-        if existing_sub and existing_sub.status in ['active', 'trialing']:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User already has an active subscription"
-            )
-
-        try:
-            # Create or retrieve Stripe customer
-            customer_id = None
-            if existing_sub and existing_sub.stripe_customer_id:
-                customer_id = existing_sub.stripe_customer_id
-                # Update customer's default payment method
-                stripe.PaymentMethod.attach(
-                    payment_method_id,
-                    customer=customer_id,
+            
+            if not subscription:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No active subscription found"
                 )
-                stripe.Customer.modify(
-                    customer_id,
-                    invoice_settings={
-                        'default_payment_method': payment_method_id
-                    }
+            
+            if not subscription.stripe_customer_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No customer ID found for subscription"
                 )
-            else:
-                customer = stripe.Customer.create(
-                    email=email,
-                    payment_method=payment_method_id,
-                    invoice_settings={
-                        'default_payment_method': payment_method_id
-                    }
-                )
-                customer_id = customer.id
-
-            # Get payment method details
-            payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
-
-            # Create subscription
-            subscription = stripe.Subscription.create(
-                customer=customer_id,
-                items=[{
-                    'price': price_id,
-                }],
-                expand=['latest_invoice.payment_intent'],
-                payment_behavior='default_incomplete',
-                payment_settings={
-                    'save_default_payment_method': 'on_subscription',
-                },
-                off_session=True
-            )
-
-            # Create subscription in our database
-            subscription_data = {
-                'user_id': user_id,
-                'status': 'active',
-                'stripe_customer_id': customer_id,
-                'stripe_subscription_id': subscription.id,
-                'current_period_end': datetime.fromtimestamp(
-                    subscription.current_period_end,
-                    tz=timezone.utc
-                ) if hasattr(subscription, 'current_period_end') else None,
-                'plan_id': price_id,
-                'card_last4': payment_method.card.last4 if hasattr(payment_method, 'card') else None,
-                'card_brand': payment_method.card.brand if hasattr(payment_method, 'card') else None,
-                'exp_month': payment_method.card.exp_month if hasattr(payment_method, 'card') else None,
-                'exp_year': payment_method.card.exp_year if hasattr(payment_method, 'card') else None,
-                'stripe_payment_method_id': payment_method_id
-            }
             
-            subscription = await user_repo.create_subscription(**subscription_data)
-
-            # Get the updated subscription with all details
-            subscription_data = await user_repo.get_user_subscription(user_id)
-
-            # Format the response
-            response = await format_subscription_response(subscription_data, repo_manager)
-
-            # Add payment intent client secret if available
-            if (hasattr(subscription, 'latest_invoice') and 
-                subscription.latest_invoice and
-                hasattr(subscription.latest_invoice, 'payment_intent') and 
-                subscription.latest_invoice.payment_intent):
-
-                response.update({
-                    'requires_action': True,
-                    'payment_intent_client_secret': subscription.latest_invoice.payment_intent.client_secret
-                })
-                
-            return response
-            
-        except stripe.error.StripeError as e:
-            logger.error(f"Stripe error in create_subscription: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Payment processing error: {str(e)}"
-            )
-            
-        except HTTPException:
-            raise
-            
-        except Exception as e:
-            logger.error(f"Unexpected error in create_subscription: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An unexpected error occurred while creating your subscription"
-            )
-
-        return response
-
-    except stripe.error.CardError as e:
-        logger.error(f"Card error: {str(e)}", exc_info=True)
-        return format_subscription_response({
-            'status': 'error',
-            'error': str(e)
-        })
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error: {str(e)}", exc_info=True)
-        return format_subscription_response({
-            'status': 'error',
-            'error': "An error occurred while processing your subscription"
-        })
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        return format_subscription_response({
-            'status': 'error',
-            'error': "An unexpected error occurred"
-        })
-
-# Route to update payment method
-@subscriptions_router.post("/update-payment-method", status_code=status.HTTP_200_OK)
-async def update_payment(
-    request: Dict = Body(...),
-    user_data: Dict = Depends(authenticate_user)
-):
-    """
-    Update the payment method for the current user's subscription.
-    
-    - **payment_method_id**: The Stripe payment method ID to use for future payments (required)
-    """
-    try:
-        user_id = user_data["internal_user_id"]
-        payment_method_id = request.get('payment_method_id')
-        
-        if not payment_method_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Payment method ID is required"
-            )
-        
-        repo_manager = user_data['repo_manager']
-        user_repo = await repo_manager.user_repo
-        
-        # Get current subscription
-        subscription = await user_repo.get_subscription(user_id=user_id)
-        if not subscription or not subscription.stripe_customer_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No active subscription found"
-            )
-        
-        try:
-            # Attach the payment method to the customer
-            stripe.PaymentMethod.attach(
-                payment_method_id,
+            # Attach payment method to customer
+            payment_method_obj = stripe.PaymentMethod.attach(
+                payment_method.get('id'),
                 customer=subscription.stripe_customer_id
             )
             
-            # Set as default payment method
+            # Update customer's default payment method
             stripe.Customer.modify(
                 subscription.stripe_customer_id,
                 invoice_settings={
-                    'default_payment_method': payment_method_id
+                    'default_payment_method': payment_method_obj.id
                 }
             )
             
-            # Get payment method details
-            payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
-            
-            # Update subscription with new payment method
-            update_data = {
-                'stripe_payment_method_id': payment_method_id
+            # Update or create card details in database
+            card_data = {
+                'subscription_id': subscription.id,
+                'stripe_payment_method_id': payment_method_obj.id,
+                'card_type': payment_method_obj.card.brand,
+                'last4': payment_method_obj.card.last4,
+                'exp_month': payment_method_obj.card.exp_month,
+                'exp_year': payment_method_obj.card.exp_year
             }
             
-            if hasattr(payment_method, 'card'):
-                update_data.update({
-                    'card_last4': payment_method.card.last4,
-                    'card_brand': payment_method.card.brand,
-                    'card_exp_month': payment_method.card.exp_month,
-                    'card_exp_year': payment_method.card.exp_year
-                })
-            
-            await user_repo.update_subscription(
-                user_id=user_id,
-                **update_data
+            # Check if card details already exist
+            existing_card = await session.execute(
+                select(CardDetails)
+                .where(CardDetails.subscription_id == subscription.id)
             )
+            existing_card = existing_card.scalar_one_or_none()
             
-            # Get updated subscription data
-            updated_sub = await user_repo.get_user_subscription(user_id)
-            response = await format_subscription_response(updated_sub, repo_manager)
-            response['message'] = "Payment method updated successfully"
-            return response
+            if existing_card:
+                for key, value in card_data.items():
+                    setattr(existing_card, key, value)
+                session.add(existing_card)
+            else:
+                session.add(CardDetails(**card_data))
             
-        except stripe.error.CardError as e:
-            logger.error(f"Card error in update_payment: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=e.user_message or "Your card was declined. Please try again with a different payment method."
-            )
+            await session.commit()
             
-        except stripe.error.StripeError as e:
-            logger.error(f"Stripe error in update_payment: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="An error occurred while updating your payment method. Please try again."
-            )
+            return {"message": "Payment method updated successfully"}
             
-    except HTTPException:
-        raise
-        
+    except stripe.error.CardError as e:
+        logger.error(f"Card error in update_payment_method: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error in update_payment_method: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
-        logger.error(f"Unexpected error in update_payment: {str(e)}", exc_info=True)
+        logger.error(f"Error in update_payment_method: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred while updating your payment method."
+            detail="An error occurred while updating payment method"
         )
 
-# Define supported webhook events with their purposes
-SUPPORTED_EVENTS = {
-    'payment_method.attached': 'Update payment method details',
-    'customer.subscription.updated': 'Handle subscription changes',
-    'customer.subscription.deleted': 'Handle subscription cancellation',
-    'customer.subscription.trial_will_end': 'Handle upcoming trial end',
-    'invoice.payment_succeeded': 'Handle successful payments',
-    'invoice.payment_failed': 'Handle payment failures',
-    'invoice.upcoming': 'Notify about upcoming charges',
-    'customer.subscription.created': 'Handle new subscriptions'
-}
-
-# Subscription status transitions for validation
-ALLOWED_STATUS_TRANSITIONS = {
-    'trialing': ['active', 'past_due', 'canceled', 'unpaid'],
-    'active': ['past_due', 'canceled', 'unpaid'],
-    'past_due': ['active', 'canceled', 'unpaid'],
-    'unpaid': ['canceled', 'active'],
-    'canceled': []  # Final state
-}
-
-# Route to handle Stripe webhooks
-@subscriptions_router.post("/webhook", status_code=status.HTTP_200_OK)
-@limiter.limit("100/minute")  # Rate limiting
-async def webhook(
-    request: Request
-):
-    """Handle Stripe webhook events with idempotency and detailed logging.
-    
-    This endpoint processes various Stripe webhook events related to subscriptions
-    and payment methods. It's designed to be idempotent, meaning duplicate events
-    will be detected and handled gracefully without side effects.
-    
-    Returns:
-        JSON response with status and details about the processed event
-    """
-    # Get raw payload and signature
+@router.post("/webhook", status_code=200)
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events"""
     payload = await request.body()
     sig_header = request.headers.get('stripe-signature')
     
-    if not sig_header:
-        logger.error("Missing Stripe-Signature header")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "error",
-                "code": "MISSING_SIGNATURE",
-                "message": "Missing Stripe-Signature header"
-            }
-        )
-    
     try:
-        # Verify webhook signature
         event = stripe.Webhook.construct_event(
-            payload,
-            sig_header,
-            endpoint_secret,
-            tolerance=300  # 5 minutes tolerance for clock drift
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
-        
-        # Log the event type for debugging
-        logger.info(f"Processing Stripe webhook: {event.type}")
-        
-        # Create a new repository manager for the webhook
-        repo_manager = RepositoryManager()
-        await repo_manager.initialize()
-        logger.info(f"Processing webhook: {event['type']} (ID: {event['id']})")
-        
-        # Get the user repository
-        user_repo = await repo_manager.user_repo
-        
-        # Check if event type is supported
-        if event['type'] not in SUPPORTED_EVENTS:
-            logger.warning(f"Unsupported event type: {event['type']}")
-            return {
-                "status": "success", 
-                "message": "Unsupported event type",
-                "event_id": event['id'],
-                "event_type": event['type']
-            }
-            
-        # Handle different event types
-        if event_type == 'customer.subscription.updated':
-            subscription = event['data']['object']
-            customer_id = subscription['customer']
-            subscription_id = subscription.get('id', 'unknown')
-            
-            # Log subscription update details
-            logger.info(f"Processing subscription update for customer {customer_id} (Subscription: {subscription_id})")
-            
-            # Get current subscription from DB
-            current_sub = await user_repo.get_subscription_by_customer_id(customer_id)
-            
-            if current_sub:
-                # Check if this is a duplicate event by comparing with current state
-                current_period_end = current_sub.current_period_end
-                subscription_period_end = subscription.get('current_period_end')
-                
-                # Check if this is a duplicate update
-                if (current_period_end and 
-                    subscription_period_end and 
-                    current_period_end.timestamp() == subscription_period_end and
-                    current_sub.status == subscription.get('status')):
-                    
-                    logger.info(f"Skipping duplicate subscription update for customer {customer_id} (Status: {subscription['status']})")
-                    return {
-                        "status": "success", 
-                        "message": "Duplicate event - no changes detected",
-                        "event_id": event_id,
-                        "event_type": event_type
-                    }
-                
-                # Log status transitions
-                if current_sub.status != subscription.get('status'):
-                    logger.info(f"Subscription status changed from {current_sub.status} to {subscription['status']} for customer {customer_id}")
-                
-                # Handle trial end
-                if (current_sub.status == 'trialing' and 
-                    subscription['status'] == 'active' and
-                    'trial_end' in subscription and 
-                    subscription['trial_end'] is not None and
-                    subscription['trial_end'] <= datetime.now(timezone.utc).timestamp()):
-                    
-                    logger.info(f"Trial ended for customer {customer_id}")
-                    # Trigger any trial end notifications or actions
-            
-            # Prepare update data
-            update_data = {
-                'stripe_customer_id': customer_id,
-                'status': subscription['status'],
-                'stripe_subscription_id': subscription_id,
-                'current_period_end': datetime.fromtimestamp(subscription['current_period_end'], timezone.utc)
-            }
-            
-            # Include trial end if it exists
-            if 'trial_end' in subscription and subscription['trial_end'] is not None:
-                update_data['trial_end'] = datetime.fromtimestamp(subscription['trial_end'], timezone.utc)
-            
-            # Update subscription in database
-            logger.debug(f"Updating subscription with data: {json.dumps(update_data, default=str)}")
-            
-            # Use update_subscription with proper parameters
-            if current_sub:  # Only update if we found a subscription
-                await user_repo.update_subscription(
-                    user_id=current_sub.user_id,
-                    **{k: v for k, v in update_data.items() if k != 'user_id'}
-                )
-            logger.info(f"Successfully updated subscription {subscription_id} for customer {customer_id}")
-            
-        elif event_type == 'customer.subscription.deleted':
-            subscription = event['data']['object']
-            customer_id = subscription['customer']
-            subscription_id = subscription.get('id', 'unknown')
-            
-            logger.info(f"Processing subscription deletion for customer {customer_id} (Subscription: {subscription_id})")
-            
-            # Check if already canceled
-            current_sub = await user_repo.get_subscription_by_customer_id(customer_id)
-            if current_sub and current_sub.status == 'canceled':
-                logger.info(f"Subscription already marked as canceled for customer {customer_id}")
-                return {
-                    "status": "success",
-                    "message": "Subscription already canceled",
-                    "event_id": event['id'],
-                    "event_type": event['type']
-                }
-            
-            # Mark subscription as canceled
-            logger.debug(f"Marking subscription {subscription_id} as canceled for customer {customer_id}")
-            
-            # Use update_subscription with proper parameters
-            update_data = {
-                'stripe_customer_id': customer_id,
-                'status': 'canceled',
-                'stripe_subscription_id': subscription_id,
-                'cancelled_at': datetime.now(timezone.utc)
-            }
-            
-            if current_sub:  # Only update if we found a subscription
-                await user_repo.update_subscription(
-                    user_id=current_sub.user_id,
-                    **update_data
-                )
-            logger.info(f"Successfully marked subscription {subscription_id} as canceled for customer {customer_id}")
-            
-        elif event_type == 'payment_method.attached':
-            payment_method = event['data']['object']
-            customer_id = payment_method['customer']
-            payment_method_id = payment_method.get('id', 'unknown')
-            
-            logger.info(f"Processing payment method attached for customer {customer_id} (Payment Method: {payment_method_id})")
-            
-            # Check if this is a card payment method
-            if payment_method['type'] != 'card' or not payment_method.get('card'):
-                logger.info(f"Skipping non-card payment method: {payment_method.get('type')}")
-                return {
-                    "status": "success",
-                    "message": "Non-card payment method skipped",
-                    "event_id": event_id,
-                    "event_type": event_type
-                }
-            
-            # Check if this is a duplicate update
-            current_sub = await user_repo.get_subscription_by_customer_id(customer_id)
-            card = payment_method['card']
-            
-            if (current_sub and 
-                current_sub.stripe_payment_method_id == payment_method_id and
-                current_sub.card_last4 == card['last4'] and
-                str(current_sub.card_exp_month) == str(card['exp_month']) and
-                str(current_sub.card_exp_year) == str(card['exp_year'])):
-                
-                logger.info(f"Skipping duplicate payment method update for customer {customer_id}")
-                return {
-                    "status": "success",
-                    "message": "Payment method already up to date",
-                    "event_id": event['id'],
-                    "event_type": event['type']
-                }
-            
-            # Update payment method in database
-            logger.debug(f"Updating payment method for customer {customer_id} with card ending in {card['last4']}")
-            
-            # Prepare update data
-            update_data = {
-                'stripe_customer_id': customer_id,
-                'card_last4': card['last4'],
-                'card_brand': card['brand'],
-                'card_exp_month': card['exp_month'],
-                'card_exp_year': card['exp_year'],
-                'stripe_payment_method_id': payment_method_id
-            }
-            
-            if current_sub:  # Only update if we found a subscription
-                await user_repo.update_subscription(
-                    user_id=current_sub.user_id,
-                    **update_data
-                )
-            logger.info(f"Successfully updated payment method for customer {customer_id}")
-            
-            # If this is a payment method update after a failed payment
-            if current_sub and current_sub.status in ['past_due', 'unpaid']:
-                logger.info(f"Processing payment method update for subscription in {current_sub.status} status")
-                
-                try:
-                    # Get the most recent open invoice
-                    invoices = stripe.Invoice.list(
-                        customer=customer_id,
-                        limit=1,
-                        status='open'
-                    )
-                    
-                    if invoices.data:
-                        invoice = invoices.data[0]
-                        logger.info(f"Found open invoice {invoice.id} for customer {customer_id}")
-                        
-                        # Pay the invoice with the new payment method
-                        stripe.Invoice.pay(invoice.id, payment_method=payment_method_id)
-                        logger.info(f"Paid outstanding invoice {invoice.id} for customer {customer_id}")
-                        
-                        # Update subscription status if needed
-                        if current_sub.status != 'active':
-                            await user_repo.update_subscription(
-                                user_id=current_sub.user_id,
-                                status='active'
-                            )
-                            logger.info(f"Updated subscription status to active for customer {customer_id}")
-                    else:
-                        logger.info(f"No open invoices found for customer {customer_id}")
-                        
-                except stripe.error.StripeError as e:
-                    error_msg = f"Failed to process payment for customer {customer_id}: {str(e)}"
-                    logger.error(error_msg, exc_info=True)
-                    # Don't fail the webhook - we'll log the error and continue
-        
-        # Log successful processing
-        logger.info(f"Successfully processed webhook: {event['type']} (ID: {event['id']})")
-        return {
-            "status": "success",
-            "event_id": event['id'],
-            "event_type": event['type']
-        }
-        
+    except ValueError as e:
+        logger.error(f"Invalid payload: {str(e)}")
+        return Response(status_code=400)
     except stripe.error.SignatureVerificationError as e:
-        error_id = str(uuid.uuid4())
-        error_msg = f"Invalid webhook signature (Error ID: {error_id}): {str(e)}"
-        logger.warning(error_msg)
-        logger.debug(f"Request headers: {dict(request.headers)}")
-        logger.debug(f"Request body (first 1000 chars): {payload.decode('utf-8', errors='replace')[:1000]}")
+        logger.error(f"Invalid signature: {str(e)}")
+        return Response(status_code=400)
+    
+    # Get repository manager
+    repo_manager = await get_repository_manager()
+    user_repo = repo_manager.user_repo
+    
+    async with user_repo.session_scope() as session:
+        # Handle the event
+        if event['type'] == 'payment_intent.succeeded':
+            payment_intent = event['data']['object']
+            logger.info(f"PaymentIntent was successful: {payment_intent.id}")
         
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "error",
-                "code": "INVALID_SIGNATURE",
-                "message": "Invalid webhook signature",
-                "error_id": error_id,
-                "details": "The webhook signature verification failed. Please verify your webhook secret and try again."
-            }
+        elif event['type'] == 'payment_method.attached':
+            payment_method = event['data']['object']
+            logger.info(f"PaymentMethod was attached: {payment_method.id}")
+        
+        elif event['type'] == 'customer.subscription.updated':
+            subscription = event['data']['object']
+            await handle_subscription_updated(subscription, user_repo, session)
+        
+        elif event['type'] == 'customer.subscription.deleted':
+            subscription = event['data']['object']
+            await handle_subscription_deleted(subscription, user_repo, session)
+        
+        await session.commit()
+    
+    return Response(status_code=200)
+
+async def handle_subscription_updated(
+    subscription: Dict[str, Any],
+    user_repo: AsyncUserRepository,
+    session: AsyncSession
+):
+    """Handle subscription updated webhook event"""
+    try:
+        # Get subscription from database
+        subscription_obj = await user_repo._get_subscription_by_criteria(
+            stripe_subscription_id=subscription['id'],
+            session=session
         )
         
-    except stripe.error.StripeError as e:
-        error_id = str(uuid.uuid4())
-        error_msg = f"Stripe error processing webhook (Error ID: {error_id}): {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        logger.debug(f"Request headers: {dict(request.headers)}")
+        if not subscription_obj:
+            logger.warning(f"No subscription found for Stripe ID: {subscription['id']}")
+            return
         
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "status": "error",
-                "code": "STRIPE_ERROR",
-                "message": "Error processing webhook",
-                "error_id": error_id,
-                "details": f"An error occurred while processing the webhook: {str(e)}"
-            }
-        )
+        # Update subscription status
+        subscription_obj.status = subscription['status']
+        subscription_obj.current_period_end = datetime.fromtimestamp(subscription['current_period_end'])
+        subscription_obj.cancel_at_period_end = subscription['cancel_at_period_end']
+        
+        session.add(subscription_obj)
+        logger.info(f"Updated subscription {subscription['id']} status to {subscription['status']}")
         
     except Exception as e:
-        error_id = str(uuid.uuid4())
-        error_msg = f"Unexpected error processing webhook (Error ID: {error_id}): {str(e)}"
-        logger.error(error_msg, exc_info=True)
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "status": "error",
-                "code": "INTERNAL_SERVER_ERROR",
-                "message": "An unexpected error occurred",
-                "error_id": error_id,
-                "details": "An unexpected error occurred while processing the webhook. Please try again later."
-            }
+        logger.error(f"Error in handle_subscription_updated: {str(e)}", exc_info=True)
+        raise
+
+async def handle_subscription_deleted(
+    subscription: Dict[str, Any],
+    user_repo: AsyncUserRepository,
+    session: AsyncSession
+):
+    """Handle subscription deleted webhook event"""
+    try:
+        # Get subscription from database
+        subscription_obj = await user_repo._get_subscription_by_criteria(
+            stripe_subscription_id=subscription['id'],
+            session=session
         )
+        
+        if not subscription_obj:
+            logger.warning(f"No subscription found for Stripe ID: {subscription['id']}")
+            return
+        
+        # Update subscription status
+        subscription_obj.status = 'canceled'
+        subscription_obj.canceled_at = datetime.utcnow()
+        
+        session.add(subscription_obj)
+        logger.info(f"Marked subscription {subscription['id']} as canceled")
+        
+    except Exception as e:
+        logger.error(f"Error in handle_subscription_deleted: {str(e)}", exc_info=True)
+        raise
+
+# Export the router
+subscriptions_router = router
+
+# Import models here to avoid circular imports
+from api.models.orm_models import Subscription, CardDetails
