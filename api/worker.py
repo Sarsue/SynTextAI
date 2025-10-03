@@ -40,7 +40,7 @@ logging.basicConfig(
 logger = logging.getLogger("worker")
 
 # Application imports
-from api.repositories.base_repository_manager import RepositoryManager
+from api.repositories import RepositoryManager, get_repository_manager
 from api.agents.ingestion_agent import IngestionAgent
 from api.models.orm_models import File
 from api.core.config import settings
@@ -175,12 +175,10 @@ class WorkerContext:
                     class_=AsyncSession
                 )
 
-                # Initialize repository manager and agent
-                self.repo_manager = RepositoryManager(
-                    session_factory=self._session_factory,
-                    engine=self._engine
-                )
-                self.agent = IngestionAgent(self.repo_manager)
+                # Initialize repository manager with the new factory function
+                self.repo_manager = await get_repository_manager()
+                # Initialize the ingestion agent
+                self.agent = IngestionAgent()
 
                 self._db_initialized = True
                 logger.info("Worker context initialized successfully")

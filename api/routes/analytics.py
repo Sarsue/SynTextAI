@@ -1,20 +1,27 @@
-from fastapi import APIRouter, Depends, Request
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import json
 import os
 import time
+import logging
 import posthog
-from sqlalchemy.ext.asyncio import AsyncSession
-from api.models.db_utils import get_async_session as get_session
+from fastapi import APIRouter, Depends, Request, HTTPException, status
 from pydantic import BaseModel, Field
+
+from ..dependencies import get_repository_manager
+from ..repositories.domain_models import UserInDB
+from ..middleware.auth import get_current_user
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Initialize PostHog client
 posthog.api_key = os.environ.get('POST_HOG_API_KEY', '')
 # If you're self-hosting PostHog, uncomment and set this
 # posthog.host = 'https://your-instance.posthog.com'
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
 
 # PostHog middleware to track API requests
 # This function should be registered in app.py as middleware, not on the router
@@ -67,110 +74,165 @@ class AnalyticsPayload(BaseModel):
     userId: Optional[str] = None
     timestamp: int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
 
-@router.post("/analytics")
+@router.post("/events")
 async def receive_analytics(
     payload: AnalyticsPayload,
     request: Request,
-    db: AsyncSession = Depends(get_session)
-):
-    # Extract client info
-    client_ip = request.client.host
-    user_agent = request.headers.get("user-agent", "")
+    _user: UserInDB = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Receive and process analytics events from the client.
     
-    # Process analytics events
-    for event in payload.events:
-        # Add metadata
-        event["_meta"] = {
-            "ip": client_ip,
-            "userAgent": user_agent,
-            "receivedAt": datetime.now().isoformat(),
-            "sessionId": payload.sessionId
-        }
+    This endpoint accepts analytics events in batches and processes them asynchronously.
+    Events are forwarded to PostHog for analysis and may be stored in the database.
+    
+    Args:
+        payload: The analytics payload containing events to process
+        request: The incoming HTTP request
+        user: The authenticated user (optional, as some events may be from unauthenticated users)
         
-        if payload.userId:
-            event["_meta"]["userId"] = payload.userId
-            # Optionally validate user exists
-            # store = RepositoryManager()
-            # user_id = store.get_user_id_from_email(payload.userId)  # Assuming userId is an email
-            # if not user_id:
-            #     raise HTTPException(status_code=404, detail="User not found")
+    Returns:
+        Dict with status and count of processed events
+    """
+    try:
+        # Get repository manager
+        repo_manager = await get_repository_manager()
         
-        # Send event to PostHog
-        try:
-            event_type = event.get('type', 'unknown')
-            # Convert to PostHog-friendly format
-            properties = {
-                **event,  # Include all original event properties
-                'sessionId': payload.sessionId,
-                'ip': client_ip,
-                'userAgent': user_agent
+        # Extract client info
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent", "")
+        
+        # Process events in a transaction
+        async with repo_manager.session_scope() as session:
+            # Get repositories if needed
+            # user_repo = await repo_manager.user_repo
+            
+            processed_count = 0
+            
+            for event in payload.events:
+                try:
+                    # Add metadata
+                    event_meta = {
+                        "ip": client_ip,
+                        "user_agent": user_agent,
+                        "received_at": datetime.utcnow().isoformat(),
+                        "session_id": payload.sessionId,
+                        "user_id": str(user.id) if user else None
+                    }
+                    
+                    # Add metadata to event
+                    if "_meta" not in event:
+                        event["_meta"] = {}
+                    event["_meta"].update(event_meta)
+                    
+                    # Get event type and properties for PostHog
+                    event_type = event.get('type', 'unknown')
+                    properties = {
+                        **{k: v for k, v in event.items() if k != 'type'},
+                        'session_id': payload.sessionId,
+                        'user_id': str(user.id) if user else None,
+                        'ip': client_ip,
+                        'user_agent': user_agent
+                    }
+                    
+                    # Send to PostHog
+                    distinct_id = str(user.id) if user else payload.sessionId
+                    posthog.capture(
+                        distinct_id=distinct_id,
+                        event=f"{event_type}_event",
+                        properties=properties
+                    )
+                    
+                    # Here you could also store events in your database if needed
+                    # Example:
+                    # await analytics_repo.store_event(
+                    #     event_type=event_type,
+                    #     properties=event,
+                    #     user_id=user.id if user else None,
+                    #     session_id=payload.sessionId,
+                    #     session=session
+                    # )
+                    
+                    processed_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error processing event: {str(e)}", exc_info=True)
+                    # Continue with next event even if one fails
+            
+            # Log successful processing
+            logger.info(
+                f"Processed {processed_count}/{len(payload.events)} analytics events",
+                extra={
+                    "user_id": str(user.id) if user else None,
+                    "session_id": payload.sessionId,
+                    "event_count": len(payload.events),
+                    "processed_count": processed_count
+                }
+            )
+            
+            # Commit the transaction
+            await session.commit()
+            
+            return {
+                "status": "success",
+                "message": f"Processed {processed_count} events",
+                "processed_count": processed_count,
+                "total_events": len(payload.events)
             }
             
-            # Remove 'type' from properties as it's used as the event name
-            if 'type' in properties:
-                del properties['type']
-                
-            # Send to PostHog - use userId as distinct_id if available
-            distinct_id = payload.userId or payload.sessionId
-            posthog.capture(
-                distinct_id=distinct_id,
-                event=f"{event_type}_event",
-                properties=properties
-            )
-        except Exception as e:
-            print(f"Error sending event to PostHog: {str(e)}")
-    
-    # In a production system, you would likely:
-    # 1. Store events in a database (consider ClickHouse, TimescaleDB, or MongoDB)
-    # 2. Queue them in a message broker like Kafka, RabbitMQ, or Redis
-    # 3. Process them asynchronously
-    
-    # For this implementation, we'll log the events and save them to a file
-    # (In production, replace this with proper database storage)
-    try:
-        # Log event types for debugging
-        event_types = [event["type"] for event in payload.events]
-        print(f"Received {len(payload.events)} analytics events: {event_types}")
-        
-        # Still save to file as a backup
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = f"analytics-{timestamp}-{payload.sessionId[:8]}.json"
-        
-        try:
-            with open(f"/tmp/{filename}", "w") as f:
-                json.dump(payload.dict(), f, indent=2)
-        except Exception as e:
-            print(f"Error saving analytics to file: {str(e)}")
-        
-        return {"status": "success", "eventsProcessed": len(payload.events)}
-    
     except Exception as e:
-        print(f"Error processing analytics: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Error in receive_analytics: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing analytics events"
+        )
 
-
-@router.get("/analytics/dashboard")
+@router.get("/dashboard")
 async def analytics_dashboard(
-    db: AsyncSession = Depends(get_session)
-):
+    request: Request,
+    _user: UserInDB = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
-    In a real implementation, this would return analytics dashboard data
-    aggregated from your analytics storage system.
+    Get analytics dashboard data for the authenticated user.
+    
+    This endpoint returns aggregated analytics data that can be displayed
+    on an admin or user dashboard. The data is fetched from the analytics
+    storage system (PostHog) and may be combined with data from the database.
+    
+    Args:
+        request: The incoming HTTP request
+        user: The authenticated user
+        
+    Returns:
+        Dict containing aggregated analytics data for the dashboard
     """
-    # Placeholder for actual dashboard data
-    return {
-        "status": "success",
-        "data": {
-            "message": "Analytics dashboard API endpoint",
-            "metrics": {
-                "totalSessions": 0,
-                "activeUsers": 0,
-                "averageSessionDuration": 0,
-                "bounceRate": 0,
-                "clickEvents": 0,
-                "rageClicks": 0,
+    try:
+        # Get repository manager
+        repo_manager = await get_repository_manager()
+        
+        # In a real implementation, you would fetch data from your analytics storage
+        # For example, using PostHog's API or querying your analytics database
+        
+        # Example of fetching data from PostHog
+        # This is a placeholder - replace with actual PostHog API calls
+        dashboard_data = {
+            "active_users": {
+                "today": 0,  # Replace with actual data
+                "this_week": 0,  # Replace with actual data
+                "this_month": 0,  # Replace with actual data
                 "ghostedSessions": 0
             },
             "note": "This is a placeholder. Connect to your analytics storage to get real metrics."
         }
-    }
+        
+        return dashboard_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching analytics dashboard: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while fetching analytics data"
+        )
+
+# Export the router
+analytics_router = router

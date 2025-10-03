@@ -8,13 +8,11 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from typing import Dict, Any, Optional, AsyncGenerator
-from .repositories.base_repository_manager import get_repository_manager, RepositoryManager
+from .repositories import get_repository_manager, RepositoryManager
 from .utils import decode_firebase_token
 import logging
 
 # Configure logging
-logger = logging.getLogger(__name__)
-
 logger = logging.getLogger(__name__)
 
 
@@ -42,35 +40,6 @@ async def get_repository_manager_ctx() -> AsyncGenerator[RepositoryManager, None
     finally:
         await repo_manager.close()
 
-
-async def get_repository_manager() -> RepositoryManager:
-    """
-    FastAPI dependency to get the repository manager instance.
-    
-    Returns the singleton instance of the repository manager.
-    """
-    try:
-        from .repositories.base_repository_manager import get_repository_manager as get_repo_manager
-        return await get_repo_manager()
-    except Exception as e:
-        logger.error(f"Error getting repository manager: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get repository manager"
-        ) from e
-
-
-async def get_store() -> RepositoryManager:
-    """
-    Alias for get_repository_manager for backward compatibility.
-    
-    This is kept for compatibility with existing code but new code should use
-    get_repository_manager() directly.
-    
-    Returns:
-        RepositoryManager: An initialized repository manager
-    """
-    return await get_repository_manager()
 
 async def get_request_store(request: Request) -> RepositoryManager:
     """
@@ -105,15 +74,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
 async def authenticate_user(
-    token: str = Depends(oauth2_scheme),
-    repo_manager: RepositoryManager = Depends(get_repository_manager)
+    request: Request,
+    token: str = Depends(oauth2_scheme)
 ) -> Dict[str, Any]:
     """
     FastAPI dependency to authenticate a user via Firebase token.
     
     Args:
+        request: The FastAPI request object
         token: The Firebase authentication token
-        repo_manager: RepositoryManager instance
         
     Returns:
         Dict containing user information and store references
@@ -139,6 +108,9 @@ async def authenticate_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
+        # Get the repository manager
+        repo_manager = await get_repository_manager()
+        
         # Get the internal user ID from the Firebase UID
         user_repo = await repo_manager.user_repo
         user = await user_repo.get_user_by_firebase_id(user_info.get('uid'))
@@ -151,9 +123,15 @@ async def authenticate_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
             
-        # Add repository manager and internal user ID to the user info
-        user_info['repo_manager'] = repo_manager
-        user_info['internal_user_id'] = user.id  # Internal integer user ID
+        # Add user info to the request state for use in route handlers
+        request.state.user = {
+            'user_id': user.id,
+            'email': user_info.get('email'),
+            'firebase_uid': user_info.get('uid')
+        }
+        
+        # Add repository manager to the request state
+        request.state.repo_manager = repo_manager
         
         logger.info(f"Authenticated user: {user_info.get('email', 'unknown')} (ID: {user.id})")
         return user_info

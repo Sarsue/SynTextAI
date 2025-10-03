@@ -1,130 +1,110 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status, BackgroundTasks
-from fastapi.responses import JSONResponse
-from typing import Dict, List, Optional, Any, cast
-import logging
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+import logging
+
+import stripe
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Response, BackgroundTasks
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..repositories import RepositoryManager, get_repository_manager
-
-# Get repository manager dependency
-async def get_repo_manager() -> RepositoryManager:
-    repo_manager = await get_repository_manager()
-    if not repo_manager._repos_initialized:
-        await repo_manager._initialize_repositories()
-    return repo_manager
-from ..models.orm_models import User
 from ..models.user_schemas import UserCreate, UserResponse, UserInDB, UserUpdate, UserRole
-from ..dependencies import authenticate_user, decode_firebase_token
+from ..repositories import AsyncUserRepository, RepositoryManager
+from ..dependencies import get_repository_manager
+from ..repositories.domain_models import UserInDB
+from ..middleware.auth import get_current_user
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Initialize router
-users_router = APIRouter(prefix="/api/v1/users", tags=["users"])
+router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
-# Repository manager is provided by get_repository_manager() from repository_manager
+async def get_current_user(request: Request) -> Dict[str, Any]:
+    """Get the current authenticated user from request state."""
+    if not hasattr(request.state, 'user'):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
+    return request.state.user
 
-async def get_firebase_user_info_from_token(authorization: str = Header(None)) -> Dict[str, Any]:
-    """Extract and validate Firebase user info from authorization token.
+@router.post("", status_code=201, response_model=Dict[str, Any])
+async def create_user(
+    request: Request,
+    _user: UserInDB = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Create a new user or return existing user if already registered.
+    
+    This endpoint is called after successful Firebase authentication.
+    It checks if the user exists by email, and if not, creates a new user record.
     
     Args:
-        authorization: The authorization header value
+        request: The incoming HTTP request containing user info in state
+        user: The authenticated user from Firebase
         
     Returns:
-        Dict containing user info from Firebase token
-        
-    Raises:
-        HTTPException: If token is invalid or missing required claims
+        Dict containing user creation status and user details
     """
-    if not authorization or not authorization.startswith("Bearer "):
-        logger.warning("Invalid or missing Authorization token")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization token"
-        )
-        
-    token = authorization.split("Bearer ")[1]
-    success, user_info = decode_firebase_token(token)
-    
-    if not success or not user_info:
-        logger.warning("Failed to decode Firebase token or token is invalid")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or unparseable token"
-        )
-        
-    if not user_info.get('email'):
-        logger.warning("Token is missing email claim")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token is missing required email claim"
-        )
-        
-    return cast(Dict[str, Any], user_info)
-
-
-# Route to create a new user
-@users_router.post("", status_code=201)
-async def create_user(
-    user_info: Dict[str, Any] = Depends(get_firebase_user_info_from_token),
-    repo_manager: RepositoryManager = Depends(get_repo_manager)
-) -> JSONResponse:
-    email = user_info.get('email')
-    name = user_info.get('name', email)  # Fallback to email if name not provided
-    firebase_uid = user_info.get('uid')
-
-    if not email:
-        logger.error("POST /users: Email missing from Firebase token info.")
-        raise HTTPException(status_code=400, detail="Email missing from token.")
-
-    # Get user repository and check if user already exists by email
     try:
-        user_repo = await repo_manager.user_repo
-        existing_user = await user_repo.get_by_email(email)
-        if existing_user:
-            logger.info(f"User with email {email} already exists. Returning 200 OK.")
-            return JSONResponse(
-                content={"message": "User already registered", "email": email, "user_id": str(existing_user.id)}, 
-                status_code=200
+        # Get repository manager
+        repo_manager = await get_repository_manager()
+        
+        async with repo_manager.session_scope() as session:
+            user_repo = await repo_manager.user_repo
+            
+            # Check if user already exists
+            existing_user = await user_repo.get_user_by_email(user.email, session=session)
+            if existing_user:
+                logger.info(f"User with email {user.email} already exists")
+                return {
+                    "status": "success",
+                    "message": "User already registered",
+                    "user_id": str(existing_user.id),
+                    "email": existing_user.email,
+                    "is_new_user": False
+                }
+            
+            # Create new user
+            user_data = UserCreate(
+                email=user.email,
+                name=user.name or user.email.split('@')[0],
+                firebase_uid=user.firebase_uid,
+                is_verified=True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
             )
-    except Exception as e:
-        logger.error(f"Error accessing user repository: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error while accessing user data")
-
-    # Create new user
-    try:
-        logger.info(f"Creating new user with email {email}")
-        user_create = UserCreate(
-            email=email,
-            name=name,
-            firebase_uid=firebase_uid,
-            is_verified=True
-        )
-        
-        # Get user repository and create user
-        user_repo = await repo_manager.user_repo
-        new_user = await user_repo.create(user_create)
-        logger.info(f"Successfully created new user with ID: {new_user.id}")
-        
-        return JSONResponse(
-            content={"message": "User created successfully", "email": email, "user_id": str(new_user.id)},
-            status_code=201
-        )
+            
+            new_user = await user_repo.create_user(user_data, session=session)
+            logger.info(f"Created new user with ID: {new_user.id}")
+            
+            return {
+                "status": "success",
+                "message": "User created successfully",
+                "user_id": str(new_user.id),
+                "email": new_user.email,
+                "is_new_user": True
+            }
+            
     except IntegrityError as e:
-        logger.error(f"IntegrityError while creating user {email}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=409, detail=f"User with email {email} already exists.")
+        logger.error(f"Integrity error creating user {user.email}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User with this email already exists"
+        )
     except Exception as e:
-        logger.error(f"Unexpected error creating user {email}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during user creation.")
+        logger.error(f"Error creating user {user.email}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating user"
+        )
 
-# Route to delete a user
-@users_router.delete("", status_code=200, response_model=Dict[str, str])
+@router.delete("", status_code=200, response_model=Dict[str, str])
 async def delete_user(
     request: Request,
-    user_data: Dict = Depends(authenticate_user),
-    repo_manager: RepositoryManager = Depends(get_repo_manager)
+    _user: UserInDB = Depends(get_current_user)
 ) -> Dict[str, str]:
     """
     Delete a user account and all associated data.
@@ -139,25 +119,19 @@ async def delete_user(
     - Clearing local storage/session
     - Redirecting to the home page
     
-    Request Headers:
-        - Authorization: Bearer <firebase_token>
+    Args:
+        request: The incoming HTTP request
+        user: The authenticated user
         
     Returns:
-        {
-            "status": "success"|"error",
-            "message": "Operation status message",
-            "email": "user@example.com"
-        }
+        Dict with status, message, and email of the deleted user
     """
-    user_id = user_data["user_id"]
-    user_email = user_data["user_info"]['email']
-    
     # Log the deletion attempt with request context
     logger.info(
         "Initiating user deletion",
         extra={
-            "user_id": user_id,
-            "email": user_email,
+            "user_id": str(user.id),
+            "email": user.email,
             "action": "account_deletion",
             "client_ip": request.client.host if request.client else None,
             "user_agent": request.headers.get("user-agent")
@@ -165,38 +139,56 @@ async def delete_user(
     )
     
     try:
-        # Get user repository
-        user_repo = await repo_manager.user_repo
+        # Get repository manager
+        repo_manager = await get_repository_manager()
         
-        # Perform the deletion
-        success = await user_repo.delete_user_account(user_id)
-        
-        if not success:
-            logger.error(
-                "Failed to delete user account",
-                extra={"user_id": user_id, "action": "account_deletion_failed"}
+        async with repo_manager.session_scope() as session:
+            user_repo = await repo_manager.user_repo
+            
+            # Verify the user exists and get fresh data
+            current_user = await user_repo.get_user_by_id(user.id, session=session)
+            if not current_user:
+                logger.warning(f"User with ID {user.id} not found for deletion")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found"
+                )
+            
+            # Perform the soft delete
+            success = await user_repo.soft_delete_user(
+                user_id=user.id,
+                session=session
             )
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to process account deletion"
+            
+            if not success:
+                logger.error(
+                    "Failed to delete user account",
+                    extra={"user_id": str(user.id), "action": "account_deletion_failed"}
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to process account deletion"
+                )
+            
+            # Commit the transaction
+            await session.commit()
+            
+            # Log successful deletion
+            logger.info(
+                "User account successfully deleted",
+                extra={
+                    "user_id": str(user.id),
+                    "email": user.email,
+                    "action": "account_deletion_success"
+                }
             )
-        
-        # Log successful deletion
-        logger.info(
-            "User account successfully deleted",
-            extra={
-                "user_id": user_id,
-                "email": user_email,
-                "action": "account_deletion_success"
+            
+            return {
+                "status": "success",
+                "message": "Your account and all associated data have been deleted.",
+                "email": user.email
             }
-        )
-        
-        return {
-            "status": "success",
-            "message": "Your account and all associated data have been deleted.",
-            "email": user_email
-        }
-        
+            
     except HTTPException:
         # Re-raise HTTP exceptions as-is
         raise
@@ -206,13 +198,16 @@ async def delete_user(
         logger.critical(
             "Unexpected error during user deletion",
             extra={
-                "user_id": user_id,
+                "user_id": str(user.id) if user else None,
                 "error": str(e),
                 "action": "account_deletion_failed"
             },
             exc_info=True
         )
         raise HTTPException(
-            status_code=500,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while processing your request"
         )
+
+# Export the router
+users_router = router

@@ -32,15 +32,32 @@ def decode_firebase_token(token):
 def get_user_id(token):
     try:
         logger.debug("Extracting user ID from token...")
-        token = token.split("Bearer ")[1]
+        # Handle case where token might be None or empty
+        if not token:
+            logger.error("No token provided")
+            return False, {'error': 'No authentication token provided'}
+            
+        # Handle different token formats
+        if ' ' in token:
+            # Handle 'Bearer ' prefix if present
+            token = token.split(' ')[-1]  # Get the last part after splitting on space
+            
+        # Ensure token is not empty after processing
+        if not token:
+            logger.error("Empty token after processing")
+            return False, {'error': 'Invalid token format'}
+            
         success, user_info = decode_firebase_token(token)
         if success:
-            logger.info(f"Successfully extracted user ID: {user_info['user_id']}")
+            logger.info(f"Successfully extracted user ID: {user_info.get('user_id', 'unknown')}")
         else:
-            logger.error(f"Failed to extract user ID: {user_info['error']}")
+            logger.error(f"Failed to extract user ID: {user_info.get('error', 'Unknown error')}")
         return success, user_info
+    except IndexError as ie:
+        logger.error(f"Token format error: {str(ie)}")
+        return False, {'error': 'Invalid token format'}
     except Exception as e:
-        logger.error(f"Error extracting user ID: {e}")
+        logger.error(f"Error extracting user ID: {str(e)}", exc_info=True)
         return False, {'error': str(e)}
 
 def format_timestamp(seconds: float) -> str:

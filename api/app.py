@@ -12,7 +12,8 @@ from fastapi import (
     WebSocketDisconnect, 
     Request, 
     status,
-    Depends
+    Depends,
+    HTTPException
 )
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -23,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .websocket_manager import websocket_manager
-from .repositories import get_repository_manager, RepositoryManager
+from .repositories import get_repository_manager as _get_repository_manager, RepositoryManager
 from .firebase_setup import initialize_firebase
 from .utils import utils
 from .models import init_db, close_db, get_engine
@@ -39,6 +40,9 @@ load_dotenv()
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
+# Global repository manager instance
+_repo_manager: RepositoryManager = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events.
@@ -46,6 +50,8 @@ async def lifespan(app: FastAPI):
     This context manager handles startup and shutdown events for the application.
     It ensures proper initialization and cleanup of resources.
     """
+    global _repo_manager
+    
     # Startup logic
     logger.info("Starting application...")
     
@@ -63,9 +69,14 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized successfully")
     
     # Initialize repository manager
+    logger.info("Initializing repository manager...")
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable not set")
+        
     try:
-        repo_manager = await get_repository_manager()
-        app.state.repo_manager = repo_manager
+        _repo_manager = await _get_repository_manager(database_url=database_url)
+        app.state.repo_manager = _repo_manager
         logger.info("Repository manager initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize repository manager: {e}", exc_info=True)
@@ -85,14 +96,30 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application...")
     
     # Close repository manager
-    if hasattr(app.state, 'repo_manager') and app.state.repo_manager:
-        await app.state.repo_manager.close()
-        logger.info("Repository manager closed")
+    global _repo_manager
+    if _repo_manager is not None:
+        try:
+            await _repo_manager.close()
+            logger.info("Repository manager closed successfully")
+        except Exception as e:
+            logger.error(f"Error closing repository manager: {e}", exc_info=True)
+        finally:
+            _repo_manager = None
+    
+    # Clean up app state
+    if hasattr(app.state, 'repo_manager'):
+        app.state.repo_manager = None
     
     # Shutdown database
     logger.info("Shutting down database...")
-    await close_db()
-    logger.info("Database shutdown complete")
+    try:
+        await close_db()
+        logger.info("Database shutdown complete")
+    except Exception as e:
+        logger.error(f"Error during database shutdown: {e}", exc_info=True)
+
+# Import auth middleware
+from .middleware.auth import AuthMiddleware, get_current_user
 
 # Initialize FastAPI with lifespan management
 app = FastAPI(
@@ -102,6 +129,9 @@ app = FastAPI(
     max_request_body_size=2 * 1024 * 1024 * 1024,
     lifespan=lifespan
 )
+
+# Initialize and add authentication middleware
+auth_middleware = AuthMiddleware(app)
 
 # Configure rate limiting
 app.state.limiter = limiter
@@ -212,10 +242,12 @@ async def get_repository_manager_dep() -> RepositoryManager:
     Returns:
         RepositoryManager: The initialized repository manager
     """
-    # Initialize database if not already done
-    if not _initialized:
-        await init_db()
-    return await get_repository_manager()
+    if _repo_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Repository manager not initialized"
+        )
+    return _repo_manager
 
 # For backward compatibility
 async def get_store() -> RepositoryManager:
