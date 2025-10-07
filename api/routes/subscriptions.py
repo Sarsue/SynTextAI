@@ -40,7 +40,7 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
         logger.error("Failed to authenticate user with token")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = store.get_user_id_from_email(user_info['email'])
+    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
     if not user_id:
         logger.error(f"No user ID found for email: {user_info['email']}")
         raise HTTPException(status_code=404, detail="User not found")
@@ -56,7 +56,7 @@ async def subscription_status(
 ):
     try:
         user_id = user_data["user_id"]
-        subscription_data = store.get_subscription(user_id)
+        subscription_data = await store.user_repo.get_subscription(user_id)
         
         if not subscription_data:
             return {
@@ -97,7 +97,7 @@ async def start_trial(
         user_info = user_data["user_info"]
 
         # Check if the user already has a subscription
-        subscription = store.get_subscription(user_id)
+        subscription = await store.user_repo.get_subscription(user_id)
         if subscription:
             # If subscription exists, check its status
             if subscription.get('status') == 'active':
@@ -133,7 +133,7 @@ async def start_trial(
             )
 
             # Store the subscription in the database with the 'trial' status
-            store.add_or_update_subscription(
+            await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
@@ -164,7 +164,7 @@ async def cancel_sub(
 ):
     try:
         user_id = user_data["user_id"]
-        subscription_status = store.get_subscription(user_id)
+        subscription_status = await store.user_repo.get_subscription(user_id)
         if not subscription_status:
             raise HTTPException(status_code=404, detail="No subscription found")
 
@@ -173,7 +173,7 @@ async def cancel_sub(
             raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
         cancellation_result = stripe.Subscription.delete(subscription_id)
-        store.update_subscription_status(
+        await store.user_repo.update_subscription_status(
             subscription_status['stripe_customer_id'],
             cancellation_result['status']
         )
@@ -201,7 +201,7 @@ async def create_subscription(
         user_info = user_data["user_info"]
 
         # Check if user already has a subscription
-        subscription = store.get_subscription(user_id)
+        subscription = await store.user_repo.get_subscription(user_id)
         if subscription:
             # If subscription exists, get the customer ID from it
             stripe_customer_id = subscription.get('stripe_customer_id')
@@ -257,7 +257,7 @@ async def create_subscription(
             )
             
             # Store the subscription in the database
-            store.add_or_update_subscription(
+            await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
@@ -281,7 +281,7 @@ async def create_subscription(
         except Exception as e:
             # Handle card errors
             error_msg = str(e)
-            store.add_or_update_subscription(
+            await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=None,
@@ -303,7 +303,7 @@ async def update_payment(
 ):
     try:
         user_id = user_data["user_id"]
-        subscription = store.get_subscription(user_id)
+        subscription = await store.user_repo.get_subscription(user_id)
         if not subscription:
             raise HTTPException(status_code=404, detail="No subscription found")
 
@@ -316,7 +316,7 @@ async def update_payment(
         stripe.PaymentMethod.attach(payment_method, customer=stripe_customer_id)
         stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
 
-        store.update_subscription(
+        await store.user_repo.update_subscription(
             stripe_customer_id=stripe_customer_id,
             status=subscription["status"],  # Or retrieve status from Stripe if required
             current_period_end=datetime.utcfromtimestamp(subscription["current_period_end"]),  # Retrieve current period end from Stripe if needed
@@ -345,16 +345,20 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
         stripe_customer_id = data_object['customer']
 
         if event_type == 'invoice.payment_succeeded':
-            store.update_subscription_status(stripe_customer_id, "active")
-
+            await store.user_repo.update_subscription_status(stripe_customer_id, "active")
         elif event_type == 'invoice.payment_failed':
-            store.update_subscription_status(stripe_customer_id, "card_declined")
+            await store.user_repo.update_subscription_status(stripe_customer_id, "card_declined")
 
         elif event_type == 'customer.subscription.updated':
             current_status = data_object['status']
             previous_status = event['data'].get('previous_attributes', {}).get('status') # Keep this for potential future use or logging
             current_period_end = data_object['current_period_end']
 
+            await store.user_repo.update_subscription(
+                stripe_customer_id=stripe_customer_id,
+                status=current_status,
+                current_period_end=current_period_end
+            )
             # --- Logic to handle trial end --- 
             try:
                 # Using the repository methods to get subscription info
@@ -383,16 +387,14 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
             # --- End trial handling logic --- 
 
             # Always update the subscription record with the latest status from Stripe
-            store.update_subscription(stripe_customer_id, current_status, current_period_end)
-
+            await store.user_repo.update_subscription(stripe_customer_id, current_status, current_period_end)
         elif event_type == 'customer.subscription.deleted':
-            store.update_subscription_status(stripe_customer_id, "canceled")
+            await store.user_repo.update_subscription_status(stripe_customer_id, "canceled")
 
         else:
             raise HTTPException(status_code=400, detail="Unhandled event")
 
         return {"status": "success"}
-
     except stripe.error.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
     except ValueError:

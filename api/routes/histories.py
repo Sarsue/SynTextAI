@@ -26,7 +26,7 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
         logger.error("Failed to authenticate user with token")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = store.get_user_id_from_email(user_info['email'])
+    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
     if not user_id:
         logger.error(f"No user ID found for email: {user_info['email']}")
         raise HTTPException(status_code=404, detail="User not found")
@@ -43,7 +43,7 @@ async def create_history(
 ):
     try:
         user_id = user_data["user_id"]
-        history = store.add_chat_history(title, user_id)
+        history = await store.chat_repo.add_chat_history(title, user_id)
         return history
     except Exception as e:
         logger.error(f"Error creating chat history: {e}")
@@ -57,7 +57,7 @@ async def get_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = store.get_all_user_chat_histories(user_id)
+        message_list = await store.chat_repo.get_all_user_chat_histories(user_id)
         return message_list
     except Exception as e:
         logger.error(f"Error retrieving chat histories: {e}")
@@ -72,7 +72,7 @@ async def get_specific_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = store.get_messages_for_chat_history(user_id, history_id)
+        message_list = await store.chat_repo.get_messages_for_chat_history(user_id, history_id)
         return message_list
     except Exception as e:
         logger.error(f"Error retrieving messages for history {history_id}: {e}")
@@ -87,7 +87,7 @@ async def delete_specific_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        store.delete_chat_history(user_id, history_id)
+        await store.chat_repo.delete_chat_history(user_id, history_id)
         return {"message": "History deleted successfully", "deletedHistoryId": history_id}
     except Exception as e:
         logger.error(f"Error deleting history {history_id}: {e}")
@@ -101,7 +101,7 @@ async def delete_all_user_histories(
 ):
     try:
         user_id = user_data["user_id"]
-        store.delete_all_user_histories(user_id)
+        await store.chat_repo.delete_all_user_histories(user_id)
         return {"message": "All histories deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting all histories for user {user_id}: {e}")

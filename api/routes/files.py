@@ -52,7 +52,7 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
             logger.error("Failed to authenticate user with token")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
-        user_id = store.get_user_id_from_email(user_info['email'])
+        user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
         if not user_id:
             logger.error(f"No user ID found for email: {user_info['email']}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -89,12 +89,15 @@ async def save_file(
             if not url or not youtube_regex.match(url):
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             
-            file_record = store.add_file(user_id=user_id, file_name=url, file_url=url)
-            if not file_record:
+            file_id = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
+            if not file_id:
                 raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
 
             task_name = 'tasks.process_youtube_url'
-            request.app.state.celery_app.send_task(task_name, args=[file_record['id'], url, language, comprehension_level])
+            request.app.state.celery_app.send_task(task_name, args=[file_id, url, language, comprehension_level])
+            
+            # Get file details for response
+            file_record = await store.file_repo.get_file_by_id(file_id)
             return UploadResponse(files=[FileResponse.model_validate(file_record)])
 
         elif content_type.startswith("multipart/form-data"):
@@ -104,13 +107,16 @@ async def save_file(
             uploaded_files_responses = []
             for file in files:
                 gcs_url = upload_to_gcs(file, user_gc_id)
-                file_record = store.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
-                if not file_record:
+                file_id = await store.file_repo.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
+                if not file_id:
                     logger.error(f"Failed to create file record for {file.filename}")
                     continue
 
                 task_name = 'tasks.process_uploaded_file'
-                request.app.state.celery_app.send_task(task_name, args=[file_record['id'], gcs_url, file.filename, language, comprehension_level])
+                request.app.state.celery_app.send_task(task_name, args=[file_id, gcs_url, file.filename, language, comprehension_level])
+                
+                # Get file details for response
+                file_record = await store.file_repo.get_file_by_id(file_id)
                 uploaded_files_responses.append(FileResponse.model_validate(file_record))
             return UploadResponse(files=uploaded_files_responses)
         else:
@@ -134,7 +140,7 @@ async def retrieve_files(
     try:
         user_id = user_data['user_id']
         offset = (page - 1) * page_size
-        paginated_result = store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size)
+        paginated_result = await store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size)
         
         db_files = paginated_result.get('items', [])
         total_files = paginated_result.get('total', 0)
@@ -173,14 +179,14 @@ async def delete_file(
         user_id = user_data["user_id"]
         user_gc_id = user_data["user_gc_id"]
 
-        file_to_delete = store.file_repo.get_file_by_id(file_id)
+        file_to_delete = await store.file_repo.get_file_by_id(file_id)
         if not file_to_delete or file_to_delete.user_id != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
 
         if file_to_delete.file_url and "storage.googleapis.com" in file_to_delete.file_url:
              delete_from_gcs(file_to_delete.file_url, user_gc_id)
 
-        if not store.delete_file_entry(file_id=file_id, user_id=user_id):
+        if not await store.file_repo.delete_file_entry(user_id, file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -193,8 +199,8 @@ async def delete_file(
 # --- Learning Content Endpoints ---
 
 # Helper for ownership check
-def check_ownership(file_id: int, user_id: int, store: RepositoryManager):
-    if not store.file_repo.check_user_file_ownership(file_id, user_id):
+async def check_ownership(file_id: int, user_id: int, store: RepositoryManager):
+    if not await store.file_repo.check_user_file_ownership(file_id, user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
 
 # --- Flashcards ---
@@ -218,10 +224,10 @@ async def get_flashcards_for_file(
         logger.info(f"[API] Getting flashcards for file {file_id} (page {page}, size {page_size})")
         
         # Check file ownership
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Get the flashcards
-        flashcards = store.learning_material_repo.get_flashcards_for_file(file_id, page, page_size)
+        flashcards = await store.learning_material_repo.get_flashcards_for_file(file_id, page, page_size)
         
         logger.info(f"[API] Found {len(flashcards)} flashcards for file {file_id}")
         
@@ -268,15 +274,15 @@ async def add_flashcard_for_file(
         logger.info(f"[API] Adding flashcard to file {file_id} by user {user_data['user_id']}")
         
         # Check file ownership and processing status
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Create a dictionary with the flashcard data to pass to the repository
         flashcard_dict = flashcard_data.dict()
-        
+
         # Add the flashcard and get the new flashcard ID
-        flashcard_id = store.learning_material_repo.add_flashcard(
+        flashcard_id = await store.learning_material_repo.add_flashcard(
             file_id=file_id,
-            flashcard_data=flashcard_data
+            flashcard_data=flashcard_dict
         )
         
         if not flashcard_id:
@@ -334,15 +340,14 @@ async def update_flashcard(
         logger.info(f"[API] Updating flashcard {flashcard_id} for file {file_id} by user {user_data['user_id']}")
         
         # Check file ownership first
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Update the flashcard - the repository will verify it belongs to the user
-        updated_flashcard = store.learning_material_repo.update_flashcard(
+        updated_flashcard = await store.learning_material_repo.update_flashcard(
             flashcard_id=flashcard_id,
             user_id=user_data["user_id"],
-            update_data=flashcard_update_data
+            update_data=flashcard_update_data.dict(exclude_none=True)
         )
-        
         if not updated_flashcard:
             logger.error(f"[API] Failed to update flashcard {flashcard_id} for file {file_id}")
             raise HTTPException(
@@ -398,10 +403,10 @@ async def delete_flashcard(
         logger.info(f"[API] Deleting flashcard {flashcard_id} for file {file_id} by user {user_data['user_id']}")
         
         # Check file ownership first
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Delete the flashcard - the repository will verify it belongs to the user
-        success = store.learning_material_repo.delete_flashcard(
+        success = await store.learning_material_repo.delete_flashcard(
             flashcard_id=flashcard_id,
             user_id=user_data["user_id"]
         )
@@ -445,10 +450,10 @@ async def get_quiz_questions_for_file(
         logger.info(f"[API] Getting quiz questions for file {file_id} (page {page}, size {page_size})")
         
         # Check file ownership
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Get the quiz questions
-        quiz_questions = store.learning_material_repo.get_quiz_questions_for_file(file_id, page, page_size)
+        quiz_questions = await store.learning_material_repo.get_quiz_questions_for_file(file_id, page, page_size)
         
         logger.info(f"[API] Found {len(quiz_questions)} quiz questions for file {file_id}")
         
@@ -499,15 +504,15 @@ async def add_quiz_question_for_file(
         logger.info(f"[API] Adding quiz question to file {file_id} by user {user_data['user_id']}")
         
         # Check file ownership
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Create a dictionary with the question data to pass to the repository
-        question_dict = question_data.dict()
-        
+        question_dict = question_data.dict(exclude_none=True)
+
         # Add the quiz question and get the new question ID
-        question_id = store.learning_material_repo.add_quiz_question(
+        question_id = await store.learning_material_repo.add_quiz_question(
             file_id=file_id,
-            quiz_question_data=question_data
+            **question_dict
         )
         
         if not question_id:
@@ -566,13 +571,13 @@ async def update_quiz_question(
         logger.info(f"[API] Updating quiz question {quiz_question_id} for file {file_id} by user {user_data['user_id']}")
         
         # Check file ownership first
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Update the quiz question - the repository will verify it belongs to the user
-        updated_question = store.learning_material_repo.update_quiz_question(
+        updated_question = await store.learning_material_repo.update_quiz_question(
             quiz_question_id=quiz_question_id,
             user_id=user_data["user_id"],
-            update_data=quiz_question_data
+            update_data=quiz_question_data.dict(exclude_none=True)
         )
         
         if not updated_question:
@@ -631,10 +636,10 @@ async def delete_quiz_question(
         logger.info(f"[API] Deleting quiz question {quiz_question_id} for file {file_id} by user {user_data['user_id']}")
         
         # Check file ownership first
-        check_ownership(file_id, user_data["user_id"], store)
-        
+        await check_ownership(file_id, user_data["user_id"], store)
+
         # Delete the quiz question - the repository will verify it belongs to the user
-        success = store.learning_material_repo.delete_quiz_question(
+        success = await store.learning_material_repo.delete_quiz_question(
             quiz_question_id=quiz_question_id,
             user_id=user_data["user_id"]
         )
@@ -667,8 +672,8 @@ async def get_key_concepts_for_file(
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
 ) -> StandardResponse:
-    check_ownership(file_id, user_data["user_id"], store)
-    concepts = store.learning_material_repo.get_key_concepts_for_file(file_id, page, page_size)
+    await check_ownership(file_id, user_data["user_id"], store)
+    concepts = await store.learning_material_repo.get_key_concepts_for_file(file_id, page, page_size)
     return StandardResponse(
         data=KeyConceptsListResponse(key_concepts=concepts).model_dump(),
         message="Key concepts retrieved successfully"
@@ -684,16 +689,16 @@ async def add_key_concept(
         logger.info(f"[API] Adding key concept for file {file_id} by user {user_data['user_id']}")
         
         # Verify file ownership through repository
-        if not store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+        if not await store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found or you don't have permission to access it."
             )
-        
+
         # Add the key concept through the repository
-        new_concept = store.learning_material_repo.add_key_concept(
-            file_id=file_id, 
-            key_concept_data=key_concept_data
+        new_concept = await store.learning_material_repo.add_key_concept(
+            file_id=file_id,
+            key_concept_data=key_concept_data.dict()
         )
         
         if not new_concept:
@@ -756,16 +761,16 @@ async def update_key_concept(
     """
     try:
         # Verify file ownership through repository
-        if not store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+        if not await store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found or you don't have permission to access it."
             )
-        
+
         # Update the key concept
-        updated_concept = store.learning_material_repo.update_key_concept(
+        updated_concept = await store.learning_material_repo.update_key_concept(
             concept_id=key_concept_id,
-            update_data=key_concept_update_data
+            update_data=key_concept_update_data.dict(exclude_none=True)
         )
         
         if not updated_concept:
@@ -811,9 +816,9 @@ async def delete_key_concept(
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
 ):
-    check_ownership(file_id, user_data["user_id"], store)
-    success = store.learning_material_repo.delete_key_concept(
-        key_concept_id=key_concept_id, 
+    await check_ownership(file_id, user_data["user_id"], store)
+    success = await store.learning_material_repo.delete_key_concept(
+        key_concept_id=key_concept_id,
         user_id=user_data["user_id"]
     )
     if not success:

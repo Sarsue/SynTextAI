@@ -29,7 +29,7 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
         logger.error("Failed to authenticate user with token")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = store.get_user_id_from_email(user_info['email'])
+    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
     if not user_id:
         logger.error(f"No user ID found for email: {user_info['email']}")
         raise HTTPException(status_code=404, detail="User not found")
@@ -69,7 +69,7 @@ async def create_user( # Function name remains 'create_user'
         name = email 
 
     # Check if user already exists by email
-    existing_user_id = store.get_user_id_from_email(email)
+    existing_user_id = await store.user_repo.get_user_id_from_email(email)
     if existing_user_id:
         logger.info(f"POST /users: User with email {email} already exists with ID {existing_user_id}. Returning 200 OK.")
         # You might want to fetch and return the full existing user object
@@ -87,7 +87,7 @@ async def create_user( # Function name remains 'create_user'
         logger.info(f"POST /users: Creating new user with email {email} and name {name}.")
         # Ensure add_user can handle potential missing fields or has defaults
         # Also, consider if your store.add_user needs/accepts firebase_uid
-        new_user = store.add_user(email, name, firebase_uid=firebase_uid) # Pass firebase_uid if your add_user and DB schema support it
+        new_user = await store.user_repo.add_user(email, name) # Pass firebase_uid if your add_user and DB schema support it
         logger.info(f"POST /users: Successfully created new user: {new_user.email if hasattr(new_user, 'email') else 'unknown'}")
         return new_user # FastAPI will serialize this (hopefully Pydantic model) to JSON with 201 status
     except IntegrityError: 

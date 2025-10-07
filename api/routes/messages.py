@@ -27,7 +27,7 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
         logger.error("Failed to authenticate user with token")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    user_id = store.get_user_id_from_email(user_info['email'])
+    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
     if not user_id:
         logger.error(f"No user ID found for email: {user_info['email']}")
         raise HTTPException(status_code=404, detail="User not found")
@@ -51,7 +51,7 @@ async def create_message(
         user_id = user_data["user_id"]
 
         # Save the user message to the history
-        user_request = store.add_message(
+        user_request = await store.chat_repo.add_message(
             content=message, sender='user', user_id=user_id, chat_history_id=history_id
         )
         message_list = [user_request]
