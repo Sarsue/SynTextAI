@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.user_schemas import UserCreate, UserResponse, UserInDB, UserUpdate, UserRole
 from ..repositories import AsyncUserRepository, RepositoryManager
 from ..dependencies import get_repository_manager
-from ..repositories.domain_models import UserInDB
+from ..models.user import UserInDB
 from ..middleware.auth import get_current_user
 
 # Configure logging

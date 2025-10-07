@@ -9,11 +9,11 @@ from sqlalchemy.orm import selectinload, joinedload
 import logging
 
 from .async_base_repository import AsyncBaseRepository
-from ..models.orm_models import ChatHistory, Message, File
-from ..models.chat import ChatHistoryCreate, ChatHistoryUpdate
+from ..models.orm_models import ChatHistory as ChatHistoryORM, Message as MessageORM, File as FileORM
+from .domain_models import ChatHistory, Message
 logger = logging.getLogger(__name__)
 
-class AsyncChatRepository(AsyncBaseRepository[ChatHistory, ChatHistoryCreate, ChatHistoryUpdate]):
+class AsyncChatRepository(AsyncBaseRepository[ChatHistoryORM, Any, Any]):
     """
     Async repository for ChatHistory and Message model operations.
     """

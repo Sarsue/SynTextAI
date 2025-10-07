@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path, Request, sta
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ..models.chat import ChatHistory, ChatHistoryCreate, ChatHistoryUpdate, Message
+from ..models.chat import ChatHistory, ChatHistoryCreate
 from ..repositories import AsyncChatRepository
 from ..dependencies import get_repository_manager
 from ..middleware.auth import get_current_user
-from ..repositories.domain_models import UserInDB
+from ..models.user import UserInDB
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

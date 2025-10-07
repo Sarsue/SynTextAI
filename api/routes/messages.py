@@ -20,7 +20,8 @@ class MessageListResponse(BaseModel):
     total: int
 from ..repositories import AsyncChatRepository
 from ..dependencies import get_repository_manager
-from ..repositories.domain_models import UserInDB, ChatHistory, Message
+from ..models.chat import Message,ChatHistory
+from ..models.user import UserInDB
 from ..middleware.auth import get_current_user
 from ..services.agent_service import agent_service
 

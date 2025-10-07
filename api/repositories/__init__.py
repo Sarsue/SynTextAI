@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, TypeVar, Type, Any, Dict, Generic, Optional
 
 # Core components
 from .repository_manager import get_repository_manager, RepositoryManager, BaseRepositoryManager
+from .base_repository_manager import BaseRepositoryManager as _BaseRepositoryManager
+from .async_base_repository import AsyncBaseRepository
 
 # Type variables for generic repository types
 ModelType = TypeVar("ModelType")
@@ -44,9 +46,9 @@ __all__ = [
     'get_repository_manager',
     'RepositoryManager',
     'BaseRepositoryManager',
+    'AsyncBaseRepository',
     
     # Base repository class
-    'AsyncBaseRepository',
     'ModelType',
     'CreateSchemaType',
     'UpdateSchemaType',
@@ -60,13 +62,7 @@ __all__ = [
     # Type variables
     'ModelT',
     'CreateSchemaT',
-    'UpdateSchemaT',
-    
-    # Repository implementations
-    'AsyncUserRepository',
-    'AsyncChatRepository',
-    'AsyncFileRepository',
-    'AsyncLearningMaterialRepository'
+    'UpdateSchemaT'
 ]
 
 # Export type information for static type checkers

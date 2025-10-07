@@ -6,7 +6,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from ..dependencies import get_repository_manager
-from ..repositories.domain_models import UserInDB
+from ..models.user import UserInDB
 from ..core.config import settings
 
 # Configure logging

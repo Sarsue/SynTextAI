@@ -1,9 +1,11 @@
 import re
+import secrets
+import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, BackgroundTasks
 from typing import List, Dict, Optional, TypeVar, Any
 from redis.exceptions import RedisError
-from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
+from ..utils.utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 from ..repositories import RepositoryManager
 from ..models.orm_models import File
@@ -244,9 +246,9 @@ async def save_file(
     All processing is delegated to the IngestionAgent with appropriate metadata.
     """
     try:
-        user_id = user_data["user_id"]
-        user_gc_id = user_data["user_gc_id"]
-        repo_manager = user_data["store"]
+        user_id = _user["user_id"]
+        user_gc_id = _user["user_gc_id"]
+        repo_manager = await get_repository_manager()
         
         content_type = request.headers.get("content-type", "")
         is_json = "application/json" in content_type

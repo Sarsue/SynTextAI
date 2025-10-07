@@ -5,28 +5,28 @@ Handles all database operations for LearningMaterial model using async SQLAlchem
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import logging
-from sqlalchemy.future import select
-from sqlalchemy import or_, delete, update
+from sqlalchemy import select, or_, delete, update
 from sqlalchemy.orm import selectinload
 
 from ..models.orm_models import (
-    Flashcard as FlashcardModel,
-    Flashcard,
-    File,
-    KeyConcept,
-    QuizQuestion as QuizQuestionModel
+    Flashcard as FlashcardORM,
+    File as FileORM,
+    KeyConcept as KeyConceptORM,
+    QuizQuestion as QuizQuestionORM
 )
-from ..models.flashcard import FlashcardCreate, FlashcardUpdate
-from ..models.quiz import QuizQuestionCreate, QuizQuestionUpdate
+# Temporarily commenting out missing model imports for basic functionality
+# from ..models.flashcard import FlashcardCreate, FlashcardUpdate
+# from ..models.quiz import QuizQuestionCreate, QuizQuestionUpdate
 from .async_base_repository import AsyncBaseRepository
+from .domain_models import Flashcard, QuizQuestion, KeyConcept
 
 logger = logging.getLogger(__name__)
 
-class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, FlashcardCreate, FlashcardUpdate]):
+class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardORM, Any, Any]):
     """Async repository for LearningMaterial model operations."""
     
     # Define the model class attribute required by AsyncBaseRepository
-    model = FlashcardModel
+    model = FlashcardORM
     
     def __init__(self, repository_manager, session_factory=None):
         """
@@ -40,63 +40,63 @@ class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, Flashc
         self._model = FlashcardModel
         self._initialized = True
 
-    async def get_by_user(self, user_id: int) -> List[FlashcardModel]:
+    async def get_by_user(self, user_id: int) -> List[FlashcardORM]:
         """Get all learning materials for a specific user."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
-                select(FlashcardModel)
-                .join(File, FlashcardModel.file_id == File.id)
-                .where(File.user_id == user_id)
-                .order_by(FlashcardModel.id.desc())
+                select(FlashcardORM)
+                .join(FileORM, FlashcardORM.file_id == FileORM.id)
+                .where(FileORM.user_id == user_id)
+                .order_by(FlashcardORM.id.desc())
             )
             return result.scalars().all()
 
-    async def search(self, user_id: int, query: str, limit: int = 10) -> List[FlashcardModel]:
+    async def search(self, user_id: int, query: str, limit: int = 10) -> List[FlashcardORM]:
         """Search learning materials by content."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
-                select(FlashcardModel)
-                .join(File, FlashcardModel.file_id == File.id)
+                select(FlashcardORM)
+                .join(FileORM, FlashcardORM.file_id == FileORM.id)
                 .where(
-                    (File.user_id == user_id) &
+                    (FileORM.user_id == user_id) &
                     (
-                        FlashcardModel.question.ilike(f"%{query}%") |
-                        FlashcardModel.answer.ilike(f"%{query}%")
+                        FlashcardORM.question.ilike(f"%{query}%") |
+                        FlashcardORM.answer.ilike(f"%{query}%")
                     )
                 )
-                .order_by(FlashcardModel.id.desc())
+                .order_by(FlashcardORM.id.desc())
                 .limit(limit)
             )
             return result.scalars().all()
 
-    async def get_by_key_concept(self, key_concept_id: int, user_id: int) -> List[FlashcardModel]:
+    async def get_by_key_concept(self, key_concept_id: int, user_id: int) -> List[FlashcardORM]:
         """Get all learning materials for a specific key concept and user."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
-                select(FlashcardModel)
-                .join(File, FlashcardModel.file_id == File.id)
+                select(FlashcardORM)
+                .join(FileORM, FlashcardORM.file_id == FileORM.id)
                 .where(
-                    (FlashcardModel.key_concept_id == key_concept_id) &
-                    (File.user_id == user_id)
+                    (FlashcardORM.key_concept_id == key_concept_id) &
+                    (FileORM.user_id == user_id)
                 )
-                .order_by(FlashcardModel.id.desc())
+                .order_by(FlashcardORM.id.desc())
             )
             return result.scalars().all()
 
     async def create_custom_flashcard(
         self, user_id: int, file_id: int, question: str, answer: str,
         key_concept_id: Optional[int] = None
-    ) -> FlashcardModel:
+    ) -> FlashcardORM:
         """Create a new custom flashcard."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             file_result = await session.execute(
-                select(File)
-                .where((File.id == file_id) & (File.user_id == user_id))
+                select(FileORM)
+                .where((FileORM.id == file_id) & (FileORM.user_id == user_id))
             )
             if not file_result.scalars().first():
                 raise ValueError("File not found or access denied")
 
-            flashcard = FlashcardModel(
+            flashcard = FlashcardORM(
                 file_id=file_id,
                 key_concept_id=key_concept_id,
                 question=question,
@@ -136,7 +136,7 @@ class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, Flashc
         """
         async with self.session_scope as session:
             try:
-                quiz_question = QuizQuestionModel(
+                quiz_question = QuizQuestionORM(
                     file_id=file_id,
                     key_concept_id=key_concept_id,
                     question=question,
@@ -151,34 +151,33 @@ class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, Flashc
                 await session.refresh(quiz_question)
                 return quiz_question.__dict__
             except Exception as e:
-                await session.rollback()
                 logger.error(f"Error creating quiz question: {e}", exc_info=True)
                 return None
 
-    async def get_learning_material_with_questions(self, material_id: int) -> Optional[FlashcardModel]:
+    async def get_learning_material_with_questions(self, material_id: int) -> Optional[FlashcardORM]:
         """Get a flashcard with its associated file and key concept."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
-                select(FlashcardModel)
-                .options(selectinload(FlashcardModel.file), selectinload(FlashcardModel.key_concept))
-                .where(FlashcardModel.id == material_id)
+                select(FlashcardORM)
+                .options(selectinload(FlashcardORM.file), selectinload(FlashcardORM.key_concept))
+                .where(FlashcardORM.id == material_id)
             )
             return result.scalar_one_or_none()
 
-    async def get_user_learning_materials(self, user_id: int, skip: int = 0, limit: int = 100) -> List[FlashcardModel]:
+    async def get_user_learning_materials(self, user_id: int, skip: int = 0, limit: int = 100) -> List[FlashcardORM]:
         """Get all flashcards for a specific user with pagination."""
-        async with self.session_scope as session:
+        async with self.session_scope() as session:
             result = await session.execute(
-                select(FlashcardModel)
-                .join(File, File.id == FlashcardModel.file_id)
-                .where(File.user_id == user_id)
+                select(FlashcardORM)
+                .join(FileORM, FileORM.id == FlashcardORM.file_id)
+                .where(FileORM.user_id == user_id)
                 .offset(skip)
                 .limit(limit)
-                .options(selectinload(FlashcardModel.file), selectinload(FlashcardModel.key_concept))
+                .options(selectinload(FlashcardORM.file), selectinload(FlashcardORM.key_concept))
             )
             return result.scalars().all()
 
-    async def create_learning_material(self, learning_material_data: Dict[str, Any], user_id: int) -> FlashcardModel:
+    async def create_learning_material(self, learning_material_data: Dict[str, Any], user_id: int) -> FlashcardORM:
         """Create a new flashcard."""
         async with self.session_scope as session:
             flashcard = FlashcardModel(**learning_material_data, created_at=datetime.utcnow())
@@ -461,8 +460,8 @@ class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, Flashc
         async with self.session_scope as session:
             result = await session.execute(
                 select(func.count())
-                .select_from(FlashcardModel)
-                .where(FlashcardModel.file_id == file_id)
+                .select_from(FlashcardORM)
+                .where(FlashcardORM.file_id == file_id)
             )
             return result.scalar_one() or 0
             
@@ -485,9 +484,9 @@ class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, Flashc
         async with self.session_scope as session:
             offset = (page - 1) * page_size
             result = await session.execute(
-                select(FlashcardModel)
-                .where(FlashcardModel.file_id == file_id)
-                .order_by(FlashcardModel.created_at.desc())
+                select(FlashcardORM)
+                .where(FlashcardORM.file_id == file_id)
+                .order_by(FlashcardORM.created_at.desc())
                 .offset(offset)
                 .limit(page_size)
             )
@@ -497,9 +496,9 @@ class AsyncLearningMaterialRepository(AsyncBaseRepository[FlashcardModel, Flashc
         """Delete a quiz question by ID."""
         async with self.session_scope as session:
             result = await session.execute(
-                delete(QuizQuestionModel)
-                .where(QuizQuestionModel.id == question_id)
-                .returning(QuizQuestionModel.id)
+                delete(QuizQuestionORM)
+                .where(QuizQuestionORM.id == question_id)
+                .returning(QuizQuestionORM.id)
             )
             await session.commit()
             return result.scalar_one_or_none() is not None

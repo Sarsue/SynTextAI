@@ -17,7 +17,7 @@ from ..models.subscription_schemas import (
 )
 from ..repositories import RepositoryManager, AsyncUserRepository
 from ..dependencies import get_repository_manager
-from ..repositories.domain_models import UserInDB
+from ..models.user import UserInDB
 from ..middleware.auth import get_current_user
 
 # Set up logging

@@ -34,24 +34,25 @@ from .orm_models import (
 )
 
 # Pydantic Schemas
-from .user import UserCreate, UserUpdate, UserInDB, User as UserSchema
-from .chat import (
-    MessageBase, MessageCreate, MessageUpdate, Message,
-    ChatHistoryBase, ChatHistoryCreate, ChatHistoryUpdate, ChatHistory as ChatHistorySchema
-)
-from .file import FileCreate, FileUpdate, FileInDB, File as FileSchema
-from .flashcard import (
-    FlashcardBase, FlashcardCreate, FlashcardUpdate,
-    FlashcardInDB, Flashcard as FlashcardSchema
-)
-from .key_concept import (
-    KeyConceptBase, KeyConceptCreate, KeyConceptUpdate,
-    KeyConceptInDB, KeyConcept as KeyConceptSchema
-)
-from .quiz import (
-    QuizQuestionBase, QuizQuestionCreate, QuizQuestionUpdate,
-    QuizQuestionInDB, QuizQuestion as QuizQuestionSchema
-)
+# Temporarily commenting out missing schema imports for basic functionality
+# from .user import UserCreate, UserUpdate, UserInDB, User as UserSchema
+# from .chat import (
+#     MessageBase, MessageCreate, MessageUpdate, Message,
+#     ChatHistoryBase, ChatHistoryCreate, ChatHistoryUpdate, ChatHistory as ChatHistorySchema
+# )
+# from .file import FileCreate, FileUpdate, FileInDB, File as FileSchema
+# from .flashcard import (
+#     FlashcardBase, FlashcardCreate, FlashcardUpdate,
+#     FlashcardInDB, Flashcard as FlashcardSchema
+# )
+# from .key_concept import (
+#     KeyConceptBase, KeyConceptCreate, KeyConceptUpdate,
+#     KeyConceptInDB, KeyConcept as KeyConceptSchema
+# )
+# from .quiz import (
+#     QuizQuestionBase, QuizQuestionCreate, QuizQuestionUpdate,
+#     QuizQuestionInDB, QuizQuestion as QuizQuestionSchema
+# )
 
 __all__ = [
     # Database utilities
@@ -76,25 +77,26 @@ __all__ = [
     'QuizQuestion',
     
     # Pydantic Schemas
+    # Temporarily commenting out missing schema exports for basic functionality
     # User
-    'UserCreate', 'UserUpdate', 'UserInDB', 'UserSchema',
+    # 'UserCreate', 'UserUpdate', 'UserInDB', 'UserSchema',
     
     # Chat
-    'MessageBase', 'MessageCreate', 'MessageUpdate', 'Message',
-    'ChatHistoryBase', 'ChatHistoryCreate', 'ChatHistoryUpdate', 'ChatHistorySchema',
+    # 'MessageBase', 'MessageCreate', 'MessageUpdate', 'Message',
+    # 'ChatHistoryBase', 'ChatHistoryCreate', 'ChatHistoryUpdate', 'ChatHistorySchema',
     
     # File
-    'FileCreate', 'FileUpdate', 'FileInDB', 'FileSchema',
+    # 'FileCreate', 'FileUpdate', 'FileInDB', 'FileSchema',
     
     # Flashcard
-    'FlashcardBase', 'FlashcardCreate', 'FlashcardUpdate',
-    'FlashcardInDB', 'FlashcardSchema',
+    # 'FlashcardBase', 'FlashcardCreate', 'FlashcardUpdate',
+    # 'FlashcardInDB', 'FlashcardSchema',
     
     # Key Concept
-    'KeyConceptBase', 'KeyConceptCreate', 'KeyConceptUpdate',
-    'KeyConceptInDB', 'KeyConceptSchema',
+    # 'KeyConceptBase', 'KeyConceptCreate', 'KeyConceptUpdate',
+    # 'KeyConceptInDB', 'KeyConceptSchema',
     
     # Quiz
-    'QuizQuestionBase', 'QuizQuestionCreate', 'QuizQuestionUpdate',
-    'QuizQuestionInDB', 'QuizQuestionSchema'
+    # 'QuizQuestionBase', 'QuizQuestionCreate', 'QuizQuestionUpdate',
+    # 'QuizQuestionInDB', 'QuizQuestionSchema'
 ]
