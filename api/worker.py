@@ -219,6 +219,7 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
     """Fetch files with 'uploaded' status from the database and mark them as processing"""
     try:
         from api.models.orm_models import File
+        from sqlalchemy import select
         from sqlalchemy.orm import joinedload
 
         # Use the shared repository manager function
@@ -226,14 +227,18 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
 
         # Use async transaction to atomically fetch and update files
         async with store.file_repo.get_async_session() as session:
-            # Find files that need processing with row locking
-            files_to_process = await session.query(File).options(
-                joinedload(File.user, innerjoin=True)
-            ).filter(
-                File.processing_status == 'uploaded'
-            ).order_by(
-                File.created_at.asc()
-            ).with_for_update(skip_locked=True).limit(10).all()
+            # Find files that need processing with row locking using async syntax
+            stmt = (
+                select(File)
+                .options(joinedload(File.user, innerjoin=True))
+                .where(File.processing_status == 'uploaded')
+                .order_by(File.created_at.asc())
+                .with_for_update(skip_locked=True)
+                .limit(10)
+            )
+
+            result = await session.execute(stmt)
+            files_to_process = result.scalars().all()
 
             # Update status to processing
             for file in files_to_process:

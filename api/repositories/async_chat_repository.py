@@ -6,7 +6,6 @@ while maintaining identical method signatures and return types.
 """
 from typing import Optional, List, Dict, Any
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .async_base_repository import AsyncBaseRepository
 from .domain_models import ChatHistory, Message
@@ -15,134 +14,143 @@ from .domain_models import ChatHistory, Message
 from ..models import ChatHistory as ChatHistoryORM
 from ..models import Message as MessageORM
 
+# Import SQLAlchemy async components
+from sqlalchemy import select, and_, desc, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
 logger = logging.getLogger(__name__)
 
 
 class AsyncChatRepository(AsyncBaseRepository):
-    """Async repository for chat history and message operations."""
+    """Async repository for chat operations."""
 
     async def add_chat_history(self, title: str, user_id: int) -> Optional[int]:
-        """Add a new chat history for a user.
+        """Add a new chat history.
 
         Args:
-            title: Title of the chat history
-            user_id: ID of the user who owns this chat history
+            title: Title of the chat
+            user_id: ID of the user
 
         Returns:
-            int: The ID of the newly created chat history, or None if creation failed
+            Optional[int]: The ID of the newly created chat history, or None if creation failed
         """
         async with self.get_async_session() as session:
             try:
-                new_chat_history = ChatHistoryORM(
-                    title=title,
-                    user_id=user_id
-                )
-                session.add(new_chat_history)
-                await session.flush()  # Flush to get the ID without committing
-                await session.refresh(new_chat_history)
-                return new_chat_history.id
+                chat_orm = ChatHistoryORM(title=title, user_id=user_id)
+                session.add(chat_orm)
+                await session.flush()
+                chat_id = chat_orm.id
+                await session.commit()
+                logger.info(f"Successfully added chat history {title} for user {user_id}")
+                return chat_id
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error creating chat history: {e}", exc_info=True)
+                logger.error(f"Error adding chat history {title}: {e}", exc_info=True)
                 return None
 
     async def get_latest_chat_history_id(self, user_id: int) -> Optional[int]:
-        """Get the ID of the most recent chat history for a user.
+        """Get the latest chat history ID for a user.
 
         Args:
             user_id: ID of the user
 
         Returns:
-            int: The ID of the most recent chat history, or None if not found
-        """
-        async with self.get_async_session() as session:
-            chat_history = await session.query(ChatHistoryORM).filter(
-                ChatHistoryORM.user_id == user_id
-            ).order_by(ChatHistoryORM.id.desc()).first()
-
-            return chat_history.id if chat_history else None
-
-    async def add_message(self, content: str, sender: str, user_id: int, chat_history_id: Optional[int] = None) -> Optional[int]:
-        """Add a new message to a chat history.
-
-        Args:
-            content: Message content
-            sender: Message sender (user or assistant)
-            user_id: ID of the user
-            chat_history_id: ID of the chat history, if None, uses the latest one
-
-        Returns:
-            int: The ID of the newly created message, or None if creation failed
+            Optional[int]: Latest chat history ID, or None if no chat histories exist
         """
         async with self.get_async_session() as session:
             try:
-                # If no chat history ID was provided, get the latest one
-                if chat_history_id is None:
-                    chat_history = await session.query(ChatHistoryORM).filter(
-                        ChatHistoryORM.user_id == user_id
-                    ).order_by(ChatHistoryORM.id.desc()).first()
+                stmt = select(ChatHistoryORM).where(ChatHistoryORM.user_id == user_id).order_by(desc(ChatHistoryORM.id)).limit(1)
+                result = await session.execute(stmt)
+                chat_history = result.scalar_one_or_none()
 
-                    # If no chat history exists, create one
+                if chat_history:
+                    return chat_history.id
+                return None
+
+            except Exception as e:
+                logger.error(f"Error getting latest chat history for user {user_id}: {e}", exc_info=True)
+                return None
+
+    async def add_message(self, content: str, sender: str, user_id: int, chat_history_id: Optional[int] = None) -> Optional[int]:
+        """Add a message to a chat history.
+
+        Args:
+            content: Content of the message
+            sender: Sender of the message (user or assistant)
+            user_id: ID of the user
+            chat_history_id: ID of the chat history (optional)
+
+        Returns:
+            Optional[int]: The ID of the newly created message, or None if creation failed
+        """
+        async with self.get_async_session() as session:
+            try:
+                # If no chat_history_id provided, get the latest one for the user
+                if chat_history_id is None:
+                    stmt = select(ChatHistoryORM).where(ChatHistoryORM.user_id == user_id).order_by(desc(ChatHistoryORM.id)).limit(1)
+                    result = await session.execute(stmt)
+                    chat_history = result.scalar_one_or_none()
+
                     if not chat_history:
-                        chat_history = ChatHistoryORM(
-                            title="Untitled",
-                            user_id=user_id
-                        )
-                        session.add(chat_history)
-                        await session.flush()  # To get the ID
+                        logger.error(f"No chat history found for user {user_id}")
+                        return None
 
                     chat_history_id = chat_history.id
 
-                # Create the message
-                new_message = MessageORM(
+                message_orm = MessageORM(
                     content=content,
                     sender=sender,
                     user_id=user_id,
                     chat_history_id=chat_history_id
                 )
-                session.add(new_message)
-                await session.flush()  # Flush to get the ID without committing
-                await session.refresh(new_message)
-                return new_message.id
+                session.add(message_orm)
+                await session.flush()
+                message_id = message_orm.id
+                await session.commit()
+
+                logger.info(f"Successfully added message for user {user_id} in chat {chat_history_id}")
+                return message_id
 
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error adding message: {e}", exc_info=True)
+                logger.error(f"Error adding message for user {user_id}: {e}", exc_info=True)
                 return None
 
     async def get_all_user_chat_histories(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get all chat histories for a user with latest messages.
+        """Get all chat histories for a user.
 
         Args:
             user_id: ID of the user
 
         Returns:
-            List[Dict]: List of chat histories with metadata
+            List[Dict[str, Any]]: List of chat history data
         """
         async with self.get_async_session() as session:
             try:
-                chat_histories_orm = await session.query(ChatHistoryORM).filter(
-                    ChatHistoryORM.user_id == user_id
-                ).all()
+                stmt = select(ChatHistoryORM).where(ChatHistoryORM.user_id == user_id).order_by(desc(ChatHistoryORM.created_at))
+                result = await session.execute(stmt)
+                chat_histories_orm = result.scalars().all()
 
-                result = []
-                for ch in chat_histories_orm:
-                    # Get the latest message for this chat history
-                    latest_message = await session.query(MessageORM).filter(
-                        MessageORM.chat_history_id == ch.id
-                    ).order_by(MessageORM.timestamp.desc()).first()
+                chat_histories = []
+                for chat in chat_histories_orm:
+                    # Get the latest message for this chat
+                    stmt = select(MessageORM).where(MessageORM.chat_history_id == chat.id).order_by(desc(MessageORM.created_at)).limit(1)
+                    result = await session.execute(stmt)
+                    latest_message = result.scalar_one_or_none()
 
-                    history_dict = {
-                        "id": ch.id,
-                        "title": ch.title,
-                        "latest_message": latest_message.content[:50] + "..." if latest_message else "No messages",
-                        "timestamp": latest_message.timestamp if latest_message else None
-                    }
-                    result.append(history_dict)
+                    chat_histories.append({
+                        'id': chat.id,
+                        'title': chat.title,
+                        'created_at': chat.created_at,
+                        'updated_at': chat.updated_at,
+                        'latest_message': latest_message.content if latest_message else None,
+                        'latest_message_time': latest_message.created_at if latest_message else None
+                    })
 
-                return result
+                return chat_histories
+
             except Exception as e:
-                logger.error(f"Error getting chat histories: {e}", exc_info=True)
+                logger.error(f"Error getting chat histories for user {user_id}: {e}", exc_info=True)
                 return []
 
     async def get_messages_for_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, Any]]:
@@ -150,45 +158,35 @@ class AsyncChatRepository(AsyncBaseRepository):
 
         Args:
             chat_history_id: ID of the chat history
-            user_id: ID of the user (for security check)
+            user_id: ID of the user
 
         Returns:
-            List[Dict]: List of messages
+            List[Dict[str, Any]]: List of message data
         """
         async with self.get_async_session() as session:
             try:
-                # First verify the user owns this chat history
-                chat_history = await session.query(ChatHistoryORM).filter(
-                    ChatHistoryORM.id == chat_history_id,
-                    ChatHistoryORM.user_id == user_id
-                ).first()
+                stmt = select(MessageORM).where(MessageORM.chat_history_id == chat_history_id).order_by(MessageORM.created_at)
+                result = await session.execute(stmt)
+                messages_orm = result.scalars().all()
 
-                if not chat_history:
-                    logger.warning(f"User {user_id} attempted to access unauthorized chat history {chat_history_id}")
-                    return []
+                messages = []
+                for message in messages_orm:
+                    messages.append({
+                        'id': message.id,
+                        'content': message.content,
+                        'sender': message.sender,
+                        'created_at': message.created_at,
+                        'chat_history_id': message.chat_history_id
+                    })
 
-                # Get messages
-                messages_orm = await session.query(MessageORM).filter(
-                    MessageORM.chat_history_id == chat_history_id
-                ).order_by(MessageORM.timestamp).all()
+                return messages
 
-                result = []
-                for msg in messages_orm:
-                    message_dict = {
-                        "id": msg.id,
-                        "content": msg.content,
-                        "sender": msg.sender,
-                        "timestamp": msg.timestamp.isoformat()
-                    }
-                    result.append(message_dict)
-
-                return result
             except Exception as e:
-                logger.error(f"Error getting messages: {e}", exc_info=True)
+                logger.error(f"Error getting messages for chat history {chat_history_id}: {e}", exc_info=True)
                 return []
 
     async def delete_chat_history(self, user_id: int, history_id: int) -> bool:
-        """Delete a chat history and all associated messages.
+        """Delete a chat history and all its messages.
 
         Args:
             user_id: ID of the user
@@ -199,24 +197,32 @@ class AsyncChatRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
-                # First verify the user owns this chat history
-                chat_history = await session.query(ChatHistoryORM).filter(
-                    ChatHistoryORM.id == history_id,
-                    ChatHistoryORM.user_id == user_id
-                ).first()
+                # Check if chat history exists and belongs to user
+                stmt = select(ChatHistoryORM).where(
+                    and_(ChatHistoryORM.id == history_id, ChatHistoryORM.user_id == user_id)
+                )
+                result = await session.execute(stmt)
+                chat_history = result.scalar_one_or_none()
 
                 if not chat_history:
-                    logger.warning(f"User {user_id} attempted to delete unauthorized chat history {history_id}")
+                    logger.error(f"Chat history {history_id} not found for user {user_id}")
                     return False
 
-                # Delete the chat history (cascade will delete messages)
+                # Delete all messages in the chat history
+                await session.execute(
+                    MessageORM.__table__.delete().where(MessageORM.chat_history_id == history_id)
+                )
+
+                # Delete the chat history
                 await session.delete(chat_history)
                 await session.commit()
-                logger.info(f"Deleted chat history {history_id} for user {user_id}")
+
+                logger.info(f"Successfully deleted chat history {history_id} for user {user_id}")
                 return True
+
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error deleting chat history: {e}", exc_info=True)
+                logger.error(f"Error deleting chat history {history_id}: {e}", exc_info=True)
                 return False
 
     async def delete_all_user_histories(self, user_id: int) -> bool:
@@ -230,59 +236,67 @@ class AsyncChatRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
-                # Query all histories for this user
-                histories = await session.query(ChatHistoryORM).filter(
-                    ChatHistoryORM.user_id == user_id
-                ).all()
+                # Get all chat history IDs for the user
+                stmt = select(ChatHistoryORM.id).where(ChatHistoryORM.user_id == user_id)
+                result = await session.execute(stmt)
+                chat_history_ids = result.scalars().all()
 
-                # Delete each one (cascade will delete messages)
-                for history in histories:
-                    await session.delete(history)
+                # Delete all messages for all chat histories
+                for chat_id in chat_history_ids:
+                    await session.execute(
+                        MessageORM.__table__.delete().where(MessageORM.chat_history_id == chat_id)
+                    )
+
+                # Delete all chat histories
+                await session.execute(
+                    ChatHistoryORM.__table__.delete().where(ChatHistoryORM.user_id == user_id)
+                )
 
                 await session.commit()
-                logger.info(f"Deleted all chat histories for user {user_id}")
+
+                logger.info(f"Successfully deleted all chat histories for user {user_id}")
                 return True
+
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error deleting chat histories: {e}", exc_info=True)
+                logger.error(f"Error deleting all chat histories for user {user_id}: {e}", exc_info=True)
                 return False
 
     async def format_user_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, str]]:
-        """Format chat history in a way suitable for LLM context.
+        """Format chat history for display.
 
         Args:
             chat_history_id: ID of the chat history
             user_id: ID of the user
 
         Returns:
-            List[Dict]: List of messages formatted as {"role": "user"|"assistant", "content": "message"}
+            List[Dict[str, str]]: Formatted chat history
         """
         async with self.get_async_session() as session:
             try:
-                # First verify the user owns this chat history
-                chat_history = await session.query(ChatHistoryORM).filter(
-                    ChatHistoryORM.id == chat_history_id,
-                    ChatHistoryORM.user_id == user_id
-                ).first()
+                stmt = select(ChatHistoryORM).where(
+                    and_(ChatHistoryORM.id == chat_history_id, ChatHistoryORM.user_id == user_id)
+                )
+                result = await session.execute(stmt)
+                chat_history = result.scalar_one_or_none()
 
                 if not chat_history:
-                    logger.warning(f"User {user_id} attempted to access unauthorized chat history {chat_history_id}")
                     return []
 
-                # Get messages
-                messages_orm = await session.query(MessageORM).filter(
-                    MessageORM.chat_history_id == chat_history_id
-                ).order_by(MessageORM.timestamp).all()
+                stmt = select(MessageORM).where(MessageORM.chat_history_id == chat_history_id).order_by(MessageORM.created_at)
+                result = await session.execute(stmt)
+                messages_orm = result.scalars().all()
 
-                formatted_messages = []
-                for msg in messages_orm:
-                    role = "user" if msg.sender.lower() == "user" else "assistant"
-                    formatted_messages.append({
-                        "role": role,
-                        "content": msg.content
+                formatted_history = []
+                for message in messages_orm:
+                    formatted_history.append({
+                        'sender': message.sender,
+                        'content': message.content,
+                        'timestamp': message.created_at.isoformat() if message.created_at else None
                     })
 
-                return formatted_messages
+                return formatted_history
+
             except Exception as e:
-                logger.error(f"Error formatting chat history: {e}", exc_info=True)
+                logger.error(f"Error formatting chat history {chat_history_id}: {e}", exc_info=True)
                 return []

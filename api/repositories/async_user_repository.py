@@ -6,7 +6,7 @@ while maintaining identical method signatures and return types.
 """
 from typing import Optional, List, Tuple
 import logging
-from sqlalchemy import text
+from sqlalchemy import text, select, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +20,8 @@ from ..models import CardDetails as CardDetailsORM
 
 logger = logging.getLogger(__name__)
 
-
 class AsyncUserRepository(AsyncBaseRepository):
-    """Async repository for user-related database operations."""
+    """Async repository for user operations."""
 
     async def add_user(self, email: str, username: str) -> Optional[int]:
         """Add a new user to the database.
@@ -32,36 +31,44 @@ class AsyncUserRepository(AsyncBaseRepository):
             username: User's username
 
         Returns:
-            int: The ID of the newly created user, or None if creation failed
+            Optional[int]: The ID of the newly created user, or None if creation failed
         """
         async with self.get_async_session() as session:
             try:
-                new_user = UserORM(email=email, username=username)
-                session.add(new_user)
-                await session.flush()  # Flush to get the ID without committing
-                await session.refresh(new_user)
-                return new_user.id
+                user_orm = UserORM(email=email, username=username)
+                session.add(user_orm)
+                await session.flush()
+                user_id = user_orm.id
+                await session.commit()
+                logger.info(f"Successfully added user {username} with email {email}")
+                return user_id
             except IntegrityError:
                 await session.rollback()
                 logger.error(f"User with email '{email}' or username '{username}' already exists.")
                 return None
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error adding user: {e}", exc_info=True)
+                logger.error(f"Error adding user {username}: {e}", exc_info=True)
                 return None
 
     async def get_user_id_from_email(self, email: str) -> Optional[int]:
-        """Get user ID from email.
+        """Get user ID from email address.
 
         Args:
             email: User's email address
 
         Returns:
-            int: The user ID if found, None otherwise
+            Optional[int]: User ID if found, None otherwise
         """
         async with self.get_async_session() as session:
-            user = await session.get(UserORM, email)  # This should work for email lookup
-            return user.id if user else None
+            try:
+                stmt = select(UserORM).where(UserORM.email == email)
+                result = await session.execute(stmt)
+                user_orm = result.scalar_one_or_none()
+                return user_orm.id if user_orm else None
+            except Exception as e:
+                logger.error(f"Error getting user ID for email {email}: {e}", exc_info=True)
+                return None
 
     async def delete_user_account(self, user_id: int) -> bool:
         """Delete a user account and all associated data.
@@ -70,35 +77,35 @@ class AsyncUserRepository(AsyncBaseRepository):
             user_id: ID of the user to delete
 
         Returns:
-            bool: True if the deletion was successful, False otherwise
+            bool: True if deletion was successful, False otherwise
         """
         async with self.get_async_session() as session:
             try:
-                # Check if the user exists
-                user = await session.get(UserORM, user_id)
-                if not user:
+                stmt = select(UserORM).where(UserORM.id == user_id)
+                result = await session.execute(stmt)
+                user_orm = result.scalar_one_or_none()
+
+                if not user_orm:
                     logger.warning(f"Attempted to delete non-existent user: {user_id}")
                     return False
 
-                # The cascade should handle deleting related objects
-                await session.delete(user)
+                await session.delete(user_orm)
                 await session.commit()
                 logger.info(f"Successfully deleted user {user_id} with cascade")
                 return True
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Error deleting user {user_id}: {e}", exc_info=True)
-
-                # Fallback to direct SQL for cleanup if ORM cascade fails
-                try:
-                    await session.execute(text(f"DELETE FROM users WHERE id = {user_id}"))
-                    await session.commit()
-                    logger.info(f"Deleted user {user_id} using direct SQL after ORM failure")
-                    return True
-                except Exception as sql_error:
-                    await session.rollback()
-                    logger.error(f"SQL fallback error deleting user {user_id}: {sql_error}", exc_info=True)
-                    return False
+                async with self.get_async_session() as fallback_session:
+                    try:
+                        await fallback_session.execute(text(f"DELETE FROM users WHERE id = {user_id}"))
+                        await fallback_session.commit()
+                        logger.info(f"Deleted user {user_id} using direct SQL after ORM failure")
+                        return True
+                    except Exception as sql_error:
+                        await fallback_session.rollback()
+                        logger.error(f"SQL fallback error deleting user {user_id}: {sql_error}", exc_info=True)
+                        return False
 
     async def add_or_update_subscription(
         self,
@@ -106,125 +113,233 @@ class AsyncUserRepository(AsyncBaseRepository):
         stripe_customer_id: str,
         stripe_subscription_id: Optional[str],
         status: str,
-        current_period_start: Optional[int],
-        current_period_end: Optional[int],
-        cancel_at_period_end: bool,
-        plan_type: str
+        current_period_end=None,
+        trial_end=None,
+        card_last4=None,
+        card_type=None,
+        exp_month=None,
+        exp_year=None
     ) -> bool:
         """Add or update a user subscription.
 
         Args:
             user_id: ID of the user
             stripe_customer_id: Stripe customer ID
-            stripe_subscription_id: Stripe subscription ID (optional)
+            stripe_subscription_id: Stripe subscription ID
             status: Subscription status
-            current_period_start: Start of current period (Unix timestamp)
-            current_period_end: End of current period (Unix timestamp)
-            cancel_at_period_end: Whether to cancel at period end
-            plan_type: Type of subscription plan
+            current_period_end: End of current subscription period
+            trial_end: End of trial period, if any
+            card_last4: Last 4 digits of payment card
+            card_type: Type of payment card
+            exp_month: Card expiration month
+            exp_year: Card expiration year
 
         Returns:
             bool: True if successful, False otherwise
         """
         async with self.get_async_session() as session:
             try:
-                # Check if subscription already exists
-                existing_subscription = await session.query(SubscriptionORM).filter(
-                    SubscriptionORM.stripe_customer_id == stripe_customer_id
-                ).first()
+                # Check if user exists
+                stmt = select(UserORM).where(UserORM.id == user_id)
+                result = await session.execute(stmt)
+                user = result.scalar_one_or_none()
+                if not user:
+                    logger.error(f"No user found with ID: {user_id}")
+                    return False
 
-                if existing_subscription:
+                # Check if subscription already exists
+                stmt = select(SubscriptionORM).where(SubscriptionORM.user_id == user_id)
+                result = await session.execute(stmt)
+                existing_sub = result.scalar_one_or_none()
+
+                if existing_sub:
                     # Update existing subscription
-                    existing_subscription.status = status
-                    existing_subscription.stripe_subscription_id = stripe_subscription_id
-                    existing_subscription.current_period_start = current_period_start
-                    existing_subscription.current_period_end = current_period_end
-                    existing_subscription.cancel_at_period_end = cancel_at_period_end
-                    existing_subscription.plan_type = plan_type
+                    existing_sub.stripe_customer_id = stripe_customer_id
+                    existing_sub.stripe_subscription_id = stripe_subscription_id
+                    existing_sub.status = status
+                    if current_period_end:
+                        existing_sub.current_period_end = current_period_end
+                    if trial_end:
+                        existing_sub.trial_end = trial_end
+
+                    # Update card details if provided
+                    if all([card_last4, card_type, exp_month, exp_year]):
+                        stmt = select(CardDetailsORM).where(CardDetailsORM.subscription_id == existing_sub.id)
+                        result = await session.execute(stmt)
+                        card_details = result.scalar_one_or_none()
+
+                        if card_details:
+                            # Update existing card details
+                            card_details.card_last4 = card_last4
+                            card_details.card_type = card_type
+                            card_details.exp_month = exp_month
+                            card_details.exp_year = exp_year
+                        else:
+                            # Create new card details
+                            new_card = CardDetailsORM(
+                                subscription_id=existing_sub.id,
+                                card_last4=card_last4,
+                                card_type=card_type,
+                                exp_month=exp_month,
+                                exp_year=exp_year
+                            )
+                            session.add(new_card)
+
+                    await session.commit()
+                    logger.info(f"Updated subscription for user {user_id}")
+                    return True
                 else:
                     # Create new subscription
-                    new_subscription = SubscriptionORM(
+                    new_sub = SubscriptionORM(
                         user_id=user_id,
                         stripe_customer_id=stripe_customer_id,
                         stripe_subscription_id=stripe_subscription_id,
                         status=status,
-                        current_period_start=current_period_start,
                         current_period_end=current_period_end,
-                        cancel_at_period_end=cancel_at_period_end,
-                        plan_type=plan_type
+                        trial_end=trial_end
                     )
-                    session.add(new_subscription)
+                    session.add(new_sub)
+                    await session.flush()  # To get the ID of the new subscription
 
-                await session.commit()
-                return True
+                    # Add card details if provided
+                    if all([card_last4, card_type, exp_month, exp_year]):
+                        new_card = CardDetailsORM(
+                            subscription_id=new_sub.id,
+                            card_last4=card_last4,
+                            card_type=card_type,
+                            exp_month=exp_month,
+                            exp_year=exp_year
+                        )
+                        session.add(new_card)
+
+                    await session.commit()
+                    logger.info(f"Created new subscription for user {user_id}")
+                    return True
 
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error adding/updating subscription for user {user_id}: {e}", exc_info=True)
+                logger.error(f"Error adding/updating subscription: {e}", exc_info=True)
                 return False
 
     async def update_subscription(
         self,
         stripe_customer_id: str,
         status: str,
-        current_period_end: Optional[int] = None
+        current_period_end=None,
+        card_last4=None,
+        card_type=None,
+        exp_month=None,
+        exp_year=None
     ) -> bool:
         """Update a subscription by Stripe customer ID.
 
         Args:
             stripe_customer_id: Stripe customer ID
             status: New subscription status
-            current_period_end: New period end timestamp (optional)
+            current_period_end: End of current subscription period
+            card_last4: Last 4 digits of payment card
+            card_type: Type of payment card
+            exp_month: Card expiration month
+            exp_year: Card expiration year
 
         Returns:
             bool: True if successful, False otherwise
         """
         async with self.get_async_session() as session:
             try:
-                subscription = await session.query(SubscriptionORM).filter(
-                    SubscriptionORM.stripe_customer_id == stripe_customer_id
-                ).first()
+                # Find subscription by stripe_customer_id
+                stmt = select(SubscriptionORM).where(SubscriptionORM.stripe_customer_id == stripe_customer_id)
+                result = await session.execute(stmt)
+                subscription = result.scalar_one_or_none()
 
                 if not subscription:
-                    logger.error(f"No subscription found for customer {stripe_customer_id}")
+                    logger.error(f"No subscription found for Stripe customer ID: {stripe_customer_id}")
                     return False
 
+                # Update subscription
                 subscription.status = status
-                if current_period_end is not None:
+                if current_period_end:
                     subscription.current_period_end = current_period_end
 
+                # Update card details if provided
+                if all([card_last4, card_type, exp_month, exp_year]):
+                    stmt = select(CardDetailsORM).where(CardDetailsORM.subscription_id == subscription.id)
+                    result = await session.execute(stmt)
+                    card_details = result.scalar_one_or_none()
+
+                    if card_details:
+                        # Update existing card details
+                        card_details.card_last4 = card_last4
+                        card_details.card_type = card_type
+                        card_details.exp_month = exp_month
+                        card_details.exp_year = exp_year
+                    else:
+                        # Create new card details
+                        new_card = CardDetailsORM(
+                            subscription_id=subscription.id,
+                            card_last4=card_last4,
+                            card_type=card_type,
+                            exp_month=exp_month,
+                            exp_year=exp_year
+                        )
+                        session.add(new_card)
+
                 await session.commit()
+                logger.info(f"Updated subscription for customer {stripe_customer_id}")
                 return True
 
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error updating subscription for customer {stripe_customer_id}: {e}", exc_info=True)
+                logger.error(f"Error updating subscription: {e}", exc_info=True)
                 return False
 
     async def get_subscription(self, user_id: int) -> Optional[Tuple[Subscription, Optional[CardDetails]]]:
-        """Get subscription details for a user.
+        """Get user's subscription details.
 
         Args:
             user_id: ID of the user
 
         Returns:
-            Optional[Tuple[Subscription, Optional[CardDetails]]]: Subscription and card details if found
+            Optional[Tuple[Subscription, Optional[CardDetails]]]: Subscription and card details, or None if not found
         """
         async with self.get_async_session() as session:
             try:
-                subscription = await session.query(SubscriptionORM).filter(
-                    SubscriptionORM.user_id == user_id
-                ).first()
+                stmt = select(SubscriptionORM).where(SubscriptionORM.user_id == user_id)
+                result = await session.execute(stmt)
+                sub_orm = result.scalar_one_or_none()
 
-                if not subscription:
+                if not sub_orm:
                     return None
 
+                # Convert to domain model
+                subscription = Subscription(
+                    id=sub_orm.id,
+                    user_id=sub_orm.user_id,
+                    stripe_customer_id=sub_orm.stripe_customer_id,
+                    stripe_subscription_id=sub_orm.stripe_subscription_id,
+                    status=sub_orm.status,
+                    current_period_end=sub_orm.current_period_end,
+                    trial_end=sub_orm.trial_end,
+                    created_at=sub_orm.created_at,
+                    updated_at=sub_orm.updated_at
+                )
+
                 # Get card details if they exist
+                stmt = select(CardDetailsORM).where(CardDetailsORM.subscription_id == sub_orm.id)
+                result = await session.execute(stmt)
+                card_details_orm = result.scalar_one_or_none()
+
                 card_details = None
-                if subscription.stripe_customer_id:
-                    card_details = await session.query(CardDetailsORM).filter(
-                        CardDetailsORM.stripe_customer_id == subscription.stripe_customer_id
-                    ).first()
+                if card_details_orm:
+                    card_details = CardDetails(
+                        id=card_details_orm.id,
+                        subscription_id=card_details_orm.subscription_id,
+                        card_last4=card_details_orm.card_last4,
+                        card_type=card_details_orm.card_type,
+                        exp_month=card_details_orm.exp_month,
+                        exp_year=card_details_orm.exp_year,
+                        created_at=card_details_orm.created_at
+                    )
 
                 return (subscription, card_details)
 
@@ -233,27 +348,28 @@ class AsyncUserRepository(AsyncBaseRepository):
                 return None
 
     async def update_subscription_status(self, stripe_customer_id: str, new_status: str) -> bool:
-        """Update subscription status by Stripe customer ID (for webhooks).
+        """Update subscription status by Stripe customer ID.
 
         Args:
             stripe_customer_id: Stripe customer ID
             new_status: New subscription status
 
         Returns:
-            bool: True if successful, False otherwise
+            bool: True if update was successful, False otherwise
         """
         async with self.get_async_session() as session:
             try:
-                subscription = await session.query(SubscriptionORM).filter(
-                    SubscriptionORM.stripe_customer_id == stripe_customer_id
-                ).first()
+                stmt = select(SubscriptionORM).where(SubscriptionORM.stripe_customer_id == stripe_customer_id)
+                result = await session.execute(stmt)
+                subscription = result.scalar_one_or_none()
 
                 if not subscription:
-                    logger.error(f"No subscription found for customer {stripe_customer_id}")
+                    logger.error(f"Subscription for customer {stripe_customer_id} not found")
                     return False
 
                 subscription.status = new_status
                 await session.commit()
+                logger.info(f"Successfully updated subscription status for customer {stripe_customer_id}")
                 return True
 
             except Exception as e:
@@ -262,23 +378,25 @@ class AsyncUserRepository(AsyncBaseRepository):
                 return False
 
     async def is_premium_user(self, user_id: int) -> bool:
-        """Check if a user has an active premium subscription.
+        """Check if user has an active premium subscription.
 
         Args:
             user_id: ID of the user
 
         Returns:
-            bool: True if user has active premium subscription
+            bool: True if user has active premium subscription, False otherwise
         """
         async with self.get_async_session() as session:
             try:
-                subscription = await session.query(SubscriptionORM).filter(
-                    SubscriptionORM.user_id == user_id,
-                    SubscriptionORM.status == 'active'
-                ).first()
-
+                stmt = select(SubscriptionORM).where(
+                    and_(
+                        SubscriptionORM.user_id == user_id,
+                        SubscriptionORM.status.in_(["active", "trialing"])
+                    )
+                )
+                result = await session.execute(stmt)
+                subscription = result.scalar_one_or_none()
                 return subscription is not None
-
             except Exception as e:
                 logger.error(f"Error checking premium status for user {user_id}: {e}", exc_info=True)
                 return False

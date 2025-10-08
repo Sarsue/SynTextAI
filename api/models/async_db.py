@@ -50,7 +50,11 @@ def create_ssl_context() -> Optional[ssl.SSLContext]:
     Returns:
         ssl.SSLContext or None: Configured SSL context or None if SSL disabled
     """
-    sslmode = os.getenv("DATABASE_SSLMODE", "require").lower()
+    # Default SSL mode to 'disable' for localhost, 'require' otherwise
+    db_host = os.getenv("DATABASE_HOST", "localhost")
+    default_ssl_mode = 'disable' if db_host in ['localhost', '127.0.0.1'] else 'require'
+    sslmode = os.getenv("DATABASE_SSLMODE", default_ssl_mode).lower()
+    
     cafile = os.getenv("DATABASE_SSLROOTCERT")
 
     if sslmode == 'disable':
@@ -104,14 +108,20 @@ def get_connect_args() -> dict:
         dict: Connection arguments for SQLAlchemy engine
     """
     connect_args = {
-        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "30")),
-        "application_name": f"syntextai-{os.getpid()}",
+        "server_settings": {
+            "application_name": f"syntextai-{os.getpid()}",
+        }
     }
 
     # Add SSL context if configured
     ssl_context = create_ssl_context()
     if ssl_context:
         connect_args["ssl"] = ssl_context
+
+    # For asyncpg, timeout is handled differently
+    timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
+    if timeout > 0:
+        connect_args["timeout"] = timeout
 
     logger.debug(
         "Database connection args configured: %s",
@@ -130,16 +140,39 @@ def get_database_url() -> str:
     Returns:
         str: Database URL for asyncpg connections
     """
+    # For development/testing, use default values if environment variables are not set
     database_config = {
-        'dbname': os.getenv("DATABASE_NAME"),
-        'user': os.getenv("DATABASE_USER"),
-        'password': os.getenv("DATABASE_PASSWORD"),
-        'host': os.getenv("DATABASE_HOST"),
-        'port': os.getenv("DATABASE_PORT"),
+        'dbname': os.getenv("DATABASE_NAME", "syntextai"),
+        'user': os.getenv("DATABASE_USER", "postgres"),
+        'password': os.getenv("DATABASE_PASSWORD", "password"),
+        'host': os.getenv("DATABASE_HOST", "localhost"),
+        'port': os.getenv("DATABASE_PORT", "5432"),
     }
-
+    
+    # Validate that we have reasonable values
+    if not database_config['dbname'] or database_config['dbname'] == 'None':
+        database_config['dbname'] = 'syntextai'
+    if not database_config['user'] or database_config['user'] == 'None':
+        database_config['user'] = 'postgres'
+    if not database_config['host'] or database_config['host'] == 'None':
+        database_config['host'] = 'localhost'
+    
+    # Ensure port is valid
+    try:
+        port_int = int(database_config['port'])
+        if port_int <= 0 or port_int > 65535:
+            database_config['port'] = "5432"
+    except (ValueError, TypeError):
+        database_config['port'] = "5432"
+    
+    # Ensure password is properly encoded for URL construction
+    password = database_config['password'] or ""
+    password_str = str(password)
+    
+    logger.info(f"Using database config: host={database_config['host']}, port={database_config['port']}, db={database_config['dbname']}, user={database_config['user']}")
+    
     return (
-        f"postgresql+asyncpg://{database_config['user']}:{quote_plus(database_config['password'])}"
+        f"postgresql+asyncpg://{database_config['user']}:{quote_plus(password_str)}"
         f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
     )
 
@@ -190,7 +223,7 @@ def create_engine_with_retry() -> AsyncEngine:
         database_url = get_database_url()
         engine_options = get_engine_options()
 
-        logger.info(f"Creating database engine for {os.getenv('DATABASE_HOST')}:{os.getenv('DATABASE_PORT')}")
+        logger.info(f"Creating database engine for {os.getenv('DATABASE_HOST', 'localhost')}:{os.getenv('DATABASE_PORT', '5432')}")
         _engine = create_async_engine(database_url, **engine_options)
 
         logger.info("Database engine created successfully")
@@ -230,25 +263,36 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _async_session_factory
 
 
-@asynccontextmanager
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get an async database session with automatic lifecycle management.
+class AsyncSessionManager:
+    """Async context manager for database sessions."""
+    
+    def __init__(self):
+        self.session = None
+    
+    async def __aenter__(self) -> AsyncSession:
+        if _async_session_factory is None:
+            await init_db()
+        self.session = _async_session_factory()
+        return self.session
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            try:
+                if exc_type is not None:
+                    await self.session.rollback()
+                else:
+                    await self.session.commit()
+            finally:
+                await self.session.close()
 
-    Yields:
-        AsyncSession: An async database session that is automatically closed after use.
+
+def get_async_session() -> AsyncSessionManager:
+    """Get an async database session manager.
+
+    Returns:
+        AsyncSessionManager: An async context manager for database sessions.
     """
-    if _async_session_factory is None:
-        await init_db()
-
-    session = _async_session_factory()
-    try:
-        yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
+    return AsyncSessionManager()
 
 
 async def init_db() -> None:

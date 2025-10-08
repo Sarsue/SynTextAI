@@ -1,5 +1,5 @@
 """
-Async Base Repository interface defining common async methods and database connection handling.
+Async base repository class that all async repositories will inherit from.
 
 This module mirrors the sync base_repository.py but provides async functionality
 while maintaining identical method signatures and return types.
@@ -38,23 +38,19 @@ class AsyncBaseRepository(ABC):
         """Get a new async database session."""
         return self.session_factory()
 
-    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Get an async database session as context manager.
-        This mirrors the sync get_db() function signature exactly.
+    def get_async_session(self):
+        """Get an async database session manager.
 
-        Yields:
-            AsyncSession: An async database session that is automatically closed after use.
+        Returns:
+            AsyncSessionManager: An async context manager for database sessions.
         """
-        async with self.session_scope() as session:
-            try:
-                yield session
-            finally:
-                await session.close()
+        return self.session_scope()
 
     async def commit_and_close(self, session: AsyncSession, operation_name: str) -> bool:
         """Commit changes and close the async session, with error handling.
 
         Args:
+            session: The async session to commit and close
             operation_name: Name of the operation for logging purposes
 
         Returns:
@@ -65,30 +61,18 @@ class AsyncBaseRepository(ABC):
             return True
         except Exception as e:
             await session.rollback()
-            logger.error(f"Error during {operation_name}: {e}", exc_info=True)
+            logger.error(f"Error committing {operation_name}: {e}", exc_info=True)
             return False
-        finally:
-            await session.close()
 
-    async def execute_transactional_async(self, operation_func: Callable, operation_name: str = "operation"):
-        """Execute an async function within a transaction boundary.
+    async def execute_with_session(self, operation_func: Callable[[AsyncSession], Any], operation_name: str) -> Any:
+        """Execute an operation with an async session and handle errors.
 
         Args:
-            operation_func: Async function that takes a session parameter and performs DB operations
-            operation_name: Name of operation for logging purposes
+            operation_func: Function that takes a session and returns a result
+            operation_name: Name of the operation for logging purposes
 
         Returns:
-            The result of operation_func, or None if an exception occurred
-
-        Example:
-            async def add_entity(session, entity):
-                session.add(entity)
-                await session.flush()
-                return entity.id
-
-            result = await repo.execute_transactional_async(
-                lambda session: add_entity(session, new_entity)
-            )
+            Any: The result of the operation, or None if it failed
         """
         try:
             async with self.get_async_session() as session:
@@ -99,3 +83,8 @@ class AsyncBaseRepository(ABC):
         except Exception as e:
             logger.error(f"Error during {operation_name}: {e}", exc_info=True)
             return None
+
+
+class AsyncRepositoryError(Exception):
+    """Exception raised by async repository operations."""
+    pass
