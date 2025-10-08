@@ -10,7 +10,7 @@ import logging
 import os
 from typing import Callable, TypeVar, Generic, Optional, Any, AsyncGenerator
 
-from ..models.async_db import get_async_db
+from ..models.async_db import get_engine, get_session_factory, get_async_session, init_db, close_db
 
 logger = logging.getLogger(__name__)
 
@@ -30,27 +30,22 @@ class AsyncBaseRepository(ABC):
                 raise ValueError("No database URL provided and DATABASE_URL environment variable not set")
 
         self.database_url = database_url
-        self.engine = create_async_engine(
-            database_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_recycle=3600,
-        )
-        self.AsyncSession = async_sessionmaker(bind=self.engine, class_=AsyncSession)
+        self.engine = get_engine()
+        self.session_factory = get_session_factory()
+        self.session_scope = get_async_session
 
     async def get_session(self) -> AsyncSession:
         """Get a new async database session."""
-        return self.AsyncSession()
+        return self.session_factory()
 
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
         """Get an async database session as context manager.
-
         This mirrors the sync get_db() function signature exactly.
 
         Yields:
             AsyncSession: An async database session that is automatically closed after use.
         """
-        async with self.AsyncSession() as session:
+        async with self.session_scope() as session:
             try:
                 yield session
             finally:
@@ -60,7 +55,6 @@ class AsyncBaseRepository(ABC):
         """Commit changes and close the async session, with error handling.
 
         Args:
-            session: The async SQLAlchemy session
             operation_name: Name of the operation for logging purposes
 
         Returns:

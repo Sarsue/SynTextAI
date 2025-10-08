@@ -73,8 +73,7 @@ MAX_POLL_INTERVAL = 300     # 5 minutes maximum
 POLL_BACKOFF_FACTOR = 1.5   # 1.5x backoff factor
 
 # API configuration for notifications
-API_NOTIFY_URL = os.getenv("API_NOTIFY_URL", "http://syntextaiapp:3000/api/v1/internal/notify-client")
-
+API_NOTIFY_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
 async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
     """Send a notification to the main API via HTTP POST"""
     payload = {
@@ -105,52 +104,39 @@ shutdown_event = asyncio.Event()
 
 def get_repository_manager():
     """Get a RepositoryManager instance with proper database configuration"""
+    from api.models.async_db import get_database_url
     from api.repositories.repository_manager import RepositoryManager
-    
-    # Get database configuration from environment variables
-    database_config = {
-        'dbname': os.getenv("DATABASE_NAME"),
-        'user': os.getenv("DATABASE_USER"),
-        'password': os.getenv("DATABASE_PASSWORD"),
-        'host': os.getenv("DATABASE_HOST"),
-        'port': os.getenv("DATABASE_PORT"),
-    }
-    
-    # Construct the URL from individual components
-    database_url = (
-        f"postgresql://{database_config['user']}:{database_config['password']}@"
-        f"{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-    )
-    
+
+    # Use centralized async database URL
+    database_url = get_database_url()
+
     return RepositoryManager(database_url=database_url)
 
 async def update_file_status(file_id: int, status: str, error: str = None) -> None:
-    """Update file status in the database using SQLAlchemy ORM"""
+    """Update file status in the database using async SQLAlchemy ORM"""
     try:
         from sqlalchemy.exc import SQLAlchemyError
-        from models import File
-        
+        from api.models.orm_models import File
+
         store = get_repository_manager()
-        
-        with store.file_repo.get_unit_of_work() as uow:
+
+        async with store.file_repo.get_async_session() as session:
             try:
-                file = uow.session.query(File).filter(
-                    File.id == file_id
-                ).with_for_update().first()
-                
+                file = await session.get(File, file_id)
+
                 if not file:
                     logger.error(f"File with ID {file_id} not found")
                     return
-                
+
                 file.processing_status = status
                 if error:
                     file.error_message = error
-                
-                uow.session.commit()
+
+                await session.commit()
                 logger.info(f"Successfully updated file {file_id} status to {status}")
-                
+
             except SQLAlchemyError as e:
-                uow.session.rollback()
+                await session.rollback()
                 logger.error(f"Database error updating file {file_id} status: {str(e)}")
                 raise
                 
@@ -232,33 +218,30 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
 async def fetch_pending_files() -> List[Dict[str, Any]]:
     """Fetch files with 'uploaded' status from the database and mark them as processing"""
     try:
-        from sqlalchemy import text
-        
+        from api.models.orm_models import File
+        from sqlalchemy.orm import joinedload
+
         # Use the shared repository manager function
         store = get_repository_manager()
-        
-        # Use a transaction to atomically fetch and update files
-        with store.file_repo.get_unit_of_work() as uow:
-            from api.models.orm_models import File
-            
-            # Find files that need processing
-            from sqlalchemy.orm import joinedload
 
-            files_to_process = uow.session.query(File).options(
+        # Use async transaction to atomically fetch and update files
+        async with store.file_repo.get_async_session() as session:
+            # Find files that need processing with row locking
+            files_to_process = await session.query(File).options(
                 joinedload(File.user, innerjoin=True)
             ).filter(
                 File.processing_status == 'uploaded'
             ).order_by(
                 File.created_at.asc()
             ).with_for_update(skip_locked=True).limit(10).all()
-            
+
             # Update status to processing
             for file in files_to_process:
                 file.processing_status = 'processing'
-            
+
             # Commit the transaction to release the lock
-            uow.session.commit()
-            
+            await session.commit()
+
             # Convert files to list of dictionaries
             pending_files = []
             for file in files_to_process:
@@ -270,32 +253,32 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
                     "user_gc_id": file.user.user_gc_id if file.user else '',
                     "created_at": file.created_at
                 })
-        
-        
-        return pending_files
-        
+
+            logger.info(f"Fetched {len(pending_files)} files for processing")
+            return pending_files
+
     except Exception as e:
-        logger.exception(f"Error fetching pending files: {str(e)}")
+        logger.error(f"Error fetching pending files: {str(e)}")
         return []
 
 
 async def worker_loop() -> None:
     """Main worker loop that polls for files and processes them with exponential backoff"""
     global current_poll_interval
-    
+
     while not shutdown_event.is_set():
         try:
             # Fetch pending files
             pending_files = await fetch_pending_files()
-            
+
             if pending_files:
                 logger.info(f"Found {len(pending_files)} files to process")
-                
+
                 # Reset poll interval since we found work
                 if current_poll_interval > INITIAL_POLL_INTERVAL:
                     logger.info(f"Resetting poll interval from {current_poll_interval}s to {INITIAL_POLL_INTERVAL}s")
                     current_poll_interval = INITIAL_POLL_INTERVAL
-                
+
                 # Create tasks for each file
                 tasks = []
                 for file in pending_files:

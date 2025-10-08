@@ -50,18 +50,10 @@ async def startup_event():
     initialize_firebase()
     logger.info("Firebase initialized successfully.")
 
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT"),
-}
+from .models.async_db import get_database_url
 
-DATABASE_URL = (
-    f"postgresql://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-)
+# Get centralized async database URL
+DATABASE_URL = get_database_url()
 
 store = RepositoryManager(database_url=DATABASE_URL)
 app.state.store = store
