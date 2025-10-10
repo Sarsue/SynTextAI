@@ -116,11 +116,6 @@ build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../fronten
 # Note: StaticFiles will only handle requests for files that exist
 app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
 
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=3000)

@@ -1,7 +1,7 @@
 import requests
 import os
 from bs4 import BeautifulSoup
-from llm_service import prompt_llm  # Ensure this is correctly defined in your project
+from api.llm_service import prompt_llm  # Ensure this is correctly defined in your project
 import re
 import time  # Import time module to add delays
 

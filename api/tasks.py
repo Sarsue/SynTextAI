@@ -5,16 +5,19 @@ from contextlib import contextmanager
 import asyncio
 from faster_whisper import WhisperModel
 import yt_dlp
-from utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
-from repositories.repository_manager import RepositoryManager
-from llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
-from syntext_agent import SyntextAgent
+from api.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
+from api.repositories.repository_manager import RepositoryManager
+from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
+from api.syntext_agent import SyntextAgent
 import stripe
-from websocket_manager import websocket_manager
+from api.websocket_manager import websocket_manager
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, HTTPException
 import gc
 from typing import Optional
+from api.models.async_db import get_database_url
+
+# Get centralized async database URL
 
 # Load environment variables
 load_dotenv()
@@ -55,18 +58,7 @@ stripe.api_key = os.getenv('STRIPE_SECRET')
 
 # Initialize DocSynthStore and SyntextAgent
 
-database_config = {
-    'dbname': os.getenv("DATABASE_NAME"),
-    'user': os.getenv("DATABASE_USER"),
-    'password': os.getenv("DATABASE_PASSWORD"),
-    'host': os.getenv("DATABASE_HOST"),
-    'port': os.getenv("DATABASE_PORT"),
-}
-
-DATABASE_URL = (
-    f"postgresql://{database_config['user']}:{database_config['password']}"
-    f"@{database_config['host']}:{database_config['port']}/{database_config['dbname']}"
-)
+DATABASE_URL = get_database_url()
 
 store = RepositoryManager(database_url=DATABASE_URL)
 syntext = SyntextAgent()
@@ -331,7 +323,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 # Update status to EXTRACTED after successful extraction
                 if result.get("success", False):
                     logger.info("[TRACE] [process_file_data] Updating status to EXTRACTED")
-                    file = store.file_repo.get_file_by_id(file_id)  # Reload to avoid stale data
+                    file = await store.file_repo.get_file_by_id(file_id)  # Reload to avoid stale data
                     if file is not None:
                         try:
                             if hasattr(file, 'processing_status'):
@@ -400,7 +392,7 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
     """Processes a user query and generates a response using SyntextAgent with enhanced RAG."""
     try:
         # Get conversation history in formatted form
-        formatted_history = store.format_user_chat_history(history_id, id)
+        formatted_history = await store.user_repo.format_user_chat_history(history_id, id)
         
         # Try enhanced RAG pipeline first
         try:
@@ -418,7 +410,7 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             query_embedding = get_text_embedding(rewritten_query)
             
             # Enhanced retrieval: get more candidates for reranking
-            vector_results = store.query_chunks_by_embedding(id, query_embedding, top_k=15)
+            vector_results = await store.file_repo.query_chunks_by_embedding(id, query_embedding, top_k=15)
             
             # If we have expanded terms, try to get additional results and combine them
             additional_results = []
@@ -426,7 +418,7 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
                 for term in expanded_terms[:3]:  # Limit to top 3 expansion terms
                     try:
                         term_embedding = get_text_embedding(term)
-                        term_results = store.query_chunks_by_embedding(id, term_embedding, top_k=5)
+                        term_results = await store.file_repo.query_chunks_by_embedding(id, term_embedding, top_k=5)
                         additional_results.extend(term_results)
                     except Exception as term_error:
                         logger.warning(f"Error retrieving results for expansion term '{term}': {term_error}")
@@ -473,12 +465,12 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             
             # Original RAG pipeline as a fallback
             query_embedding = get_text_embedding(message)
-            topK_chunks = store.query_chunks_by_embedding(id, query_embedding, top_k=10)
+            topK_chunks = await store.file_repo.query_chunks_by_embedding(id, query_embedding, top_k=10)
             response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
             logger.info("Fallback to original RAG pipeline successful")
         
         # Save response and notify user (common for both pipelines)
-        store.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)
+        await store.user_repo.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)
         await websocket_manager.send_message(id, "message_received", {"status": "success", "history_id": history_id, "message": response})
     
     except Exception as e:
@@ -489,7 +481,7 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
 async def delete_user_task(user_id: str, user_gc_id: str):
     """Deletes a user's account, subscription, and associated files."""
     try:
-        user_sub = store.get_subscription(user_id)
+        user_sub = await store.user_repo.get_subscription(user_id)
         if user_sub and user_sub.get("status") == "active":
             stripe_sub_id = user_sub.get("stripe_subscription_id")
             stripe_customer_id = user_sub.get("stripe_customer_id")
@@ -501,20 +493,30 @@ async def delete_user_task(user_id: str, user_gc_id: str):
 
             # Remove payment methods and delete the customer
             if stripe_customer_id:
-                payment_methods = stripe.PaymentMethod.list(customer=stripe_customer_id, type="card")
+                payment_methods = await stripe.PaymentMethod.list_async(customer=stripe_customer_id, type="card")
                 for method in payment_methods.auto_paging_iter():
-                    stripe.PaymentMethod.detach(method.id)
+                    await stripe.PaymentMethod.detach_async(method.id)
                     logger.info(f"Payment method {method.id} detached.")
                 
-                stripe.Customer.delete(stripe_customer_id)
+                await stripe.Customer.delete_async(stripe_customer_id)
                 logger.info(f"Stripe customer {stripe_customer_id} deleted.")
 
         # Delete files and user account
-        for file in store.get_files_for_user(user_id):
-            delete_from_gcs(user_gc_id, file["name"])
+        files = await store.file_repo.get_files_for_user(user_id)
 
-        store.delete_user_account(user_id)
-        logger.info(f"User account {user_id} deleted.")
+        # Schedule all file deletions concurrently
+        await asyncio.gather(
+            *(asyncio.to_thread(delete_from_gcs, user_gc_id, f["name"]) for f in files),
+            return_exceptions=True
+        )
+
+        success = await store.user_repo.delete_user_account(user_id)
+        if success:
+            logger.info(f"User account {user_id} deleted successfully")
+        else:
+            logger.error(f"Failed to delete user account {user_id}")
+
+      
 
     except Exception as e:
         logger.error(f"Error during user deletion: {e}")

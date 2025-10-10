@@ -18,7 +18,7 @@ from ..schemas.learning_content import (
     QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
 )
 from ..models import KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM, File
-
+import asyncio
 class UploadResponse(BaseModel):
     message: str
     file_id: Optional[int] = None
@@ -89,15 +89,11 @@ async def save_file(
             if not url or not youtube_regex.match(url):
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
             
-            file_id = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
-            if not file_id:
+            file_record = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
+            if not file_record:
                 raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
 
-            task_name = 'tasks.process_youtube_url'
-            request.app.state.celery_app.send_task(task_name, args=[file_id, url, language, comprehension_level])
-            
-            # Get file details for response
-            file_record = await store.file_repo.get_file_by_id(file_id)
+          
             return UploadResponse(files=[FileResponse.model_validate(file_record)])
 
         elif content_type.startswith("multipart/form-data"):
@@ -106,21 +102,14 @@ async def save_file(
             
             uploaded_files_responses = []
             for file in files:
-                gcs_url = upload_to_gcs(file, user_gc_id)
-                file_id = await store.file_repo.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
-                if not file_id:
+                gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
+                file_record = await store.file_repo.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
+                if not file_record:
                     logger.error(f"Failed to create file record for {file.filename}")
                     continue
 
-                task_name = 'tasks.process_uploaded_file'
-                request.app.state.celery_app.send_task(task_name, args=[file_id, gcs_url, file.filename, language, comprehension_level])
-                
-                # Get file details for response
-                file_record = await store.file_repo.get_file_by_id(file_id)
                 uploaded_files_responses.append(FileResponse.model_validate(file_record))
             return UploadResponse(files=uploaded_files_responses)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported Content-Type.")
 
     except RedisError as e:
         logger.error(f"Redis error in save_file: {e}", exc_info=True)
@@ -180,11 +169,11 @@ async def delete_file(
         user_gc_id = user_data["user_gc_id"]
 
         file_to_delete = await store.file_repo.get_file_by_id(file_id)
-        if not file_to_delete or file_to_delete.user_id != user_id:
+        if not file_to_delete or file_to_delete.get('user_id') != user_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
 
-        if file_to_delete.file_url and "storage.googleapis.com" in file_to_delete.file_url:
-             delete_from_gcs(file_to_delete.file_url, user_gc_id)
+        if file_to_delete.get('file_url') and "storage.googleapis.com" in file_to_delete.get('file_url'):
+             await asyncio.to_thread(delete_from_gcs, user_gc_id, file_to_delete.get('file_name'))
 
         if not await store.file_repo.delete_file_entry(user_id, file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")

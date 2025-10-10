@@ -49,7 +49,7 @@ async def create_message(
     try:
         from tasks import process_query_data
         user_id = user_data["user_id"]
-
+        
         # Save the user message to the history
         user_request = await store.chat_repo.add_message(
             content=message, sender='user', user_id=user_id, chat_history_id=history_id

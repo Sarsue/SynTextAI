@@ -1,7 +1,7 @@
 import re
 import logging
-from llm_service import prompt_llm, token_count, MAX_TOKENS_CONTEXT 
-from web_searcher import get_answers_from_web
+from api.llm_service import prompt_llm, token_count, MAX_TOKENS_CONTEXT 
+from api.web_searcher import get_answers_from_web
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -153,10 +153,10 @@ class SyntextAgent:
 
             # Fallback to Web search if no document results found
             logger.info("No relevant document chunks found, falling back to web search.")
-            results, _ = get_answers_from_web(query)
-            if results:
-                return results # Assuming web search includes its own sources
-            return "Sorry, I couldn't find an answer in your documents or on the web."
+            # results, _ = get_answers_from_web(query)
+            # if results:
+            #     return results # Assuming web search includes its own sources
+            # return "Sorry, I couldn't find an answer in your documents or on the web."
 
         except Exception as e:
             logger.error(f"Exception occurred in query pipeline: {e}", exc_info=True)

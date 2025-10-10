@@ -347,6 +347,54 @@ class AsyncUserRepository(AsyncBaseRepository):
                 logger.error(f"Error getting subscription for user {user_id}: {e}", exc_info=True)
                 return None
 
+    async def get_subscription_by_stripe_customer_id(self, stripe_customer_id: str) -> Optional[Tuple[Subscription, Optional[CardDetails]]]:
+        """Get subscription details by Stripe customer ID."""
+        async with self.get_unit_of_work() as uow:
+            try:
+                sub_orm = await uow.session.execute(
+                    select(SubscriptionORM).filter(SubscriptionORM.stripe_customer_id == stripe_customer_id)
+                )
+                sub_orm = sub_orm.scalar_one_or_none()
+                
+                if not sub_orm:
+                    logger.warning(f"No subscription found for Stripe customer ID: {stripe_customer_id}")
+                    return None
+                
+                subscription = Subscription(
+                    id=sub_orm.id,
+                    user_id=sub_orm.user_id,
+                    stripe_customer_id=sub_orm.stripe_customer_id,
+                    stripe_subscription_id=sub_orm.stripe_subscription_id,
+                    status=sub_orm.status,
+                    current_period_end=sub_orm.current_period_end,
+                    trial_end=sub_orm.trial_end,
+                    created_at=sub_orm.created_at,
+                    updated_at=sub_orm.updated_at
+                )
+                
+                card_details_orm = await uow.session.execute(
+                    select(CardDetailsORM).filter(CardDetailsORM.subscription_id == sub_orm.id)
+                )
+                card_details_orm = card_details_orm.scalar_one_or_none()
+                
+                card_details = None
+                if card_details_orm:
+                    card_details = CardDetails(
+                        id=card_details_orm.id,
+                        subscription_id=card_details_orm.subscription_id,
+                        card_last4=card_details_orm.card_last4,
+                        card_type=card_details_orm.card_type,
+                        exp_month=card_details_orm.exp_month,
+                        exp_year=card_details_orm.exp_year,
+                        created_at=card_details_orm.created_at
+                    )
+                
+                return (subscription, card_details)
+                
+            except Exception as e:
+                logger.error(f"Error getting subscription by customer ID {stripe_customer_id}: {e}", exc_info=True)
+                return None
+  
     async def update_subscription_status(self, stripe_customer_id: str, new_status: str) -> bool:
         """Update subscription status by Stripe customer ID.
 

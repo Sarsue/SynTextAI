@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
 from api.utils import decode_firebase_token
+from api.tasks import delete_user_task
 from api.repositories.repository_manager import RepositoryManager
 import logging
 

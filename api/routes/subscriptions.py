@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from api.utils import get_user_id
 from api.repositories.repository_manager import RepositoryManager
 from api.repositories.domain_models import Subscription
-
+import asyncio
 # Load environment variables
 load_dotenv()
 
@@ -111,13 +111,13 @@ async def start_trial(
             stripe_customer_id = None
 
             # Create a new Stripe customer if needed
-            existing_customers = stripe.Customer.list(email=user_info.get('email'))
+            existing_customers = await stripe.Customer.list_async(email=user_info.get('email'))
             if existing_customers.data:
                 stripe_customer_id = existing_customers.data[0].id
                 logger.info(f"Found existing Stripe customer: {stripe_customer_id}")
             else:
                 # Create a new Stripe customer if no existing customer is found
-                customer = stripe.Customer.create(
+                customer = await stripe.Customer.create_async(
                     description=f"Customer for user_id {user_id}",
                     email=user_info.get('email'),
                     name=user_info.get('name')
@@ -126,7 +126,7 @@ async def start_trial(
                 logger.info(f"Created new Stripe customer: {stripe_customer_id}")
 
             # Create a trial subscription for the user
-            created_subscription = stripe.Subscription.create(
+            created_subscription = await stripe.Subscription.create_async(
                 customer=stripe_customer_id,
                 items=[{'price': price_id}],
                 trial_period_days=30,  # Adjust to your trial period duration
@@ -164,18 +164,20 @@ async def cancel_sub(
 ):
     try:
         user_id = user_data["user_id"]
-        subscription_status = await store.user_repo.get_subscription(user_id)
-        if not subscription_status:
+        subscription_data = await store.user_repo.get_subscription(user_id)
+        if not subscription_data:
             raise HTTPException(status_code=404, detail="No subscription found")
 
-        subscription_id = subscription_status.get('stripe_subscription_id')
+        subscription, card_details = subscription_data
+        subscription_id = subscription.stripe_subscription_id
         if not subscription_id:
             raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
-        cancellation_result = stripe.Subscription.delete(subscription_id)
+        cancellation_result = await asyncio.to_thread(stripe.Subscription.delete, subscription_id)
+    
         await store.user_repo.update_subscription_status(
-            subscription_status['stripe_customer_id'],
-            cancellation_result['status']
+            subscription.stripe_customer_id,
+            cancellation_result.status
         )
     
         return {
@@ -200,18 +202,15 @@ async def create_subscription(
         user_id = user_data["user_id"]
         user_info = user_data["user_info"]
 
-        # Check if user already has a subscription
-        subscription = await store.user_repo.get_subscription(user_id)
-        if subscription:
-            # If subscription exists, get the customer ID from it
-            stripe_customer_id = subscription.get('stripe_customer_id')
-            if subscription.get('status') == 'active':
+        subscription_data = await store.user_repo.get_subscription(user_id)
+        stripe_customer_id = None
+        if subscription_data:
+            subscription, _ = subscription_data
+            stripe_customer_id = subscription.stripe_customer_id
+            if subscription.status == 'active':
                 logger.error(f"Request came from an already active subscription: {user_id}")
                 raise HTTPException(status_code=400, detail="Active subscription already exists")
-        else:
-            # If no subscription exists, stripe_customer_id is None
-            stripe_customer_id = None
-        
+   
         # Retrieve the payment method ID from the request
         payment_method_id = payment_method
         if not payment_method_id:
@@ -221,13 +220,13 @@ async def create_subscription(
         # If stripe_customer_id is still None, check if the customer exists in Stripe
         if not stripe_customer_id:
             # Look for an existing customer using the email
-            existing_customers = stripe.Customer.list(email=user_info.get('email'))
+            existing_customers = await stripe.Customer.list_async(email=user_info.get('email'))
             if existing_customers.data:
                 stripe_customer_id = existing_customers.data[0].id
                 logger.info(f"Found existing Stripe customer: {stripe_customer_id}")
             else:
                 # Create a new Stripe customer if no existing customer is found
-                customer = stripe.Customer.create(
+                customer = await stripe.Customer.create_async(
                     description=f"Customer for user_id {user_id}",
                     email=user_info.get('email'),
                     name=user_info.get('name')
@@ -237,20 +236,20 @@ async def create_subscription(
 
         try:
             # Attach the payment method to the customer
-            payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
-            stripe.PaymentMethod.attach(
+            payment_method = await stripe.PaymentMethod.retrieve_async(payment_method_id)
+            await stripe.PaymentMethod.attach_async(
                 payment_method_id,
                 customer=stripe_customer_id
             )
 
             # Set the payment method as the default for the customer
-            stripe.Customer.modify(
+            await stripe.Customer.modify_async(
                 stripe_customer_id,
                 invoice_settings={'default_payment_method': payment_method_id}
             )
 
             # Create a new Stripe subscription
-            created_subscription = stripe.Subscription.create(
+            created_subscription = await stripe.Subscription.create_async(
                 customer=stripe_customer_id,
                 items=[{'price': price_id}],
                 default_payment_method=payment_method_id
@@ -303,18 +302,20 @@ async def update_payment(
 ):
     try:
         user_id = user_data["user_id"]
-        subscription = await store.user_repo.get_subscription(user_id)
-        if not subscription:
+        subscription_data = await store.user_repo.get_subscription(user_id)
+        if not subscription_data:
             raise HTTPException(status_code=404, detail="No subscription found")
 
-        stripe_customer_id = subscription.get('stripe_customer_id')
-        subscription_id = subscription.get('stripe_subscription_id')
+        subscription, card_details = subscription_data
+        stripe_customer_id = subscription.stripe_customer_id
+        subscription_id = subscription.stripe_subscription_id
         if not subscription_id:
             raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
-        payment_method = stripe.PaymentMethod.retrieve(payment_method)
-        stripe.PaymentMethod.attach(payment_method, customer=stripe_customer_id)
-        stripe.Subscription.modify(subscription_id, default_payment_method=payment_method)
+
+        payment_method = await stripe.PaymentMethod.retrieve_async(payment_method)
+        await stripe.PaymentMethod.attach_async(payment_method, customer=stripe_customer_id)
+        await  stripe.Subscription.modify_async(subscription_id, default_payment_method=payment_method)
 
         await store.user_repo.update_subscription(
             stripe_customer_id=stripe_customer_id,
@@ -338,7 +339,8 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
     sig_header = request.headers.get('Stripe-Signature')
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        # event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
+        event = await asyncio.to_thread(stripe.Webhook.construct_event, payload, sig_header, endpoint_secret)
 
         event_type = event['type']
         data_object = event['data']['object']
@@ -363,20 +365,15 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
             try:
                 # Using the repository methods to get subscription info
                 # We need to find the user ID from the stripe customer ID first
-                user_id = None
-                subscriptions = store.user_repo._get_raw_subscription(stripe_customer_id)
-                
-                if subscriptions and len(subscriptions) > 0:
-                    subscription_in_db = subscriptions[0]
-                    user_id = subscription_in_db.user_id
+               
+                subscription_data = await store.user_repo.get_subscription_by_customer_id(stripe_customer_id)
+                if subscription_data:
+                    subscription, _ = subscription_data
+                    user_id = subscription.user_id
                     
-                    if subscription_in_db.status == 'trialing' and current_status != 'trialing':
+                    if subscription.status == 'trialing' and current_status != 'trialing':
                         logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
-                        # TODO: Implement logic here to update the user's plan/tier based on the new status.
-                        # Now we have the user_id from the query, we can use it for updates
-                        # Example: store.update_user_plan(user_id, 'free')
-                        pass # Placeholder for trial end logic
-
+                       
             except Exception as db_exc:
                 logger.error(f"Database error checking/handling trial end for {stripe_customer_id}: {db_exc}")
                 # Decide if this should prevent the main subscription update - likely not, 
@@ -387,7 +384,6 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
             # --- End trial handling logic --- 
 
             # Always update the subscription record with the latest status from Stripe
-            await store.user_repo.update_subscription(stripe_customer_id, current_status, current_period_end)
         elif event_type == 'customer.subscription.deleted':
             await store.user_repo.update_subscription_status(stripe_customer_id, "canceled")
 

@@ -102,15 +102,25 @@ running_tasks = []
 shutdown_event = asyncio.Event()
 
 
+# Global store instance to reuse across worker operations
+_store = None
+
+
 def get_repository_manager():
-    """Get a RepositoryManager instance with proper database configuration"""
-    from api.models.async_db import get_database_url
-    from api.repositories.repository_manager import RepositoryManager
+    """Get or create a RepositoryManager instance with proper database configuration"""
+    global _store
+    if _store is None:
+        from api.models.async_db import get_database_url
+        from api.repositories.repository_manager import RepositoryManager
 
-    # Use centralized async database URL
-    database_url = get_database_url()
+        # Use centralized async database URL
+        database_url = get_database_url()
+        _store = RepositoryManager(database_url=database_url)
+        logger.info("Created new RepositoryManager instance for worker")
+    else:
+        logger.debug("Reusing existing RepositoryManager instance")
 
-    return RepositoryManager(database_url=database_url)
+    return _store
 
 async def update_file_status(file_id: int, status: str, error: str = None) -> None:
     """Update file status in the database using async SQLAlchemy ORM"""
