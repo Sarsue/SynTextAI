@@ -71,7 +71,7 @@ async def generate_learning_materials_for_concept(
                         back = card.get('answer', card.get('back', ''))
                         logger.debug(f"Saving flashcard {i+1}/{len(flashcards)}: front='{front[:30]}...', back='{back[:30]}...'")
                         
-                        await store.add_flashcard_async(
+                        await store.learning_material_repo.add_flashcard(
                             file_id=int(file_id),
                             question=front,
                             answer=back,
@@ -99,7 +99,7 @@ async def generate_learning_materials_for_concept(
                         answer = mcq.get('answer', '')
                         logger.debug(f"Saving MCQ {i+1}/{len(mcqs)}: question='{question[:30]}...', answer='{answer[:30]}...'")
                         
-                        await store.add_quiz_question_async(
+                        await store.learning_material_repo.add_quiz_question(
                             file_id=int(file_id),
                             question=question,
                             question_type="MCQ",
@@ -129,7 +129,7 @@ async def generate_learning_materials_for_concept(
                         logger.debug(f"Saving T/F {i+1}/{len(tf_questions)}: statement='{statement[:30]}...', is_true={is_true}")
                         
                         # Note: We're not passing explanation as it's not accepted by the method
-                        await store.add_quiz_question_async(
+                        await store.learning_material_repo.add_quiz_question(
                             file_id=int(file_id),
                             question=statement,
                             question_type="TF",  # Must match frontend's expected type 'TF' for true/false

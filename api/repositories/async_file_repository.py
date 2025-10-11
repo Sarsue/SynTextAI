@@ -14,32 +14,54 @@ from scipy.spatial.distance import cosine, euclidean
 from .async_base_repository import AsyncBaseRepository
 from .domain_models import File, Segment, Chunk
 
-# Import ORM models from the new models module
 from ..models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
 from ..models import Segment as SegmentORM
 
 # Import SQLAlchemy async components
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, text
+from sqlalchemy import create_engine, select, and_, func, text
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
 class AsyncFileRepository(AsyncBaseRepository):
     """Async repository for file operations."""
 
-    async def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
-        """Add a new file to the database.
+    def __init__(self, database_url: str = None):
+        """Initialize the async file repository.
 
         Args:
-            user_id: ID of the user who owns the file
-            file_name: Name of the file
-            file_url: URL where the file is stored
+            database_url: Database connection URL. If None, uses environment variable.
+        """
+        super().__init__(database_url)
+
+        # Create synchronous session factory for thread executor operations
+        if database_url is None:
+            from ..models.async_db import get_database_url
+            database_url = get_database_url()
+
+        # Convert asyncpg URL to synchronous psycopg2 URL
+        sync_database_url = database_url.replace('postgresql+asyncpg://', 'postgresql://')
+
+        self.sync_engine = create_engine(
+            sync_database_url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
+        self.SyncSession = sessionmaker(bind=self.sync_engine)
+
+    def get_unit_of_work(self):
+        """Get a unit of work for synchronous operations.
 
         Returns:
-            Optional[int]: The ID of the newly created file, or None if creation failed
+            UnitOfWork: A unit of work context manager for synchronous sessions
         """
+        from .unit_of_work import UnitOfWork
+        return UnitOfWork(self.SyncSession)
+
+    async def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
         async with self.get_async_session() as session:
             try:
                 file_orm = FileORM(

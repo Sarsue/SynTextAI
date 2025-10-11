@@ -14,29 +14,23 @@ import hashlib
 
 import fitz  # PyMuPDF
 import numpy as np
-import re
-
-# Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
-from api.repositories.repository_manager import RepositoryManager
 from api.utils import chunk_text
 from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
-
-# Import PDF extraction tools
-from pdfminer.high_level import extract_text
+from api.schemas.learning_content import KeyConceptCreate
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFPageInterpreter
 from pdfminer.pdfdevice import PDFDevice
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.converter import TextConverter
-
 logger = logging.getLogger(__name__)
 
 class PDFProcessor(FileProcessor):
     """
     Processor for PDF documents.
+{{ ... }}
     Handles text extraction, embedding generation, and key concept extraction.
     """
     
@@ -99,7 +93,7 @@ class PDFProcessor(FileProcessor):
         if processed_data and "chunks" in processed_data:
             logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
             # Now properly awaiting the async method
-            success = await self.store.update_file_with_chunks(
+            success = await self.store.file_repo.update_file_with_chunks(
                 user_id=user_id,
                 filename=filename,
                 file_type="pdf",
@@ -159,14 +153,19 @@ class PDFProcessor(FileProcessor):
                         
                         # 1. Save the concept to get its ID
                         logger.debug(f"Attempting to save concept to database: '{title[:50]}...'")
-                        concept_id = await self.store.add_key_concept_async(
-                            file_id=file_id,
+                        key_concept_create = KeyConceptCreate(
                             concept_title=concept.get("concept_title", ""),
                             concept_explanation=concept.get("concept_explanation", ""),
                             source_page_number=concept.get("source_page_number"),
                             source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
-                            source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                            source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds"),
+                            is_custom=False
                         )
+                        concept_result = await self.store.learning_material_repo.add_key_concept(
+                            file_id=file_id,
+                            key_concept_data=key_concept_create
+                        )
+                        concept_id = concept_result.get('id') if concept_result else None
                         
                         if concept_id is not None:
                             logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
@@ -214,55 +213,49 @@ class PDFProcessor(FileProcessor):
     
     async def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
         """
-        Process PDF pages: chunk text and generate embeddings.
-        
-        Args:
-            page_data: List of dictionaries containing page numbers and content
-            
-        Returns:
-            Dictionary with processed chunks including embeddings
+        Process PDF pages: chunk text and generate embeddings efficiently.
+        Collects all chunks first, then processes in large batches to avoid rate limits.
         """
         all_chunks = []
-        
+
+        # First pass: extract and chunk all pages
         for page_item in page_data:
             try:
                 page_content = page_item['content']
                 page_num = page_item['page_num']
-                
+
                 if not page_content:
                     continue
-                    
+
                 # Chunk the page content
                 text_chunks = chunk_text(page_content)
                 non_empty_chunks = [chunk['content'] for chunk in text_chunks if chunk['content'].strip()]
-                
-                if not non_empty_chunks:
-                    continue
-                    
-                # Generate embeddings for all non-empty chunks in batch
-                chunk_embeddings = get_text_embeddings_in_batches(non_empty_chunks)
-                
-                # Ensure we got the same number of embeddings as chunks
-                if len(chunk_embeddings) != len(non_empty_chunks):
-                    logger.error(f"Mismatch between chunk count ({len(non_empty_chunks)}) "
-                                f"and embedding count ({len(chunk_embeddings)}) for page {page_num}")
-                    continue
-                    
-                # Create structured chunks with embeddings
-                for i, chunk_content in enumerate(non_empty_chunks):
+
+                # Collect chunks with metadata for later processing
+                for chunk_content in non_empty_chunks:
                     all_chunks.append({
-                        'embedding': chunk_embeddings[i],
                         'content': chunk_content,
-                        'metadata': {
-                            'page': page_num,
-                            'source_type': 'pdf'
-                        }
+                        'page_num': page_num,
+                        'source_type': 'pdf'
                     })
-                    
+
             except Exception as e:
                 logger.error(f"Error processing page {page_item.get('page_num', 'unknown')}: {e}")
-        
-        return {"chunks": all_chunks}
+
+        # Single large batch for all embeddings
+        if all_chunks:
+            chunk_texts = [chunk['content'] for chunk in all_chunks]
+            chunk_embeddings = get_text_embeddings_in_batches(chunk_texts, batch_size=100)
+
+            # Combine chunks with their embeddings
+            for i, chunk in enumerate(all_chunks):
+                chunk['embedding'] = chunk_embeddings[i] if i < len(chunk_embeddings) else None
+                chunk['metadata'] = {
+                    'page': chunk['page_num'],
+                    'source_type': 'pdf'
+                }
+
+            return {"chunks": all_chunks}
     
     def extract_text_with_page_numbers(self, pdf_data: bytes) -> List[Dict[str, Any]]:
         """

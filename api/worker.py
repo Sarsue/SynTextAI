@@ -77,19 +77,29 @@ API_NOTIFY_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
 async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
     """Send a notification to the main API via HTTP POST"""
     payload = {
-        "user_gc_id": user_gc_id,
+        "user_id": user_gc_id,
         "event_type": event_type,
         "data": data
     }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(API_NOTIFY_URL, json=payload) as response:
-                if response.status == 200:
-                    logger.info(f"Sent notification for {event_type} to user {user_gc_id} via API")
+            # Use the configured API URL instead of hardcoded localhost
+            base_url = API_NOTIFY_URL.rstrip('/')
+            url = f"{base_url}/api/v1/internal/notify-client"
+            logger.debug(f"Sending notification to {url} for user {user_gc_id}")
+
+            async with session.post(url, json=payload, timeout=10) as response:
+                if response.status == 202:  # Accepted
+                    logger.info(f"Successfully sent notification for {event_type} to user {user_gc_id} via API")
                 else:
-                    logger.error(f"Failed to send notification via API. Status: {response.status}, Response: {await response.text()}")
+                    response_text = await response.text()
+                    logger.error(f"Failed to send notification via API. Status: {response.status}, Response: {response_text}")
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout sending notification to API for user {user_gc_id}")
+    except aiohttp.ClientConnectionError as e:
+        logger.error(f"Connection error sending notification to API for user {user_gc_id}: {e}")
     except Exception as e:
-        logger.error(f"Exception while sending notification to API: {e}")
+        logger.error(f"Exception while sending notification to API for user {user_gc_id}: {e}")
 
 # Global semaphore for limiting concurrent file processing
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
@@ -184,8 +194,8 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
                 from api.tasks import process_file_data
                 await process_file_data(
                     user_gc_id=user_gc_id,
-                    user_id=str(user_id),
-                    file_id=str(file_id),
+                    user_id=user_id,  # Pass as int, not string
+                    file_id=file_id,  # Pass as int, not string
                     filename=filename,
                     file_url=file_url,
                     is_youtube=is_youtube,
@@ -260,12 +270,24 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
             # Convert files to list of dictionaries
             pending_files = []
             for file in files_to_process:
+                # Try to get user_gc_id from file URL if available, otherwise use empty string
+                # GCS URLs are structured as: https://storage.googleapis.com/bucket/user_gc_id/filename
+                user_gc_id = ''
+                if file.file_url and "storage.googleapis.com" in file.file_url:
+                    try:
+                        # Extract user_gc_id from GCS URL path
+                        path_parts = file.file_url.split('/')
+                        if len(path_parts) >= 4:
+                            user_gc_id = path_parts[-2]  # Second to last part should be user_gc_id
+                    except Exception as e:
+                        logger.warning(f"Could not extract user_gc_id from file URL {file.file_url}: {e}")
+
                 pending_files.append({
                     "id": file.id,
                     "file_name": file.file_name,
                     "file_url": file.file_url,
                     "user_id": file.user_id,
-                    "user_gc_id": file.user.user_gc_id if file.user else '',
+                    "user_gc_id": user_gc_id,
                     "created_at": file.created_at
                 })
 

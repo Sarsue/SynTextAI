@@ -1,5 +1,7 @@
 import os
 import logging
+import random
+import time
 from dotenv import load_dotenv
 from mistralai.client import MistralClient
 from requests.exceptions import Timeout, RequestException
@@ -9,16 +11,15 @@ import json
 import re
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import time
 import google.generativeai as genai
 import dspy
 from typing import List
-
 
 # Load environment variables
 load_dotenv()
 mistral_key = os.getenv("MISTRAL_API_KEY")
 google_api_key = os.getenv("GOOGLE_API_KEY")
+
 
 # Initialize Gemini client and MistralAI client (keep for embeddings if needed)
 # Note: genai.Client is deprecated; use genai.configure and GenerativeModel
@@ -39,17 +40,14 @@ if mistral_key:
     mistral_client = MistralClient(api_key=mistral_key)
     logging.info("Mistral client initialized.")
 else:
-    logging.warning("MISTRAL_API_KEY not found, Mistral client not initialized (needed for embeddings).")
-
-
-# --- Updated Model and Token Limit for Gemini --- 
-# Use gemini-1.5-pro for large context window (check availability/pricing)
-# Fallback: gemini-1.0-pro with ~32k limit
+    logging.warning("MISTRAL_API_KEY not found, Mistral client not initialized (needed for embeddings).") 
+# Use gemini-2.0-flash for large context window (check availability/pricing)
+# Fallback: gemini-2.0-pro with ~32k limit
 # Choose model appropriate for the task. Flash is fast and cheap, good for bulk explanations.
-GEMINI_MODEL_NAME = "gemini-1.5-flash" # Or "gemini-1.5-pro"
+GEMINI_MODEL_NAME = "gemini-2.0-flash" # Updated to 2.0 flash model
 
 # Practical token limits depend on the specific model version and task
-# Gemini 1.5 Flash has 1M context, Pro has up to 2M in preview
+# Gemini 2.0 Flash has 1M context, Pro has up to 2M in preview
 # Set a reasonable limit for explanations, DSPy manages this but good to be aware
 MAX_TOKENS_CONTEXT = 1000000 # Can adjust based on specific Gemini model/needs
 
@@ -718,57 +716,80 @@ def get_text_embedding(input):
         logging.error(f"Error getting embedding from Mistral: {e}", exc_info=True)
         return [] # Return empty list on error
 
-# --- Embeddings function (Still uses Mistral, update if needed) ---
-def get_text_embeddings_in_batches(inputs, batch_size=10):
+# --- Embeddings function (Optimized for rate limits) ---
+def get_text_embeddings_in_batches(inputs, batch_size=100):
     """
-    Generate embeddings for a list of inputs in batches using Mistral.
-    Update this if you want to use Google's embedding models.
+    Generate embeddings for a list of inputs in batches using Mistral with intelligent rate limiting.
     """
     if not mistral_key:
         logging.error("Mistral API Key not configured for embeddings.")
         return []
-    # Ensure client is initialized before use
+    
     if not mistral_client:
         logging.error("Mistral client not initialized. Cannot get embeddings in batch.")
         return []
         
     all_embeddings = []
-    max_retries = 3
-    retry_delay = 2 # seconds
+    max_retries = 5  # More retries for rate limits
+    base_delay = 5   # Longer base delay
+    max_delay = 120  # Cap maximum delay
+    
+    # Rate limiting state
+    last_request_time = 0
+    min_interval = 3  # Minimum 3 seconds between requests
     
     for i in range(0, len(inputs), batch_size):
         batch = inputs[i:i + batch_size]
+        
+        # Rate limiting: ensure minimum interval between requests
+        current_time = time.time()
+        elapsed = current_time - last_request_time
+        if elapsed < min_interval:
+            sleep_time = min_interval - elapsed
+            time.sleep(sleep_time)
+        
         retries = 0
         success = False
+        
         while retries < max_retries and not success:
             try:
-                embeddings_batch = mistral_client.embeddings(model="mistral-embed", input=batch)
+                embeddings_batch = mistral_client.embeddings(
+                    model="mistral-embed", 
+                    input=batch
+                )
                 all_embeddings.extend([emb.embedding for emb in embeddings_batch.data])
                 success = True
+                last_request_time = time.time()
+                
             except Exception as e:
                 retries += 1
-                logging.warning(f"Error getting embeddings for batch starting at index {i} (Attempt {retries}/{max_retries}): {e}")
-                if retries < max_retries:
-                    logging.info(f"Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)
+                error_msg = str(e).lower()
+                
+                # Handle rate limiting specifically
+                if "429" in error_msg or "rate limit" in error_msg or "capacity exceeded" in error_msg:
+                    if retries < max_retries:
+                        # Exponential backoff for rate limits
+                        delay = min(base_delay * (2 ** retries), max_delay)
+                        jitter = random.uniform(0.8, 1.2)  # Add jitter
+                        sleep_time = delay * jitter
+                        
+                        logging.warning(f"Rate limit hit for batch {i}, retry {retries}/{max_retries} in {sleep_time:.1f}s")
+                        time.sleep(sleep_time)
+                        continue
+                    else:
+                        logging.error(f"Failed to get embeddings for batch {i} after {max_retries} attempts due to rate limits")
+                        # Return partial results instead of failing completely
+                        all_embeddings.extend([None] * len(batch))
+                        break
                 else:
-                    logging.error(f"Failed to get embeddings for batch starting at index {i} after {max_retries} attempts.")
-                    # Option 1: Re-raise the last exception to signal critical failure
-                    raise e 
-                    # Option 2: Return partially collected embeddings (might be risky)
-                    # return all_embeddings 
-                    # Option 3: Append placeholders (like None) or skip the batch
-                    # all_embeddings.extend([None] * len(batch)) # Mark failures
-                    # break # Stop processing further batches if one fails critically
-                    
-        # If a batch failed critically and we didn't re-raise, handle here
-        # if not success:
-            # Handle critical failure after retries if needed (e.g., if Option 3 above was chosen)
-            # pass
-            
-        # Apply the original delay *between batches* if needed for general rate limiting
-        time.sleep(delay) # Use the original 'delay' variable if defined elsewhere
-
+                    # For other errors, don't retry as much
+                    logging.error(f"Non-rate-limit error for batch {i}: {e}")
+                    all_embeddings.extend([None] * len(batch))
+                    break
+        
+        # Longer delay between batches
+        time.sleep(base_delay)
+    
     return all_embeddings
 
 if __name__ == "__main__":

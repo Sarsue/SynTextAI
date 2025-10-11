@@ -186,7 +186,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
     
     try:
         # Get the file object and validate status - don't process if already processing or processed
-        file = store.file_repo.get_file_by_id(file_id)
+        file = store.file_repo.get_file_by_id(int(file_id))
         if not file:
             logger.error(f"File not found with ID: {file_id}")
             return
@@ -323,7 +323,7 @@ async def process_file_data(user_gc_id: str, user_id: str, file_id: str, filenam
                 # Update status to EXTRACTED after successful extraction
                 if result.get("success", False):
                     logger.info("[TRACE] [process_file_data] Updating status to EXTRACTED")
-                    file = await store.file_repo.get_file_by_id(file_id)  # Reload to avoid stale data
+                    file = await store.file_repo.get_file_by_id(int(file_id))  # Reload to avoid stale data
                     if file is not None:
                         try:
                             if hasattr(file, 'processing_status'):
@@ -471,11 +471,22 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
         
         # Save response and notify user (common for both pipelines)
         await store.user_repo.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)
-        await websocket_manager.send_message(id, "message_received", {"status": "success", "history_id": history_id, "message": response})
+
+        # Send WebSocket notification with error handling
+        try:
+            await websocket_manager.send_message(id, "message_received", {"status": "success", "history_id": history_id, "message": response})
+        except Exception as ws_error:
+            logger.warning(f"Failed to send WebSocket notification for successful query processing: {str(ws_error)}")
+            # Don't fail the entire operation for WebSocket issues
     
     except Exception as e:
         logger.error(f"Error processing query: {e}")
-        await websocket_manager.send_message(id, "message_received", {"status": "error", "error": str(e)})
+        # Send WebSocket error notification with error handling
+        try:
+            await websocket_manager.send_message(id, "message_received", {"status": "error", "error": str(e)})
+        except Exception as ws_error:
+            logger.warning(f"Failed to send WebSocket error notification: {str(ws_error)}")
+            # Don't fail the entire operation for WebSocket issues
         raise HTTPException(status_code=500, detail="Query processing failed")
 
 async def delete_user_task(user_id: str, user_gc_id: str):

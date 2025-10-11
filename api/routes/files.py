@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
 from typing import List, Dict, Optional, Any
@@ -19,11 +20,23 @@ from ..schemas.learning_content import (
 )
 from ..models import KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM, File
 import asyncio
+
+class FileResponse(BaseModel):
+    id: int
+    file_name: str
+    file_url: str
+    created_at: Optional[datetime] = None
+    user_id: Optional[int] = None
+    file_type: Optional[str] = None
+    processing_status: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class UploadResponse(BaseModel):
-    message: str
-    file_id: Optional[int] = None
-    file_name: Optional[str] = None
-    job_id: Optional[str] = None
+    message: Optional[str] = None
+    files: Optional[List[FileResponse]] = None
+  
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s: %(message)s')
@@ -68,9 +81,9 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=UploadResponse)
 async def save_file(
     request: Request,
-    language: str = Query(default="English", description="Language of the file content"),
-    comprehension_level: str = Query(default="Beginner", description="Comprehension level of the file content"),
-    files: Optional[List[UploadFile]] = FastAPIFile(None, description="List of files to upload"),
+    language: str = Query(default="English"),
+    comprehension_level: str = Query(default="Beginner"),
+    files: Optional[List[UploadFile]] = FastAPIFile(None),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -79,37 +92,52 @@ async def save_file(
         user_gc_id = user_data["user_gc_id"]
 
         content_type = request.headers.get("content-type", "")
+
+        # --- YouTube JSON Upload ---
         if content_type.startswith("application/json"):
             data = await request.json()
             if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
                 raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
-            url = data.get("url", "")
 
+            url = data.get("url", "")
             youtube_regex = re.compile(r"^(https?://)?(www\\.)?(youtube\\.com|youtu\\.be)/")
             if not url or not youtube_regex.match(url):
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
-            
-            file_record = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
-            if not file_record:
+
+            file_id = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
+            if not file_id:
                 raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
 
-          
-            return UploadResponse(files=[FileResponse.model_validate(file_record)])
+            file_record = await store.file_repo.get_file_by_id(file_id=file_id)
 
+            return UploadResponse(
+                message="YouTube link processed successfully.",
+                files=[FileResponse.model_validate(file_record)]
+            )
+
+        # --- Multipart File Upload ---
         elif content_type.startswith("multipart/form-data"):
             if not files:
                 raise HTTPException(status_code=400, detail="No files were uploaded.")
-            
+
             uploaded_files_responses = []
             for file in files:
                 gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
-                file_record = await store.file_repo.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
-                if not file_record:
+                file_id = await store.file_repo.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
+                if not file_id:
                     logger.error(f"Failed to create file record for {file.filename}")
                     continue
 
+                file_record = await store.file_repo.get_file_by_id(file_id=file_id)
                 uploaded_files_responses.append(FileResponse.model_validate(file_record))
-            return UploadResponse(files=uploaded_files_responses)
+
+            return UploadResponse(
+                message="File(s) uploaded successfully.",
+                files=uploaded_files_responses
+            )
+
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported content type.")
 
     except RedisError as e:
         logger.error(f"Redis error in save_file: {e}", exc_info=True)

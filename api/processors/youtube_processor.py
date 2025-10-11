@@ -12,8 +12,7 @@ from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 from api.llm_service import generate_key_concepts_dspy, get_text_embeddings_in_batches
-
-logger = logging.getLogger(__name__)
+from api.schemas.learning_content import KeyConceptCreate
 
 # Import required only for YouTube processing
 try:
@@ -134,14 +133,19 @@ class YouTubeProcessor(FileProcessor):
                     logger.debug(f"Saving concept to database: '{title[:30]}...'")
                     
                     # Save the concept to get its ID
-                    concept_id = await self.store.add_key_concept_async(
-                        file_id=file_id,
+                    key_concept_create = KeyConceptCreate(
                         concept_title=title,
                         concept_explanation=explanation,
                         source_page_number=concept.get("source_page_number"),
                         source_video_timestamp_start_seconds=concept.get("source_video_timestamp_start_seconds"),
-                        source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds")
+                        source_video_timestamp_end_seconds=concept.get("source_video_timestamp_end_seconds"),
+                        is_custom=False
                     )
+                    concept_result = await self.store.learning_material_repo.add_key_concept(
+                        file_id=int(file_id),
+                        key_concept_data=key_concept_create
+                    )
+                    concept_id = concept_result.get('id') if concept_result else None
                     
                     if concept_id is not None:
                         logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
@@ -462,7 +466,7 @@ class YouTubeProcessor(FileProcessor):
             extracted_data.append(segment_data)
         
         # Store using the proper repository method that matches the PDF processor
-        success = await self.store.update_file_with_chunks_async(
+        success = await self.store.file_repo.update_file_with_chunks(
             user_id=int(user_id),
             filename=filename,
             file_type="youtube",
