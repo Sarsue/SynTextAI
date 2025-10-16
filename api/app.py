@@ -39,6 +39,10 @@ async def apply_posthog_middleware(request: Request, call_next):
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 # Initialize Firebase on application startup
 @app.on_event("startup")
 async def startup_event():
@@ -49,6 +53,16 @@ async def startup_event():
     logger.info("Executing startup event: Initializing Firebase...")
     initialize_firebase()
     logger.info("Firebase initialized successfully.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Cleanup shared database resources on application shutdown.
+    """
+    logger.info("Executing shutdown event: Cleaning up database resources...")
+    from .repositories.async_base_repository import cleanup_shared_db_resources
+    await cleanup_shared_db_resources()
+    logger.info("Database resources cleaned up successfully.")
 
 from .models.async_db import get_database_url
 

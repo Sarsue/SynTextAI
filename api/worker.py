@@ -26,7 +26,7 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from pathlib import Path
 from api.models.orm_models import File
-
+from api.tasks import process_file_data
 # Add the parent directory to sys.path to fix imports
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, base_dir)
@@ -150,7 +150,9 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
 
                 file.processing_status = status
                 if error:
-                    file.error_message = error
+                    # Note: File model doesn't have error_message field
+                    # Error details are logged but not stored in database
+                    logger.warning(f"File {file_id} error: {error}")
 
                 await session.commit()
                 logger.info(f"Successfully updated file {file_id} status to {status}")
@@ -181,8 +183,7 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
             is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
             logger.info(f"[TRACE] File type detection - is_youtube: {is_youtube}")
                 
-            # Update status to PROCESSING and notify frontend
-            await update_file_status(file_id, "processing")
+            # Send notification for processing start (don't update status yet)
             await send_notification_to_api(user_gc_id, 'file_status_update', {
                 'file_id': file_id,
                 'status': 'processing',
@@ -190,9 +191,8 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
             })
 
             try:
-                # Process the file
-                from api.tasks import process_file_data
-                await process_file_data(
+                # Process the file - let process_file_data handle all status updates
+                result = await process_file_data(
                     user_gc_id=user_gc_id,
                     user_id=user_id,  # Pass as int, not string
                     file_id=file_id,  # Pass as int, not string
@@ -203,11 +203,14 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
                     comprehension_level=comprehension_level
                 )
 
-                # Update status to PROCESSED and notify frontend
-                await update_file_status(file_id, "processed")
+                # Only set final status based on result from process_file_data
+                final_status = result.get('final_status', 'processed' if result.get('success', False) else 'failed')
+                
+                # Update status to final state and notify frontend
+                await update_file_status(file_id, final_status)
                 await send_notification_to_api(user_gc_id, 'file_status_update', {
                     'file_id': file_id,
-                    'status': 'processed',
+                    'status': final_status,
                     'progress': 100,
                 })
                 logger.info(f"Successfully completed processing file {filename} (ID: {file_id})")
@@ -260,11 +263,11 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
             result = await session.execute(stmt)
             files_to_process = result.scalars().all()
 
-            # Update status to processing
+            # Update status to processing to claim the files
             for file in files_to_process:
                 file.processing_status = 'processing'
 
-            # Commit the transaction to release the lock
+            # Commit the transaction to release the lock and persist status changes
             await session.commit()
 
             # Convert files to list of dictionaries
@@ -370,13 +373,13 @@ async def worker_loop() -> None:
 def handle_shutdown(sig, frame):
     """Handle shutdown signals gracefully"""
     logger.info(f"Received shutdown signal {sig}")
-    
+
     # Set the shutdown event to stop creating new tasks
     shutdown_event.set()
-    
+
     # Note: we're not forcibly cancelling running tasks
     # They will continue processing but no new tasks will be started
-    
+
     logger.info(f"Waiting for {len(running_tasks)} tasks to complete...")
 
 
@@ -400,7 +403,12 @@ async def main():
         if running_tasks:
             logger.info(f"Waiting for {len(running_tasks)} tasks to complete...")
             await asyncio.wait(running_tasks)
-            
+
+        # Clean up shared database resources
+        logger.info("Cleaning up shared database resources...")
+        from api.repositories.async_base_repository import cleanup_shared_db_resources
+        await cleanup_shared_db_resources()
+
         logger.info("SynText AI Worker shutdown complete")
 
 

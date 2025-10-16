@@ -1,26 +1,19 @@
 """
 Async File repository for managing file-related database operations.
-
-This module mirrors the sync FileRepository but provides async functionality
-while maintaining identical method signatures and return types.
 """
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 import logging
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from scipy.spatial.distance import cosine, euclidean
 
 from .async_base_repository import AsyncBaseRepository
-from .domain_models import File, Segment, Chunk
-
 from ..models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
 from ..models import Segment as SegmentORM
 
 # Import SQLAlchemy async components
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import create_engine, select, and_, func, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select, and_, func, text
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
@@ -36,38 +29,24 @@ class AsyncFileRepository(AsyncBaseRepository):
         """
         super().__init__(database_url)
 
-        # Create synchronous session factory for thread executor operations
-        if database_url is None:
-            from ..models.async_db import get_database_url
-            database_url = get_database_url()
+    async def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
+        """Add a new file to the database.
 
-        # Convert asyncpg URL to synchronous psycopg2 URL
-        sync_database_url = database_url.replace('postgresql+asyncpg://', 'postgresql://')
-
-        self.sync_engine = create_engine(
-            sync_database_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_recycle=3600,
-        )
-        self.SyncSession = sessionmaker(bind=self.sync_engine)
-
-    def get_unit_of_work(self):
-        """Get a unit of work for synchronous operations.
+        Args:
+            user_id: ID of the user who owns this file
+            file_name: Name of the file
+            file_url: URL where the file is stored
 
         Returns:
-            UnitOfWork: A unit of work context manager for synchronous sessions
+            int: The ID of the newly created file, or None if creation failed
         """
-        from .unit_of_work import UnitOfWork
-        return UnitOfWork(self.SyncSession)
-
-    async def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
         async with self.get_async_session() as session:
             try:
                 file_orm = FileORM(
                     user_id=user_id,
                     file_name=file_name,
-                    file_url=file_url
+                    file_url=file_url,
+                    processing_status="uploaded"  # Explicitly set status to ensure it's not None
                 )
                 session.add(file_orm)
                 await session.flush()
@@ -96,42 +75,28 @@ class AsyncFileRepository(AsyncBaseRepository):
         Returns:
             bool: True if successful, False otherwise
         """
-        try:
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor() as pool:
-                result = await loop.run_in_executor(
-                    pool,
-                    self._sync_update_file_with_chunks,
-                    user_id, filename, file_type, extracted_data
-                )
-                return result
-        except Exception as e:
-            logger.error(f"Error in async wrapper for update_file_with_chunks: {e}", exc_info=True)
-            return False
-
-    def _sync_update_file_with_chunks(self, user_id: int, filename: str, file_type: str, extracted_data: List[Dict]) -> bool:
-        """Synchronous implementation of update_file_with_chunks."""
-        with self.get_unit_of_work() as uow:
+        async with self.get_async_session() as session:
             try:
                 # Get or create the file record
-                file = uow.session.query(FileORM).filter(
-                    FileORM.user_id == user_id,
-                    FileORM.file_name == filename
-                ).first()
+                stmt = select(FileORM).where(
+                    and_(FileORM.user_id == user_id, FileORM.file_name == filename)
+                )
+                result = await session.execute(stmt)
+                file = result.scalar_one_or_none()
 
                 if not file:
                     file = FileORM(
                         user_id=user_id,
                         file_name=filename,
-                        file_url="",  # URL might be added later
-                        file_type=file_type
+                        file_url="",
+                        file_type=file_type,
+                        processing_status="processed"
                     )
-                    uow.session.add(file)
-                    uow.session.flush()
-
-                # Update file metadata
-                file.file_type = file_type
-                file.processing_status = 'processed'
+                    session.add(file)
+                    await session.flush()
+                else:
+                    file.file_type = file_type
+                    file.processing_status = "processed"
 
                 # Process segments and chunks
                 for segment_data in extracted_data:
@@ -140,20 +105,12 @@ class AsyncFileRepository(AsyncBaseRepository):
                         content=segment_data.get('content', ''),
                         page_number=segment_data.get('page_number')
                     )
-
-                    # Handle metadata
-                    meta_data = {}
-                    for key in segment_data:
-                        if key not in ['content', 'page_number', 'chunks']:
-                            meta_data[key] = segment_data[key]
-
+                    meta_data = {k: v for k, v in segment_data.items() if k not in ['content', 'page_number', 'chunks']}
                     if meta_data:
                         segment.meta_data = meta_data
+                    session.add(segment)
+                    await session.flush()
 
-                    uow.session.add(segment)
-                    uow.session.flush()
-
-                    # Process chunks within this segment
                     if 'chunks' in segment_data:
                         for chunk_data in segment_data['chunks']:
                             chunk = ChunkORM(
@@ -161,14 +118,26 @@ class AsyncFileRepository(AsyncBaseRepository):
                                 content=chunk_data.get('content', ''),
                                 embedding=chunk_data.get('embedding')
                             )
-                            uow.session.add(chunk)
+                            session.add(chunk)
 
+                await session.commit()
+                logger.info(f"Updated file {filename} (ID: {file.id}) with chunks")
                 return True
             except IntegrityError as e:
-                logger.error(f"Integrity error updating file with chunks: {e}", exc_info=True)
+                await session.rollback()
+                error_msg = f"Integrity error updating file {filename} with chunks: {str(e)[:1000]}"
+                logger.error(error_msg, exc_info=True)
+                if file:
+                    file.processing_status = "failed"
+                    await session.commit()
                 return False
             except Exception as e:
-                logger.error(f"Error updating file with chunks: {e}", exc_info=True)
+                await session.rollback()
+                error_msg = f"Error updating file {filename} with chunks: {str(e)[:1000]}"
+                logger.error(error_msg, exc_info=True)
+                if file:
+                    file.processing_status = "failed"
+                    await session.commit()
                 return False
 
     async def get_files_for_user(self, user_id: int, skip: int = 0, limit: int = 10) -> Dict[str, Any]:
@@ -200,23 +169,25 @@ class AsyncFileRepository(AsyncBaseRepository):
                     FileORM.file_name,
                     FileORM.file_url,
                     FileORM.created_at,
-                    FileORM.processing_status
+                    FileORM.processing_status,
+                    FileORM.file_type
                 ).where(FileORM.user_id == user_id).order_by(FileORM.created_at.desc()).offset(skip).limit(limit)
                 result = await session.execute(stmt)
                 files = result.fetchall()
 
-                items = []
-                for file in files:
-                    file_dict = {
+                items = [
+                    {
                         "id": file.id,
                         "file_name": file.file_name,
                         "name": file.file_name,
                         "file_url": file.file_url,
                         "publicUrl": file.file_url,
                         "processing_status": file.processing_status,
-                        "created_at": file.created_at.isoformat() if file.created_at else None,
+                        "file_type": file.file_type,
+                        "created_at": file.created_at.isoformat() if file.created_at else None
                     }
-                    items.append(file_dict)
+                    for file in files
+                ]
 
                 return {
                     'items': items,
@@ -258,30 +229,29 @@ class AsyncFileRepository(AsyncBaseRepository):
 
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Error deleting file {file_id}: {e}", exc_info=True)
-
-                # Fallback: Try SQL deletion using the same session
+                error_msg = f"Error deleting file {file_id}: {str(e)[:1000]}"
+                logger.error(error_msg, exc_info=True)
                 try:
-                    # Delete associated entities
-                    await session.execute(text(f"DELETE FROM flashcards WHERE file_id = {file_id}"))
-                    await session.execute(text(f"DELETE FROM quiz_questions WHERE file_id = {file_id}"))
-                    await session.execute(text(f"DELETE FROM key_concepts WHERE file_id = {file_id}"))
-                    await session.execute(text(f"DELETE FROM chunks WHERE file_id = {file_id}"))
-                    await session.execute(text(f"DELETE FROM segments WHERE file_id = {file_id}"))
-                    await session.execute(text(f"DELETE FROM files WHERE id = {file_id} AND user_id = {user_id}"))
+                    await session.execute(text("DELETE FROM flashcards WHERE file_id = :file_id"), {"file_id": file_id})
+                    await session.execute(text("DELETE FROM quiz_questions WHERE file_id = :file_id"), {"file_id": file_id})
+                    await session.execute(text("DELETE FROM key_concepts WHERE file_id = :file_id"), {"file_id": file_id})
+                    await session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
+                    await session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
+                    await session.execute(text("DELETE FROM files WHERE id = :file_id AND user_id = :user_id"),
+                                         {"file_id": file_id, "user_id": user_id})
                     await session.commit()
                     logger.info(f"Successfully deleted file {file_id} for user {user_id} using manual SQL deletion")
                     return True
                 except Exception as sql_error:
-                    await session.rollback()
-                    logger.error(f"SQL fallback error deleting file {file_id}: {sql_error}", exc_info=True)
+                    error_msg = f"SQL fallback error deleting file {file_id}: {str(sql_error)[:1000]}"
+                    logger.error(error_msg, exc_info=True)
                     return False
 
     async def query_chunks_by_embedding(
         self,
-        user_id: int, 
-        query_embedding: List[float], 
-        top_k: int = 5, 
+        user_id: int,
+        query_embedding: List[float],
+        top_k: int = 5,
         similarity_type: str = 'l2'
     ) -> List[Dict]:
         """Retrieves chunks with the highest similarity to the query embedding.
@@ -307,10 +277,10 @@ class AsyncFileRepository(AsyncBaseRepository):
 
                 file_ids = [file.id for file in files]
 
-                # Get all chunks with embeddings
+                # Get chunks with embeddings, limited to improve performance
                 stmt = select(ChunkORM).where(
                     and_(ChunkORM.file_id.in_(file_ids), ChunkORM.embedding != None)
-                )
+                ).limit(1000)
                 result = await session.execute(stmt)
                 chunks = result.scalars().all()
 
@@ -323,13 +293,11 @@ class AsyncFileRepository(AsyncBaseRepository):
 
                 for chunk in chunks:
                     chunk_embedding = np.array(chunk.embedding)
-
                     if similarity_type.lower() == 'cosine':
                         similarity = 1 - cosine(query_embedding_np, chunk_embedding)
                     else:
-                        # Default to L2 (euclidean) distance
                         distance = euclidean(query_embedding_np, chunk_embedding)
-                        similarity = 1 / (1 + distance)  # Transform distance to similarity [0,1]
+                        similarity = 1 / (1 + distance)
 
                     results.append({
                         'chunk_id': chunk.id,
@@ -373,16 +341,15 @@ class AsyncFileRepository(AsyncBaseRepository):
                         'page_number': segment.page_number,
                         'meta_data': meta
                     })
-
                 return result
             except Exception as e:
                 logger.error(f"Error getting segments for page {page_number}: {e}", exc_info=True)
                 return []
 
     async def get_segments_for_time_range(
-        self, 
-        file_id: int, 
-        start_time: float, 
+        self,
+        file_id: int,
+        start_time: float,
         end_time: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """Get segment contents for a specific time range of a video file.
@@ -397,10 +364,7 @@ class AsyncFileRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
-                # Build base query
                 stmt = select(SegmentORM).where(SegmentORM.file_id == file_id)
-
-                # Apply filter for time range
                 if end_time:
                     stmt = stmt.filter(
                         and_(
@@ -415,7 +379,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                             SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
                         )
                     )
-
                 result = await session.execute(stmt)
                 segments = result.scalars().all()
 
@@ -427,7 +390,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                         'content': segment.content,
                         'meta_data': meta
                     })
-
                 return result
             except Exception as e:
                 logger.error(f"Error getting segments for time range: {e}", exc_info=True)
@@ -447,16 +409,15 @@ class AsyncFileRepository(AsyncBaseRepository):
                 stmt = select(FileORM).where(FileORM.id == file_id)
                 result = await session.execute(stmt)
                 file_orm = result.scalar_one_or_none()
-
                 if file_orm:
                     return {
                         'id': file_orm.id,
+                        'user_id': file_orm.user_id,
                         'file_name': file_orm.file_name,
                         'file_url': file_orm.file_url,
-                        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None,
-                        'user_id': file_orm.user_id,
                         'file_type': file_orm.file_type,
-                        'processing_status': file_orm.processing_status
+                        'processing_status': file_orm.processing_status,
+                        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None
                     }
                 return None
             except Exception as e:
@@ -479,21 +440,75 @@ class AsyncFileRepository(AsyncBaseRepository):
                     and_(FileORM.user_id == user_id, FileORM.file_name == filename)
                 )
                 result = await session.execute(stmt)
-                file = result.scalar_one_or_none()
-
-                if not file:
-                    return None
-
-                return {
-                    'id': file.id,
-                    'user_id': file.user_id,
-                    'file_name': file.file_name,
-                    'file_url': file.file_url,
-                    'created_at': file.created_at.isoformat() if file.created_at else None
-                }
+                file_orm = result.scalar_one_or_none()
+                if file_orm:
+                    return {
+                        'id': file_orm.id,
+                        'user_id': file_orm.user_id,
+                        'file_name': file_orm.file_name,
+                        'file_url': file_orm.file_url,
+                        'file_type': file_orm.file_type,
+                        'processing_status': file_orm.processing_status,
+                        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None
+                    }
+                return None
             except Exception as e:
                 logger.error(f"Error getting file by name {filename}: {e}", exc_info=True)
                 return None
+
+    async def update_file_type(self, file_id: int, file_type: str) -> bool:
+        """Update the file_type of a file.
+
+        Args:
+            file_id: ID of the file to update
+            file_type: New file type (pdf, youtube, etc.)
+
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(FileORM).where(FileORM.id == file_id)
+                result = await session.execute(stmt)
+                file_orm = result.scalar_one_or_none()
+                if not file_orm:
+                    logger.warning(f"File {file_id} not found for type update")
+                    return False
+                file_orm.file_type = file_type
+                await session.commit()
+                logger.info(f"Updated file {file_id} type to {file_type}")
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error updating file {file_id} type: {e}", exc_info=True)
+                return False
+
+    async def update_file_status(self, file_id: int, status: str) -> bool:
+        """Update the processing status of a file.
+
+        Args:
+            file_id: ID of the file to update
+            status: New processing status
+
+        Returns:
+            bool: True if update was successful, False otherwise
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(FileORM).where(FileORM.id == file_id)
+                result = await session.execute(stmt)
+                file_orm = result.scalar_one_or_none()
+                if not file_orm:
+                    logger.warning(f"File {file_id} not found for status update")
+                    return False
+                file_orm.processing_status = status
+                await session.commit()
+                logger.info(f"Updated file {file_id} status to {status}")
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error updating file {file_id} status: {e}", exc_info=True)
+                return False
 
     async def check_user_file_ownership(self, file_id: int, user_id: int) -> bool:
         """Check if a user owns a specific file."""
@@ -501,8 +516,7 @@ class AsyncFileRepository(AsyncBaseRepository):
             try:
                 stmt = select(FileORM.id).where(and_(FileORM.id == file_id, FileORM.user_id == user_id))
                 result = await session.execute(stmt)
-                exists = result.scalar_one_or_none() is not None
-                return exists
+                return result.scalar() is not None
             except Exception as e:
                 logger.error(f"Error checking file ownership for file {file_id}, user {user_id}: {e}", exc_info=True)
                 return False

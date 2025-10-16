@@ -31,6 +31,7 @@ async def generate_learning_materials_for_concept(
             generate_mcqs_from_concept,
             generate_true_false_from_concept
         )
+        from api.schemas.learning_content import FlashcardCreate
         
         concept_id = concept.get('id')
         if not concept_id:
@@ -67,19 +68,30 @@ async def generate_learning_materials_for_concept(
                 logger.info(f"Saving {len(flashcards)} flashcards for concept ID {concept_id}")
                 for i, card in enumerate(flashcards):
                     try:
-                        front = card.get('question', card.get('front', ''))
-                        back = card.get('answer', card.get('back', ''))
+                        # Extract front and back from the card data
+                        front = card.get('front', card.get('question', ''))
+                        back = card.get('back', card.get('answer', ''))
                         logger.debug(f"Saving flashcard {i+1}/{len(flashcards)}: front='{front[:30]}...', back='{back[:30]}...'")
                         
+                        # Create FlashcardCreate object with correct field names
+                        flashcard_data = FlashcardCreate(
+                            question=front,  # Use 'question' field
+                            answer=back,     # Use 'answer' field
+                            key_concept_id=int(concept_id),
+                            is_custom=True
+                        )
+                        
+                        # Call with correct parameters
                         await store.learning_material_repo.add_flashcard(
                             file_id=int(file_id),
-                            question=front,
-                            answer=back,
-                            key_concept_id=int(concept_id)
+                            flashcard_data=flashcard_data
                         )
                         flashcards_saved += 1
+                        logger.debug(f"✅ Successfully saved flashcard {i+1}")
                     except Exception as e:
-                        logger.error(f"Error saving flashcard {i+1}: {e}", exc_info=True)
+                        logger.error(f"❌ Error saving flashcard {i+1}: {e}", exc_info=True)
+                        logger.error(f"❌ Flashcard data: front='{front[:50]}...', back='{back[:50]}...'")
+                        logger.error(f"❌ Parameters: file_id={file_id}, concept_id={concept_id}")
         except Exception as e:
             logger.error(f"Error generating flashcards: {e}", exc_info=True)
                 
@@ -102,14 +114,17 @@ async def generate_learning_materials_for_concept(
                         await store.learning_material_repo.add_quiz_question(
                             file_id=int(file_id),
                             question=question,
-                            question_type="MCQ",
+                            question_type="MCQ",  # Keep MCQ for multiple choice questions
                             correct_answer=answer,
                             distractors=options,
                             key_concept_id=int(concept_id)
                         )
                         mcqs_saved += 1
+                        logger.debug(f"✅ Successfully saved MCQ {i+1}")
                     except Exception as e:
-                        logger.error(f"Error saving MCQ {i+1}: {e}", exc_info=True)
+                        logger.error(f"❌ Error saving MCQ {i+1}: {e}", exc_info=True)
+                        logger.error(f"❌ MCQ data: question='{question[:50]}...', answer='{answer[:30]}...'")
+                        logger.error(f"❌ Parameters: file_id={file_id}, concept_id={concept_id}, type=MCQ")
         except Exception as e:
             logger.error(f"Error generating MCQs: {e}", exc_info=True)
                 
@@ -132,13 +147,16 @@ async def generate_learning_materials_for_concept(
                         await store.learning_material_repo.add_quiz_question(
                             file_id=int(file_id),
                             question=statement,
-                            question_type="TF",  # Must match frontend's expected type 'TF' for true/false
+                            question_type="TF",  # Try this format instead of 'TF'
                             correct_answer="True" if is_true else "False",
                             key_concept_id=int(concept_id)
                         )
                         tf_saved += 1
+                        logger.debug(f"✅ Successfully saved T/F question {i+1}")
                     except Exception as e:
-                        logger.error(f"Error saving T/F question {i+1}: {e}", exc_info=True)
+                        logger.error(f"❌ Error saving T/F question {i+1}: {e}", exc_info=True)
+                        logger.error(f"❌ T/F data: statement='{statement[:50]}...', is_true={is_true}")
+                        logger.error(f"❌ Parameters: file_id={file_id}, concept_id={concept_id}, type=TF")
         except Exception as e:
             logger.error(f"Error generating True/False questions: {e}", exc_info=True)
         

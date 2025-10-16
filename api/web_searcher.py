@@ -1,7 +1,7 @@
 import requests
 import os
 from bs4 import BeautifulSoup
-from api.llm_service import prompt_llm  # Ensure this is correctly defined in your project
+from api.llm_service import generate_explanation_dspy  # Ensure this is correctly defined in your project
 import re
 import time  # Import time module to add delays
 
@@ -91,7 +91,7 @@ def query_llm_with_text(text, query):
     The confidence should be in the format 'Confidence: <score>'.
     """
     # Get the response from the LLM
-    response_text = prompt_llm(prompt)
+    response_text = generate_explanation_dspy(prompt)
 
     # Extract the answer (assuming the response is structured to start with the answer)
     answer = response_text.strip()
@@ -209,7 +209,7 @@ Instructions:
 4. Keep the response focused and relevant
 """
             
-            final_answer = prompt_llm(synthesis_prompt)
+            final_answer = generate_explanation_dspy(synthesis_prompt)
             
             # Add reference links at the end
             reference_links = "\n\nReferences:\n" + "\n".join([

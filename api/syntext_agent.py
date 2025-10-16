@@ -1,7 +1,9 @@
 import re
 import logging
-from api.llm_service import prompt_llm, token_count, MAX_TOKENS_CONTEXT 
-from api.web_searcher import get_answers_from_web
+from typing import List, Dict, Any, Tuple
+
+from api.llm_service import generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT
+from api.web_searcher import get_answers_from_web  # Uncommented for fallback
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,7 +15,7 @@ class SyntextAgent:
     def __init__(self):
         pass 
 
-    def _format_context_and_sources(self, top_k_results: list) -> tuple[str, str]:
+    def _format_context_and_sources(self, top_k_results: List[Dict]) -> Tuple[str, str]:
         """Formats retrieved segments for the LLM prompt and creates a source map."""
         context_parts = []
         source_map_parts = ["\n\n**Sources:**"]
@@ -39,7 +41,7 @@ class SyntextAgent:
                 end_time = meta.get('end_time')
                 time_str = f"{start_time:.1f}s-{end_time:.1f}s"
                 source_text += f" ({time_str})"
-                if file_url_base: # Add fragment only if URL exists
+                if file_url_base:  # Add fragment only if URL exists
                      source_target += f"#t={start_time:.1f}"
             elif page_num:
                 source_text += f" (Page {page_num})"
@@ -52,7 +54,7 @@ class SyntextAgent:
         source_map = "\n".join(source_map_parts)
         return formatted_context, source_map
     
-    def query_pipeline(self, query: str, convo_history: str, top_k_results: list, language: str, comprehension_level: str) -> str:
+    def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
         """
         Enhanced main pipeline using large context: formats context, prompts LLM to cite sources precisely, 
         appends detailed source map. Falls back to web search.
@@ -66,7 +68,7 @@ class SyntextAgent:
                 if convo_history and len(convo_history) > 1500:  # If history is long
                     try:
                         summarization_prompt = f"Summarize this conversation history briefly, focusing on the most important points and context needed to answer follow-up questions:\n\n{convo_history}"
-                        history_summary = prompt_llm(summarization_prompt)
+                        history_summary = generate_explanation_dspy(summarization_prompt, language=language, comprehension_level=comprehension_level)
                         history_prompt = f"\n\nPrevious Conversation Summary:\n{history_summary}\n\n"
                     except Exception as e:
                         logger.warning(f"Failed to summarize conversation history: {e}")
@@ -95,7 +97,7 @@ class SyntextAgent:
                     detail_instruction = "Use moderate technical detail and some domain-specific terminology. Provide examples where helpful."
                 elif comprehension_level.lower() == "advanced":
                     detail_instruction = "Use precise technical language and domain-specific terminology. Go into depth on complex concepts."
-                else: # Default
+                else:  # Default
                     detail_instruction = "Provide a balanced response with clear explanations."
 
                 # Step 5: Create the full prompt with all components
@@ -108,10 +110,10 @@ class SyntextAgent:
                     f"------------------------\n"
                     f"{formatted_context}\n"
                     f"------------------------\n\n"
-                    f"Answer:" # LLM starts generating here
+                    f"Answer:"  # LLM starts generating here
                 )
                 
-                # Step 6: Check token count and apply smart token management
+                # Step 6: Check token count and apply smart token management with iterative reduction
                 prompt_tokens = token_count(full_prompt)
                 if prompt_tokens > MAX_TOKENS_CONTEXT:
                     logger.warning(f"Combined prompt ({prompt_tokens} tokens) exceeds MAX_TOKENS_CONTEXT ({MAX_TOKENS_CONTEXT}). Applying smart token reduction.")
@@ -141,22 +143,35 @@ class SyntextAgent:
                         f"------------------------\n\n"
                         f"Answer:"
                     )
+                    # Re-check token count after reduction (iterative if needed)
+                    prompt_tokens = token_count(full_prompt)
+                    if prompt_tokens > MAX_TOKENS_CONTEXT:
+                        logger.error(f"Prompt still exceeds token limit after reduction ({prompt_tokens}/{MAX_TOKENS_CONTEXT}). Truncating further.")
+                        full_prompt = full_prompt[:MAX_TOKENS_CONTEXT * 4]  # Rough character approximation
 
                 # Step 7: Call the LLM with the combined context and instructions
-                llm_answer_with_citations = prompt_llm(full_prompt)
+                llm_answer_with_citations = generate_explanation_dspy(
+                    full_prompt,
+                    language=language,
+                    comprehension_level=comprehension_level,
+                    max_context_length=MAX_TOKENS_CONTEXT
+                )
+
+                if not llm_answer_with_citations:
+                    logger.error("No response generated from LLM")
+                    return "Sorry, I couldn't generate a response. Please try again."
 
                 # Step 8: Combine LLM answer with improved source map
-                # Enhance source map formatting for better readability
                 final_response = llm_answer_with_citations + "\n\n" + source_map
                 
                 return final_response
 
             # Fallback to Web search if no document results found
             logger.info("No relevant document chunks found, falling back to web search.")
-            # results, _ = get_answers_from_web(query)
-            # if results:
-            #     return results # Assuming web search includes its own sources
-            # return "Sorry, I couldn't find an answer in your documents or on the web."
+            results, _ = get_answers_from_web(query)
+            if results:
+                return results  # Assuming web search includes its own sources
+            return "Sorry, I couldn't find an answer in your documents or on the web."
 
         except Exception as e:
             logger.error(f"Exception occurred in query pipeline: {e}", exc_info=True)

@@ -12,8 +12,11 @@ import json
 from datetime import datetime
 import hashlib
 
+import pytesseract
+from PIL import Image
+import io
 import fitz  # PyMuPDF
-import numpy as np
+from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.utils import chunk_text
 from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
@@ -121,15 +124,17 @@ class PDFProcessor(FileProcessor):
                 # Generate key concepts using dspy - it now handles both chunking and format standardization
                 key_concepts = generate_key_concepts_dspy(content, language, comprehension_level)
                 
+                logger.info(f"generate_key_concepts_dspy returned: {type(key_concepts)}, length: {len(key_concepts) if key_concepts else 0}")
+                
                 # Add detailed logging of all concepts
-                if key_concepts and isinstance(key_concepts, list):
+                if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > 0:
                     logger.info(f"Extracted {len(key_concepts)} key concepts from document")
                     for i, concept in enumerate(key_concepts):
                         title = concept.get('concept_title', 'MISSING')
                         explanation = concept.get('concept_explanation', 'MISSING')
                         logger.debug(f"Raw concept {i+1}: title='{title[:100]}', explanation='{explanation[:100]}...'")
                 else:
-                    logger.warning(f"No key concepts were extracted from the document content")
+                    logger.warning(f"No key concepts were extracted from the document content. key_concepts type: {type(key_concepts)}, value: {key_concepts}")
                     return {
                         "success": False,
                         "file_id": file_id,
@@ -140,7 +145,7 @@ class PDFProcessor(FileProcessor):
                         }
                     }
                     
-                if key_concepts and isinstance(key_concepts, list):
+                if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > 0:
                     logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
                     concepts_processed = 0
                     
@@ -260,37 +265,34 @@ class PDFProcessor(FileProcessor):
     def extract_text_with_page_numbers(self, pdf_data: bytes) -> List[Dict[str, Any]]:
         """
         Extracts text from PDF data while capturing page numbers.
+        Falls back to OCR (Tesseract) if a page contains only images.
         
         Args:
             pdf_data: PDF file data in bytes
-            
+
         Returns:
             List of dictionaries with page numbers and text content
         """
-        laparams = LAParams()
         page_texts = []
-        
         try:
-            # Use BytesIO to treat the PDF data as a file-like object
-            with BytesIO(pdf_data) as file:
-                resource_manager = PDFResourceManager()
-                output = BytesIO()
-                device = TextConverter(resource_manager, output, laparams=laparams)
-                interpreter = PDFPageInterpreter(resource_manager, device)
-                
-                for page_num, page in enumerate(PDFPage.get_pages(file), 1):
-                    output.seek(0)
-                    output.truncate()
-                    interpreter.process_page(page)
-                    text = output.getvalue().decode("utf-8")
+            with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+                for page_num, page in enumerate(doc, 1):
+                    text = page.get_text("text")
+                    if not text.strip():
+                        # No extractable text -> use OCR
+                        pix = page.get_pixmap(dpi=300)
+                        img_bytes = pix.tobytes("png")
+                        image = Image.open(io.BytesIO(img_bytes))
+                        text = pytesseract.image_to_string(image)
+
                     page_texts.append({
-                        "page_num": page_num, 
-                        "content": text
+                        "page_num": page_num,
+                        "content": text.strip()
                     })
                     
             return page_texts
         except Exception as e:
-            logger.error(f"Error extracting text from PDF: {e}")
+            logger.error(f"Error extracting text (Tesseract fallback): {e}", exc_info=True)
             return []
     
     async def extract_content(self, **kwargs) -> Dict[str, Any]:

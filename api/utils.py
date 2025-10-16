@@ -5,6 +5,7 @@ import hashlib
 from google.cloud import storage
 import logging
 from fastapi import UploadFile
+import json
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -173,3 +174,45 @@ def chunk_text(text):
     except Exception as e:
         logger.error(f"Error chunking text: {e}")
         raise
+
+    """
+    Parse JSON string from LLM, handling single quotes and other common issues.
+    
+    Args:
+        json_string: Raw JSON string from LLM (e.g., DSPy output)
+    
+    Returns:
+        List of parsed JSON objects, or empty list if parsing fails
+    """
+    if not json_string:
+        logger.warning("Empty JSON string provided for parsing")
+        return []
+    
+    try:
+        # Strip ```json and ``` markers if present
+        json_string = json_string.strip()
+        if json_string.startswith("```json"):
+            json_string = json_string[7:].rstrip("```").strip()
+        
+        # Replace single quotes with double quotes for JSON properties
+        def replace_quotes(match):
+            return f'"{match.group(1)}":'
+        json_string = re.sub(r"'(\w+)'\s*:", replace_quotes, json_string)
+        
+        # Remove trailing commas before closing brackets
+        json_string = re.sub(r',(\s*[}\]])', r'\1', json_string)
+        
+        # Parse JSON
+        parsed = json.loads(json_string)
+        if not isinstance(parsed, list):
+            logger.warning(f"Parsed JSON is not a list: {type(parsed)}")
+            return []
+        return parsed
+    
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON: {str(e)}")
+        logger.debug(f"Problematic JSON (first 500 chars): {json_string[:500]}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error parsing JSON: {str(e)}")
+        return []
