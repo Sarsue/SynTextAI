@@ -129,6 +129,10 @@
     padding: 0 5px;
     gap: 12px;
   }
+
+  .question-text {
+    font-size: 14px;
+  }
 }
 
 .question-text {
@@ -137,6 +141,9 @@
   margin-bottom: 10px;
   color: #333;
   line-height: 1.4;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 @media (max-width: 480px) {
@@ -180,8 +187,14 @@
   }
   
   .answer-option-label {
-    font-size: 0.95em;
+    font-size: 0.9em;
   }
+}
+
+.answer-option-label {
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .options {
@@ -294,6 +307,12 @@
     flex-basis: 100%;
     margin-top: 5px;
   }
+
+  .progress-indicator {
+    min-width: 200px;
+    font-size: 12px;
+    padding: 6px 10px;
+  }
 }
 
 .icon-btn {
@@ -362,6 +381,68 @@
   background-color: #3a689c;
 }
 
-.dark-mode .quiz-interface button:disabled {
-  background-color: #555;
+.gamification-feedback {
+  padding: 10px 15px;
+  border-radius: 4px;
+  margin: 10px 0;
+  font-weight: 500;
+  text-align: center;
+}
+
+.gamification-feedback.correct {
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  color: #155724;
+}
+
+.gamification-feedback.incorrect {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.dark-mode .gamification-feedback.correct {
+  background-color: #155724;
+  border-color: #c3e6cb;
+  color: #d4edda;
+}
+
+.dark-mode .gamification-feedback.incorrect {
+  background-color: #721c24;
+  border-color: #f5c6cb;
+  color: #f8d7da;
+}
+
+.progress-bar-container {
+  width: 80px;
+  margin: 10px auto;
+}
+
+.achievements {
+  margin-top: 15px;
+  padding: 10px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+.dark-mode .achievements {
+  background-color: #3a3a3a;
+  border-color: #555;
+  color: #e0e0e0;
+}
+
+.achievements h4 {
+  font-size: 1em;
+  margin-bottom: 10px;
+}
+
+.achievements ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+.achievements li {
+  padding: 5px 0;
+  font-size: 0.9em;
 }

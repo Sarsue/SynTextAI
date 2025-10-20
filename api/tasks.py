@@ -451,7 +451,7 @@ async def generate_flashcards_from_key_concepts(key_concepts: list) -> list:
 
 async def generate_mcq_from_key_concepts(key_concepts: list) -> list:
     """
-    Generate multiple choice questions from key concepts.
+    Generate multiple choice questions from key concepts with improved distractors.
     
     Args:
         key_concepts: List of key concept dictionaries
@@ -478,23 +478,73 @@ async def generate_mcq_from_key_concepts(key_concepts: list) -> list:
                 correct_answer = concept_explanation.split(".")[0] + "." + concept_explanation.split(".")[1]
                 correct_answer = correct_answer.strip()
             
-            distractors = [
-                f"An unrelated concept not covered in this material.",
-                f"The opposite of what the material actually explains about this topic.",
-                f"A common misconception about {concept_title.lower()}."
-            ]
+            # Generate better distractors using embeddings
+            distractors = await _generate_smart_distractors(concept, key_concepts, correct_answer)
             
-            options = [correct_answer] + distractors
+            # Ensure we have enough distractors (fall back to generic if needed)
+            if len(distractors) < 3:
+                generic_distractors = [
+                    "An unrelated concept not covered in this material.",
+                    "The opposite of what the material actually explains about this topic.",
+                    "A common misconception about this topic."
+                ]
+                distractors.extend(generic_distractors[:3 - len(distractors)])
+            
+            options = [correct_answer] + distractors[:3]  # Limit to 3 distractors
             mcqs.append({
                 'question': question,
                 'options': options,
                 'answer': correct_answer
             })
         
-        logger.info(f"Generated {len(mcqs)} MCQs from {len(key_concepts)} key concepts")
+        logger.info(f"Generated {len(mcqs)} MCQs from {len(key_concepts)} key concepts with enhanced distractors")
         return mcqs
     except Exception as e:
         logger.error(f"Error generating MCQs: {e}", exc_info=True)
+        return []
+
+async def _generate_smart_distractors(concept, all_concepts, correct_answer):
+    """Generate smart distractors using embeddings and LLM."""
+    distractors = []
+    try:
+        # Get embeddings for the correct answer and other concepts
+        correct_embedding = get_text_embedding([correct_answer])[0]
+        other_concepts = [c for c in all_concepts if c != concept]
+        
+        if other_concepts:
+            other_explanations = [c.get('concept_explanation', '') for c in other_concepts]
+            other_embeddings = get_text_embeddings_in_batches(other_explanations)
+            
+            # Find most similar explanations as potential distractors
+            similarities = []
+            for i, emb in enumerate(other_embeddings):
+                if emb and correct_embedding:
+                    sim = np.dot(correct_embedding, emb) / (np.linalg.norm(correct_embedding) * np.linalg.norm(emb))
+                    similarities.append((i, sim, other_explanations[i]))
+            
+            # Sort by similarity and select top 3 as distractors
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            distractors = [exp for _, _, exp in similarities[:3] if exp != correct_answer]
+        
+        # If not enough, use LLM to generate distractors based on document context
+        if len(distractors) < 3:
+            additional_distractors = await _generate_llm_distractors(concept, correct_answer)
+            distractors.extend(additional_distractors)
+        
+    except Exception as e:
+        logger.warning(f"Error generating smart distractors: {e}")
+    
+    return distractors[:3]
+
+async def _generate_llm_distractors(concept, correct_answer):
+    """Use LLM to generate realistic distractors."""
+    try:
+        from api.llm_service import generate_explanation_dspy
+        prompt = f"Generate 2-3 plausible but incorrect explanations for '{concept.get('concept_title')}' that could be mistaken for the correct one: '{correct_answer}'. Make them sound realistic based on common knowledge."
+        distractors = await asyncio.to_thread(generate_explanation_dspy, prompt, "English", "Beginner", 1000)
+        return [d.strip() for d in distractors.split('.') if d.strip()][:3]
+    except Exception as e:
+        logger.warning(f"LLM distractor generation failed: {e}")
         return []
 
 async def generate_true_false_from_key_concepts(key_concepts: list) -> list:

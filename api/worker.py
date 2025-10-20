@@ -67,10 +67,8 @@ logger = logging.getLogger('syntextai-worker')
 # Maximum number of concurrent file processing tasks
 MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "3"))
 
-# Polling configuration
-INITIAL_POLL_INTERVAL = 10  # Start with 10 seconds
-MAX_POLL_INTERVAL = 300     # 5 minutes maximum
-POLL_BACKOFF_FACTOR = 1.5   # 1.5x backoff factor
+# Polling configuration - Simplified to fixed 30-second intervals
+POLL_INTERVAL = 30  # Check for files every 30 seconds
 
 # API configuration for notifications
 API_NOTIFY_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
@@ -103,9 +101,6 @@ async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict)
 
 # Global semaphore for limiting concurrent file processing
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
-
-# Track the current poll interval
-current_poll_interval = INITIAL_POLL_INTERVAL
 
 # Track running tasks to ensure graceful shutdown
 running_tasks = []
@@ -303,9 +298,7 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
 
 
 async def worker_loop() -> None:
-    """Main worker loop that polls for files and processes them with exponential backoff"""
-    global current_poll_interval
-
+    """Main worker loop that polls for files and processes them with fixed 30-second intervals"""
     while not shutdown_event.is_set():
         try:
             # Fetch pending files
@@ -313,11 +306,6 @@ async def worker_loop() -> None:
 
             if pending_files:
                 logger.info(f"Found {len(pending_files)} files to process")
-
-                # Reset poll interval since we found work
-                if current_poll_interval > INITIAL_POLL_INTERVAL:
-                    logger.info(f"Resetting poll interval from {current_poll_interval}s to {INITIAL_POLL_INTERVAL}s")
-                    current_poll_interval = INITIAL_POLL_INTERVAL
 
                 # Create tasks for each file
                 tasks = []
@@ -334,40 +322,27 @@ async def worker_loop() -> None:
                     )
                     tasks.append(task)
                     running_tasks.append(task)
-                
+
                 # Wait for all tasks to complete
                 completed_tasks, _ = await asyncio.wait(
-                    tasks, 
+                    tasks,
                     return_when=asyncio.ALL_COMPLETED
                 )
-                
+
                 # Clean up completed tasks
                 for task in completed_tasks:
                     if task in running_tasks:
                         running_tasks.remove(task)
-            
             else:
-                logger.info(f"No pending files found. Next poll in {current_poll_interval:.1f} seconds")
-                
-                # Calculate next poll interval with exponential backoff
-                next_interval = min(
-                    current_poll_interval * POLL_BACKOFF_FACTOR,
-                    MAX_POLL_INTERVAL
-                )
-                
-                # Only log when the interval changes
-                if next_interval > current_poll_interval:
-                    logger.info(f"Increasing poll interval to {next_interval:.1f} seconds")
-                
-                current_poll_interval = next_interval
-            
-            # Wait before polling again with the current interval
-            await asyncio.sleep(current_poll_interval)
-            
+                logger.info(f"No pending files found. Next poll in {POLL_INTERVAL} seconds")
+
+            # Wait before polling again with fixed interval
+            await asyncio.sleep(POLL_INTERVAL)
+
         except Exception as e:
             logger.exception(f"Error in worker loop: {str(e)}")
-            # On error, use the current poll interval before trying again
-            await asyncio.sleep(current_poll_interval)
+            # On error, still use the fixed poll interval before trying again
+            await asyncio.sleep(POLL_INTERVAL)
 
 
 def handle_shutdown(sig, frame):

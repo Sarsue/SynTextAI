@@ -373,10 +373,11 @@ def _standardize_concept_format(concepts: List[dict], is_video: bool = False) ->
     return standardized_concepts
 
 def _validate_references(concepts: List[dict], document_text: str, is_video: bool) -> List[dict]:
-    """Validate and correct timestamps or page references."""
+    """Validate and correct timestamps or page references with improved metadata cross-referencing."""
     validated_concepts = []
     
     if is_video:
+        # Extract all valid timestamp ranges from the document
         all_timestamps = re.findall(r'\[(\d+:\d+)\s*-\s*(\d+:\d+)\]', document_text)
         valid_timestamp_ranges = []
         for start_time, end_time in all_timestamps:
@@ -385,7 +386,18 @@ def _validate_references(concepts: List[dict], document_text: str, is_video: boo
                 end_mins, end_secs = map(int, end_time.split(':'))
                 start_seconds = start_mins * 60 + start_secs
                 end_seconds = end_mins * 60 + end_secs
-                valid_timestamp_ranges.append((start_seconds, end_seconds, f"{start_time} - {end_time}"))
+                if start_seconds < end_seconds:  # Ensure valid range
+                    valid_timestamp_ranges.append((start_seconds, end_seconds, f"{start_time} - {end_time}"))
+            except ValueError:
+                continue
+        
+        # Also extract standalone timestamps
+        standalone_timestamps = re.findall(r'\b(\d+:\d+)\b', document_text)
+        for timestamp in standalone_timestamps:
+            try:
+                mins, secs = map(int, timestamp.split(':'))
+                seconds = mins * 60 + secs
+                valid_timestamp_ranges.append((seconds, seconds + 30, timestamp))  # Assume 30s duration
             except ValueError:
                 continue
         
@@ -406,16 +418,18 @@ def _validate_references(concepts: List[dict], document_text: str, is_video: boo
                     break
             
             if not found_valid_timestamp and valid_timestamp_ranges:
-                valid_start, valid_end, timestamp_str = valid_timestamp_ranges[0]
-                concept['source_video_timestamp_start_seconds'] = valid_start
-                concept['source_video_timestamp_end_seconds'] = valid_end
-                concept['source_timestamp'] = timestamp_str
-                logger.warning(f"Assigned default timestamp to concept: {concept.get('concept_title')}")
+                # Assign the closest timestamp
+                closest_start, closest_end, closest_str = min(valid_timestamp_ranges, key=lambda x: abs(x[0] - (start_seconds or 0)))
+                concept['source_video_timestamp_start_seconds'] = closest_start
+                concept['source_video_timestamp_end_seconds'] = closest_end
+                concept['source_timestamp'] = closest_str
+                logger.warning(f"Assigned closest timestamp to concept: {concept.get('concept_title')}")
             
             validated_concepts.append(concept)
     else:
+        # Extract all valid page numbers from the document
         all_pages = re.findall(r'Page\s+(\d+)', document_text)
-        valid_pages = [int(page) for page in all_pages]
+        valid_pages = sorted(set(int(page) for page in all_pages if int(page) > 0))
         
         for concept in concepts:
             source_page = concept.get('source_page_number')
@@ -426,13 +440,16 @@ def _validate_references(concepts: List[dict], document_text: str, is_video: boo
             
             valid_concept_pages = [p for p in pages if p in valid_pages]
             if not valid_concept_pages and valid_pages:
-                concept['source_page_number'] = valid_pages[0]
-                logger.warning(f"Assigned default page to concept: {concept.get('concept_title')}")
+                # Assign the closest page number
+                closest_page = min(valid_pages, key=lambda x: abs(x - (source_page or 0)))
+                concept['source_page_number'] = closest_page
+                logger.warning(f"Assigned closest page to concept: {concept.get('concept_title')}")
             elif valid_concept_pages:
                 concept['source_page_number'] = valid_concept_pages[0]
             
             validated_concepts.append(concept)
     
+    logger.info(f"Validated references for {len(validated_concepts)} concepts")
     return validated_concepts
 
 def generate_summary_dspy(text_to_summarize: str, language: str = "English", comprehension_level: str = "Beginner") -> str:

@@ -40,6 +40,29 @@
   .progress-indicator .divider {
     margin: 0 2px;
   }
+
+  .flashcard {
+    height: 150px; /* Reduced height for smaller screens */
+    font-size: 14px;
+  }
+
+  .flashcard-front,
+  .flashcard-back {
+    padding: 15px;
+    font-size: 14px;
+  }
+
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+
+  .progress-indicator {
+    min-width: 160px;
+    font-size: 12px;
+    padding: 6px 10px;
+  }
 }
 
 .progress-indicator .card-position {
@@ -100,11 +123,6 @@
   box-sizing: border-box;
 }
 
-@media (max-width: 480px) {
-  .flashcard {
-    height: 180px;
-  }
-}
 
 .flashcard-inner {
   position: relative;
@@ -126,11 +144,15 @@
   height: 100%;
   backface-visibility: hidden;
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* Changed from center to flex-start for better scrolling */
   justify-content: center;
   padding: 20px;
   box-sizing: border-box;
   border-radius: 8px;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+  overflow-y: auto; /* Scroll if content is too long */
 }
 
 .flashcard-front {
@@ -275,7 +297,10 @@
   color: white;
   border-radius: 5px;
   padding: 10px;
-  resize: none;
+  resize: vertical;
+  min-height: 80px;
+  max-height: 150px;
+  overflow-y: auto;
   box-sizing: border-box;
 }
 
@@ -287,6 +312,45 @@
   background-color: #3a689c;
 }
 
-.dark-mode .navigation button:disabled, .dark-mode .actions button:disabled {
-  background-color: #555;
+.gamification-feedback {
+  padding: 10px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 500;
+  margin-top: 10px;
+}
+
+.gamification-feedback.known {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.gamification-feedback.needs-review {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.dark-mode .gamification-feedback.known {
+  background-color: #155724;
+  color: #d4edda;
+}
+
+.dark-mode .gamification-feedback.needs-review {
+  background-color: #856404;
+  color: #fff3cd;
+}
+
+.progress-bar-container {
+  width: 100px;
+  margin: 10px auto;
+}
+
+@keyframes flip-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.flashcard.flipped {
+  animation: flip-pulse 0.3s ease;
 }
