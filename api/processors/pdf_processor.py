@@ -19,7 +19,7 @@ import fitz  # PyMuPDF
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.utils import chunk_text
-from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts_dspy
+from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 from api.schemas.learning_content import KeyConceptCreate
 from pdfminer.layout import LAParams
@@ -121,10 +121,10 @@ class PDFProcessor(FileProcessor):
                                if isinstance(chunk, dict) and "content" in chunk])
             
             try:
-                # Generate key concepts using dspy - it now handles both chunking and format standardization
-                key_concepts = generate_key_concepts_dspy(content, language, comprehension_level)
+                # Generate key concepts using Mistral
+                key_concepts = generate_key_concepts(content, language, comprehension_level)
                 
-                logger.info(f"generate_key_concepts_dspy returned: {type(key_concepts)}, length: {len(key_concepts) if key_concepts else 0}")
+                logger.info(f"generate_key_concepts returned: {type(key_concepts)}, length: {len(key_concepts) if key_concepts else 0}")
                 
                 # Add detailed logging of all concepts
                 if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > 0:
@@ -203,7 +203,16 @@ class PDFProcessor(FileProcessor):
                     logger.warning(f"No valid key concepts generated for file {file_id}")
             except Exception as e:
                 logger.error(f"Error generating key concepts: {e}")
-                # We continue even if key concept generation fails
+                # We cant continue  if key concept generation fails
+                return {
+                        "success": False,
+                        "file_id": file_id,
+                        "error": "Failed to extract key concepts",
+                        "metadata": {
+                            "processor_type": "pdf",
+                            "page_count": len(page_data)
+                        }
+                }
         
         return {
             "success": True,
@@ -287,7 +296,7 @@ class PDFProcessor(FileProcessor):
 
                     page_texts.append({
                         "page_num": page_num,
-                        "content": text.strip()
+                        "content": f"Page {page_num}\n{text.strip()}"
                     })
                     
             return page_texts
@@ -350,7 +359,7 @@ class PDFProcessor(FileProcessor):
             return []
             
         try:
-            key_concepts = generate_key_concepts_dspy(document_text=full_text)
+            key_concepts = generate_key_concepts(document_text=full_text)
             return key_concepts
         except Exception as e:
             self._log_error(f"Error generating key concepts for file {file_id}", e)

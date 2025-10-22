@@ -20,8 +20,6 @@ Add parameters for comprehension level in quiz generation functions.
 
 Agentic way of doing things evolution from worker and tasks. ingestion agent, learning repo agent, we can add more agents
 
-Simplified Worker Polling:
-Worker now checks for files every 30 seconds with a fixed interval instead of exponential backoff for simpler and more predictable processing.
 
 Testing
 

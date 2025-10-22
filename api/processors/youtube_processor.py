@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
-from api.llm_service import generate_key_concepts_dspy, get_text_embeddings_in_batches
+from api.llm_service import generate_key_concepts, get_text_embeddings_in_batches
 from api.schemas.learning_content import KeyConceptCreate
 
 # Import required only for YouTube processing
@@ -505,7 +505,7 @@ class YouTubeProcessor(FileProcessor):
         
         try:
             # Use the same function as PDFProcessor
-            key_concepts = generate_key_concepts_dspy(
+            key_concepts = generate_key_concepts(
                 document_text=full_text,
                 language=language,
                 comprehension_level=comprehension_level

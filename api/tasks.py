@@ -7,7 +7,7 @@ from faster_whisper import WhisperModel
 import yt_dlp
 from api.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
-from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, MAX_TOKENS_CONTEXT, generate_key_concepts_dspy
+from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, token_count, generate_key_concepts
 from api.syntext_agent import SyntextAgent
 import stripe
 from api.websocket_manager import websocket_manager
@@ -479,7 +479,7 @@ async def generate_mcq_from_key_concepts(key_concepts: list) -> list:
                 correct_answer = correct_answer.strip()
             
             # Generate better distractors using embeddings
-            distractors = await _generate_smart_distractors(concept, key_concepts, correct_answer)
+            distractors = await _generate_smart_distractors(concept, key_concepts, correct_answer, comprehension_level)
             
             # Ensure we have enough distractors (fall back to generic if needed)
             if len(distractors) < 3:
@@ -503,8 +503,8 @@ async def generate_mcq_from_key_concepts(key_concepts: list) -> list:
         logger.error(f"Error generating MCQs: {e}", exc_info=True)
         return []
 
-async def _generate_smart_distractors(concept, all_concepts, correct_answer):
-    """Generate smart distractors using embeddings and LLM."""
+async def _generate_smart_distractors(concept, all_concepts, correct_answer, comprehension_level="Beginner"):
+    """Generate smart distractors using embeddings and LLM with dynamic difficulty."""
     distractors = []
     try:
         # Get embeddings for the correct answer and other concepts
@@ -522,30 +522,32 @@ async def _generate_smart_distractors(concept, all_concepts, correct_answer):
                     sim = np.dot(correct_embedding, emb) / (np.linalg.norm(correct_embedding) * np.linalg.norm(emb))
                     similarities.append((i, sim, other_explanations[i]))
             
+            # Dynamic threshold based on comprehension level
+            similarity_threshold = 0.6 if comprehension_level == "Beginner" else 0.8
+            # Filter similarities below threshold and ensure distinctness (<0.9 to correct answer)
+            filtered_similarities = [
+                (i, sim, exp) for i, sim, exp in similarities
+                if sim < similarity_threshold and sim < 0.9  # Added distinctness check
+            ]
+            
             # Sort by similarity and select top 3 as distractors
-            similarities.sort(key=lambda x: x[1], reverse=True)
-            distractors = [exp for _, _, exp in similarities[:3] if exp != correct_answer]
+            filtered_similarities.sort(key=lambda x: x[1], reverse=True)
+            distractors = [exp for _, _, exp in filtered_similarities[:3] if exp != correct_answer]
         
-        # If not enough, use LLM to generate distractors based on document context
+        # If not enough, use generic distractors
         if len(distractors) < 3:
-            additional_distractors = await _generate_llm_distractors(concept, correct_answer)
-            distractors.extend(additional_distractors)
+            generic_distractors = [
+                "An unrelated concept not covered in this material.",
+                "The opposite of what the material actually explains about this topic.",
+                "A common misconception about this topic."
+            ]
+            distractors.extend(generic_distractors[:3 - len(distractors)])
         
     except Exception as e:
         logger.warning(f"Error generating smart distractors: {e}")
     
     return distractors[:3]
 
-async def _generate_llm_distractors(concept, correct_answer):
-    """Use LLM to generate realistic distractors."""
-    try:
-        from api.llm_service import generate_explanation_dspy
-        prompt = f"Generate 2-3 plausible but incorrect explanations for '{concept.get('concept_title')}' that could be mistaken for the correct one: '{correct_answer}'. Make them sound realistic based on common knowledge."
-        distractors = await asyncio.to_thread(generate_explanation_dspy, prompt, "English", "Beginner", 1000)
-        return [d.strip() for d in distractors.split('.') if d.strip()][:3]
-    except Exception as e:
-        logger.warning(f"LLM distractor generation failed: {e}")
-        return []
 
 async def generate_true_false_from_key_concepts(key_concepts: list) -> list:
     """

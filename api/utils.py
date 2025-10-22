@@ -161,16 +161,88 @@ def chunk_text(text):
     try:
         logger.debug("Chunking text...")
         chunks = []
-        paragraphs = text.split("\n")
-        for paragraph in paragraphs:
-            paragraph = paragraph.strip()
-            if paragraph:
-                chunk = {
-                    "content": paragraph,
-                }
-                chunks.append(chunk)
+        max_tokens = 1000  # Default for general audience
+        min_tokens = 200   # Avoid tiny chunks
+        
+        # Rough token estimation: 1 word ≈ 1.5 tokens
+        def count_tokens(content: str) -> int:
+            return int(len(content.split()) * 1.5)
+
+        # Detect document type based on content patterns
+        is_youtube = bool(re.search(r'\[\d{2}:\d{2}(?::\d{2})?\]', text))
+
+        if is_youtube:
+            # Handle YouTube transcripts with timestamps (e.g., "[00:01] Text...")
+            segments = re.split(r'(\[\d{2}:\d{2}(?::\d{2})?\])', text)
+            current_chunk = {"content": "", "metadata": {"start_time": None, "end_time": None, "doc_type": "youtube"}}
+            current_tokens = 0
+            
+            for i in range(1, len(segments), 2):
+                timestamp = segments[i].strip('[]')
+                segment_text = segments[i + 1].strip()
+                if not segment_text:
+                    continue
+                
+                segment_tokens = count_tokens(segment_text)
+                
+                # Start a new chunk if adding this segment exceeds max_tokens
+                if current_tokens + segment_tokens > max_tokens and current_tokens >= min_tokens:
+                    chunks.append(current_chunk)
+                    current_chunk = {"content": "", "metadata": {"start_time": timestamp, "end_time": None, "doc_type": "youtube"}}
+                    current_tokens = 0
+                
+                current_chunk["content"] += f"{segment_text} "
+                current_chunk["metadata"]["end_time"] = timestamp
+                current_tokens += segment_tokens
+            
+            # Add final chunk if it meets minimum size
+            if current_chunk["content"].strip() and current_tokens >= min_tokens:
+                chunks.append(current_chunk)
+        
+        else:
+            # Handle PDFs (page-based chunking)
+            pages = re.split(r'(Page \d+\n)', text)
+            current_chunk = {"content": "", "metadata": {"page_number": None, "doc_type": "pdf"}}
+            current_tokens = 0
+            
+            for i in range(0, len(pages), 2):
+                page_marker = pages[i] if i < len(pages) else ""
+                page_text = pages[i + 1] if i + 1 < len(pages) else ""
+                if not page_text.strip():
+                    continue
+                
+                # Extract page number
+                page_num_match = re.match(r'Page (\d+)', page_marker)
+                page_num = int(page_num_match.group(1)) if page_num_match else None
+                
+                # Split into sentences for semantic chunking
+                sentences = sent_tokenize(page_text)
+                for sentence in sentences:
+                    sentence_tokens = count_tokens(sentence)
+                    
+                    # Start a new chunk if adding this sentence exceeds max_tokens
+                    if current_tokens + sentence_tokens > max_tokens and current_tokens >= min_tokens:
+                        chunks.append(current_chunk)
+                        current_chunk = {"content": "", "metadata": {"page_number": page_num, "doc_type": "pdf"}}
+                        current_tokens = 0
+                    
+                    current_chunk["content"] += f"{sentence} "
+                    current_chunk["metadata"]["page_number"] = page_num
+                    current_tokens += sentence_tokens
+                
+                # End of page: add chunk if it meets minimum size
+                if current_chunk["content"].strip() and current_tokens >= min_tokens:
+                    chunks.append(current_chunk)
+                    current_chunk = {"content": "", "metadata": {"page_number": None, "doc_type": "pdf"}}
+                    current_tokens = 0
+            
+            # Add final chunk if it meets minimum size
+            if current_chunk["content"].strip() and current_tokens >= min_tokens:
+                chunks.append(current_chunk)
+        
         logger.info(f"Successfully chunked text into {len(chunks)} parts")
         return chunks
+    
     except Exception as e:
         logger.error(f"Error chunking text: {e}")
         raise

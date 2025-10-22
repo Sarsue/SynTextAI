@@ -191,3 +191,7 @@ posthog==3.25.0
 ctranslate2==4.6.0
 av==15.0.0
 loguru==0.7.2
+
+# Development dependencies for testing
+pytest>=7.0.0
+pytest-mock>=3.10.0
