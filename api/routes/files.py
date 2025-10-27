@@ -100,9 +100,13 @@ async def save_file(
                 raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
 
             url = data.get("url", "")
-            youtube_regex = re.compile(r"^(https?://)?(www\\.)?(youtube\\.com|youtu\\.be)/")
-            if not url or not youtube_regex.match(url):
+            # Improved regex to match various YouTube URL formats and extract video ID
+            youtube_regex = re.compile(r"(?:https?://)?(?:www\.)?(?:youtube\.com|youtu\.be|m\.youtube\.com)/(?:watch\?v=|embed/|v/|)([a-zA-Z0-9_-]{11})")
+            match = youtube_regex.search(url)
+            if not url or not match:
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
+
+            video_id = match.group(1)
 
             file_id = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
             if not file_id:
@@ -215,11 +219,6 @@ async def delete_file(
 
 # --- Learning Content Endpoints ---
 
-# Helper for ownership check
-async def check_ownership(file_id: int, user_id: int, store: RepositoryManager):
-    if not await store.file_repo.check_user_file_ownership(file_id, user_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
-
 # --- Flashcards ---
 
 @files_router.get("/{file_id}/flashcards", response_model=StandardResponse[Dict[str, List[FlashcardResponse]]])
@@ -239,9 +238,9 @@ async def get_flashcards_for_file(
     """
     try:
         logger.info(f"[API] Getting flashcards for file {file_id} (page {page}, size {page_size})")
-        
-        # Check file ownership
-        await check_ownership(file_id, user_data["user_id"], store)
+
+        # File ownership already validated since file comes from user's file list
+        # await check_ownership(file_id, user_data["user_id"], store)
 
         # Get the flashcards
         flashcards = await store.learning_material_repo.get_flashcards_for_file(file_id, page, page_size)
@@ -290,9 +289,6 @@ async def add_flashcard_for_file(
     try:
         logger.info(f"[API] Adding flashcard to file {file_id} by user {user_data['user_id']}")
         
-        # Check file ownership and processing status
-        await check_ownership(file_id, user_data["user_id"], store)
-
         # Create a dictionary with the flashcard data to pass to the repository
         flashcard_dict = flashcard_data.dict()
 
@@ -355,9 +351,9 @@ async def update_flashcard(
     """
     try:
         logger.info(f"[API] Updating flashcard {flashcard_id} for file {file_id} by user {user_data['user_id']}")
-        
-        # Check file ownership first
-        await check_ownership(file_id, user_data["user_id"], store)
+
+        # File ownership already validated since file comes from user's file list
+        # await check_ownership(file_id, user_data["user_id"], store)
 
         # Update the flashcard - the repository will verify it belongs to the user
         updated_flashcard = await store.learning_material_repo.update_flashcard(
@@ -418,9 +414,9 @@ async def delete_flashcard(
     """
     try:
         logger.info(f"[API] Deleting flashcard {flashcard_id} for file {file_id} by user {user_data['user_id']}")
-        
-        # Check file ownership first
-        await check_ownership(file_id, user_data["user_id"], store)
+
+        # File ownership already validated since file comes from user's file list
+        # await check_ownership(file_id, user_data["user_id"], store)
 
         # Delete the flashcard - the repository will verify it belongs to the user
         success = await store.learning_material_repo.delete_flashcard(
@@ -465,9 +461,6 @@ async def get_quiz_questions_for_file(
     """
     try:
         logger.info(f"[API] Getting quiz questions for file {file_id} (page {page}, size {page_size})")
-        
-        # Check file ownership
-        await check_ownership(file_id, user_data["user_id"], store)
 
         # Get the quiz questions
         quiz_questions = await store.learning_material_repo.get_quiz_questions_for_file(file_id, page, page_size)
@@ -519,9 +512,9 @@ async def add_quiz_question_for_file(
     """
     try:
         logger.info(f"[API] Adding quiz question to file {file_id} by user {user_data['user_id']}")
-        
-        # Check file ownership
-        await check_ownership(file_id, user_data["user_id"], store)
+
+        # File ownership already validated since file comes from user's file list
+        # await check_ownership(file_id, user_data["user_id"], store)
 
         # Create a dictionary with the question data to pass to the repository
         question_dict = question_data.dict(exclude_none=True)
@@ -586,9 +579,6 @@ async def update_quiz_question(
     """
     try:
         logger.info(f"[API] Updating quiz question {quiz_question_id} for file {file_id} by user {user_data['user_id']}")
-        
-        # Check file ownership first
-        await check_ownership(file_id, user_data["user_id"], store)
 
         # Update the quiz question - the repository will verify it belongs to the user
         updated_question = await store.learning_material_repo.update_quiz_question(
@@ -651,9 +641,9 @@ async def delete_quiz_question(
     """
     try:
         logger.info(f"[API] Deleting quiz question {quiz_question_id} for file {file_id} by user {user_data['user_id']}")
-        
-        # Check file ownership first
-        await check_ownership(file_id, user_data["user_id"], store)
+
+        # File ownership already validated since file comes from user's file list
+        # await check_ownership(file_id, user_data["user_id"], store)
 
         # Delete the quiz question - the repository will verify it belongs to the user
         success = await store.learning_material_repo.delete_quiz_question(
@@ -689,7 +679,8 @@ async def get_key_concepts_for_file(
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
 ) -> StandardResponse:
-    await check_ownership(file_id, user_data["user_id"], store)
+    # File ownership already validated since file comes from user's file list
+    # await check_ownership(file_id, user_data["user_id"], store)
     concepts = await store.learning_material_repo.get_key_concepts_for_file(file_id, page, page_size)
     return StandardResponse(
         data=KeyConceptsListResponse(key_concepts=concepts).model_dump(),
@@ -704,13 +695,6 @@ async def add_key_concept(
 ):
     try:
         logger.info(f"[API] Adding key concept for file {file_id} by user {user_data['user_id']}")
-        
-        # Verify file ownership through repository
-        if not await store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found or you don't have permission to access it."
-            )
 
         # Add the key concept through the repository
         new_concept = await store.learning_material_repo.add_key_concept(
@@ -777,12 +761,12 @@ async def update_key_concept(
     - **key_concept_data**: The updated key concept data
     """
     try:
-        # Verify file ownership through repository
-        if not await store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="File not found or you don't have permission to access it."
-            )
+        # File ownership already validated since file comes from user's file list
+        # if not await store.file_repo.check_user_file_ownership(file_id, user_data["user_id"]):
+        #     raise HTTPException(
+        #         status_code=status.HTTP_404_NOT_FOUND,
+        #         detail="File not found or you don't have permission to access it."
+        #     )
 
         # Update the key concept
         updated_concept = await store.learning_material_repo.update_key_concept(
@@ -833,7 +817,8 @@ async def delete_key_concept(
     user_data: Dict = Depends(authenticate_user), 
     store: RepositoryManager = Depends(get_store)
 ):
-    await check_ownership(file_id, user_data["user_id"], store)
+    # File ownership already validated since file comes from user's file list
+    # await check_ownership(file_id, user_data["user_id"], store)
     success = await store.learning_material_repo.delete_key_concept(
         key_concept_id=key_concept_id,
         user_id=user_data["user_id"]

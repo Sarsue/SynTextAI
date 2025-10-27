@@ -18,8 +18,7 @@ import io
 import fitz  # PyMuPDF
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
-from api.utils import chunk_text
-from api.llm_service import get_text_embeddings_in_batches, generate_key_concepts
+from api.llm_service import _deduplicate_concepts, _validate_references, _standardize_concept_format,get_text_embeddings_in_batches, generate_key_concepts
 from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
 from api.schemas.learning_content import KeyConceptCreate
 from pdfminer.layout import LAParams
@@ -28,6 +27,7 @@ from pdfminer.pdfdevice import PDFDevice
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.converter import TextConverter
+from api.utils import chunk_text
 logger = logging.getLogger(__name__)
 
 class PDFProcessor(FileProcessor):
@@ -248,7 +248,7 @@ class PDFProcessor(FileProcessor):
                 # Collect chunks with metadata for later processing
                 for chunk_content in non_empty_chunks:
                     all_chunks.append({
-                        'content': chunk_content,
+                        'text': chunk_content,  # Use 'text' for ChunkORM
                         'page_num': page_num,
                         'source_type': 'pdf'
                     })
@@ -258,7 +258,7 @@ class PDFProcessor(FileProcessor):
 
         # Single large batch for all embeddings
         if all_chunks:
-            chunk_texts = [chunk['content'] for chunk in all_chunks]
+            chunk_texts = [chunk['text'] for chunk in all_chunks]
             chunk_embeddings = get_text_embeddings_in_batches(chunk_texts, batch_size=100)
 
             # Combine chunks with their embeddings
@@ -293,10 +293,11 @@ class PDFProcessor(FileProcessor):
                         img_bytes = pix.tobytes("png")
                         image = Image.open(io.BytesIO(img_bytes))
                         text = pytesseract.image_to_string(image)
+                        logger.debug(f"OCR extracted: {len(text)} chars")
 
                     page_texts.append({
                         "page_num": page_num,
-                        "content": f"Page {page_num}\n{text.strip()}"
+                        "text": f"Page {page_num}\n{text.strip()}"  # Use 'text' for consistency
                     })
                     
             return page_texts
@@ -350,16 +351,18 @@ class PDFProcessor(FileProcessor):
         if not file_id:
             raise ValueError("Missing required 'file_id' parameter")
             
-        # Extract text from all chunks for key concept generation
-        chunks = content.get("chunks", [])
-        full_text = " ".join([chunk.get("content", "") for chunk in chunks if chunk.get("content")])
-        
+        # Extract key concepts from full document to reduce LLM calls
+        full_text = " ".join([p.get("text", "") for p in pages])  # Use 'text' for consistency
         if not full_text.strip():
             logger.warning(f"No content available for key concept generation for file ID {file_id}")
             return []
             
         try:
-            key_concepts = generate_key_concepts(document_text=full_text)
+            key_concepts = generate_key_concepts(document_text=full_text, is_video=False)
+            # Assign page numbers based on content distribution (simple heuristic)
+            total_pages = len(pages)
+            for concept in key_concepts:
+                concept["source_page_number"] = 1  # Default to page 1, can improve later
             return key_concepts
         except Exception as e:
             self._log_error(f"Error generating key concepts for file {file_id}", e)

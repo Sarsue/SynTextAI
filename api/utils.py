@@ -5,10 +5,16 @@ import hashlib
 from google.cloud import storage
 import logging
 from fastapi import UploadFile
+from llama_index.core.node_parser import SentenceSplitter as RecursiveTextSplitter
+from tiktoken import get_encoding
 import json
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+from typing import Dict, List, Any, Optional, Tuple
+
+
+
 logger = logging.getLogger(__name__)
+
+
 
 bucket_name = 'docsynth-fbb02.appspot.com'
 
@@ -157,134 +163,86 @@ def delete_from_gcs(user_gc_id, filename):
     except Exception as e:
         logger.error(f"Error deleting {filename} from GCS: {e}")
 
-def chunk_text(text):
-    try:
-        logger.debug("Chunking text...")
-        chunks = []
-        max_tokens = 1000  # Default for general audience
-        min_tokens = 200   # Avoid tiny chunks
-        
-        # Rough token estimation: 1 word ≈ 1.5 tokens
-        def count_tokens(content: str) -> int:
-            return int(len(content.split()) * 1.5)
 
-        # Detect document type based on content patterns
-        is_youtube = bool(re.search(r'\[\d{2}:\d{2}(?::\d{2})?\]', text))
+def detect_content_type(text: str) -> str:
+    """Heuristically detect content type from text."""
+    if re.search(r'\[\d{2}:\d{2}(?::\d{2})?\]', text):
+        return "youtube"
+    if re.search(r'Page \d+', text, re.IGNORECASE):
+        return "pdf"
+    if re.search(r'^#+\s|\n#{1,6}\s', text):
+        return "markdown"
+    if "," in text and "\n" in text and len(text.splitlines()) > 3:
+        return "csv_like"
+    return "text"
 
-        if is_youtube:
-            # Handle YouTube transcripts with timestamps (e.g., "[00:01] Text...")
-            segments = re.split(r'(\[\d{2}:\d{2}(?::\d{2})?\])', text)
-            current_chunk = {"content": "", "metadata": {"start_time": None, "end_time": None, "doc_type": "youtube"}}
-            current_tokens = 0
-            
-            for i in range(1, len(segments), 2):
-                timestamp = segments[i].strip('[]')
-                segment_text = segments[i + 1].strip()
-                if not segment_text:
-                    continue
-                
-                segment_tokens = count_tokens(segment_text)
-                
-                # Start a new chunk if adding this segment exceeds max_tokens
-                if current_tokens + segment_tokens > max_tokens and current_tokens >= min_tokens:
-                    chunks.append(current_chunk)
-                    current_chunk = {"content": "", "metadata": {"start_time": timestamp, "end_time": None, "doc_type": "youtube"}}
-                    current_tokens = 0
-                
-                current_chunk["content"] += f"{segment_text} "
-                current_chunk["metadata"]["end_time"] = timestamp
-                current_tokens += segment_tokens
-            
-            # Add final chunk if it meets minimum size
-            if current_chunk["content"].strip() and current_tokens >= min_tokens:
-                chunks.append(current_chunk)
-        
-        else:
-            # Handle PDFs (page-based chunking)
-            pages = re.split(r'(Page \d+\n)', text)
-            current_chunk = {"content": "", "metadata": {"page_number": None, "doc_type": "pdf"}}
-            current_tokens = 0
-            
-            for i in range(0, len(pages), 2):
-                page_marker = pages[i] if i < len(pages) else ""
-                page_text = pages[i + 1] if i + 1 < len(pages) else ""
-                if not page_text.strip():
-                    continue
-                
-                # Extract page number
-                page_num_match = re.match(r'Page (\d+)', page_marker)
-                page_num = int(page_num_match.group(1)) if page_num_match else None
-                
-                # Split into sentences for semantic chunking
-                sentences = sent_tokenize(page_text)
-                for sentence in sentences:
-                    sentence_tokens = count_tokens(sentence)
-                    
-                    # Start a new chunk if adding this sentence exceeds max_tokens
-                    if current_tokens + sentence_tokens > max_tokens and current_tokens >= min_tokens:
-                        chunks.append(current_chunk)
-                        current_chunk = {"content": "", "metadata": {"page_number": page_num, "doc_type": "pdf"}}
-                        current_tokens = 0
-                    
-                    current_chunk["content"] += f"{sentence} "
-                    current_chunk["metadata"]["page_number"] = page_num
-                    current_tokens += sentence_tokens
-                
-                # End of page: add chunk if it meets minimum size
-                if current_chunk["content"].strip() and current_tokens >= min_tokens:
-                    chunks.append(current_chunk)
-                    current_chunk = {"content": "", "metadata": {"page_number": None, "doc_type": "pdf"}}
-                    current_tokens = 0
-            
-            # Add final chunk if it meets minimum size
-            if current_chunk["content"].strip() and current_tokens >= min_tokens:
-                chunks.append(current_chunk)
-        
-        logger.info(f"Successfully chunked text into {len(chunks)} parts")
-        return chunks
-    
-    except Exception as e:
-        logger.error(f"Error chunking text: {e}")
-        raise
+def clean_text(text: str, content_type: str) -> str:
+    """Clean irrelevant elements or markers from text."""
+    if content_type == "youtube":
+        text = re.sub(r'\[(Music|Applause|Ad)\]', '', text, flags=re.IGNORECASE)
+    elif content_type == "pdf":
+        text = re.sub(r'Page \d+(?: of \d+)?\s*\n?', '', text, flags=re.IGNORECASE)
+    elif content_type == "markdown":
+        text = re.sub(r'#.*?\n', '', text)
+    elif content_type == "csv_like":
+        # Keep commas, dots, newline, alphanumeric
+        text = re.sub(r'[^\w,.\n ]+', '', text)
+    return text.strip()
 
+def chunk_text(
+    text: str,
+    content_type: str = None,
+    max_chunks_per_section: int = 5,
+    target_chunk_tokens: int = 200
+) -> List[Dict[str, Any]]:
     """
-    Parse JSON string from LLM, handling single quotes and other common issues.
-    
-    Args:
-        json_string: Raw JSON string from LLM (e.g., DSPy output)
-    
-    Returns:
-        List of parsed JSON objects, or empty list if parsing fails
+    Universal text chunker using LlamaIndex RecursiveTextSplitter for semantic splitting.
+    Produces overlapping chunks for RAG or QA.
     """
-    if not json_string:
-        logger.warning("Empty JSON string provided for parsing")
-        return []
-    
     try:
-        # Strip ```json and ``` markers if present
-        json_string = json_string.strip()
-        if json_string.startswith("```json"):
-            json_string = json_string[7:].rstrip("```").strip()
-        
-        # Replace single quotes with double quotes for JSON properties
-        def replace_quotes(match):
-            return f'"{match.group(1)}":'
-        json_string = re.sub(r"'(\w+)'\s*:", replace_quotes, json_string)
-        
-        # Remove trailing commas before closing brackets
-        json_string = re.sub(r',(\s*[}\]])', r'\1', json_string)
-        
-        # Parse JSON
-        parsed = json.loads(json_string)
-        if not isinstance(parsed, list):
-            logger.warning(f"Parsed JSON is not a list: {type(parsed)}")
+        if not text.strip():
             return []
-        return parsed
-    
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON: {str(e)}")
-        logger.debug(f"Problematic JSON (first 500 chars): {json_string[:500]}")
-        return []
+
+        content_type = content_type or detect_content_type(text)
+        text = clean_text(text, content_type)
+        logger.debug(f"Chunking {content_type} text of length {len(text)}")
+
+        # Use tiktoken for accurate token counting
+        
+        tiktoken_enc = get_encoding("cl100k_base")  # OpenAI's tokenizer, good approximation
+
+        def count_tokens(content: str) -> int:
+            return len(tiktoken_enc.encode(content))
+
+        # Configure splitter
+        separators = ["\n\n", "\n", ".", " ", ""]  # Recursive splitting
+        if content_type == "youtube":
+            # For YouTube, use standard recursive splitting (Whisper transcripts don't have timestamp markers)
+            splitter = RecursiveTextSplitter(
+                chunk_size=target_chunk_tokens * 4 if content_type == "pdf" else target_chunk_tokens,
+                chunk_overlap=int(target_chunk_tokens * 0.2)
+            )
+            split_chunks = splitter.split_text(text)
+            chunks = [
+                {"content": chunk, "metadata": {"doc_type": "youtube"}}
+                for chunk in split_chunks
+            ]
+        else:
+            # For other types, use recursive splitter
+            splitter = RecursiveTextSplitter(
+                    chunk_size=target_chunk_tokens * 4 if content_type == "pdf" else target_chunk_tokens,
+                    chunk_overlap=int(target_chunk_tokens * 0.2)
+        )
+
+            split_chunks = splitter.split_text(text)
+            chunks = [
+                {"content": chunk, "metadata": {"section": i + 1, "doc_type": content_type}}
+                for i, chunk in enumerate(split_chunks)
+            ]
+
+        logger.info(f"Chunked {content_type} text into {len(chunks)} parts")
+        return chunks
+
     except Exception as e:
-        logger.error(f"Unexpected error parsing JSON: {str(e)}")
+        logger.error(f"Error chunking text: {e}", exc_info=True)
         return []

@@ -24,8 +24,8 @@ class KeyConceptCreate(BaseModel):
     concept_explanation: Optional[str] = None
     explanation: Optional[str] = None  # Old field name for backward compatibility
     source_page_number: Optional[int] = None
-    source_video_timestamp_start_seconds: Optional[int] = None
-    source_video_timestamp_end_seconds: Optional[int] = None
+    source_video_timestamp_start_seconds: Optional[float] = None  # Allow float initially
+    source_video_timestamp_end_seconds: Optional[float] = None    # Allow float initially
     is_custom: bool = False
 
     # Custom validator to handle both old and new field names
@@ -33,19 +33,25 @@ class KeyConceptCreate(BaseModel):
         extra='forbid',
         populate_by_name=True
     )
-    
+
     @model_validator(mode='after')
     def check_fields(self) -> 'KeyConceptCreate':
         if self.concept_title is None and self.concept is not None:
             self.concept_title = self.concept
         if self.concept_explanation is None and self.explanation is not None:
             self.concept_explanation = self.explanation
-            
+
         if self.concept_title is None:
             raise ValueError("Either 'concept_title' or 'concept' must be provided")
         if self.concept_explanation is None:
             raise ValueError("Either 'concept_explanation' or 'explanation' must be provided")
-            
+
+        # Convert float timestamps to int for database storage
+        if self.source_video_timestamp_start_seconds is not None:
+            self.source_video_timestamp_start_seconds = int(self.source_video_timestamp_start_seconds)
+        if self.source_video_timestamp_end_seconds is not None:
+            self.source_video_timestamp_end_seconds = int(self.source_video_timestamp_end_seconds)
+
         return self
 
 class KeyConceptUpdate(BaseModel):

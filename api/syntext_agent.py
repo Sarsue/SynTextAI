@@ -2,15 +2,14 @@ import re
 import logging
 from typing import List, Dict, Any, Tuple
 
-from api.llm_service import generate_explanation_dspy, token_count, MAX_TOKENS_CONTEXT
-from api.web_searcher import get_answers_from_web  # Uncommented for fallback
+from api.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation_dspy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class SyntextAgent:
-    """Interface for conversing with document and web content using large context LLMs."""
+    """Interface for conversing with document content using large context LLMs."""
 
     def __init__(self):
         pass 
@@ -57,7 +56,7 @@ class SyntextAgent:
     def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
         """
         Enhanced main pipeline using large context: formats context, prompts LLM to cite sources precisely, 
-        appends detailed source map. Falls back to web search.
+        appends detailed source map.
         """
         try:
             if top_k_results:
@@ -166,12 +165,9 @@ class SyntextAgent:
                 
                 return final_response
 
-            # Fallback to Web search if no document results found
-            logger.info("No relevant document chunks found, falling back to web search.")
-            results, _ = get_answers_from_web(query)
-            if results:
-                return results  # Assuming web search includes its own sources
-            return "Sorry, I couldn't find an answer in your documents or on the web."
+            # No relevant document chunks found
+            logger.info("No relevant document chunks found for query.")
+            return "I couldn't find relevant information in your documents to answer this question. Please try rephrasing your question or upload additional relevant content."
 
         except Exception as e:
             logger.error(f"Exception occurred in query pipeline: {e}", exc_info=True)

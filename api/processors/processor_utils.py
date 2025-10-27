@@ -4,11 +4,11 @@ Centralizes common functionality used by multiple processors.
 """
 import logging
 from typing import Dict, Any, List, Optional, Tuple
-
+from api.repositories.repository_manager import RepositoryManager
 logger = logging.getLogger(__name__)
 
 async def generate_learning_materials_for_concept(
-    store, 
+    store: RepositoryManager, 
     file_id: int, 
     concept: Dict[str, Any]
 ) -> bool:

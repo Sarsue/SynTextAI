@@ -510,13 +510,69 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error updating file {file_id} status: {e}", exc_info=True)
                 return False
 
-    async def check_user_file_ownership(self, file_id: int, user_id: int) -> bool:
-        """Check if a user owns a specific file."""
+    async def create_file(self, file_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a new file record with enhanced error handling and uniqueness checks.
+
+        Args:
+            file_data: Dictionary containing file information
+
+        Returns:
+            Dict: Created file record with id and filename, or empty dict if failed
+        """
         async with self.get_async_session() as session:
             try:
-                stmt = select(FileORM.id).where(and_(FileORM.id == file_id, FileORM.user_id == user_id))
-                result = await session.execute(stmt)
-                return result.scalar() is not None
+                logger.debug(f"Creating new file with data: {file_data}")
+
+                # Validate required fields
+                required_fields = ['user_id', 'filename', 'file_type', 'status']
+                for field in required_fields:
+                    if field not in file_data or file_data[field] is None:
+                        raise ValueError(f"Missing required field: {field}")
+
+                file_orm = FileORM(
+                    user_id=file_data["user_id"],
+                    file_name=file_data["filename"],
+                    file_url=file_data.get("url", ""),
+                    file_type=file_data["file_type"],
+                    processing_status=file_data["status"]
+                )
+
+                session.add(file_orm)
+                await session.flush()
+                file_id = file_orm.id
+                await session.commit()
+
+                logger.info(f"Successfully created file {file_data['filename']} (ID: {file_id}) for user {file_data['user_id']}")
+                return {"id": file_id, "filename": file_orm.file_name}
+
+            except IntegrityError as e:
+                await session.rollback()
+                error_msg = f"Integrity constraint violation creating file {file_data.get('filename', 'unknown')}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+
+                # Check for specific constraint violations
+                if "unique constraint" in str(e).lower() or "duplicate key" in str(e).lower():
+                    logger.warning(f"File with similar attributes already exists: {file_data}")
+                    # Try to find existing file
+                    try:
+                        stmt = select(FileORM).where(
+                            and_(
+                                FileORM.user_id == file_data["user_id"],
+                                FileORM.file_name == file_data["filename"]
+                            )
+                        )
+                        result = await session.execute(stmt)
+                        existing_file = result.scalar_one_or_none()
+                        if existing_file:
+                            return {"id": existing_file.id, "filename": existing_file.file_name}
+                    except Exception as find_error:
+                        logger.error(f"Error finding existing file: {find_error}")
+
+                return {}
+
             except Exception as e:
-                logger.error(f"Error checking file ownership for file {file_id}, user {user_id}: {e}", exc_info=True)
-                return False
+                await session.rollback()
+                error_msg = f"Error creating file {file_data.get('filename', 'unknown')}: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                return {}

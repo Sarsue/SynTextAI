@@ -143,7 +143,10 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                     logger.error(f"File with ID {file_id} not found")
                     return
 
-                file.processing_status = status
+                if status == 'processed':
+                    file.processing_status = 'processed'
+                else:
+                    file.processing_status = 'failed'
                 if error:
                     # Note: File model doesn't have error_message field
                     # Error details are logged but not stored in database
@@ -189,8 +192,8 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
                 # Process the file - let process_file_data handle all status updates
                 result = await process_file_data(
                     user_gc_id=user_gc_id,
-                    user_id=user_id,  # Pass as int, not string
-                    file_id=file_id,  # Pass as int, not string
+                    file_id=file_id,
+                    user_id=user_id,
                     filename=filename,
                     file_url=file_url,
                     is_youtube=is_youtube,
@@ -238,17 +241,15 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
     try:
         from api.models.orm_models import File
         from sqlalchemy import select
-        from sqlalchemy.orm import joinedload
 
         # Use the shared repository manager function
         store = get_repository_manager()
 
         # Use async transaction to atomically fetch and update files
         async with store.file_repo.get_async_session() as session:
-            # Find files that need processing with row locking using async syntax
+            # Find files that need processing - simplified query without joinedload to avoid filtering issues
             stmt = (
                 select(File)
-                .options(joinedload(File.user, innerjoin=True))
                 .where(File.processing_status == 'uploaded')
                 .order_by(File.created_at.asc())
                 .with_for_update(skip_locked=True)
