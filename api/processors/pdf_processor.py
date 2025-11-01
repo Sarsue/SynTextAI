@@ -89,12 +89,22 @@ class PDFProcessor(FileProcessor):
             
         # Process extracted pages and generate embeddings
         logger.info(f"Starting page processing and embedding generation for file {filename}")
+        # Update status to 'embedding' to support REST polling progress
+        try:
+            await self.store.file_repo.update_file_status(int(file_id), "embedding")
+        except Exception:
+            logger.debug("Non-fatal: could not update status to 'embedding'")
         processed_data = await self.process_pages(page_data)
         logger.info(f"Completed processing pages: generated {len(processed_data.get('chunks', []))} chunks")
         
         # Update the database with chunks and embeddings
         if processed_data and "chunks" in processed_data:
             logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
+            # Update status to 'storing' before DB writes
+            try:
+                await self.store.file_repo.update_file_status(int(file_id), "storing")
+            except Exception:
+                logger.debug("Non-fatal: could not update status to 'storing'")
             # Now properly awaiting the async method
             success = await self.store.file_repo.update_file_with_chunks(
                 user_id=user_id,
@@ -117,6 +127,10 @@ class PDFProcessor(FileProcessor):
                 }
                 
             # Generate key concepts
+            try:
+                await self.store.file_repo.update_file_status(int(file_id), "generating_concepts")
+            except Exception:
+                logger.debug("Non-fatal: could not update status to 'generating_concepts'")
             content = " ".join([chunk.get("content", "") for chunk in processed_data["chunks"] 
                                if isinstance(chunk, dict) and "content" in chunk])
             

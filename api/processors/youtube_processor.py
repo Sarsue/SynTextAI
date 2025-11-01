@@ -60,6 +60,7 @@ class YouTubeProcessor(FileProcessor):
             file_id_int = int(file_id)  # Ensure file_id is an integer
 
             # Step 1: Extract content (transcript)
+            # 'extracting' status is set by caller (process_file_data). Keep it there.
             content = await self.extract_content(filename=filename, language=language)
             if not content or not content.get('transcript_data'):
                 logger.error(f"Failed to extract transcript from YouTube video: {filename}")
@@ -72,6 +73,8 @@ class YouTubeProcessor(FileProcessor):
                 }
 
             # Step 2: Generate embeddings
+            # Update status to 'embedding' to support REST polling progress
+            await self.store.file_repo.update_file_status(file_id_int, "embedding")
             processed_content = await self.generate_embeddings(content)
             if not processed_content.get('chunks'):
                 logger.error(f"No chunks generated for {filename}")
@@ -84,9 +87,11 @@ class YouTubeProcessor(FileProcessor):
                 }
 
             # Step 3: Store segments and chunks
+            await self.store.file_repo.update_file_status(file_id_int, "storing")
             await self._store_video_segments(user_id, file_id, filename, processed_content)
 
             # Step 4: Generate key concepts
+            await self.store.file_repo.update_file_status(file_id_int, "generating_concepts")
             key_concepts = await self.generate_key_concepts(
                 content,
                 language=language,
@@ -222,30 +227,33 @@ class YouTubeProcessor(FileProcessor):
             
         target_lang_code = LANGUAGE_CODE_MAP.get(language.lower(), 'en')
         
-        transcript_data = await self._transcribe_with_whisper(video_id, target_lang_code)
-        if not transcript_data:
-            logger.warning(f"Whisper transcription failed for {video_id}, falling back to YouTube API")
-            transcript_data = await self._get_youtube_transcript(video_id, target_lang_code)
-            if not transcript_data:
-                raise ValueError(f"Failed to extract transcript from video {video_id}")
-            else:
-                # Check if YouTube transcript has actual text
-                full_text_check = '\n'.join([entry['text'] for entry in transcript_data])
-                if not full_text_check.strip():
-                    logger.warning(f"YouTube transcript is empty for {video_id}, using anyway as last resort")
-        else:
-            # Check if Whisper transcript has actual text
-            full_text_check = '\n'.join([entry['text'] for entry in transcript_data])
-            if not full_text_check.strip():
-                logger.warning(f"Whisper transcript is empty for {video_id}, falling back to YouTube API")
-                transcript_data = await self._get_youtube_transcript(video_id, target_lang_code)
+        # Add light retry/backoff for robustness with long videos
+        attempt = 0
+        last_error = None
+        transcript_data = None
+        while attempt < 3 and not transcript_data:
+            try:
+                transcript_data = await self._transcribe_with_whisper(video_id, target_lang_code)
                 if not transcript_data:
-                    raise ValueError(f"Failed to extract transcript from video {video_id}")
-                else:
+                    logger.warning(f"Whisper transcription failed for {video_id}, falling back to YouTube API (attempt {attempt+1})")
+                    transcript_data = await self._get_youtube_transcript(video_id, target_lang_code)
+                if transcript_data:
                     full_text_check = '\n'.join([entry['text'] for entry in transcript_data])
                     if not full_text_check.strip():
-                        logger.warning(f"YouTube transcript is also empty for {video_id}")
-                        raise ValueError(f"Failed to extract transcript from video {video_id}")
+                        logger.warning(f"Transcript empty for {video_id} (attempt {attempt+1})")
+                        transcript_data = None
+                if transcript_data:
+                    break
+            except Exception as e:
+                last_error = e
+                transcript_data = None
+            if not transcript_data:
+                await asyncio.sleep(2 ** attempt)
+                attempt += 1
+        if not transcript_data:
+            err = last_error or Exception("Transcript extraction failed after retries")
+            logger.error(str(err))
+            raise ValueError(f"Failed to extract transcript from video {video_id}")
 
         # Calculate full text for logging
         full_text_check = '\n'.join([entry['text'] for entry in transcript_data])

@@ -144,6 +144,54 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setIsLoadingFiles(false);
         }
     }, [_callApiWithTokenInternal]);
+
+    // 60s polling for file processing status (replaces WS progress)
+    useEffect(() => {
+        if (!user || files.length === 0) return;
+
+        let cancelled = false;
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        const isTerminal = (status: string | undefined) =>
+            status === 'processed' || status === 'failed';
+
+        const pollOnce = async () => {
+            try {
+                const pending = files.filter(f => !isTerminal(f.status));
+                if (pending.length === 0) return; // nothing to poll
+
+                const ids = pending.map(f => f.id).join(',');
+                const url = `/api/v1/files/status?ids=${ids}`;
+                const response = await _callApiWithTokenInternal(url, 'GET');
+                if (!response?.ok || cancelled) return;
+                const data = await response.json();
+                const items: Array<{ file_id: number; processing_status: string; progress: number } > = data.items || [];
+                if (items.length === 0) return;
+
+                setFiles(prev => prev.map(file => {
+                    const found = items.find(it => it.file_id === file.id);
+                    if (!found) return file;
+                    return { ...file, status: found.processing_status as any };
+                }));
+            } catch (e) {
+                // swallow polling errors; try again next cycle
+                console.warn('Status polling error', e);
+            }
+        };
+
+        const loop = async () => {
+            await pollOnce();
+            if (cancelled) return;
+            timeoutId = setTimeout(loop, 60000); // 60s
+        };
+
+        loop();
+
+        return () => {
+            cancelled = true;
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [user, files, _callApiWithTokenInternal, setFiles]);
     
     const disconnectWebSocket = useCallback(() => {
         setWebSocketStatus('disconnected');
@@ -193,39 +241,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     }
 
                     case 'file_status_update': {
-                        const data = parsedMessage.data as FileStatusUpdatePayload;
-                        setFiles(prevFiles =>
-                            prevFiles.map(file =>
-                                file.id === data.file_id
-                                    ? {
-                                        ...file,
-                                        status: data.status,
-                                        error_message: data.error_message, // Will be undefined if not present, which is fine
-                                    }
-                                    : file
-                            )
-                        );
-
-                        if (data.status === 'failed') {
-                            addToast(`Error processing file: ${data.error_message || 'Unknown error'}`, 'error');
-                        }
                         break;
                     }
 
-                    case 'file_status_error': { // This is likely redundant but handled for safety
-                        const data = parsedMessage.data as FileStatusUpdatePayload;
-                        setFiles(prevFiles =>
-                            prevFiles.map(file =>
-                                file.id === data.file_id
-                                    ? {
-                                        ...file,
-                                        status: 'failed',
-                                        error_message: data.error_message,
-                                    }
-                                    : file
-                            )
-                        );
-                        addToast(`Error processing file: ${data.error_message}`, 'error');
+                    case 'file_status_error': {
                         break;
                     }
 

@@ -189,6 +189,71 @@ async def retrieve_files(
         logger.error(f"Error retrieving files for user {user_data.get('user_id')}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve files.")
 
+def _status_to_progress(status: Optional[str]) -> int:
+    """Map processing_status to a coarse progress percentage for polling UI."""
+    mapping = {
+        "uploaded": 0,
+        "extracting": 10,
+        "embedding": 40,
+        "storing": 70,
+        "generating_concepts": 90,
+        "processed": 100,
+        "failed": 0,
+    }
+    return mapping.get((status or "uploaded").lower(), 0)
+
+@files_router.get("/{file_id}/status", response_class=JSONResponse)
+async def get_file_status(
+    file_id: int,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Return current processing status and derived progress for a single file."""
+    try:
+        file_record = await store.file_repo.get_file_by_id(file_id)
+        if not file_record or file_record.get("user_id") != user_data["user_id"]:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        status_str = file_record.get("processing_status", "uploaded")
+        return {
+            "file_id": file_id,
+            "processing_status": status_str,
+            "progress": _status_to_progress(status_str),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file status for {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not get file status")
+
+@files_router.get("/status", response_class=JSONResponse)
+async def get_files_status(
+    ids: str = Query(..., description="Comma-separated file IDs"),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Return status/progress for multiple files by IDs (batch polling)."""
+    try:
+        raw_ids = [s.strip() for s in ids.split(",") if s.strip()]
+        results: List[Dict[str, Any]] = []
+        for sid in raw_ids:
+            try:
+                fid = int(sid)
+            except ValueError:
+                continue
+            file_record = await store.file_repo.get_file_by_id(file_id=fid)
+            if not file_record or file_record.get("user_id") != user_data["user_id"]:
+                continue
+            status_str = file_record.get("processing_status", "uploaded")
+            results.append({
+                "file_id": fid,
+                "processing_status": status_str,
+                "progress": _status_to_progress(status_str),
+            })
+        return {"items": results}
+    except Exception as e:
+        logger.error(f"Error getting files status for ids={ids}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not get files status")
+
 # Route to delete a file
 @files_router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_file(

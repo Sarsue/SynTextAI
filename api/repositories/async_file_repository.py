@@ -314,6 +314,78 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error querying chunks by embedding: {e}", exc_info=True)
                 return []
 
+    # --- Hybrid Search (vector + BM25 via Postgres full text) ---
+    DEFAULT_VECTOR_WEIGHT = 0.7
+    DEFAULT_BM25_WEIGHT = 0.3
+    DEFAULT_TOP_K = 10
+
+    async def hybrid_search(
+        self,
+        user_id: int,
+        query: str,
+        query_embedding: List[float],
+        vector_weight: float = None,
+        bm25_weight: float = None,
+        top_k: int = None,
+    ) -> List[Dict[str, Any]]:
+        """Hybrid search combining vector similarity and BM25 in Postgres.
+
+        Returns a list of { chunk_id, file_id, content, hybrid_score }.
+        """
+        vw = self.DEFAULT_VECTOR_WEIGHT if vector_weight is None else float(vector_weight)
+        bw = self.DEFAULT_BM25_WEIGHT if bm25_weight is None else float(bm25_weight)
+        k = self.DEFAULT_TOP_K if top_k is None else int(top_k)
+
+        async with self.get_async_session() as session:
+            try:
+                sql = text(
+                    """
+                    WITH query AS (
+                      SELECT 
+                        CAST(:embedding AS vector) AS embedding,
+                        plainto_tsquery('simple', :keywords) AS keywords
+                    )
+                    SELECT 
+                      c.id AS id,
+                      c.file_id AS file_id,
+                      c.content AS content,
+                      (
+                        :vector_weight * (1 - (c.embedding <-> q.embedding)) +
+                        :bm25_weight * ts_rank_cd(to_tsvector('simple', c.content), q.keywords)
+                      ) AS hybrid_score
+                    FROM chunks c
+                    JOIN files f ON f.id = c.file_id
+                    CROSS JOIN query q
+                    WHERE f.user_id = :user_id
+                    ORDER BY hybrid_score DESC
+                    LIMIT :top_k
+                    """
+                )
+
+                params = {
+                    "embedding": query_embedding,
+                    "keywords": query,
+                    "vector_weight": vw,
+                    "bm25_weight": bw,
+                    "top_k": k,
+                    "user_id": user_id,
+                }
+
+                result = await session.execute(sql, params)
+                rows = result.fetchall()
+                out: List[Dict[str, Any]] = []
+                for row in rows:
+                    out.append({
+                        "chunk_id": row.id,
+                        "file_id": row.file_id,
+                        "content": row.content,
+                        "hybrid_score": float(row.hybrid_score) if row.hybrid_score is not None else 0.0,
+                    })
+                return out
+            except Exception as e:
+                logger.error(f"Error performing hybrid_search: {e}", exc_info=True)
+                return []
+
     async def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:
         """Get all segment contents for a specific page of a file.
 

@@ -18,7 +18,6 @@ import os
 import sys
 import signal
 import time
-import aiohttp
 from sqlalchemy import text
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -70,34 +69,6 @@ MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "3"))
 # Polling configuration - Simplified to fixed 30-second intervals
 POLL_INTERVAL = 30  # Check for files every 30 seconds
 
-# API configuration for notifications
-API_NOTIFY_URL = os.getenv("API_BASE_URL", "http://localhost:3000")
-async def send_notification_to_api(user_gc_id: str, event_type: str, data: dict):
-    """Send a notification to the main API via HTTP POST"""
-    payload = {
-        "user_id": user_gc_id,
-        "event_type": event_type,
-        "data": data
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            # Use the configured API URL instead of hardcoded localhost
-            base_url = API_NOTIFY_URL.rstrip('/')
-            url = f"{base_url}/api/v1/internal/notify-client"
-            logger.debug(f"Sending notification to {url} for user {user_gc_id}")
-
-            async with session.post(url, json=payload, timeout=10) as response:
-                if response.status == 202:  # Accepted
-                    logger.info(f"Successfully sent notification for {event_type} to user {user_gc_id} via API")
-                else:
-                    response_text = await response.text()
-                    logger.error(f"Failed to send notification via API. Status: {response.status}, Response: {response_text}")
-    except asyncio.TimeoutError:
-        logger.error(f"Timeout sending notification to API for user {user_gc_id}")
-    except aiohttp.ClientConnectionError as e:
-        logger.error(f"Connection error sending notification to API for user {user_gc_id}: {e}")
-    except Exception as e:
-        logger.error(f"Exception while sending notification to API for user {user_gc_id}: {e}")
 
 # Global semaphore for limiting concurrent file processing
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
@@ -181,50 +152,40 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
             is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
             logger.info(f"[TRACE] File type detection - is_youtube: {is_youtube}")
                 
-            # Send notification for processing start (don't update status yet)
-            await send_notification_to_api(user_gc_id, 'file_status_update', {
-                'file_id': file_id,
-                'status': 'processing',
-                'progress': 10,
-            })
+            # Process the file with up to 3 attempts (exponential backoff)
+            last_error: Optional[Exception] = None
+            for attempt in range(3):
+                try:
+                    # Let process_file_data handle phase status updates; we only set final state
+                    result = await process_file_data(
+                        user_gc_id=user_gc_id,
+                        file_id=file_id,
+                        user_id=user_id,
+                        filename=filename,
+                        file_url=file_url,
+                        is_youtube=is_youtube,
+                        language=language,
+                        comprehension_level=comprehension_level
+                    )
 
-            try:
-                # Process the file - let process_file_data handle all status updates
-                result = await process_file_data(
-                    user_gc_id=user_gc_id,
-                    file_id=file_id,
-                    user_id=user_id,
-                    filename=filename,
-                    file_url=file_url,
-                    is_youtube=is_youtube,
-                    language=language,
-                    comprehension_level=comprehension_level
-                )
-
-                # Only set final status based on result from process_file_data
-                final_status = result.get('final_status', 'processed' if result.get('success', False) else 'failed')
-                
-                # Update status to final state and notify frontend
-                await update_file_status(file_id, final_status)
-                await send_notification_to_api(user_gc_id, 'file_status_update', {
-                    'file_id': file_id,
-                    'status': final_status,
-                    'progress': 100,
-                })
-                logger.info(f"Successfully completed processing file {filename} (ID: {file_id})")
-
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Error processing file {file_id}: {error_msg}", exc_info=True)
-                # Update status to FAILED and notify frontend
-                await update_file_status(file_id, "failed", error=error_msg)
-                await send_notification_to_api(user_gc_id, 'file_status_update', {
-                    'file_id': file_id,
-                    'status': 'failed',
-                    'error': error_msg,
-                })
-                # Re-raise the original error to allow retry logic to work
-                raise
+                    final_status = result.get('final_status', 'processed' if result.get('success', False) else 'failed')
+                    await update_file_status(file_id, final_status)
+                    logger.info(f"Completed processing file {filename} (ID: {file_id}) with status {final_status}")
+                    last_error = None
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.error(f"Attempt {attempt+1} failed for file {file_id}: {e}", exc_info=True)
+                    if attempt < 2:
+                        # Backoff: 1s, 2s
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    # Final failure: mark failed and propagate
+                    try:
+                        await update_file_status(file_id, "failed", error=str(e))
+                    finally:
+                        pass
+                    raise
                 
     except Exception as e:
         logger.error(f"[FATAL] Unhandled error in process_file for file {file_id}: {str(e)}", exc_info=True)

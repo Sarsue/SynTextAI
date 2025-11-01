@@ -12,7 +12,14 @@ export interface User {
 
 }
 
-export type ProcessingStatus = 'uploaded' | 'processing' | 'extracted' | 'processed' | 'failed';
+export type ProcessingStatus =
+  | 'uploaded'
+  | 'extracting'
+  | 'embedding'
+  | 'storing'
+  | 'generating_concepts'
+  | 'processed'
+  | 'failed';
 
 export interface UploadedFile {
     id: number;

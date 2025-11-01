@@ -3,75 +3,66 @@ import re
 import json
 import numpy as np
 from typing import List, Dict, Any
-from mistralai.client import MistralClient
-import google.generativeai as genai
 import dspy
+import requests
 import time
 import os
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-mistral_key = os.getenv("MISTRAL_API_KEY")
-google_api_key = os.getenv("GOOGLE_API_KEY")
-
-# Initialize clients
-genai.configure(api_key=google_api_key)
-mistral_client = MistralClient(api_key=mistral_key) if mistral_key else None
+MODEL_ACCESS_KEY = os.getenv("MODEL_ACCESS_KEY")
+INFERENCE_BASE_URL = os.getenv("INFERENCE_BASE_URL", "https://inference.do-ai.run/v1")
+DO_EMBEDDINGS_URL = os.getenv("DO_EMBEDDINGS_URL", "https://api.digitalocean.com/v2/ai/embeddings")
 
 
 logger = logging.getLogger(__name__)
 
-# Define provider-specific token limits
-PROVIDER_TOKEN_LIMITS = {
-    "mistral-medium-latest": 32768,  # Mixtral-8x7B context window
-    "google-gemini-1.5-flash": 1048576,  # Gemini 1.5 Flash context window
-}
+# Active models (overridable via env)
+CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai-gpt-oss-20b")
+EMBEDDING_MODEL = os.getenv("MODEL_EMBEDDING_ID", "multi-qa-mpnet-base-dot-v1")  # 768-d multilingual
 
-def get_max_tokens_context(model: str) -> int:
-    """Return the maximum token context for the given model."""
-    return PROVIDER_TOKEN_LIMITS.get(model, 8192)  # Default to a safe value
 
-# Set the active model
-active_model = "mistral-medium-latest" if mistral_client else "google-gemini-1.5-flash"
-MAX_TOKENS_CONTEXT = get_max_tokens_context(active_model) if active_model else 8192
+def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
+    """Generate text using OpenAI-compatible chat completions over HTTP."""
+    if not MODEL_ACCESS_KEY:
+        logger.error("MODEL_ACCESS_KEY not configured for chat")
+        return ""
+    try:
+        url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+        }
+        data = {
+            "model": CHAT_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+        }
+        resp = requests.post(url, headers=headers, json=data, timeout=60)
+        resp.raise_for_status()
+        body = resp.json()
+        text = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return text.strip()
+    except Exception as e:
+        logger.error(f"HTTP chat completion error: {e}")
+        return ""
 # DSPy Configuration - Make it completely optional
 gemini_lm = None
 explain_predictor = None
-
 try:
-    gemini_lm = dspy.Google(model="gemini-1.5-flash", api_key=google_api_key, max_output_tokens=2048) if google_api_key else None
-    if gemini_lm:
-        dspy.settings.configure(lm=gemini_lm)
-        logger.info("DSPy configured successfully with Gemini")
-
-        # Only create predictor if DSPy is working
-        class ExplanationSignature(dspy.Signature):
-            """Generate explanations for text chunks."""
-            context = dspy.InputField(desc="The text chunk to explain")
-            language = dspy.InputField(desc="Language for the explanation")
-            comprehension_level = dspy.InputField(desc="Comprehension level")
-            explanation = dspy.OutputField(desc="The generated explanation")
-
-        explain_predictor = dspy.Predict(ExplanationSignature)
-        logger.info("DSPy explanation predictor created successfully")
-    else:
-        logger.warning("DSPy not configured - Google API key not available")
+    # Keep DSPy optional; if you later wire an OpenAI-compatible client in DSPy, configure it here.
+    # For now, we avoid hard dependency and use fallback paths if not configured.
+    pass
 except Exception as e:
     logger.warning(f"DSPy configuration failed: {e}. Using fallback methods.")
-    gemini_lm = None
     explain_predictor = None
 
 def token_count(content: str, model: str = None) -> int:
-    if model and "google" in model and google_api_key:
-        try:
-            return genai.count_tokens(content).total_tokens
-        except Exception:
-            pass
     return max(1, int(len(content.split()) * 1.5))
 # --- New DSPy-based Explanation Function --- >
 def generate_explanation_dspy(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_length: int = 2000) -> str:
-    """Generates an explanation for a text chunk using DSPy and Gemini."""
+    """Generates an explanation for a text chunk using DSPy if configured; falls back otherwise."""
     if not text_chunk:
         logging.warning("generate_explanation_dspy called with empty text_chunk.")
         return ""
@@ -107,12 +98,7 @@ def generate_key_concepts(document_text: str, language: str = "English", compreh
     if not document_text.strip():
         return []
 
-    if "mistral" in active_model and not mistral_client:
-        logger.error("Mistral client not configured. Cannot generate key concepts.")
-        return []
-    if "google" in active_model and not gemini_lm:
-        logger.error("Google client not configured. Cannot generate key concepts.")
-        return []
+    # LLM availability handled inside _extract_key_concepts_from_chunk via gradient_chat
 
     all_concepts = []
     logger.info(f"Processing full document ({len(document_text)} chars) for key concepts")
@@ -209,21 +195,8 @@ def _extract_key_concepts_from_chunk(
             raw_json = ""
 
             try:
-                if "mistral" in active_model and mistral_client:
-                    response = mistral_client.chat(
-                        model=active_model,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=800,
-                        response_format={"type": "json_object"}  # Enforce JSON output
-                    )
-                    raw_json = response.choices[0].message.content.strip() if response.choices else ""
-                    logger.debug(f"Mistral raw response: {raw_json[:500]}...")  # Log raw response
-
-                elif "google" in active_model and gemini_lm:
-                    gen_model = genai.GenerativeModel("gemini-1.5-flash")
-                    response = gen_model.generate_content(prompt)
-                    raw_json = getattr(response, "text", "").strip()
-                    logger.debug(f"Google raw response: {raw_json[:500]}...")
+                raw_json = gradient_chat(prompt, max_tokens=800)
+                logger.debug(f"Gradient raw response: {raw_json[:500]}...")
 
             except Exception as e:
                 logger.warning(f"Model request failed on attempt {attempt}: {e}")
@@ -328,8 +301,6 @@ def _extract_key_concepts_from_chunk(
 def _deduplicate_concepts(concepts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not concepts:
         return []
-    if not mistral_client:
-        return _deduplicate_concepts_basic(concepts)
 
     unique = []
     seen_embeddings = []
@@ -403,43 +374,101 @@ def _standardize_concept_format(concepts: List[Dict[str, Any]], is_video: bool) 
 
 # --- Embeddings ---
 def get_text_embedding(text: str) -> List[float]:
-    if not mistral_client:
+    """Get embedding via HTTP. Try INFERENCE_BASE_URL first, then DigitalOcean endpoint. No local fallback."""
+    if not MODEL_ACCESS_KEY:
+        logger.error("MODEL_ACCESS_KEY not configured for embeddings")
         return []
+    # Try OpenAI-compatible inference endpoint
     try:
-        resp = mistral_client.embeddings(model="mistral-embed", input=[text])
-        return resp.data[0].embedding if resp.data else []
+        url = f"{INFERENCE_BASE_URL.rstrip('/')}/embeddings"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+        }
+        data = {"model": EMBEDDING_MODEL, "input": text}
+        resp = requests.post(url, headers=headers, json=data, timeout=60)
+        resp.raise_for_status()
+        body = resp.json()
+        vec = (body.get("data", [{}])[0].get("embedding") or [])
+        if vec:
+            return vec
     except Exception as e:
-        logger.error(f"Error getting embedding: {e}")
+        logger.warning(f"Primary embeddings endpoint failed: {e}")
+    # Try DigitalOcean embeddings endpoint (uses same MODEL_ACCESS_KEY)
+    try:
+        headers = {
+            "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+            "Content-Type": "application/json",
+        }
+        data = {"model": EMBEDDING_MODEL, "input": text}
+        resp = requests.post(DO_EMBEDDINGS_URL, headers=headers, json=data, timeout=60)
+        resp.raise_for_status()
+        body = resp.json()
+        vec = (body.get("data", [{}])[0].get("embedding") or [])
+        return vec
+    except Exception as e:
+        logger.error(f"DigitalOcean embeddings failed: {e}")
         return []
 
 
 def get_text_embeddings_in_batches(inputs: List[str], batch_size: int = 50) -> List[List[float]]:
-    if not mistral_client:
-        logger.error("Mistral client not initialized")
+    if not inputs:
         return []
+    if not MODEL_ACCESS_KEY:
+        logger.error("MODEL_ACCESS_KEY not configured for embeddings")
+        return [[] for _ in inputs]
     all_embeddings = []
-    max_retries = 5
-    base_delay = 2
-    
+    max_retries = 3
+    base_delay = 1
     for i in range(0, len(inputs), batch_size):
         batch = inputs[i:i + batch_size]
         retries = 0
         while retries < max_retries:
             try:
-                response = mistral_client.embeddings(model="mistral-embed", input=batch)
-                all_embeddings.extend([emb.embedding for emb in response.data])
+                # Primary: inference endpoint
+                url = f"{INFERENCE_BASE_URL.rstrip('/')}/embeddings"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+                }
+                data = {"model": EMBEDDING_MODEL, "input": batch}
+                resp = requests.post(url, headers=headers, json=data, timeout=120)
+                resp.raise_for_status()
+                body = resp.json()
+                vectors = [item.get("embedding", []) for item in body.get("data", [])]
+                if len(vectors) < len(batch):
+                    vectors.extend([[] for _ in range(len(batch) - len(vectors))])
+                all_embeddings.extend(vectors)
                 break
-            except Exception as e:
-                retries += 1
-                if retries < max_retries:
-                    delay = base_delay * (2 ** retries)
-                    logger.warning(f"Retrying embedding batch {i} in {delay:.1f}s: {e}")
-                    time.sleep(delay)
-                else:
-                    logger.error(f"Failed embedding batch {i}: {e}")
-                    all_embeddings.extend([[] for _ in batch])
-        time.sleep(5)
-    
+            except Exception as e1:
+                logger.warning(f"Primary embeddings failed for batch {i}: {e1}")
+                # Secondary: DigitalOcean embeddings
+                try:
+                    headers = {
+                        "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+                        "Content-Type": "application/json",
+                    }
+                    data = {"model": EMBEDDING_MODEL, "input": batch}
+                    resp = requests.post(DO_EMBEDDINGS_URL, headers=headers, json=data, timeout=120)
+                    resp.raise_for_status()
+                    body = resp.json()
+                    vectors = [item.get("embedding", []) for item in body.get("data", [])]
+                    if len(vectors) < len(batch):
+                        vectors.extend([[] for _ in range(len(batch) - len(vectors))])
+                    all_embeddings.extend(vectors)
+                    break
+                except Exception as e2:
+                    retries += 1
+                    if retries < max_retries:
+                        delay = base_delay * (2 ** retries)
+                        logger.warning(f"Retrying embeddings batch {i} in {delay:.1f}s: {e2}")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Embeddings permanently failed for batch {i}: {e2}")
+                        all_embeddings.extend([[] for _ in batch])
+                        break
+        time.sleep(1)
     return all_embeddings
 
 def generate_mcq_from_key_concepts(key_concepts: List[Dict[str, Any]], comprehension_level: str = "Beginner") -> List[Dict[str, Any]]:
@@ -521,9 +550,7 @@ def _generate_smart_distractors(concept: Dict[str, Any], all_concepts: List[Dict
         context = concept.get('concept_explanation', '')
         concept_title = concept.get('concept_title', '')
 
-        if not mistral_client:
-            logger.warning("Mistral client not initialized, falling back to embedding-based distractors")
-            return _fallback_distractors(concept, all_concepts, correct_answer, comprehension_level)
+        # If HTTP LLM is unavailable, fall back to embedding-based distractors below
 
         # Iterative LLM prompt for distractor generation (2 passes)
         difficulty = "simple and clear" if comprehension_level == "Beginner" else "nuanced and challenging"
@@ -540,16 +567,12 @@ def _generate_smart_distractors(concept: Dict[str, Any], all_concepts: List[Dict
         delay = 2
         for attempt in range(1, max_retries + 1):
             try:
-                response = mistral_client.chat(
-                    model=active_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=200
-                )
-                initial_distractors = [d.strip("- ").strip() for d in response.choices[0].message.content.split("\n") if d.strip()]
+                resp_text = gradient_chat(prompt, max_tokens=200)
+                initial_distractors = [d.strip("- ").strip() for d in resp_text.split("\n") if d.strip()]
                 logger.debug(f"Generated {len(initial_distractors)} initial distractors on attempt {attempt}")
                 break
             except Exception as e:
-                logger.warning(f"Mistral request failed on attempt {attempt}: {e}")
+                logger.warning(f"LLM request failed on attempt {attempt}: {e}")
                 if attempt < max_retries:
                     time.sleep(delay)
                     delay *= 2
@@ -567,16 +590,12 @@ def _generate_smart_distractors(concept: Dict[str, Any], all_concepts: List[Dict
 
         for attempt in range(1, max_retries + 1):
             try:
-                response = mistral_client.chat(
-                    model=active_model,
-                    messages=[{"role": "user", "content": refine_prompt}],
-                    max_tokens=200
-                )
-                llm_distractors = [d.strip("- ").strip() for d in response.choices[0].message.content.split("\n") if d.strip()]
+                resp_text = gradient_chat(refine_prompt, max_tokens=200)
+                llm_distractors = [d.strip("- ").strip() for d in resp_text.split("\n") if d.strip()]
                 logger.debug(f"Generated {len(llm_distractors)} refined distractors on attempt {attempt}")
                 break
             except Exception as e:
-                logger.warning(f"Mistral refine request failed on attempt {attempt}: {e}")
+                logger.warning(f"LLM refine request failed on attempt {attempt}: {e}")
                 if attempt < max_retries:
                     time.sleep(delay)
                     delay *= 2
@@ -599,9 +618,20 @@ def _generate_smart_distractors(concept: Dict[str, Any], all_concepts: List[Dict
             if 0.5 <= similarity <= 0.8:
                 distractors.append(distractor)
 
-        # Supplement with embedding-based distractors if needed
+        # Supplement missing distractors using LLM (no hardcoded generics)
         if len(distractors) < 3:
-            distractors.extend(_fallback_distractors(concept, all_concepts, correct_answer, comprehension_level))
+            needed = 3 - len(distractors)
+            try:
+                supplement_prompt = (
+                    f"Provide {needed} additional plausible but incorrect distractors for a question about '{concept_title}'. "
+                    f"Correct answer: '{correct_answer}'. "
+                    f"Each 10-30 words, distinct and believable. One per line."
+                )
+                resp_text = gradient_chat(supplement_prompt, max_tokens=200)
+                extra = [d.strip("- ").strip() for d in resp_text.split("\n") if d.strip()]
+                distractors.extend(extra[:needed])
+            except Exception as e:
+                logger.warning(f"Failed to supplement distractors via LLM: {e}")
 
         return distractors[:3]
     except Exception as e:
@@ -610,7 +640,7 @@ def _generate_smart_distractors(concept: Dict[str, Any], all_concepts: List[Dict
 
 
 def _fallback_distractors(concept: Dict[str, Any], all_concepts: List[Dict[str, Any]], correct_answer: str, comprehension_level: str) -> List[str]:
-    """Fallback distractor generation using embeddings."""
+    """Fallback distractor generation using embeddings; attempts LLM before returning fewer options."""
     distractors = []
     try:
         correct_embedding = get_text_embedding(correct_answer)
@@ -629,13 +659,18 @@ def _fallback_distractors(concept: Dict[str, Any], all_concepts: List[Dict[str, 
             distractors = [exp for _, _, exp in similarities[:3 - len(distractors)]]
 
         if len(distractors) < 3:
-            concept_title = concept.get('concept_title', '')
-            generic_distractors = [
-                f"A concept not related to {concept_title}.",
-                f"A common misunderstanding of {concept_title}.",
-                f"An incorrect definition of {concept_title}."
-            ]
-            distractors.extend(generic_distractors[:3 - len(distractors)])
+            needed = 3 - len(distractors)
+            try:
+                concept_title = concept.get('concept_title', '')
+                prompt = (
+                    f"Generate {needed} plausible but incorrect distractors for '{concept_title}'. "
+                    f"Correct answer: '{correct_answer}'. One per line, 10-30 words."
+                )
+                resp_text = gradient_chat(prompt, max_tokens=120)
+                extra = [d.strip("- ").strip() for d in resp_text.split("\n") if d.strip()]
+                distractors.extend(extra[:needed])
+            except Exception as e:
+                logger.warning(f"LLM fallback distractor generation failed: {e}")
 
         return distractors[:3]
     except Exception as e:

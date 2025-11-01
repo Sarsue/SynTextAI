@@ -343,8 +343,13 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             # Generate embeddings for the query
             query_embedding = get_text_embedding(rewritten_query)
             
-            # Enhanced retrieval: get more candidates for reranking
-            vector_results = await store.file_repo.query_chunks_by_embedding(id, query_embedding, top_k=15)
+            # Enhanced retrieval: get more candidates for reranking via hybrid search
+            vector_results = await store.file_repo.hybrid_search(
+                user_id=int(id),
+                query=rewritten_query,
+                query_embedding=query_embedding,
+                top_k=15,
+            )
             
             # If we have expanded terms, try to get additional results and combine them
             additional_results = []
@@ -352,7 +357,12 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
                 for term in expanded_terms[:3]:  # Limit to top 3 expansion terms
                     try:
                         term_embedding = get_text_embedding(term)
-                        term_results = await store.file_repo.query_chunks_by_embedding(id, term_embedding, top_k=5)
+                        term_results = await store.file_repo.hybrid_search(
+                            user_id=int(id),
+                            query=term,
+                            query_embedding=term_embedding,
+                            top_k=5,
+                        )
                         additional_results.extend(term_results)
                     except Exception as term_error:
                         logger.warning(f"Error retrieving results for expansion term '{term}': {term_error}")
@@ -397,7 +407,12 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             # Fallback to original RAG pipeline if enhanced version fails
             logger.warning(f"Enhanced RAG pipeline failed: {rag_error}. Falling back to original pipeline.")
             query_embedding = get_text_embedding(message)
-            topK_chunks = await store.file_repo.query_chunks_by_embedding(id, query_embedding, top_k=10)
+            topK_chunks = await store.file_repo.hybrid_search(
+                user_id=int(id),
+                query=message,
+                query_embedding=query_embedding,
+                top_k=10,
+            )
             response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
             logger.info("Fallback to original RAG pipeline successful")
         
@@ -467,7 +482,7 @@ async def generate_mcq_from_key_concepts(key_concepts: List[Dict[str, Any]], com
 
     try:
         # Generate MCQs using LLM service
-        mcqs = generate_mcq_from_key_concepts(key_concepts, comprehension_level)
+        mcqs = await generate_mcq_from_key_concepts(key_concepts, comprehension_level)
 
         logger.info(f"Generated {len(mcqs)} MCQs from {len(key_concepts)} key concepts")
         return mcqs

@@ -45,7 +45,7 @@ greenlet==3.0.3
 grpcio
 grpcio-status
 grpcio-tools
-google-generativeai>=0.8.2
+# Removed: google-generativeai (migrated to Gradient)
 
 # Whisper and related
 faster-whisper==1.1.0
@@ -69,7 +69,7 @@ asyncpg==0.29.0
 python-jose==3.3.0
 gunicorn
 gpt4all
-mistralai
+# Removed: mistralai (migrated to Gradient)
 h11==0.14.0
 h2==4.1.0
 hpack==4.0.0
@@ -181,7 +181,7 @@ pgvector==0.3.6
 supervisor
 fastapi==0.116.1
 uvicorn==0.28.1
-google-generativeai
+# Removed duplicate google-generativeai
 python-multipart==0.0.20
 ffmpeg-python
 websockets==15.0.1
