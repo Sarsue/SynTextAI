@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './FileViewerComponent.css';
-import { UploadedFile, KeyConcept, Flashcard, QuizQuestion } from './types';
+import { UploadedFile, KeyConcept, Flashcard, QuizQuestion, ProcessingStatus } from './types';
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 
@@ -90,6 +90,17 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         if (['jpg', 'jpeg', 'png', 'gif'].includes(extension)) return 'image';
         
         return null; 
+    };
+
+    // Centralized, type-safe status messages for all processing states
+    const STATUS_MESSAGES: Record<ProcessingStatus, string> = {
+        uploaded: 'File has been uploaded and is queued for processing.',
+        extracting: 'Extracting content from the file...',
+        embedding: 'Generating embeddings for semantic search...',
+        storing: 'Storing extracted content and metadata...',
+        generating_concepts: 'Generating key concepts...',
+        processed: 'Processed successfully.',
+        failed: 'File processing failed. Please try again later.'
     };
 
     // Track in-flight requests to prevent duplicates
@@ -439,13 +450,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         
         // Show loading indicator for unprocessed files
         if (file.status !== 'processed') {
-            const statusMessage = {
-                'uploaded': 'File has been uploaded and is queued for processing.',
-                'processing': 'File is being processed. Key concepts will appear when ready.',
-                'extracted': 'File content has been extracted and is being analyzed.',
-                'failed': 'File processing failed. Please try again later.'
-            }[file.status] || 'File is being processed...';
-            
+            const statusMessage = STATUS_MESSAGES[file.status] || 'File is being processed...';
             return <div className="processing-indicator">{statusMessage}</div>;
         }
 
@@ -611,13 +616,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
 
         if (file.status !== 'processed') {
-            const statusMessage = {
-                'uploaded': 'File has been uploaded and is queued for processing.',
-                'processing': 'File is being processed. Key concepts will appear when ready.',
-                'extracted': 'File content has been extracted and is being analyzed.',
-                'failed': 'File processing failed. Please try again later.'
-            }[file.status] || 'File is being processed...';
-            
+            const statusMessage = STATUS_MESSAGES[file.status] || 'File is being processed...';
             return (
                 <div className="key-concepts-container">
                     <p>{statusMessage}</p>

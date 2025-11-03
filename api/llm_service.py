@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai-gpt-oss-20b")
 EMBEDDING_MODEL = os.getenv("MODEL_EMBEDDING_ID", "multi-qa-mpnet-base-dot-v1")  # 768-d multilingual
 
+# Max tokens allowed for combined context in syntext_agent
+try:
+    MAX_TOKENS_CONTEXT = int(os.getenv("MAX_TOKENS_CONTEXT", "120000"))
+except ValueError:
+    MAX_TOKENS_CONTEXT = 120000
+
 
 def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
     """Generate text using OpenAI-compatible chat completions over HTTP."""
@@ -511,12 +517,19 @@ def generate_mcq_from_key_concepts(key_concepts: List[Dict[str, Any]], comprehen
 
             # Ensure 4 options (1 correct + 3 distractors)
             if len(distractors) < 3:
-                generic_distractors = [
-                    f"A concept not related to {concept_title}.",
-                    f"A common misunderstanding of {concept_title}.",
-                    f"An incorrect definition of {concept_title}."
-                ]
-                distractors.extend(generic_distractors[:3 - len(distractors)])
+                needed = 3 - len(distractors)
+                try:
+                    supplement_prompt = (
+                        f"Provide {needed} additional plausible but incorrect distractors for a multiple-choice question about '{concept_title}'. "
+                        f"Correct answer: '{correct_answer}'. "
+                        f"Context: {concept_explanation[:400]} "
+                        f"Each distractor must be 10-30 words, distinct, and believable. One per line."
+                    )
+                    resp_text = gradient_chat(supplement_prompt, max_tokens=200)
+                    extra = [d.strip("- ").strip() for d in resp_text.split("\n") if d.strip()]
+                    distractors.extend(extra[:needed])
+                except Exception as e:
+                    logger.warning(f"Failed to supplement distractors via LLM in MCQ generation: {e}")
 
             options = [correct_answer] + distractors[:3]
             mcqs.append({

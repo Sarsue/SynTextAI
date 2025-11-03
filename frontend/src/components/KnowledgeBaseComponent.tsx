@@ -165,12 +165,26 @@ interface FileStatusEntry { isDeleting?: boolean; }
                                                         : currentFile.file_name}
                                             </span>
                                             <span className="file-status">
-                                                {currentFile.status === 'processed' ? '✓ Ready' :
-                                                 currentFile.status === 'failed' ? '❌ Failed' :
-                                                 currentFile.status === 'processing' ? '⏳ Processing...' :
-                                                 currentFile.status === 'extracted' ? '🔍 Extracting content...' :
-                                                 currentFile.status === 'uploaded' ? '📤 Uploaded' :
-                                                 '⏳ Processing...'}
+                                                {(() => {
+                                                    switch (currentFile.status) {
+                                                        case 'processed':
+                                                            return '✓ Ready';
+                                                        case 'failed':
+                                                            return '❌ Failed';
+                                                        case 'uploaded':
+                                                            return '📤 Uploaded';
+                                                        case 'extracting':
+                                                            return '🔍 Extracting content...';
+                                                        case 'embedding':
+                                                            return '🧠 Generating embeddings...';
+                                                        case 'storing':
+                                                            return '💾 Storing content...';
+                                                        case 'generating_concepts':
+                                                            return '🧩 Generating key concepts...';
+                                                        default:
+                                                            return '⏳ Processing...';
+                                                    }
+                                                })()}
                                             </span>
                                         </span>
                                         

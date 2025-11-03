@@ -7,7 +7,7 @@ from faster_whisper import WhisperModel
 import yt_dlp
 from api.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
-from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_mcq_from_key_concepts
+from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_mcq_from_key_concepts as llm_generate_mcq_from_key_concepts
 from api.syntext_agent import SyntextAgent
 import stripe
 from api.websocket_manager import websocket_manager
@@ -482,7 +482,61 @@ async def generate_mcq_from_key_concepts(key_concepts: List[Dict[str, Any]], com
 
     try:
         # Generate MCQs using LLM service
-        mcqs = await generate_mcq_from_key_concepts(key_concepts, comprehension_level)
+        mcqs = await llm_generate_mcq_from_key_concepts(key_concepts, comprehension_level)
+
+        if len(mcqs) == 0:
+            logger.debug(
+                f"LLM returned 0 MCQs for {len(key_concepts)} concept(s); applying heuristic fallback"
+            )
+
+            # Heuristic fallback to guarantee at least one MCQ
+            concept = key_concepts[0]
+            title = concept.get('concept_title') or concept.get('concept') or 'this concept'
+            explanation = (concept.get('concept_explanation') or concept.get('explanation') or '').strip()
+
+            # Build a simple definition question
+            first_sentence = explanation.split('.')
+            first_sentence = first_sentence[0].strip() if first_sentence and first_sentence[0].strip() else explanation
+            if not first_sentence:
+                first_sentence = 'a key idea discussed in this material'
+
+            question = f"What best describes {title}?"
+            correct = first_sentence
+
+            # Collect distractors from other concepts if available
+            other_concepts = [c for c in key_concepts[1:] if c is not concept]
+            distractors: List[str] = []
+            for oc in other_concepts:
+                oc_exp = (oc.get('concept_explanation') or oc.get('explanation') or '').strip()
+                oc_sent = oc_exp.split('.')
+                oc_sent = oc_sent[0].strip() if oc_sent and oc_sent[0].strip() else oc_exp
+                if oc_sent and oc_sent.lower() != correct.lower():
+                    distractors.append(oc_sent)
+                if len(distractors) >= 3:
+                    break
+
+            # If still not enough distractors, add generic plausible ones
+            generic_pool = [
+                "An unrelated historical fact not covered here",
+                "A peripheral detail with no direct connection",
+                "A common misconception about the topic",
+                "A random example that does not apply in this context",
+            ]
+            for g in generic_pool:
+                if len(distractors) >= 3:
+                    break
+                if g.lower() != correct.lower():
+                    distractors.append(g)
+
+            options = [correct] + distractors[:3]
+            # Stable shuffle alternative without randomness (keep as is); correct is at index 0
+            fallback_mcq = {
+                'question': question,
+                'options': options,
+                'answer': correct,
+            }
+            logger.info("Heuristic MCQ fallback produced 1 MCQ")
+            return [fallback_mcq]
 
         logger.info(f"Generated {len(mcqs)} MCQs from {len(key_concepts)} key concepts")
         return mcqs

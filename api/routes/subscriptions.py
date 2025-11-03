@@ -8,7 +8,6 @@ import os
 from dotenv import load_dotenv
 from api.utils import get_user_id
 from api.repositories.repository_manager import RepositoryManager
-from api.repositories.domain_models import Subscription
 import asyncio
 # Load environment variables
 load_dotenv()
@@ -68,17 +67,17 @@ async def subscription_status(
                 'trial_end': None
             }
         
-        # Unpack the tuple (Subscription, CardDetails)
+        # Unpack the tuple (subscription_dict, card_details_dict)
         subscription, card_details = subscription_data
         
         # Prepare subscription data to return
         response = {
-            'subscription_status': subscription.status,
-            'card_last4': card_details.card_last4 if card_details else None,
-            'card_brand': card_details.card_type if card_details else None,
-            'card_exp_month': card_details.exp_month if card_details else None,
-            'card_exp_year': card_details.exp_year if card_details else None,
-            'trial_end': subscription.trial_end
+            'subscription_status': subscription.get('status'),
+            'card_last4': (card_details or {}).get('card_last4'),
+            'card_brand': (card_details or {}).get('card_type'),
+            'card_exp_month': (card_details or {}).get('exp_month'),
+            'card_exp_year': (card_details or {}).get('exp_year'),
+            'trial_end': subscription.get('trial_end')
         }
         
         return response
@@ -100,7 +99,7 @@ async def start_trial(
         subscription = await store.user_repo.get_subscription(user_id)
         if subscription:
             # If subscription exists, check its status
-            if subscription.get('status') == 'active':
+            if subscription[0].get('status') == 'active':
                 logger.error(f"Request came from an already active subscription: {user_id}")
                 raise HTTPException(status_code=400, detail="Active subscription already exists")
             else:
@@ -169,23 +168,18 @@ async def cancel_sub(
             raise HTTPException(status_code=404, detail="No subscription found")
 
         subscription, card_details = subscription_data
-        subscription_id = subscription.stripe_subscription_id
+        subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
             raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
         cancellation_result = await asyncio.to_thread(stripe.Subscription.delete, subscription_id)
     
         await store.user_repo.update_subscription_status(
-            subscription.stripe_customer_id,
+            subscription.get('stripe_customer_id'),
             cancellation_result.status
         )
-    
         return {
-            'subscription_status': cancellation_result['status'],
-            'card_last4': subscription_status["card_last4"],
-            'card_brand': subscription_status["card_brand"],
-            'card_exp_month': subscription_status["exp_month"],
-            'card_exp_year': subscription_status["exp_year"]
+            'subscription_status': cancellation_result['status']
         }
 
     except Exception as e:
@@ -206,8 +200,8 @@ async def create_subscription(
         stripe_customer_id = None
         if subscription_data:
             subscription, _ = subscription_data
-            stripe_customer_id = subscription.stripe_customer_id
-            if subscription.status == 'active':
+            stripe_customer_id = subscription.get('stripe_customer_id')
+            if subscription.get('status') == 'active':
                 logger.error(f"Request came from an already active subscription: {user_id}")
                 raise HTTPException(status_code=400, detail="Active subscription already exists")
    
@@ -307,8 +301,8 @@ async def update_payment(
             raise HTTPException(status_code=404, detail="No subscription found")
 
         subscription, card_details = subscription_data
-        stripe_customer_id = subscription.stripe_customer_id
-        subscription_id = subscription.stripe_subscription_id
+        stripe_customer_id = subscription.get('stripe_customer_id')
+        subscription_id = subscription.get('stripe_subscription_id')
         if not subscription_id:
             raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
@@ -319,8 +313,8 @@ async def update_payment(
 
         await store.user_repo.update_subscription(
             stripe_customer_id=stripe_customer_id,
-            status=subscription["status"],  # Or retrieve status from Stripe if required
-            current_period_end=datetime.utcfromtimestamp(subscription["current_period_end"]),  # Retrieve current period end from Stripe if needed
+            status=subscription.get("status"),  # Or retrieve status from Stripe if required
+            current_period_end=subscription.get("current_period_end"),  # Already a datetime in repo
             card_last4=payment_method.card.last4,
             card_type=payment_method.card.brand,
             exp_month=payment_method.card.exp_month,
@@ -366,12 +360,12 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
                 # Using the repository methods to get subscription info
                 # We need to find the user ID from the stripe customer ID first
                
-                subscription_data = await store.user_repo.get_subscription_by_customer_id(stripe_customer_id)
+                subscription_data = await store.user_repo.get_subscription_by_stripe_customer_id(stripe_customer_id)
                 if subscription_data:
                     subscription, _ = subscription_data
-                    user_id = subscription.user_id
+                    user_id = subscription.get('user_id')
                     
-                    if subscription.status == 'trialing' and current_status != 'trialing':
+                    if subscription.get('status') == 'trialing' and current_status != 'trialing':
                         logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
                        
             except Exception as db_exc:

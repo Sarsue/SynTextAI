@@ -366,13 +366,16 @@ class PDFProcessor(FileProcessor):
             raise ValueError("Missing required 'file_id' parameter")
             
         # Extract key concepts from full document to reduce LLM calls
+        pages = content.get("pages", [])
         full_text = " ".join([p.get("text", "") for p in pages])  # Use 'text' for consistency
         if not full_text.strip():
             logger.warning(f"No content available for key concept generation for file ID {file_id}")
             return []
-            
+        
         try:
-            key_concepts = generate_key_concepts(document_text=full_text, is_video=False)
+            language = kwargs.get('language', 'English')
+            comprehension_level = kwargs.get('comprehension_level', 'Beginner')
+            key_concepts = generate_key_concepts(document_text=full_text, language=language, comprehension_level=comprehension_level, is_video=False)
             # Assign page numbers based on content distribution (simple heuristic)
             total_pages = len(pages)
             for concept in key_concepts:

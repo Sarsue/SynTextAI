@@ -94,6 +94,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const socketRef = useRef<WebSocket | null>(null);
     const reconnectionAttempts = useRef(0);
     const reconnectTimeoutId = useRef<NodeJS.Timeout | null>(null);
+    const filesRef = useRef<UploadedFile[]>([]);
 
     const toggleDarkMode = () => setDarkMode((prev) => !prev);
 
@@ -145,27 +146,29 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [_callApiWithTokenInternal]);
 
-    // 60s polling for file processing status (replaces WS progress)
+    // keep files ref in sync to avoid effect retriggers
+    useEffect(() => { filesRef.current = files; }, [files]);
+
+    // 60s polling for file processing status (replaces WS progress) - stable interval
     useEffect(() => {
-        if (!user || files.length === 0) return;
+        if (!user) return;
 
         let cancelled = false;
-        let timeoutId: NodeJS.Timeout | null = null;
-
-        const isTerminal = (status: string | undefined) =>
-            status === 'processed' || status === 'failed';
+        const isTerminal = (status: string | undefined) => status === 'processed' || status === 'failed';
 
         const pollOnce = async () => {
             try {
-                const pending = files.filter(f => !isTerminal(f.status));
-                if (pending.length === 0) return; // nothing to poll
+                const currentFiles = filesRef.current;
+                if (!currentFiles || currentFiles.length === 0) return;
+                const pending = currentFiles.filter(f => !isTerminal(f.status));
+                if (pending.length === 0) return;
 
                 const ids = pending.map(f => f.id).join(',');
                 const url = `/api/v1/files/status?ids=${ids}`;
                 const response = await _callApiWithTokenInternal(url, 'GET');
                 if (!response?.ok || cancelled) return;
                 const data = await response.json();
-                const items: Array<{ file_id: number; processing_status: string; progress: number } > = data.items || [];
+                const items: Array<{ file_id: number; processing_status: string; progress: number }> = data.items || [];
                 if (items.length === 0) return;
 
                 setFiles(prev => prev.map(file => {
@@ -174,24 +177,19 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     return { ...file, status: found.processing_status as any };
                 }));
             } catch (e) {
-                // swallow polling errors; try again next cycle
                 console.warn('Status polling error', e);
             }
         };
 
-        const loop = async () => {
-            await pollOnce();
-            if (cancelled) return;
-            timeoutId = setTimeout(loop, 60000); // 60s
-        };
-
-        loop();
+        // immediate poll once on mount
+        void pollOnce();
+        const intervalId = setInterval(pollOnce, 60000);
 
         return () => {
             cancelled = true;
-            if (timeoutId) clearTimeout(timeoutId);
+            clearInterval(intervalId);
         };
-    }, [user, files, _callApiWithTokenInternal, setFiles]);
+    }, [user, _callApiWithTokenInternal, setFiles]);
     
     const disconnectWebSocket = useCallback(() => {
         setWebSocketStatus('disconnected');

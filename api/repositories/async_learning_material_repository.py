@@ -14,7 +14,6 @@ from sqlalchemy.orm import selectinload
 
 from .async_base_repository import AsyncBaseRepository
 from ..models import File, KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM
-from .domain_models import KeyConcept, Flashcard, QuizQuestion
 from ..schemas.learning_content import (
     KeyConceptCreate, KeyConceptUpdate, KeyConceptResponse,
     FlashcardCreate, FlashcardUpdate, FlashcardResponse,

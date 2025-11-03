@@ -9,7 +9,6 @@ import logging
 from sqlalchemy.exc import IntegrityError
 
 from .async_base_repository import AsyncBaseRepository
-from .domain_models import ChatHistory, Message
 
 # Import ORM models from the new models module
 from ..models import ChatHistory as ChatHistoryORM
