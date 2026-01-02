@@ -10,9 +10,44 @@ FIREBASE_PROJECT="docsynth-fbb02"  # Replace with your Firebase project ID
 
 echo "=== 🚀 Starting deployment for $DOMAIN ==="
 
+wait_for_apt_locks() {
+    local timeout_seconds=${1:-300}
+    local start_ts
+    start_ts=$(date +%s)
+
+    while true; do
+        local now_ts elapsed
+        now_ts=$(date +%s)
+        elapsed=$((now_ts - start_ts))
+        if [ "$elapsed" -ge "$timeout_seconds" ]; then
+            echo "❌ Timed out waiting for apt/dpkg locks after ${timeout_seconds}s"
+            sudo ps aux | grep -E "(apt-get|apt\.|unattended-upgrades|dpkg)" | grep -v grep || true
+            return 1
+        fi
+
+        if command -v lsof >/dev/null 2>&1; then
+            if sudo lsof /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock >/dev/null 2>&1; then
+                echo "⏳ Waiting for apt/dpkg lock... (${elapsed}s elapsed)"
+                sleep 5
+                continue
+            fi
+        else
+            if sudo ps aux | grep -E "(apt-get|apt\.|unattended-upgrades|dpkg)" | grep -v grep >/dev/null 2>&1; then
+                echo "⏳ Waiting for apt/dpkg processes to finish... (${elapsed}s elapsed)"
+                sleep 5
+                continue
+            fi
+        fi
+
+        return 0
+    done
+}
+
 # Step 1: Update system and install necessary dependencies
 echo "[1/9] Updating system and installing dependencies..."
+wait_for_apt_locks 300
 sudo apt-get update
+wait_for_apt_locks 300
 sudo apt-get install -y docker.io nginx certbot python3-certbot-nginx curl docker-compose-plugin
 
 # Step 2: Detect Docker Compose command
