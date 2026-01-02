@@ -83,12 +83,28 @@ apt_get_with_lock_retry() {
     done
 }
 
-# Step 1: Update system and install necessary dependencies
-echo "[1/9] Updating system and installing dependencies..."
-wait_for_apt_locks 300
-apt_get_with_lock_retry 900 update
-wait_for_apt_locks 300
-apt_get_with_lock_retry 900 install -y docker.io nginx certbot python3-certbot-nginx curl docker-compose-plugin
+# Step 1: Verify system dependencies are installed (do not apt-get during deploy)
+echo "[1/9] Verifying system dependencies..."
+if ! command -v docker >/dev/null 2>&1; then
+    echo "❌ Docker is not installed on the host. Install Docker once on the droplet, then rerun deploy." 
+    exit 1
+fi
+if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+    echo "❌ Docker Compose not found on the host. Install Docker Compose once on the droplet, then rerun deploy." 
+    exit 1
+fi
+if ! command -v curl >/dev/null 2>&1; then
+    echo "❌ curl not found on the host. Install curl once on the droplet, then rerun deploy." 
+    exit 1
+fi
+if ! command -v nginx >/dev/null 2>&1; then
+    echo "❌ nginx not found on the host. Install nginx once on the droplet, then rerun deploy." 
+    exit 1
+fi
+if ! command -v certbot >/dev/null 2>&1; then
+    echo "❌ certbot not found on the host. Install certbot once on the droplet, then rerun deploy." 
+    exit 1
+fi
 
 # Step 2: Detect Docker Compose command
 echo "[2/9] Detecting Docker Compose..."
