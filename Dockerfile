@@ -117,10 +117,11 @@ RUN mkdir -p $WHISPER_CACHE_DIR && chmod 777 $WHISPER_CACHE_DIR
 
 # Create a script to download the model at runtime
 RUN echo '#!/bin/bash\
-set -e\
+set -euo pipefail\
 \
 WHISPER_CACHE_DIR=${WHISPER_CACHE_DIR:-/app/models}\
-MODEL_PATH="$WHISPER_CACHE_DIR/faster-whisper-base"\
+WHISPER_MODEL_NAME=${WHISPER_MODEL_NAME:-small}\
+MODEL_PATH="$WHISPER_CACHE_DIR/faster-whisper-${WHISPER_MODEL_NAME}"\
 \
 echo "📦 Checking for Whisper model in $MODEL_PATH"\
 \
@@ -133,22 +134,45 @@ fi\
 mkdir -p "$WHISPER_CACHE_DIR"\
 \
 # Download the model with retries\
-for i in {1..3}; do\
-    echo "Attempt $i/3: Downloading Whisper model..."\
-    if python3 -c "\
+MAX_RETRIES=${WHISPER_DOWNLOAD_MAX_RETRIES:-5}\
+BASE_SLEEP_SECONDS=${WHISPER_DOWNLOAD_BASE_SLEEP_SECONDS:-5}\
+\
+for i in $(seq 1 "$MAX_RETRIES"); do\
+    echo "Attempt $i/$MAX_RETRIES: Downloading Whisper model (${WHISPER_MODEL_NAME})..."\
+    if python3 - <<PY\
 import os\
-from faster_whisper import download_model\
-print(\"Starting model download...\")\n\
-try:\n    download_model(\"base\", output_dir=\"$WHISPER_CACHE_DIR\", local_files_only=False)\n    print(\"✅ Successfully downloaded Whisper model\")\n    import sys\n    sys.exit(0)\nexcept Exception as e:\n    print(f\"❌ Download failed: {str(e)}\")\n    import sys\n    sys.exit(1)\
-"; then\
+import sys\
+\
+cache_dir = os.environ.get("WHISPER_CACHE_DIR", "/app/models")\
+model_name = os.environ.get("WHISPER_MODEL_NAME", "small")\
+\
+try:\
+    from faster_whisper import download_model\
+except Exception as e:\
+    print(f"❌ faster_whisper import failed: {e}")\
+    sys.exit(2)\
+\
+print(f"Starting model download: {model_name} -> {cache_dir}")\
+try:\
+    download_model(model_name, output_dir=cache_dir, local_files_only=False)\
+    print("✅ Successfully downloaded Whisper model")\
+    sys.exit(0)\
+except Exception as e:\
+    print(f"❌ Download failed: {e}")\
+    sys.exit(1)\
+PY\
+    then\
         echo "✅ Successfully downloaded Whisper model"\
         exit 0\
     fi\
-    \
-    if [ $i -lt 3 ]; then\
-        sleep $((i * 5))\
-    fi\ndone\n\
-echo "❌ Failed to download Whisper model after 3 attempts"\nexit 1\
+\
+    if [ "$i" -lt "$MAX_RETRIES" ]; then\
+        sleep_seconds=$((BASE_SLEEP_SECONDS * i))\
+        echo "⏳ Retry in ${sleep_seconds}s..."\
+        sleep "$sleep_seconds"\
+    fi\
+done\n\
+echo "❌ Failed to download Whisper model after ${MAX_RETRIES} attempts"\nexit 1\
 ' > /usr/local/bin/download-whisper-model && \
     chmod +x /usr/local/bin/download-whisper-model
 
@@ -172,7 +196,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
 # Create a simple entrypoint script
-RUN echo '#!/bin/sh\n\n# Download the model if it doesn\'\''t exist\nif [ -f "/usr/local/bin/download-whisper-model" ]; then\n    if ! /usr/local/bin/download-whisper-model; then\n        echo "⚠️ Warning: Failed to download Whisper model. The app will start but may not function correctly."\n    fi\nelse\n    echo "⚠️ Warning: download-whisper-model not found. The app will start but may not function correctly."\nfi\n\n# Start the application\nexec "$@"' > /entrypoint.sh && \
+RUN echo '#!/bin/sh\n\nif [ "${SKIP_WHISPER_DOWNLOAD:-0}" = "1" ]; then\n    echo "⚠️ Warning: SKIP_WHISPER_DOWNLOAD=1 set. Proceeding without downloading Whisper model."\nelif [ -f "/usr/local/bin/download-whisper-model" ]; then\n    if ! /usr/local/bin/download-whisper-model; then\n        echo "⚠️ Warning: Failed to download Whisper model. The app will start but may not function correctly."\n    fi\nelse\n    echo "⚠️ Warning: download-whisper-model not found. The app will start but may not function correctly."\nfi\n\nexec "$@"' > /entrypoint.sh && \
     chmod +x /entrypoint.sh
 
 # Set the entrypoint
