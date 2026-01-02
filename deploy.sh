@@ -43,12 +43,52 @@ wait_for_apt_locks() {
     done
 }
 
+apt_get_with_lock_retry() {
+    local timeout_seconds=${1:-600}
+    shift
+
+    local start_ts
+    start_ts=$(date +%s)
+
+    while true; do
+        set +e
+        local output
+        output=$(sudo apt-get "$@" 2>&1)
+        local exit_code=$?
+        set -e
+
+        if [ "$exit_code" -eq 0 ]; then
+            echo "$output"
+            return 0
+        fi
+
+        if echo "$output" | grep -q "Could not get lock"; then
+            local now_ts elapsed
+            now_ts=$(date +%s)
+            elapsed=$((now_ts - start_ts))
+            if [ "$elapsed" -ge "$timeout_seconds" ]; then
+                echo "$output" >&2
+                echo "❌ Timed out waiting for apt locks after ${timeout_seconds}s" >&2
+                sudo ps aux | grep -E "(apt-get|apt\.|unattended-upgrades|dpkg)" | grep -v grep || true
+                return "$exit_code"
+            fi
+
+            echo "⏳ apt-get is locked. Waiting 10s then retrying... (${elapsed}s elapsed)" >&2
+            sleep 10
+            continue
+        fi
+
+        echo "$output" >&2
+        return "$exit_code"
+    done
+}
+
 # Step 1: Update system and install necessary dependencies
 echo "[1/9] Updating system and installing dependencies..."
 wait_for_apt_locks 300
-sudo apt-get update
+apt_get_with_lock_retry 900 update
 wait_for_apt_locks 300
-sudo apt-get install -y docker.io nginx certbot python3-certbot-nginx curl docker-compose-plugin
+apt_get_with_lock_retry 900 install -y docker.io nginx certbot python3-certbot-nginx curl docker-compose-plugin
 
 # Step 2: Detect Docker Compose command
 echo "[2/9] Detecting Docker Compose..."
