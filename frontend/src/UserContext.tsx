@@ -25,11 +25,13 @@ interface UserSettings {
 // Define the type for SubscriptionData
 interface SubscriptionData {
     subscription_status: string;
-    card_last4?: string;
-    card_brand?: string;
-    card_exp_month?: string;
-    card_exp_year?: string;
-    trial_end?: string;
+    card_last4?: string | null;
+    card_brand?: string | null;
+    card_exp_month?: number | null;
+    card_exp_year?: number | null;
+    trial_end?: string | null;
+    current_period_end?: string | null;
+    has_active_payment_method?: boolean;
 }
 
 // Define the type for UserContext
@@ -63,8 +65,9 @@ interface UserContextType {
     setIsLoadingFiles: Dispatch<SetStateAction<boolean>>;
     fileError: string | null;
     setFileError: Dispatch<SetStateAction<string | null>>;
-    loadUserFiles: (page: number, pageSize: number) => Promise<void>;
+    loadUserFiles: (page: number, pageSize: number, workspaceId?: number | null) => Promise<void>;
     deleteFileFromContext: (fileId: number) => Promise<void>;
+    pollFileStatus: () => Promise<void>; // Trigger immediate status check
     authLoading: boolean;
 }
 
@@ -101,16 +104,29 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const _callApiWithTokenInternal = useCallback(async (url: string, method: string, body?: any) => {
         if (!user) return null;
         try {
+            const buildHeaders = (token: string): HeadersInit => {
+                const headers: HeadersInit = { 'Authorization': `Bearer ${token}` };
+                if (body && !(body instanceof FormData)) {
+                    headers['Content-Type'] = 'application/json';
+                }
+                return headers;
+            };
+
             const idToken = await user.getIdToken();
-            const headers: HeadersInit = { 'Authorization': `Bearer ${idToken}` };
-            if (body && !(body instanceof FormData)) {
-                headers['Content-Type'] = 'application/json';
-            }
-            const response = await fetch(url, {
+            let response = await fetch(url, {
                 method,
-                headers,
+                headers: buildHeaders(idToken),
                 body: (body && body instanceof FormData) ? body : (body ? JSON.stringify(body) : undefined)
             });
+
+            if (response.status === 401) {
+                const refreshed = await user.getIdToken(true);
+                response = await fetch(url, {
+                    method,
+                    headers: buildHeaders(refreshed),
+                    body: (body && body instanceof FormData) ? body : (body ? JSON.stringify(body) : undefined)
+                });
+            }
             if (!response.ok) {
                  const errorText = await response.text().catch(() => 'Unknown API error');
                  console.error('API call failed:', errorText);
@@ -125,10 +141,13 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [user]);
 
-    const loadUserFiles = useCallback(async (page: number, pageSize: number) => {
+    const loadUserFiles = useCallback(async (page: number, pageSize: number, workspaceId?: number | null) => {
         setIsLoadingFiles(true);
         setFileError(null);
-        const url = `/api/v1/files?page=${page}&page_size=${pageSize}`;
+        let url = `/api/v1/files?page=${page}&page_size=${pageSize}`;
+        if (workspaceId !== null && workspaceId !== undefined) {
+            url += `&workspace_id=${workspaceId}`;
+        }
         try {
             const response = await _callApiWithTokenInternal(url, 'GET');
             if (response?.ok) {
@@ -149,48 +168,35 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // keep files ref in sync to avoid effect retriggers
     useEffect(() => { filesRef.current = files; }, [files]);
 
-    // 60s polling for file processing status (replaces WS progress) - stable interval
-    useEffect(() => {
+    // Exposed function to trigger immediate status polling (e.g., after file upload)
+    const pollFileStatus = useCallback(async () => {
         if (!user) return;
-
-        let cancelled = false;
         const isTerminal = (status: string | undefined) => status === 'processed' || status === 'failed';
+        
+        try {
+            const currentFiles = filesRef.current;
+            if (!currentFiles || currentFiles.length === 0) return;
+            const pending = currentFiles.filter(f => !isTerminal(f.status));
+            if (pending.length === 0) return;
 
-        const pollOnce = async () => {
-            try {
-                const currentFiles = filesRef.current;
-                if (!currentFiles || currentFiles.length === 0) return;
-                const pending = currentFiles.filter(f => !isTerminal(f.status));
-                if (pending.length === 0) return;
+            const ids = pending.map(f => f.id).join(',');
+            const url = `/api/v1/files/status?ids=${ids}`;
+            const response = await _callApiWithTokenInternal(url, 'GET');
+            if (!response?.ok) return;
+            const data = await response.json();
+            const items: Array<{ file_id: number; processing_status: string; progress: number }> = data.items || [];
+            if (items.length === 0) return;
 
-                const ids = pending.map(f => f.id).join(',');
-                const url = `/api/v1/files/status?ids=${ids}`;
-                const response = await _callApiWithTokenInternal(url, 'GET');
-                if (!response?.ok || cancelled) return;
-                const data = await response.json();
-                const items: Array<{ file_id: number; processing_status: string; progress: number }> = data.items || [];
-                if (items.length === 0) return;
-
-                setFiles(prev => prev.map(file => {
-                    const found = items.find(it => it.file_id === file.id);
-                    if (!found) return file;
-                    return { ...file, status: found.processing_status as any };
-                }));
-            } catch (e) {
-                console.warn('Status polling error', e);
-            }
-        };
-
-        // immediate poll once on mount
-        void pollOnce();
-        const intervalId = setInterval(pollOnce, 60000);
-
-        return () => {
-            cancelled = true;
-            clearInterval(intervalId);
-        };
+            setFiles(prev => prev.map(file => {
+                const found = items.find(it => it.file_id === file.id);
+                if (!found) return file;
+                return { ...file, status: found.processing_status as any };
+            }));
+        } catch (e) {
+            console.warn('Status polling error', e);
+        }
     }, [user, _callApiWithTokenInternal, setFiles]);
-    
+
     const disconnectWebSocket = useCallback(() => {
         setWebSocketStatus('disconnected');
         if (reconnectTimeoutId.current) {
@@ -232,13 +238,22 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
                 switch (parsedMessage.event) {
                     case 'file_processed': {
-                        const updatedFile = parsedMessage.result as UploadedFile;
+                        const updatedFile = (parsedMessage.result || parsedMessage.data) as UploadedFile;
                         setFiles(prevFiles => prevFiles.map(f => (f.id === updatedFile.id ? updatedFile : f)));
                         addToast(`File "${updatedFile.file_name}" has been processed.`, 'success');
                         break;
                     }
 
                     case 'file_status_update': {
+                        const data = parsedMessage.data as FileStatusUpdatePayload;
+                        if (data?.file_id && data?.status) {
+                            setFiles(prevFiles =>
+                                prevFiles.map(f => (f.id === data.file_id ? { ...f, status: data.status } : f))
+                            );
+                            if (data.status === 'processed') {
+                                addToast('File processing completed.', 'success');
+                            }
+                        }
                         break;
                     }
 
@@ -379,6 +394,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setFileError,
         loadUserFiles,
         deleteFileFromContext,
+        pollFileStatus,
         authLoading,
     };
 

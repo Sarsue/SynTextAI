@@ -98,23 +98,24 @@
     margin: 0;
 }
 
-.key-concept-item {
+.key-concept-card {
     background-color: #fff;
-    padding: 12px 15px;
-    border-radius: 5px;
+    padding: 16px;
+    border-radius: 12px;
     border: 1px solid #e0e0e0;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
     margin-bottom: 12px;
-    font-size: 0.9rem;
-    overflow-wrap: break-word; /* Ensure long words wrap */
+    font-size: 0.95rem;
+    overflow-wrap: break-word;
     word-break: break-word;
     max-width: 100%;
+    transition: all 0.2s ease;
 }
 
-.dark-mode .key-concept-item {
-    background-color: #4a4a4a;
-    border-color: #666;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+.dark-mode .key-concept-card {
+    background-color: #3a3a3a;
+    border-color: #555;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
 .key-concept-item h4,
@@ -605,6 +606,8 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
         flex: 1 1 100px;
         font-size: 14px;
         padding: 8px;
+        min-height: 48px;
+        -webkit-tap-highlight-color: transparent;
     }
 
     .key-concept-item h4 {
@@ -635,22 +638,33 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
 
 @media (max-width: 480px) {
   .tab-button {
-    font-size: 12px;
-    padding: 6px;
+    font-size: 13px;
+    padding: 12px 8px;
+    min-height: 48px;
   }
 
-  .key-concept-item {
-    padding: 10px;
+  .key-concept-card {
+    padding: 14px;
+    border-radius: 10px;
   }
 
   .action-btn {
-    width: 36px;
-    height: 36px;
+    min-width: 44px;
+    min-height: 44px;
     font-size: 14px;
+    padding: 10px;
   }
 
-  .action-btn:hover {
-    width: 70px; /* Smaller hover width for mobile */
+  .source-link {
+    padding: 12px 16px;
+    font-size: 0.9rem;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .concept-content {
+    font-size: 15px;
+    line-height: 1.6;
   }
 }
 /* Dark mode styles for the key concepts enhancements */
@@ -685,7 +699,7 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
 .dark-mode .concept-card {
     background-color: #444;
     border-color: #555;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 
 .dark-mode .concept-card:hover {
@@ -750,6 +764,17 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
     font-size: 1rem;
     padding: 2px 4px;
     border-radius: 4px;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .action-btn:hover {
@@ -827,6 +852,9 @@ object-fit: contain; /* Adjust as needed: cover, fill, etc. */
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
+    padding: 8px 0;
+    min-height: 48px;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .expand-icon {

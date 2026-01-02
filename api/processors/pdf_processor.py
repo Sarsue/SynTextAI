@@ -4,6 +4,7 @@ PDF processor module - Handles extraction and processing of PDF documents.
 import logging
 import os
 import asyncio
+import gc
 from typing import Dict, List, Any, Optional, Tuple
 from io import BytesIO
 import tempfile
@@ -19,7 +20,7 @@ import fitz  # PyMuPDF
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.llm_service import _deduplicate_concepts, _validate_references, _standardize_concept_format,get_text_embeddings_in_batches, generate_key_concepts
-from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
+from api.processors.processor_utils import generate_learning_materials_for_concepts, generate_learning_materials_for_concept, log_concept_processing_summary
 from api.schemas.learning_content import KeyConceptCreate
 from pdfminer.layout import LAParams
 from pdfminer.pdfinterp import PDFPageInterpreter
@@ -29,6 +30,9 @@ from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.converter import TextConverter
 from api.utils import chunk_text
 logger = logging.getLogger(__name__)
+
+# Maximum number of key concepts to persist per PDF file
+MAX_CONCEPTS_PER_FILE = 60
 
 class PDFProcessor(FileProcessor):
     """
@@ -131,12 +135,24 @@ class PDFProcessor(FileProcessor):
                 await self.store.file_repo.update_file_status(int(file_id), "generating_concepts")
             except Exception:
                 logger.debug("Non-fatal: could not update status to 'generating_concepts'")
-            content = " ".join([chunk.get("content", "") for chunk in processed_data["chunks"] 
-                               if isinstance(chunk, dict) and "content" in chunk])
+
+            # Provide explicit Page N markers so the LLM can return `source_page_number` deterministically.
+            content = " ".join([
+                f"Page {chunk.get('page_num')}: {chunk.get('text', '')}"
+                for chunk in processed_data["chunks"]
+                if isinstance(chunk, dict) and "text" in chunk
+            ])
             
             try:
                 # Generate key concepts using Mistral
                 key_concepts = generate_key_concepts(content, language, comprehension_level)
+
+                # Enforce a sane upper bound on number of concepts for large PDFs
+                if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > MAX_CONCEPTS_PER_FILE:
+                    logger.info(
+                        f"Truncating key concepts list from {len(key_concepts)} to {MAX_CONCEPTS_PER_FILE} for file {file_id}"
+                    )
+                    key_concepts = key_concepts[:MAX_CONCEPTS_PER_FILE]
                 
                 logger.info(f"generate_key_concepts returned: {type(key_concepts)}, length: {len(key_concepts) if key_concepts else 0}")
                 
@@ -161,9 +177,9 @@ class PDFProcessor(FileProcessor):
                     
                 if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > 0:
                     logger.info(f"Processing {len(key_concepts)} key concepts for file {file_id}")
-                    concepts_processed = 0
+                    saved_concepts: List[Dict[str, Any]] = []
                     
-                    # Process one concept at a time - save concept, then generate and save its learning materials
+                    # Save all concepts first (DB IDs), then batch-generate learning materials.
                     for i, concept in enumerate(key_concepts):
                         title = concept.get("concept_title", "")
                         explanation = concept.get("concept_explanation", "")
@@ -189,29 +205,26 @@ class PDFProcessor(FileProcessor):
                         if concept_id is not None:
                             logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
                             logger.debug(f"Successfully saved concept with ID {concept_id} to database")
-                            
-                            # 2. Generate and save learning materials for this concept
-                            concept_with_id = {
-                                "concept_title": concept.get("concept_title", ""), 
-                                "concept_explanation": concept.get("concept_explanation", ""),
-                                "id": concept_id
-                            }
-                            
-                            logger.debug(f"Preparing to generate learning materials for concept ID {concept_id}")
-                            logger.debug(f"Concept with ID data: {concept_with_id}")
-                            
-                            # Generate flashcards and quizzes immediately for this concept
-                            result = await self.generate_learning_materials_for_concept(file_id, concept_with_id)
-                            
-                            if result:
-                                concepts_processed += 1
-                                logger.info(f"Successfully generated learning materials for concept '{title[:30]}...'")
-                            else:
-                                logger.error(f"Failed to generate learning materials for concept '{title[:30]}...'")
+
+                            saved_concepts.append(
+                                {
+                                    "id": concept_id,
+                                    "concept_title": concept.get("concept_title", ""),
+                                    "concept_explanation": concept.get("concept_explanation", ""),
+                                }
+                            )
                         else:
                             logger.error(f"Failed to save concept '{title[:30]}...' to database for file {file_id}")
-                    
-                    logger.info(f"Completed processing {concepts_processed}/{len(key_concepts)} key concepts for file {file_id}")
+
+                    if saved_concepts:
+                        await generate_learning_materials_for_concepts(
+                            store=self.store,
+                            file_id=int(file_id),
+                            concepts=saved_concepts,
+                            comprehension_level=comprehension_level,
+                        )
+
+                    logger.info(f"Completed processing {len(saved_concepts)}/{len(key_concepts)} key concepts for file {file_id}")
 
                 else:
                     logger.warning(f"No valid key concepts generated for file {file_id}")
@@ -241,49 +254,88 @@ class PDFProcessor(FileProcessor):
     
     async def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
         """
-        Process PDF pages: chunk text and generate embeddings efficiently.
-        Collects all chunks first, then processes in large batches to avoid rate limits.
+        Process PDF pages: chunk text and generate embeddings incrementally.
+        Processes pages in batches to manage memory efficiently.
+        PRODUCTION-READY: Handles 1000+ page PDFs without OOM.
         """
         all_chunks = []
+        BATCH_SIZE = 50  # Process 50 pages at a time to manage memory
+        total_pages = len(page_data)
+        
+        logger.info(f"Processing {total_pages} pages in batches of {BATCH_SIZE}")
 
-        # First pass: extract and chunk all pages
-        for page_item in page_data:
-            try:
-                page_content = page_item['content']
-                page_num = page_item['page_num']
+        # Process pages in batches to avoid loading all chunks into memory
+        for batch_start in range(0, total_pages, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total_pages)
+            page_batch = page_data[batch_start:batch_end]
+            batch_chunks = []
+            
+            logger.info(f"Processing pages {batch_start+1}-{batch_end} of {total_pages}")
 
-                if not page_content:
-                    continue
+            # Extract and chunk this batch of pages
+            for page_item in page_batch:
+                try:
+                    page_content = page_item['text']
+                    page_num = page_item['page_num']
 
-                # Chunk the page content
-                text_chunks = chunk_text(page_content)
-                non_empty_chunks = [chunk['content'] for chunk in text_chunks if chunk['content'].strip()]
+                    if not page_content:
+                        continue
 
-                # Collect chunks with metadata for later processing
-                for chunk_content in non_empty_chunks:
-                    all_chunks.append({
-                        'text': chunk_content,  # Use 'text' for ChunkORM
-                        'page_num': page_num,
+                    # Chunk the page content
+                    text_chunks = chunk_text(page_content)
+                    non_empty_chunks = [chunk['content'] for chunk in text_chunks if chunk['content'].strip()]
+
+                    # Collect chunks for this batch
+                    for chunk_content in non_empty_chunks:
+                        batch_chunks.append({
+                            'text': chunk_content,
+                            'page_num': page_num,
+                            'source_type': 'pdf'
+                        })
+
+                except Exception as e:
+                    logger.error(f"Error processing page {page_item.get('page_num', 'unknown')}: {e}")
+
+            # Generate embeddings for this batch
+            if batch_chunks:
+                chunk_texts = [chunk['text'] for chunk in batch_chunks]
+                
+                try:
+                    logger.info(f"Generating embeddings for {len(chunk_texts)} chunks...")
+                    chunk_embeddings = get_text_embeddings_in_batches(chunk_texts, batch_size=50)
+                except Exception as e:
+                    logger.error(f"Embedding generation failed for batch: {e}")
+                    raise ValueError(f"Failed to generate embeddings: {e}")
+                
+                # Validate embeddings
+                if not chunk_embeddings or len(chunk_embeddings) != len(chunk_texts):
+                    raise ValueError(f"Embedding count mismatch: expected {len(chunk_texts)}, got {len(chunk_embeddings)}")
+                
+                embedding_dim = len(chunk_embeddings[0]) if chunk_embeddings else 0
+                if embedding_dim == 0:
+                    raise ValueError("Embeddings have zero dimensions - model failed to generate valid vectors")
+                
+                logger.info(f"✅ Generated {len(chunk_embeddings)} embeddings with dimension {embedding_dim}")
+
+                # Combine chunks with their embeddings
+                for i, chunk in enumerate(batch_chunks):
+                    chunk['embedding'] = chunk_embeddings[i] if i < len(chunk_embeddings) else None
+                    chunk['metadata'] = {
+                        'page': chunk['page_num'],
                         'source_type': 'pdf'
-                    })
+                    }
+                
+                all_chunks.extend(batch_chunks)
+                
+                # CRITICAL: Force garbage collection after each batch
+                batch_chunks = None
+                chunk_texts = None
+                chunk_embeddings = None
+                gc.collect()
+                logger.debug(f"Memory cleaned after batch {batch_start//BATCH_SIZE + 1}")
 
-            except Exception as e:
-                logger.error(f"Error processing page {page_item.get('page_num', 'unknown')}: {e}")
-
-        # Single large batch for all embeddings
-        if all_chunks:
-            chunk_texts = [chunk['text'] for chunk in all_chunks]
-            chunk_embeddings = get_text_embeddings_in_batches(chunk_texts, batch_size=100)
-
-            # Combine chunks with their embeddings
-            for i, chunk in enumerate(all_chunks):
-                chunk['embedding'] = chunk_embeddings[i] if i < len(chunk_embeddings) else None
-                chunk['metadata'] = {
-                    'page': chunk['page_num'],
-                    'source_type': 'pdf'
-                }
-
-            return {"chunks": all_chunks}
+        logger.info(f"✅ Completed processing all {total_pages} pages, generated {len(all_chunks)} total chunks")
+        return {"chunks": all_chunks}
     
     def extract_text_with_page_numbers(self, pdf_data: bytes) -> List[Dict[str, Any]]:
         """

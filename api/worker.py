@@ -18,6 +18,7 @@ import os
 import sys
 import signal
 import time
+import requests
 from sqlalchemy import text
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -64,10 +65,15 @@ logging.basicConfig(
 logger = logging.getLogger('syntextai-worker')
 
 # Maximum number of concurrent file processing tasks
-MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "3"))
+# PRODUCTION: Set to 1 to prevent OOM with large PDFs (1000+ pages)
+# Processing files sequentially ensures stable memory usage
+MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "1"))
 
 # Polling configuration - Simplified to fixed 30-second intervals
 POLL_INTERVAL = 30  # Check for files every 30 seconds
+
+# API base URL for internal notifications (docker-compose sets this to http://syntextaiapp:3000)
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/")
 
 
 # Global semaphore for limiting concurrent file processing
@@ -114,10 +120,7 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                     logger.error(f"File with ID {file_id} not found")
                     return
 
-                if status == 'processed':
-                    file.processing_status = 'processed'
-                else:
-                    file.processing_status = 'failed'
+                file.processing_status = status
                 if error:
                     # Note: File model doesn't have error_message field
                     # Error details are logged but not stored in database
@@ -126,14 +129,51 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
                 await session.commit()
                 logger.info(f"Successfully updated file {file_id} status to {status}")
 
+                try:
+                    user_id = getattr(file, 'user_id', None)
+                    if user_id:
+                        await notify_client(
+                            user_id=int(user_id),
+                            event_type="file_status_update",
+                            data={"file_id": int(file_id), "status": status},
+                        )
+                except Exception as notify_err:
+                    logger.debug(f"Failed to notify client for file {file_id} status {status}: {notify_err}")
+
             except SQLAlchemyError as e:
                 await session.rollback()
                 logger.error(f"Database error updating file {file_id} status: {str(e)}")
                 raise
-                
+
     except Exception as e:
         logger.exception(f"Error updating file {file_id} status: {str(e)}")
         raise
+
+
+async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> None:
+    """Notify the API to relay an event to the frontend over WebSocket.
+
+    We route notifications by DB user_id. The API registers each WebSocket connection
+    under both firebase uid AND db user id, so the worker doesn't need to parse URLs.
+    """
+    if not user_id:
+        return
+
+    url = f"{API_BASE_URL}/api/v1/internal/notify-client"
+    payload = {
+        "user_id": str(int(user_id)),
+        "event_type": event_type,
+        "data": data,
+    }
+
+    def _post():
+        try:
+            requests.post(url, json=payload, timeout=5)
+        except Exception as e:
+            logger.warning(f"Failed to notify client for user {user_id}: {e}")
+
+    await asyncio.to_thread(_post)
+
 
 async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
                      file_url: str, language: str = "English", 
@@ -170,6 +210,11 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
 
                     final_status = result.get('final_status', 'processed' if result.get('success', False) else 'failed')
                     await update_file_status(file_id, final_status)
+                    await notify_client(
+                        user_id=user_id,
+                        event_type="file_status_update",
+                        data={"file_id": int(file_id), "status": final_status},
+                    )
                     logger.info(f"Completed processing file {filename} (ID: {file_id}) with status {final_status}")
                     last_error = None
                     break
@@ -183,6 +228,11 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
                     # Final failure: mark failed and propagate
                     try:
                         await update_file_status(file_id, "failed", error=str(e))
+                        await notify_client(
+                            user_id=user_id,
+                            event_type="file_status_update",
+                            data={"file_id": int(file_id), "status": "failed"},
+                        )
                     finally:
                         pass
                     raise
@@ -192,6 +242,11 @@ async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: st
         # Make one final attempt to mark as failed
         try:
             await update_file_status(file_id, "failed")
+            await notify_client(
+                user_id=user_id,
+                event_type="file_status_update",
+                data={"file_id": int(file_id), "status": "failed"},
+            )
         except Exception as final_err:
             logger.error(f"[FATAL] Failed final status update for file {file_id}: {str(final_err)}")
         raise
@@ -220,9 +275,11 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
             result = await session.execute(stmt)
             files_to_process = result.scalars().all()
 
-            # Update status to processing to claim the files
+            # Update status to extracting to claim the files.
+            # We avoid introducing a separate 'processing' status because the frontend
+            # and API progress mapping expect the existing lifecycle states.
             for file in files_to_process:
-                file.processing_status = 'processing'
+                file.processing_status = 'extracting'
 
             # Commit the transaction to release the lock and persist status changes
             await session.commit()
@@ -230,24 +287,12 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
             # Convert files to list of dictionaries
             pending_files = []
             for file in files_to_process:
-                # Try to get user_gc_id from file URL if available, otherwise use empty string
-                # GCS URLs are structured as: https://storage.googleapis.com/bucket/user_gc_id/filename
-                user_gc_id = ''
-                if file.file_url and "storage.googleapis.com" in file.file_url:
-                    try:
-                        # Extract user_gc_id from GCS URL path
-                        path_parts = file.file_url.split('/')
-                        if len(path_parts) >= 4:
-                            user_gc_id = path_parts[-2]  # Second to last part should be user_gc_id
-                    except Exception as e:
-                        logger.warning(f"Could not extract user_gc_id from file URL {file.file_url}: {e}")
-
                 pending_files.append({
                     "id": file.id,
                     "file_name": file.file_name,
                     "file_url": file.file_url,
                     "user_id": file.user_id,
-                    "user_gc_id": user_gc_id,
+                    "user_gc_id": "",
                     "created_at": file.created_at
                 })
 
@@ -327,6 +372,25 @@ async def main():
     # Register signal handlers
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
+    
+    # Preload models to avoid OOM crashes during first file processing
+    logger.info("Preloading models...")
+    
+    # Note: Embedding model preload removed - using HTTP API (Voyage AI)
+    # No local model to preload
+    logger.info("✅ Using HTTP-based embeddings (Voyage AI) - no model preload needed")
+    
+    # Preload Whisper model
+    try:
+        from api.tasks import load_whisper_model_if_needed
+        whisper = load_whisper_model_if_needed()
+        if whisper:
+            logger.info("✅ Whisper model preloaded")
+        else:
+            logger.warning("⚠️ Whisper model not available")
+    except Exception as e:
+        logger.error(f"❌ Failed to preload Whisper model: {e}")
+        logger.warning("Worker will continue but YouTube transcription may fail")
     
     # Start the worker loop
     try:

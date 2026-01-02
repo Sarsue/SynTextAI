@@ -1,14 +1,18 @@
 import logging
+import json
+import re
 import os
 import tempfile
 from contextlib import contextmanager
 import asyncio
 from faster_whisper import WhisperModel
 import yt_dlp
+import requests
 from api.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
 from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_mcq_from_key_concepts as llm_generate_mcq_from_key_concepts
 from api.syntext_agent import SyntextAgent
+from api.rag_utils import rag_pipeline
 import stripe
 from api.websocket_manager import websocket_manager
 from dotenv import load_dotenv
@@ -289,8 +293,22 @@ async def process_file_data(
                     comprehension_level=comprehension_level
                 )
             else:
-                logger.info(f"Downloading file {filename} from GCS")
-                file_data = download_from_gcs(user_gc_id, filename)
+                file_data = None
+
+                if file_url:
+                    try:
+                        logger.info(f"Downloading file {filename} from file_url")
+                        resp = await asyncio.to_thread(requests.get, file_url, timeout=30)
+                        if resp.ok and resp.content:
+                            file_data = resp.content
+                        else:
+                            logger.warning(f"Failed to download file from file_url (status={resp.status_code})")
+                    except Exception as e:
+                        logger.warning(f"Error downloading file from file_url: {e}")
+
+                if file_data is None:
+                    logger.info(f"Downloading file {filename} from GCS")
+                    file_data = download_from_gcs(user_gc_id, filename)
                 if file_data is None:
                     return await handle_processing_error(file_id_int, f"Failed to download file {filename} from GCS")
 
@@ -332,7 +350,7 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
         # Try enhanced RAG pipeline first
         try:
             logger.info(f"Processing query with enhanced RAG: '{message}'")
-            from rag_utils import process_query, hybrid_search, cross_encoder_rerank, smart_chunk_selection
+            from api.rag_utils import process_query, hybrid_search, cross_encoder_rerank, smart_chunk_selection
             
             # Process and expand the query
             rewritten_query, expanded_terms = process_query(message, formatted_history)
@@ -481,8 +499,8 @@ async def generate_mcq_from_key_concepts(key_concepts: List[Dict[str, Any]], com
         return []
 
     try:
-        # Generate MCQs using LLM service
-        mcqs = await llm_generate_mcq_from_key_concepts(key_concepts, comprehension_level)
+        # Generate MCQs using LLM service (not async, returns list directly)
+        mcqs = llm_generate_mcq_from_key_concepts(key_concepts, comprehension_level)
 
         if len(mcqs) == 0:
             logger.debug(
@@ -666,6 +684,72 @@ async def generate_mcqs_from_concept(concept_title: str, concept_explanation: st
     mcqs = await generate_mcq_from_key_concepts(concept)
     logger.info(f"Generated {len(mcqs)} MCQs for concept '{concept_title[:30]}...'")
     return mcqs
+
+
+async def generate_mcqs_for_concepts_batch(
+    concepts: List[Dict[str, Any]],
+    comprehension_level: str = "Beginner",
+    batch_size: int = 5,
+) -> List[Dict[str, Any]]:
+    """Generate MCQs for multiple concepts in a small number of LLM calls.
+
+    Returns a flat list of MCQs, each including key_concept_id.
+    """
+    if not concepts:
+        return []
+
+    from api.llm_service import gradient_chat
+
+    all_mcqs: List[Dict[str, Any]] = []
+    for i in range(0, len(concepts), batch_size):
+        batch = concepts[i:i + batch_size]
+        # Keep only fields we need and ensure each has an id
+        items = [
+            {
+                "key_concept_id": int(c["id"]),
+                "concept_title": c.get("concept_title") or c.get("concept") or "",
+                "concept_explanation": c.get("concept_explanation") or c.get("explanation") or "",
+            }
+            for c in batch
+            if c.get("id") is not None
+        ]
+        if not items:
+            continue
+
+        prompt = (
+            "You are an expert educator. Create exactly 1 multiple-choice question per concept.\n"
+            f"Write for {comprehension_level} level.\n\n"
+            "Output ONLY JSON: an array of objects with fields:\n"
+            "- key_concept_id (integer, must match input)\n"
+            "- question (string)\n"
+            "- options (array of 4 strings)\n"
+            "- answer (string; must be one of options)\n\n"
+            "Concepts JSON:\n"
+            f"{json.dumps(items)}\n\n"
+            "JSON array:" 
+        )
+
+        raw = gradient_chat(prompt, max_tokens=1200)
+        if not raw:
+            continue
+
+        raw = re.sub(r"```(?:json)?\n?", "", raw).strip("` \n")
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            # Try extracting a JSON array substring
+            m = re.search(r"\[.*\]", raw, re.DOTALL)
+            parsed = json.loads(m.group(0)) if m else []
+
+        if isinstance(parsed, list):
+            for mcq in parsed:
+                if not isinstance(mcq, dict):
+                    continue
+                if mcq.get("key_concept_id") is None:
+                    continue
+                all_mcqs.append(mcq)
+
+    return all_mcqs
 
 
 async def generate_true_false_from_concept(concept_title: str, concept_explanation: str) -> list:

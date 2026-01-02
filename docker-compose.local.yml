@@ -67,6 +67,9 @@ services:
       - WHISPER_CACHE_DIR=/root/.cache/whisper
       # PostgreSQL SSL cert path
       - DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
+      # Worker-specific connection pool settings (smaller to avoid exhausting DB connections)
+      - DB_POOL_SIZE=3
+      - DB_MAX_OVERFLOW=2
     volumes:
       - ./api:/app/api
       - ./.env:/app/.env

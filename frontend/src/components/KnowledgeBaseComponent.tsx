@@ -3,6 +3,9 @@ import './KnowledgeBase.css';
 import { UploadedFile } from './types';
 import { KnownWebSocketMessage, FileStatusUpdatePayload, FileStatusUpdateMessage } from '../types/websocketTypes';
 import Modal from './Modal';
+import WorkspaceSelector from './WorkspaceSelector';
+import UsageQuota from './UsageQuota';
+import { useToast } from '../contexts/ToastContext';
 
 import { useUserContext } from '../UserContext';
 
@@ -54,9 +57,14 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
         isLoadingFiles,
         fileError: contextFileError,
     } = useUserContext();
-interface FileStatusEntry { isDeleting?: boolean; }
+interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const [fileStatus, setFileStatus] = useState<{[key: number]: FileStatusEntry}>({});
-    const [error, setError] = useState<string | null>(null); 
+    const [error, setError] = useState<string | null>(null);
+    const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
+    const [workspaces, setWorkspaces] = useState<Array<{id: number; name: string}>>([]);
+    const [showMoveMenu, setShowMoveMenu] = useState<number | null>(null);
+    const { addToast } = useToast();
+    const { user } = useUserContext(); 
 
     useEffect(() => {
         if (contextFileError) {
@@ -66,21 +74,100 @@ interface FileStatusEntry { isDeleting?: boolean; }
         }
     }, [contextFileError]);
 
-    // Initial load and load on page/pageSize change from context
+    // Initial load and load on page/pageSize/workspace change
     useEffect(() => {
-        loadUserFiles(filePagination.page, filePagination.pageSize);
-    }, [loadUserFiles, filePagination.page, filePagination.pageSize]);
+        // Only filter by workspace if user has multiple workspaces AND currentWorkspaceId is set
+        // If multiple workspaces but no currentWorkspaceId yet, don't load files (wait for workspace selection)
+        if (workspaces.length > 1 && currentWorkspaceId === null) {
+            // Don't load files yet, waiting for workspace to be selected
+            return;
+        }
+        
+        const filterWorkspaceId = workspaces.length > 1 ? currentWorkspaceId : null;
+        loadUserFiles(filePagination.page, filePagination.pageSize, filterWorkspaceId);
+    }, [loadUserFiles, filePagination.page, filePagination.pageSize, currentWorkspaceId, workspaces.length]);
+
+    // Fetch workspaces for move menu
+    useEffect(() => {
+        if (user) {
+            fetchWorkspaces();
+        }
+    }, [user]);
+
+    const fetchWorkspaces = async () => {
+        if (!user) return;
+        try {
+            const idToken = await user.getIdToken();
+            const response = await fetch('/api/v1/workspaces', {
+                headers: { 'Authorization': `Bearer ${idToken}` },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Fetched workspaces for move menu:', data.items);
+                setWorkspaces(data.items || []);
+            }
+        } catch (err) {
+            console.error('Error fetching workspaces:', err);
+        }
+    };
+
+    // Handle workspace change
+    const handleWorkspaceChange = (workspaceId: number) => {
+        console.log('Workspace changed to:', workspaceId);
+        setCurrentWorkspaceId(workspaceId);
+        // Files will reload automatically via useEffect
+    };
+
+    // Move file to different workspace
+    const handleMoveFile = async (fileId: number, targetWorkspaceId: number) => {
+        if (!user) return;
+        
+        setFileStatus(prev => ({
+            ...prev,
+            [fileId]: { ...prev[fileId], isMoving: true }
+        }));
+        
+        try {
+            const idToken = await user.getIdToken();
+            const response = await fetch(`/api/v1/files/${fileId}/workspace`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ workspace_id: targetWorkspaceId }),
+            });
+            
+            if (response.ok) {
+                addToast('File moved successfully', 'success');
+                setShowMoveMenu(null);
+                // Reload files to reflect the change
+                await loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId);
+            } else {
+                const data = await response.json();
+                addToast(data.detail || 'Failed to move file', 'error');
+            }
+        } catch (error) {
+            console.error('Error moving file:', error);
+            addToast('Failed to move file', 'error');
+        } finally {
+            setFileStatus(prev => ({
+                ...prev,
+                [fileId]: { ...prev[fileId], isMoving: false }
+            }));
+        }
+    };
 
 
 
     const handlePageChange = useCallback((newPage: number) => {
-        loadUserFiles(newPage, filePagination.pageSize);
-    }, [loadUserFiles, filePagination.pageSize]);
+        loadUserFiles(newPage, filePagination.pageSize, currentWorkspaceId);
+    }, [loadUserFiles, filePagination.pageSize, currentWorkspaceId]);
 
     const handlePageSizeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
         const newSize = Number(e.target.value);
-        loadUserFiles(1, newSize);
-    }, [loadUserFiles]);
+        loadUserFiles(1, newSize, currentWorkspaceId);
+    }, [loadUserFiles, currentWorkspaceId]);
 
     const handleFileClick = (file: UploadedFile) => {
         // Propagate the click to the parent to open the file viewer.
@@ -102,12 +189,14 @@ interface FileStatusEntry { isDeleting?: boolean; }
 
     const handleNextPage = () => {
         if (filePagination.page * filePagination.pageSize < filePagination.totalItems) {
-            loadUserFiles(filePagination.page + 1, filePagination.pageSize);
+            loadUserFiles(filePagination.page + 1, filePagination.pageSize, currentWorkspaceId);
         }
     };
 
     return (
         <div className={`knowledgebase-container ${darkMode ? 'dark-mode' : ''}`}>
+            <WorkspaceSelector darkMode={darkMode} onWorkspaceChange={handleWorkspaceChange} />
+            <UsageQuota darkMode={darkMode} />
             <div className="knowledgebase-header">
                 <h3>📚 Knowledge Base</h3>
 
@@ -189,6 +278,40 @@ interface FileStatusEntry { isDeleting?: boolean; }
                                         </span>
                                         
                                         <div className="file-actions">
+                                        {workspaces.length > 1 && (
+                                            <div className="move-menu-container">
+                                                <button
+                                                    className="kb-action-button move-button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setShowMoveMenu(showMoveMenu === currentFile.id ? null : currentFile.id);
+                                                    }}
+                                                    disabled={fileStatus[currentFile.id]?.isMoving || false}
+                                                    title="Move to workspace"
+                                                >
+                                                    {fileStatus[currentFile.id]?.isMoving ? '⏳' : '📁'}
+                                                </button>
+                                                {showMoveMenu === currentFile.id && (
+                                                    <div className="move-dropdown">
+                                                        <div className="move-dropdown-header">Move to:</div>
+                                                        {workspaces
+                                                            .filter(ws => ws.id !== currentWorkspaceId)
+                                                            .map(workspace => (
+                                                                <button
+                                                                    key={workspace.id}
+                                                                    className="move-dropdown-item"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleMoveFile(currentFile.id, workspace.id);
+                                                                    }}
+                                                                >
+                                                                    📁 {workspace.name}
+                                                                </button>
+                                                            ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                         <button
                                             className="kb-action-button"
                                             onClick={(e) => {

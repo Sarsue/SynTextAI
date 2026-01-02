@@ -16,6 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, text
 from sqlalchemy.exc import IntegrityError
 
+import os
+import requests
+
+from api.websocket_manager import websocket_manager
+
 logger = logging.getLogger(__name__)
 
 class AsyncFileRepository(AsyncBaseRepository):
@@ -29,13 +34,15 @@ class AsyncFileRepository(AsyncBaseRepository):
         """
         super().__init__(database_url)
 
-    async def add_file(self, user_id: int, file_name: str, file_url: str) -> Optional[int]:
+    async def add_file(self, user_id: int, file_name: str, file_url: str, file_size_bytes: Optional[int] = None, workspace_id: Optional[int] = None) -> Optional[int]:
         """Add a new file to the database.
 
         Args:
             user_id: ID of the user who owns this file
             file_name: Name of the file
             file_url: URL where the file is stored
+            file_size_bytes: Size of the file in bytes
+            workspace_id: ID of the workspace this file belongs to
 
         Returns:
             int: The ID of the newly created file, or None if creation failed
@@ -46,7 +53,9 @@ class AsyncFileRepository(AsyncBaseRepository):
                     user_id=user_id,
                     file_name=file_name,
                     file_url=file_url,
-                    processing_status="uploaded"  # Explicitly set status to ensure it's not None
+                    processing_status="uploaded",  # Explicitly set status to ensure it's not None
+                    file_size_bytes=file_size_bytes,
+                    workspace_id=workspace_id,
                 )
                 session.add(file_orm)
                 await session.flush()
@@ -140,13 +149,14 @@ class AsyncFileRepository(AsyncBaseRepository):
                     await session.commit()
                 return False
 
-    async def get_files_for_user(self, user_id: int, skip: int = 0, limit: int = 10) -> Dict[str, Any]:
+    async def get_files_for_user(self, user_id: int, skip: int = 0, limit: int = 10, workspace_id: int = None) -> Dict[str, Any]:
         """Get paginated files for a user.
 
         Args:
             user_id: ID of the user
             skip: Number of records to skip (for pagination)
             limit: Maximum number of records to return (for pagination)
+            workspace_id: Optional workspace ID to filter files
 
         Returns:
             Dict: {
@@ -158,8 +168,13 @@ class AsyncFileRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
+                # Build base query conditions
+                conditions = [FileORM.user_id == user_id]
+                if workspace_id is not None:
+                    conditions.append(FileORM.workspace_id == workspace_id)
+                
                 # Get total count
-                stmt = select(func.count(FileORM.id)).where(FileORM.user_id == user_id)
+                stmt = select(func.count(FileORM.id)).where(*conditions)
                 result = await session.execute(stmt)
                 total = result.scalar() or 0
 
@@ -170,8 +185,9 @@ class AsyncFileRepository(AsyncBaseRepository):
                     FileORM.file_url,
                     FileORM.created_at,
                     FileORM.processing_status,
-                    FileORM.file_type
-                ).where(FileORM.user_id == user_id).order_by(FileORM.created_at.desc()).offset(skip).limit(limit)
+                    FileORM.file_type,
+                    FileORM.workspace_id
+                ).where(*conditions).order_by(FileORM.created_at.desc()).offset(skip).limit(limit)
                 result = await session.execute(stmt)
                 files = result.fetchall()
 
@@ -184,6 +200,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                         "publicUrl": file.file_url,
                         "processing_status": file.processing_status,
                         "file_type": file.file_type,
+                        "workspace_id": file.workspace_id,
                         "created_at": file.created_at.isoformat() if file.created_at else None
                     }
                     for file in files
@@ -199,6 +216,29 @@ class AsyncFileRepository(AsyncBaseRepository):
             except Exception as e:
                 logger.error(f"Error getting files for user {user_id}: {e}", exc_info=True)
                 return {'items': [], 'total': 0, 'page': 1, 'page_size': limit}
+
+    async def count_files_for_user(self, user_id: int) -> int:
+        """Return the total number of files owned by a user."""
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(func.count(FileORM.id)).where(FileORM.user_id == user_id)
+                result = await session.execute(stmt)
+                return int(result.scalar() or 0)
+            except Exception as e:
+                logger.error(f"Error counting files for user {user_id}: {e}", exc_info=True)
+                return 0
+
+    async def total_storage_bytes_for_user(self, user_id: int) -> int:
+        """Return total recorded storage usage in bytes for a user based on file_size_bytes."""
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(func.coalesce(func.sum(FileORM.file_size_bytes), 0)).where(FileORM.user_id == user_id)
+                result = await session.execute(stmt)
+                total = result.scalar()
+                return int(total or 0)
+            except Exception as e:
+                logger.error(f"Error summing storage bytes for user {user_id}: {e}", exc_info=True)
+                return 0
 
     async def delete_file_entry(self, user_id: int, file_id: int) -> bool:
         """Delete a file and all associated data.
@@ -495,6 +535,36 @@ class AsyncFileRepository(AsyncBaseRepository):
             except Exception as e:
                 logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
                 return None
+    
+    async def update_file_workspace(self, file_id: int, workspace_id: int) -> bool:
+        """Update the workspace of a file.
+        
+        Args:
+            file_id: ID of the file to update
+            workspace_id: New workspace ID
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(FileORM).where(FileORM.id == file_id)
+                result = await session.execute(stmt)
+                file = result.scalar_one_or_none()
+                
+                if not file:
+                    logger.warning(f"File {file_id} not found for workspace update")
+                    return False
+                
+                file.workspace_id = workspace_id
+                await session.commit()
+                logger.info(f"Updated file {file_id} workspace to {workspace_id}")
+                return True
+                
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error updating file {file_id} workspace: {e}", exc_info=True)
+                return False
 
     async def get_file_by_name(self, user_id: int, filename: str) -> Optional[Dict[str, Any]]:
         """Get a file record by user ID and filename.
@@ -574,8 +644,40 @@ class AsyncFileRepository(AsyncBaseRepository):
                     logger.warning(f"File {file_id} not found for status update")
                     return False
                 file_orm.processing_status = status
+                user_id = file_orm.user_id
                 await session.commit()
                 logger.info(f"Updated file {file_id} status to {status}")
+
+                try:
+                    await websocket_manager.send_message(
+                        user_id=str(user_id),
+                        event_type="file_status_update",
+                        data={"file_id": int(file_id), "status": status},
+                    )
+                except Exception as ws_err:
+                    logger.debug(f"WebSocket notify failed for file {file_id} status update: {ws_err}")
+
+                api_base_url = os.getenv("API_BASE_URL")
+                if api_base_url:
+                    api_base_url = api_base_url.rstrip("/")
+                    url = f"{api_base_url}/api/v1/internal/notify-client"
+                    payload = {
+                        "user_id": str(int(user_id)),
+                        "event_type": "file_status_update",
+                        "data": {"file_id": int(file_id), "status": status},
+                    }
+
+                    def _post():
+                        try:
+                            requests.post(url, json=payload, timeout=5)
+                        except Exception:
+                            return
+
+                    try:
+                        await asyncio.to_thread(_post)
+                    except Exception:
+                        pass
+
                 return True
             except Exception as e:
                 await session.rollback()

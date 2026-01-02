@@ -11,6 +11,9 @@ services:
     environment:
       - WHISPER_CACHE_DIR=/app/models
       - PYTHONUNBUFFERED=1
+      # App DB pool (keep low to avoid exhausting managed Postgres connection limits)
+      - DB_POOL_SIZE=2
+      - DB_MAX_OVERFLOW=1
     # Database connection is handled via environment variables
     volumes:
       - syntextai_models:/app/models
@@ -33,9 +36,12 @@ services:
     env_file:
       - .env
     environment:
-      - MAX_CONCURRENT_TASKS=3
+      - MAX_CONCURRENT_TASKS=1
       - POLL_INTERVAL=10
       - API_BASE_URL=http://syntextaiapp:3000  # ⬅️ Use service name instead of localhost
+      # Worker-specific connection pool settings (smaller to avoid exhausting DB connections)
+      - DB_POOL_SIZE=1
+      - DB_MAX_OVERFLOW=0
     volumes:
       - ./api/config:/app/api/config
     deploy:

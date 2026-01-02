@@ -34,8 +34,11 @@ _engine: Optional[AsyncEngine] = None
 _async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
 # Production-ready default configuration
-DEFAULT_POOL_SIZE = 20
-DEFAULT_MAX_OVERFLOW = 10
+# Conservative defaults suitable for small Postgres instances and local Docker.
+# IMPORTANT: each process (api + worker) will maintain its own pool, so keep defaults small.
+# For production with higher limits, override via environment variables.
+DEFAULT_POOL_SIZE = 2
+DEFAULT_MAX_OVERFLOW = 0
 DEFAULT_POOL_RECYCLE = 3600  # 1 hour
 DEFAULT_POOL_TIMEOUT = 30
 DEFAULT_POOL_PRE_PING = True

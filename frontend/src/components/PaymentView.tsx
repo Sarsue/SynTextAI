@@ -327,7 +327,12 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 <>
                     <p>Your free trial is active.</p>
                     {subscriptionData?.trial_end && (
-                        <p>Trial ends on: {new Date(subscriptionData.trial_end).toLocaleDateString()}</p>
+                        <p>
+                            Trial ends on: {new Date(subscriptionData.trial_end).toLocaleDateString()}.
+                            {subscriptionData.has_active_payment_method
+                                ? ' Charges will start on this date unless you cancel.'
+                                : ' Usage ends on this date unless you add a card and subscribe.'}
+                        </p>
                     )}
                     <button onClick={handleSubscribe} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe Now'}
@@ -337,6 +342,11 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 // Subscription is active, show card details and cancel button
                 <>
                     <p>Your subscription is active.</p>
+                    {subscriptionData?.current_period_end && (
+                        <p>
+                            Renews on: {new Date(subscriptionData.current_period_end).toLocaleDateString()}.
+                        </p>
+                    )}
                     {subscriptionData?.card_last4 && subscriptionData?.card_brand && (
                         <div className="CardDetails">
                             <p>

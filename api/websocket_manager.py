@@ -14,17 +14,18 @@ class WebSocketManager:
         logger.info(f"WebSocket connected for user {user_id}")
 
     def disconnect(self, user_id: str):
-        if user_id in self.active_connections:
-            websocket = self.active_connections[user_id]
-            # Close the WebSocket properly
+        if user_id not in self.active_connections:
+            return
+
+        websocket = self.active_connections.get(user_id)
+        # Remove all keys that reference the same websocket (supports alias keys like db user_id + firebase uid)
+        keys_to_remove = [k for k, ws in self.active_connections.items() if ws is websocket]
+        for k in keys_to_remove:
             try:
-                # Check if WebSocket is still connected before closing
-                if hasattr(websocket, 'client_state') and websocket.client_state:
-                    pass  # WebSocket will be closed by FastAPI framework
-            except:
+                del self.active_connections[k]
+            except Exception:
                 pass
-            del self.active_connections[user_id]
-            logger.info(f"WebSocket disconnected for user {user_id}")
+        logger.info(f"WebSocket disconnected for user {user_id} (removed {len(keys_to_remove)} keys)")
 
     async def send_message(self, user_id: str, event_type: str, data: dict):
         if user_id in self.active_connections:

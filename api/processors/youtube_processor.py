@@ -2,10 +2,12 @@ import asyncio
 import logging
 import os
 import re
+import gc
 from typing import Dict, List, Any, Optional, Tuple
+import yt_dlp
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
-from api.processors.processor_utils import generate_learning_materials_for_concept, log_concept_processing_summary
+from api.processors.processor_utils import generate_learning_materials_for_concepts, generate_learning_materials_for_concept, log_concept_processing_summary
 from api.llm_service import generate_key_concepts, get_text_embeddings_in_batches, _deduplicate_concepts, _validate_references, _standardize_concept_format
 from api.schemas.learning_content import KeyConceptCreate
 try:
@@ -28,6 +30,15 @@ LANGUAGE_CODE_MAP = {
     "korean": "ko",
     "chinese": "zh",
 }
+
+# Maximum number of key concepts to persist per YouTube video
+MAX_CONCEPTS_PER_VIDEO = 60
+
+# Maximum allowed YouTube video duration in seconds (2 hours)
+MAX_VIDEO_DURATION_SECONDS = 7200
+
+# Maximum number of key concepts to persist per YouTube video
+MAX_CONCEPTS_PER_VIDEO = 60
 
 class YouTubeProcessor(FileProcessor):
     """Processor for YouTube videos."""
@@ -98,6 +109,13 @@ class YouTubeProcessor(FileProcessor):
                 comprehension_level=comprehension_level
             )
 
+            # Enforce a sane upper bound on number of concepts per video (match PDF behavior)
+            if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > MAX_CONCEPTS_PER_VIDEO:
+                logger.info(
+                    f"Truncating key concepts list from {len(key_concepts)} to {MAX_CONCEPTS_PER_VIDEO} for file {file_id_int}"
+                )
+                key_concepts = key_concepts[:MAX_CONCEPTS_PER_VIDEO]
+
             if not key_concepts:
                 logger.error(f"No key concepts generated for {filename}")
                 await self.store.file_repo.update_file_status(file_id_int, "failed")
@@ -119,7 +137,7 @@ class YouTubeProcessor(FileProcessor):
                 logger.debug(f"Processed concept {i+1}: title='{title[:50]}...'")
 
             # Step 5: Process key concepts and generate learning materials
-            concepts_processed = 0
+            saved_concepts: List[Dict[str, Any]] = []
             for i, concept in enumerate(key_concepts):
                 title = concept.get("concept_title", "")
                 explanation = concept.get("concept_explanation", "")
@@ -146,39 +164,43 @@ class YouTubeProcessor(FileProcessor):
                     start_time = end_time = 0
 
                 try:
-                    # Save concept within transaction
-                    async with self.store.file_repo.get_async_session() as concept_transaction:
-                        key_concept_create = KeyConceptCreate(
-                            concept_title=title[:255],  # Truncate to avoid length issues
-                            concept_explanation=explanation,
-                            source_page_number=concept.get("source_page_number"),
-                            source_video_timestamp_start_seconds=start_time,
-                            source_video_timestamp_end_seconds=end_time,
-                            is_custom=False
-                        )
-                        concept_result = await self.store.learning_material_repo.add_key_concept(
-                            file_id=file_id_int,
-                            key_concept_data=key_concept_create
-                        )
-                        concept_id = concept_result.get('id') if concept_result else None
+                    # Save concept (repo handles its own session/transaction)
+                    key_concept_create = KeyConceptCreate(
+                        concept_title=title[:255],  # Truncate to avoid length issues
+                        concept_explanation=explanation,
+                        source_page_number=concept.get("source_page_number"),
+                        source_video_timestamp_start_seconds=start_time,
+                        source_video_timestamp_end_seconds=end_time,
+                        is_custom=False
+                    )
+                    concept_result = await self.store.learning_material_repo.add_key_concept(
+                        file_id=file_id_int,
+                        key_concept_data=key_concept_create
+                    )
+                    concept_id = concept_result.get('id') if concept_result else None
 
-                        if concept_id:
-                            logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
-                            concept_with_id = {
+                    if concept_id:
+                        logger.info(f"Saved concept '{title[:30]}...' with ID: {concept_id}")
+                        saved_concepts.append(
+                            {
+                                "id": concept_id,
                                 "concept_title": title,
                                 "concept_explanation": explanation,
-                                "id": concept_id
                             }
-                            result = await self.generate_learning_materials_for_concept(file_id, concept_with_id)
-                            if result:
-                                concepts_processed += 1
-                            else:
-                                logger.error(f"Failed to generate learning materials for concept '{title[:30]}...'")
-                        else:
-                            logger.error(f"Failed to save concept '{title[:30]}...' to database")
+                        )
+                    else:
+                        logger.error(f"Failed to save concept '{title[:30]}...' to database")
                 except Exception as e:
                     logger.error(f"Error processing concept '{title[:30]}...': {e}")
                     continue
+
+            if saved_concepts:
+                await generate_learning_materials_for_concepts(
+                    store=self.store,
+                    file_id=int(file_id_int),
+                    concepts=saved_concepts,
+                    comprehension_level=comprehension_level,
+                )
 
             chunk_count = len(processed_content.get('chunks', []))
             transcript_length = len('\n'.join([entry['text'] for entry in content.get('transcript_data', [])]))
@@ -224,6 +246,16 @@ class YouTubeProcessor(FileProcessor):
         
         if not video_id:
             raise ValueError(f"Could not extract video ID from YouTube URL: {filename}")
+
+        # Enforce maximum video duration before doing any heavy processing
+        duration_seconds = self._get_video_duration_seconds(video_id)
+        if duration_seconds is not None and duration_seconds > MAX_VIDEO_DURATION_SECONDS:
+            logger.warning(
+                f"YouTube video {video_id} duration {duration_seconds} seconds exceeds limit of {MAX_VIDEO_DURATION_SECONDS} seconds"
+            )
+            raise ValueError(
+                f"Video is too long ({int(duration_seconds // 60)} minutes). Maximum allowed duration is {int(MAX_VIDEO_DURATION_SECONDS // 60)} minutes."
+            )
             
         target_lang_code = LANGUAGE_CODE_MAP.get(language.lower(), 'en')
         
@@ -258,19 +290,39 @@ class YouTubeProcessor(FileProcessor):
         # Calculate full text for logging
         full_text_check = '\n'.join([entry['text'] for entry in transcript_data])
 
-        # Log transcript data details
-        logger.info(f"📝 TRANSCRIPT DATA RECEIVED for video {video_id}:")
-        logger.info(f"   - Number of segments: {len(transcript_data)}")
-        logger.info(f"   - First segment type: {type(transcript_data[0]) if transcript_data else 'None'}")
-        logger.info(f"   - First segment keys: {list(transcript_data[0].keys()) if transcript_data else 'None'}")
-        logger.info(f"   - Sample first segment: {transcript_data[0] if transcript_data else 'None'}")
-        logger.info(f"   - Full transcript length: {len(full_text_check)} characters")
-        logger.info(f"   - First 500 chars: {full_text_check[:500] if full_text_check else 'Empty'}")
+        # Log transcript summary (keep INFO concise; move large payload logs to DEBUG)
+        logger.info(
+            f"Transcript extracted for video {video_id}: {len(transcript_data)} segments, {len(full_text_check)} characters"
+        )
+        logger.debug(f"Transcript first segment type: {type(transcript_data[0]) if transcript_data else 'None'}")
+        logger.debug(f"Transcript first segment keys: {list(transcript_data[0].keys()) if transcript_data else 'None'}")
+        logger.debug(f"Transcript sample first segment: {transcript_data[0] if transcript_data else 'None'}")
+        logger.debug(f"Transcript first 500 chars: {full_text_check[:500] if full_text_check else 'Empty'}")
 
         return {
             "transcript_data": transcript_data,
             "video_id": video_id
         }
+
+    def _get_video_duration_seconds(self, video_id: str) -> Optional[float]:
+        """Fetch YouTube video duration in seconds using yt_dlp without downloading the video."""
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=False)
+            duration = info.get('duration')
+            if duration is None:
+                logger.warning(f"No duration field found for YouTube video {video_id}")
+                return None
+            logger.info(f"YouTube video {video_id} duration: {duration} seconds")
+            return float(duration)
+        except Exception as e:
+            logger.warning(f"Failed to fetch duration for YouTube video {video_id}: {e}")
+            return None
     
     async def _get_youtube_transcript(self, video_id: str, target_lang_code: str) -> List[Dict[str, Any]]:
         """Attempt to get transcript via YouTube API."""
@@ -293,10 +345,9 @@ class YouTubeProcessor(FileProcessor):
                     'text': entry.text
                 })
 
-            # Log YouTube API transcript format
-            logger.info(f"🎬 YOUTUBE API TRANSCRIPT for video {video_id}:")
-            logger.info(f"   - Number of segments: {len(adapted_transcript_data)}")
-            logger.info(f"   - First segment: {adapted_transcript_data[0] if adapted_transcript_data else 'None'}")
+            # Log YouTube API transcript format (DEBUG only)
+            logger.debug(f"YouTube API transcript for video {video_id}: {len(adapted_transcript_data)} segments")
+            logger.debug(f"YouTube API transcript first segment: {adapted_transcript_data[0] if adapted_transcript_data else 'None'}")
 
             logger.info(f"Successfully fetched transcript in {target_lang_code}")
             return adapted_transcript_data
@@ -318,10 +369,9 @@ class YouTubeProcessor(FileProcessor):
                             'text': entry.text
                         })
 
-                    # Log English fallback transcript format
-                    logger.info(f"🇺🇸 ENGLISH FALLBACK TRANSCRIPT for video {video_id}:")
-                    logger.info(f"   - Number of segments: {len(adapted_transcript_data)}")
-                    logger.info(f"   - First segment: {adapted_transcript_data[0] if adapted_transcript_data else 'None'}")
+                    # Log English fallback transcript format (DEBUG only)
+                    logger.debug(f"English fallback transcript for video {video_id}: {len(adapted_transcript_data)} segments")
+                    logger.debug(f"English fallback transcript first segment: {adapted_transcript_data[0] if adapted_transcript_data else 'None'}")
 
                     logger.info("Successfully fetched transcript in English as fallback")
                     return adapted_transcript_data
@@ -356,11 +406,10 @@ class YouTubeProcessor(FileProcessor):
                 if raw_whisper_segments:
                     transcript_data = adapt_whisper_segments_to_transcript_data(raw_whisper_segments)
 
-                    # Log raw Whisper segments before adaptation
-                    logger.info(f"🔊 RAW WHISPER SEGMENTS for video {video_id}:")
-                    logger.info(f"   - Number of raw segments: {len(raw_whisper_segments)}")
-                    logger.info(f"   - First raw segment: {raw_whisper_segments[0] if raw_whisper_segments else 'None'}")
-                    logger.info(f"   - Raw segment keys: {list(raw_whisper_segments[0].keys()) if raw_whisper_segments else 'None'}")
+                    # Log raw Whisper segments before adaptation (DEBUG only)
+                    logger.debug(f"Raw Whisper segments for video {video_id}: {len(raw_whisper_segments)}")
+                    logger.debug(f"Raw Whisper first segment: {raw_whisper_segments[0] if raw_whisper_segments else 'None'}")
+                    logger.debug(f"Raw Whisper segment keys: {list(raw_whisper_segments[0].keys()) if raw_whisper_segments else 'None'}")
 
                     logger.info(f"Successfully transcribed using Whisper with {len(raw_whisper_segments)} segments")
                     return transcript_data
@@ -393,10 +442,9 @@ class YouTubeProcessor(FileProcessor):
         if not full_text.strip():
             raise ValueError("Cannot generate embeddings: Empty transcript")
 
-        # Log chunking input
-        logger.info(f"🔄 CHUNKING PROCESS for video {content.get('video_id', 'unknown')}:")
-        logger.info(f"   - Full transcript length: {len(full_text)} characters")
-        logger.info(f"   - First 300 chars: {full_text[:300] if full_text else 'Empty'}")
+        # Log chunking summary
+        logger.info(f"Chunking transcript for video {content.get('video_id', 'unknown')} ({len(full_text)} chars)")
+        logger.debug(f"First 300 chars: {full_text[:300] if full_text else 'Empty'}")
 
         # Chunk full transcript semantically (similar to PDF)
         try:
@@ -407,24 +455,30 @@ class YouTubeProcessor(FileProcessor):
         except Exception as e:
             logger.error(f"Failed to chunk text: {e}", exc_info=True)
             raise ValueError(f"Chunking failed: {str(e)}")
-        logger.info(f"📦 CHUNKING RESULTS:")
-        logger.info(f"   - Number of chunks created: {len(chunked_text)}")
-        logger.info(f"   - Chunk types: {set(type(chunk) for chunk in chunked_text) if chunked_text else 'None'}")
+        logger.info(f"Created {len(chunked_text)} chunks from transcript")
+        logger.debug(f"Chunk types: {set(type(chunk) for chunk in chunked_text) if chunked_text else 'None'}")
 
-        # Log each chunk details
-        for i, chunk in enumerate(chunked_text[:5]):  # Log first 5 chunks
-            logger.info(f"   - Chunk {i+1}: {len(chunk.get('content', ''))} chars")
-            logger.info(f"     Content: {chunk.get('content', '')[:200]}...")
+        # Log each chunk details at DEBUG level
+        for i, chunk in enumerate(chunked_text[:5]):
+            logger.debug(f"Chunk {i+1}: {len(chunk.get('content', ''))} chars - {chunk.get('content', '')[:100]}...")
 
-        if len(chunked_text) > 5:
-            logger.info(f"   - ... and {len(chunked_text) - 5} more chunks")
-
-        # Generate embeddings in batch
+        # Generate embeddings in batch with validation
         all_small_chunk_texts = [chunk['content'] for chunk in chunked_text]
-        all_embeddings = get_text_embeddings_in_batches(all_small_chunk_texts) if all_small_chunk_texts else []
-        logger.info(f"🧮 EMBEDDING RESULTS:")
-        logger.info(f"   - Number of embeddings generated: {len(all_embeddings)}")
-        logger.info(f"   - Embedding dimensions: {len(all_embeddings[0]) if all_embeddings else 'None'}")
+        try:
+            all_embeddings = get_text_embeddings_in_batches(all_small_chunk_texts) if all_small_chunk_texts else []
+        except Exception as e:
+            logger.error(f"Embedding generation failed: {e}")
+            raise ValueError(f"Failed to generate embeddings: {e}")
+        
+        # Validate embeddings
+        if not all_embeddings or len(all_embeddings) != len(all_small_chunk_texts):
+            raise ValueError(f"Embedding count mismatch: expected {len(all_small_chunk_texts)}, got {len(all_embeddings)}")
+        
+        embedding_dim = len(all_embeddings[0]) if all_embeddings else 0
+        if embedding_dim == 0:
+            raise ValueError("Embeddings have zero dimensions - model failed to generate valid vectors")
+        
+        logger.info(f"✅ Generated {len(all_embeddings)} embeddings with dimension {embedding_dim}")
 
         # Attach embeddings and add timestamp metadata based on transcript segments
         if chunked_text and transcript_data:
@@ -469,6 +523,14 @@ class YouTubeProcessor(FileProcessor):
             chunk['embedding'] = embedding
 
         logger.info(f"✅ FINAL CHUNKS WITH EMBEDDINGS: {len(chunked_text)} chunks ready for storage")
+
+        # CRITICAL: Clean up large objects to free memory
+        all_small_chunk_texts = None
+        all_embeddings = None
+        transcript_data = None
+        full_text = None
+        gc.collect()
+        logger.debug("Memory cleaned after embedding generation")
 
         return {
             "video_id": content.get("video_id"),
@@ -515,18 +577,44 @@ class YouTubeProcessor(FileProcessor):
             logger.warning("No transcript data available to generate key concepts")
             return []
         
-        # Extract key concepts from full transcript
-        full_text = '\n'.join([entry['text'] for entry in transcript_data])
+        # Extract key concepts from full transcript.
+        # Include explicit timestamp markers so the LLM can return
+        # `source_video_timestamp_start_seconds` / `source_video_timestamp_end_seconds`.
+        marked_lines = []
+        for entry in transcript_data:
+            start_sec = entry.get('start', 0) or 0
+            if 'end' in entry and entry.get('end') is not None:
+                end_sec = entry.get('end')
+            else:
+                end_sec = (entry.get('start', 0) or 0) + (entry.get('duration', 0) or 0)
+
+            try:
+                start_i = int(float(start_sec))
+            except Exception:
+                start_i = 0
+            try:
+                end_i = int(float(end_sec))
+            except Exception:
+                end_i = start_i
+
+            marked_lines.append(f"[{start_i}-{end_i}] {entry.get('text', '')}")
+
+        full_text = "\n".join(marked_lines)
         if not full_text.strip():
             logger.warning("No transcript available to generate key concepts")
             return []
 
-        logger.info(f"🧠 GENERATING KEY CONCEPTS for video {content.get('video_id', 'unknown')}:")
-        logger.info(f"   - Full text length: {len(full_text)} characters")
-        logger.info(f"   - Language: {language}, Comprehension: {comprehension_level}")
+        logger.info(f"Generating key concepts for video {content.get('video_id', 'unknown')} ({len(full_text)} chars, {language}, {comprehension_level})")
 
         try:
             key_concepts = generate_key_concepts(document_text=full_text, language=language, comprehension_level=comprehension_level, is_video=True)
+
+            # Enforce an upper bound on number of concepts for long videos
+            if key_concepts and isinstance(key_concepts, list) and len(key_concepts) > MAX_CONCEPTS_PER_VIDEO:
+                logger.info(
+                    f"Truncating key concepts list from {len(key_concepts)} to {MAX_CONCEPTS_PER_VIDEO} for video {content.get('video_id', 'unknown')}"
+                )
+                key_concepts = key_concepts[:MAX_CONCEPTS_PER_VIDEO]
 
             # Assign timestamps based on transcript segments (similar to page numbers in PDF)
             if transcript_data and key_concepts:
@@ -565,15 +653,9 @@ class YouTubeProcessor(FileProcessor):
                             concept['source_video_timestamp_end_seconds'] = end_sec
                             concept['source_video_timestamp'] = f"{int(start_sec//60):02d}:{int(start_sec%60):02d} - {int(end_sec//60):02d}:{int(end_sec%60):02d}"
 
-            logger.info(f"✨ KEY CONCEPTS GENERATED:")
-            logger.info(f"   - Number of concepts: {len(key_concepts)}")
-            for i, concept in enumerate(key_concepts[:3]):  # Log first 3 concepts
-                logger.info(f"   - Concept {i+1}: {concept.get('concept_title', 'No title')}")
-                logger.info(f"     Explanation: {concept.get('concept_explanation', 'No explanation')[:150]}...")
-                if 'source_video_timestamp' in concept:
-                    logger.info(f"     Timestamp: {concept['source_video_timestamp']}")
-
             logger.info(f"Generated {len(key_concepts)} key concepts from YouTube transcript")
+            for i, concept in enumerate(key_concepts[:3]):
+                logger.debug(f"Concept {i+1}: {concept.get('concept_title', 'No title')[:50]} at {concept.get('source_video_timestamp', 'N/A')}")
             return key_concepts
         except Exception as e:
             self._log_error("Error generating key concepts", e)

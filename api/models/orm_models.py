@@ -24,6 +24,20 @@ class User(Base):
     chat_histories = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
     files = relationship("File", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
+    workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="workspaces")
+    files = relationship("File", back_populates="workspace", cascade="all, delete-orphan")
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -65,6 +79,7 @@ class File(Base):
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
     file_type = Column(String, nullable=True)  # 'pdf', 'youtube', etc.
     # Using direct PostgreSQL enum type with string literal
     processing_status = Column(
@@ -73,11 +88,13 @@ class File(Base):
         nullable=False,
         index=True
     )
+    file_size_bytes = Column(Integer, nullable=True)  # Size of the original source file in bytes
     
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
+    workspace = relationship("Workspace", back_populates="files")
     key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
     flashcards = relationship("Flashcard", back_populates="file", cascade="all, delete-orphan")
     quiz_questions = relationship("QuizQuestion", back_populates="file", cascade="all, delete-orphan")

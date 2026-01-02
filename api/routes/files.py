@@ -7,11 +7,16 @@ from sqlalchemy.orm import Session, joinedload
 from redis.exceptions import RedisError
 from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
+
+# PRODUCTION: File size limits to prevent OOM and abuse
+MAX_FILE_SIZE_MB = 100  # 100MB max for PDFs
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 from typing import Dict, List, Optional, TypeVar
 from ..repositories.repository_manager import RepositoryManager
 from fastapi.responses import JSONResponse
 from ..dependencies import get_store, authenticate_user
-from pydantic import BaseModel, Field
+from ..limits import assert_can_create_doc
+from pydantic import BaseModel, Field, validator
 from ..schemas.learning_content import (
     StandardResponse,
     KeyConceptCreate, KeyConceptResponse, KeyConceptsListResponse, KeyConceptUpdate,
@@ -73,6 +78,8 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
         logger.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
         return {"user_id": user_id, "user_gc_id": user_info['user_id']}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error during user authentication")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -83,6 +90,7 @@ async def save_file(
     request: Request,
     language: str = Query(default="English"),
     comprehension_level: str = Query(default="Beginner"),
+    workspace_id: Optional[int] = Query(None, description="Workspace ID to add file to"),
     files: Optional[List[UploadFile]] = FastAPIFile(None),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
@@ -108,7 +116,26 @@ async def save_file(
 
             video_id = match.group(1)
 
-            file_id = await store.file_repo.add_file(user_id=user_id, file_name=url, file_url=url)
+            # For YouTube, the stored artifacts are typically transcripts and derived data.
+            # Treat the initial record as a very small logical size to avoid blocking later
+            # transcription-based accounting; this keeps enforcement simple for now.
+            await assert_can_create_doc(store, user_id, new_doc_size_bytes=0)
+            
+            # If workspace_id not provided, get user's first workspace (default)
+            actual_workspace_id = workspace_id
+            if not actual_workspace_id:
+                workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+                if workspaces:
+                    actual_workspace_id = workspaces[0]["id"]
+                    logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
+
+            file_id = await store.file_repo.add_file(
+                user_id=user_id, 
+                file_name=url, 
+                file_url=url, 
+                file_size_bytes=0,
+                workspace_id=actual_workspace_id
+            )
             if not file_id:
                 raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
 
@@ -126,8 +153,48 @@ async def save_file(
 
             uploaded_files_responses = []
             for file in files:
+                # CRITICAL: Validate file size before processing
+                file_content = await file.read()
+                file_size = len(file_content)
+                
+                if file_size > MAX_FILE_SIZE_BYTES:
+                    logger.warning(f"File {file.filename} rejected: {file_size / 1024 / 1024:.2f}MB exceeds {MAX_FILE_SIZE_MB}MB limit")
+                    raise HTTPException(
+                        status_code=413,  # Payload Too Large
+                        detail=f"File size ({file_size / 1024 / 1024:.2f}MB) exceeds maximum allowed size ({MAX_FILE_SIZE_MB}MB)"
+                    )
+                
+                if file_size == 0:
+                    logger.warning(f"File {file.filename} rejected: empty file")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File {file.filename} is empty"
+                    )
+                
+                logger.info(f"File {file.filename} validated: {file_size / 1024 / 1024:.2f}MB")
+
+                # Enforce per-user document count and storage limits for free plans
+                await assert_can_create_doc(store, user_id, new_doc_size_bytes=file_size)
+
+                # Reset file pointer after reading
+                await file.seek(0)
+                
+                # If workspace_id not provided, get user's first workspace (default)
+                actual_workspace_id = workspace_id
+                if not actual_workspace_id:
+                    workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+                    if workspaces:
+                        actual_workspace_id = workspaces[0]["id"]
+                        logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
+                
                 gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
-                file_id = await store.file_repo.add_file(user_id=user_id, file_name=file.filename, file_url=gcs_url)
+                file_id = await store.file_repo.add_file(
+                    user_id=user_id, 
+                    file_name=file.filename, 
+                    file_url=gcs_url, 
+                    file_size_bytes=file_size,
+                    workspace_id=actual_workspace_id
+                )
                 if not file_id:
                     logger.error(f"Failed to create file record for {file.filename}")
                     continue
@@ -146,6 +213,8 @@ async def save_file(
     except RedisError as e:
         logger.error(f"Redis error in save_file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="A caching error occurred.")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error saving file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -155,13 +224,14 @@ async def save_file(
 async def retrieve_files(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    workspace_id: Optional[int] = Query(None, description="Filter by workspace ID"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data['user_id']
         offset = (page - 1) * page_size
-        paginated_result = await store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size)
+        paginated_result = await store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size, workspace_id=workspace_id)
         
         db_files = paginated_result.get('items', [])
         total_files = paginated_result.get('total', 0)
@@ -193,6 +263,7 @@ def _status_to_progress(status: Optional[str]) -> int:
     """Map processing_status to a coarse progress percentage for polling UI."""
     mapping = {
         "uploaded": 0,
+        "processing": 10,
         "extracting": 10,
         "embedding": 40,
         "storing": 70,
@@ -872,6 +943,86 @@ async def update_key_concept(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while updating the key concept."
+        )
+
+# Move file to different workspace
+class MoveFileRequest(BaseModel):
+    workspace_id: int = Field(..., description="Target workspace ID")
+
+@files_router.patch("/{file_id}/workspace", status_code=status.HTTP_200_OK)
+async def move_file_to_workspace(
+    file_id: int = Path(..., description="ID of the file to move"),
+    move_request: MoveFileRequest = None,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
+):
+    """Move a file to a different workspace.
+    
+    Args:
+        file_id: ID of the file to move
+        move_request: Request body with target workspace_id
+        user_data: Authenticated user data
+        store: Repository manager
+        
+    Returns:
+        Success message
+        
+    Raises:
+        403: File or workspace doesn't belong to user
+        404: File or workspace not found
+    """
+    try:
+        user_id = user_data['user_id']
+        target_workspace_id = move_request.workspace_id
+        
+        # Verify file exists and belongs to user
+        file = await store.file_repo.get_file_by_id(file_id)
+        if not file:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="File not found"
+            )
+        
+        if file['user_id'] != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to move this file"
+            )
+        
+        # Verify target workspace exists and belongs to user
+        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+        workspace_ids = [ws['id'] for ws in workspaces]
+        
+        if target_workspace_id not in workspace_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Target workspace not found or doesn't belong to you"
+            )
+        
+        # Update file's workspace
+        success = await store.file_repo.update_file_workspace(file_id, target_workspace_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to move file"
+            )
+        
+        logger.info(f"File {file_id} moved to workspace {target_workspace_id} by user {user_id}")
+        
+        return {
+            "message": "File moved successfully",
+            "file_id": file_id,
+            "workspace_id": target_workspace_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error moving file {file_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while moving the file"
         )
 
 

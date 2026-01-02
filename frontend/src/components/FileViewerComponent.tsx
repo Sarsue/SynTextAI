@@ -26,6 +26,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
     const highlightTimeoutRef = useRef<NodeJS.Timeout>();
     const [fileType, setFileType] = useState<string>('unknown');
     const [currentPage, setCurrentPage] = useState<number>(1);
+    const [pdfIframeSrc, setPdfIframeSrc] = useState<string>(file.file_url);
+    const [youtubeIframeSrc, setYoutubeIframeSrc] = useState<string>('');
     const [keyConcepts, setKeyConcepts] = useState<KeyConcept[]>([]);
     const [isLoadingKeyConcepts, setIsLoadingKeyConcepts] = useState<boolean>(false);
     const [isKeyConceptsLoaded, setIsKeyConceptsLoaded] = useState<boolean>(false);
@@ -71,6 +73,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
     const fileId = file.id;
     const fileUrl = file.file_url;
+
+    useEffect(() => {
+        setPdfIframeSrc(fileUrl);
+        setYoutubeIframeSrc('');
+        setCurrentPage(1);
+    }, [fileUrl]);
 
     const getFileType = (urlOrName: string): string | null => {
         // Check for YouTube URLs first using a regex
@@ -383,9 +391,17 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         }
         
         if (concept.source_page_number && pdfViewerRef.current) {
-            // For PDFs, navigate to the page number
-            const iframe = pdfViewerRef.current;
-            iframe.contentWindow?.postMessage({ type: 'goto-page', page: concept.source_page_number }, '*');
+            const baseUrl = (fileUrl || '').split('#')[0];
+            const page = concept.source_page_number;
+            setCurrentPage(page);
+            const nextSrc = `${baseUrl}#page=${page}`;
+            setPdfIframeSrc(nextSrc);
+            // Ensure immediate navigation even if the iframe doesn't re-render the hash reliably.
+            try {
+                pdfViewerRef.current.src = nextSrc;
+            } catch (e) {
+                // Ignore - iframe src assignment can fail in some browsers.
+            }
             addToast(`Navigated to page ${concept.source_page_number}`, 'info');
         } else if (concept.source_video_timestamp_start_seconds !== null && concept.source_video_timestamp_start_seconds !== undefined) {
             const startTimestamp = concept.source_video_timestamp_start_seconds;
@@ -416,19 +432,19 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                 } else {
                     addToast(`Jumped to ${durationText}`, 'info');
                 }
-            } else if (youtubePlayerRef.current && fileType === 'youtube') {
-                // For YouTube videos
-                youtubePlayerRef.current.seekTo(startTimestamp);
-                youtubePlayerRef.current.playVideo();
-                
-                if (hasDuration) {
-                    const durationSeconds = endTimestamp! - startTimestamp;
-                    addToast(`Playing segment (${durationText}, ${Math.round(durationSeconds)}s)`, 'info');
-                    
-                    // Reset our timeout - keep highlighted for the full duration
-                    clearTimeout(highlightTimeoutRef.current);
-                    highlightTimeoutRef.current = setTimeout(() => setHighlightedConceptId(null), durationSeconds * 1000);
-                } else {
+            } else if (fileType === 'youtube') {
+                // For YouTube, we are using a plain iframe (not the JS player API), so navigation
+                // is done by updating the embed URL with start param.
+                const url = (fileUrl || '');
+                const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?\&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/);
+                const videoId = match && match[1] ? match[1] : '';
+                if (videoId) {
+                    const params = new URLSearchParams();
+                    params.set('start', String(Math.max(0, Math.floor(startTimestamp))));
+                    params.set('autoplay', '1');
+                    params.set('rel', '0');
+                    params.set('modestbranding', '1');
+                    setYoutubeIframeSrc(`https://www.youtube.com/embed/${videoId}?${params.toString()}`);
                     addToast(`Jumped to ${durationText}`, 'info');
                 }
             }
@@ -467,7 +483,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
                     <iframe
                         className="youtube-iframe" 
                         width="100%"
-                        src={`https://www.youtube.com/embed/${videoId}`}
+                        src={youtubeIframeSrc || `https://www.youtube.com/embed/${videoId}`}
                         title="YouTube video player"
                         frameBorder="0"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -479,8 +495,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return (
                 <div className="pdf-container file-content-area">
                     <iframe
+                        key={pdfIframeSrc}
                         ref={pdfViewerRef}
-                        src={fileUrl}
+                        src={pdfIframeSrc}
                         className="pdf-viewer"
                         title={`PDF Viewer - ${file.file_name}`}
                     />

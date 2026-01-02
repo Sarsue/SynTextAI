@@ -56,7 +56,7 @@ async def subscription_status(
     try:
         user_id = user_data["user_id"]
         subscription_data = await store.user_repo.get_subscription(user_id)
-        
+
         if not subscription_data:
             return {
                 'subscription_status': 'none',
@@ -64,22 +64,33 @@ async def subscription_status(
                 'card_brand': None,
                 'card_exp_month': None,
                 'card_exp_year': None,
-                'trial_end': None
+                'trial_end': None,
+                'current_period_end': None,
+                'has_active_payment_method': False,
             }
-        
+
         # Unpack the tuple (subscription_dict, card_details_dict)
         subscription, card_details = subscription_data
-        
-        # Prepare subscription data to return
+
+        card_last4 = (card_details or {}).get('card_last4')
+        card_brand = (card_details or {}).get('card_type')
+        card_exp_month = (card_details or {}).get('exp_month')
+        card_exp_year = (card_details or {}).get('exp_year')
+
+        trial_end = subscription.get('trial_end')
+        current_period_end = subscription.get('current_period_end')
+
         response = {
             'subscription_status': subscription.get('status'),
-            'card_last4': (card_details or {}).get('card_last4'),
-            'card_brand': (card_details or {}).get('card_type'),
-            'card_exp_month': (card_details or {}).get('exp_month'),
-            'card_exp_year': (card_details or {}).get('exp_year'),
-            'trial_end': subscription.get('trial_end')
+            'card_last4': card_last4,
+            'card_brand': card_brand,
+            'card_exp_month': card_exp_month,
+            'card_exp_year': card_exp_year,
+            'trial_end': trial_end.isoformat() if isinstance(trial_end, datetime) else trial_end,
+            'current_period_end': current_period_end.isoformat() if isinstance(current_period_end, datetime) else current_period_end,
+            'has_active_payment_method': bool(card_last4 and card_brand),
         }
-        
+
         return response
     except Exception as e:
         logger.error(f"Error in subscription_status: {str(e)}")
@@ -145,10 +156,18 @@ async def start_trial(
                 exp_year=None
             )
 
+            trial_end_dt = datetime.utcfromtimestamp(created_subscription.trial_end)
+
             return {
                 'message': 'Trial started successfully',
                 'subscription_status': created_subscription["status"],
-                'trial_end': datetime.utcfromtimestamp(created_subscription.trial_end)  # Correct trial_end value
+                'trial_end': trial_end_dt.isoformat(),
+                'current_period_end': trial_end_dt.isoformat(),
+                'card_last4': None,
+                'card_brand': None,
+                'card_exp_month': None,
+                'card_exp_year': None,
+                'has_active_payment_method': False,
             }
 
     except Exception as e:
@@ -264,11 +283,14 @@ async def create_subscription(
 
             return {
                 'message': 'Subscription created successfully',
-                "subscription_status": created_subscription.status, 
+                "subscription_status": created_subscription.status,
                 'card_last4': payment_method.card.last4,
                 'card_brand': payment_method.card.brand,
                 'card_exp_month': payment_method.card.exp_month,
-                'card_exp_year': payment_method.card.exp_year
+                'card_exp_year': payment_method.card.exp_year,
+                'trial_end': None,
+                'current_period_end': datetime.utcfromtimestamp(created_subscription.current_period_end).isoformat() if created_subscription.current_period_end else None,
+                'has_active_payment_method': True,
             }
 
         except Exception as e:
@@ -340,20 +362,30 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
         data_object = event['data']['object']
         stripe_customer_id = data_object['customer']
 
-        if event_type == 'invoice.payment_succeeded':
-            await store.user_repo.update_subscription_status(stripe_customer_id, "active")
-        elif event_type == 'invoice.payment_failed':
-            await store.user_repo.update_subscription_status(stripe_customer_id, "card_declined")
+        # Do not mutate subscription status based on invoice events.
+        # Subscription status should be treated as authoritative from the subscription object itself.
+        if event_type in {'invoice.payment_succeeded', 'invoice.payment_failed'}:
+            logger.info(f"Ignoring invoice event for entitlement: {event_type}")
+            return {"status": "ignored"}
 
         elif event_type == 'customer.subscription.updated':
             current_status = data_object['status']
             previous_status = event['data'].get('previous_attributes', {}).get('status') # Keep this for potential future use or logging
-            current_period_end = data_object['current_period_end']
+            current_period_end = data_object.get('current_period_end')
+            current_period_end_dt = None
+            if isinstance(current_period_end, (int, float)):
+                current_period_end_dt = datetime.utcfromtimestamp(current_period_end)
+            elif isinstance(current_period_end, str):
+                # Defensive: if someone stored ISO strings, keep compatible.
+                try:
+                    current_period_end_dt = datetime.fromisoformat(current_period_end)
+                except Exception:
+                    current_period_end_dt = None
 
             await store.user_repo.update_subscription(
                 stripe_customer_id=stripe_customer_id,
                 status=current_status,
-                current_period_end=current_period_end
+                current_period_end=current_period_end_dt
             )
             # --- Logic to handle trial end --- 
             try:
@@ -382,7 +414,9 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
             await store.user_repo.update_subscription_status(stripe_customer_id, "canceled")
 
         else:
-            raise HTTPException(status_code=400, detail="Unhandled event")
+            # Return 200 for unhandled events so Stripe doesn't retry.
+            logger.info(f"Ignoring unhandled Stripe event type: {event_type}")
+            return {"status": "ignored"}
 
         return {"status": "success"}
     except stripe.error.SignatureVerificationError:

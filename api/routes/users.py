@@ -5,7 +5,10 @@ from typing import Dict
 from api.utils import decode_firebase_token
 from api.tasks import delete_user_task
 from api.repositories.repository_manager import RepositoryManager
+from api.models import Workspace
 import logging
+
+from api.limits import FREE_DOC_LIMIT, FREE_STORAGE_LIMIT_BYTES, FREE_WORKSPACE_LIMIT
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -90,6 +93,20 @@ async def create_user( # Function name remains 'create_user'
         # Also, consider if your store.add_user needs/accepts firebase_uid
         new_user = await store.user_repo.add_user(email, name) # Pass firebase_uid if your add_user and DB schema support it
         logger.info(f"POST /users: Successfully created new user: {new_user.email if hasattr(new_user, 'email') else 'unknown'}")
+        
+        # Create default workspace for new user
+        try:
+            logger.info(f"POST /users: Creating default workspace for user {new_user.id}")
+            default_workspace = Workspace(
+                name="My Workspace",
+                user_id=new_user.id
+            )
+            await store.workspace_repo.create_workspace(default_workspace)
+            logger.info(f"POST /users: Successfully created default workspace for user {new_user.id}")
+        except Exception as ws_error:
+            logger.error(f"POST /users: Failed to create default workspace for user {new_user.id}: {str(ws_error)}")
+            # Don't fail user creation if workspace creation fails
+        
         return new_user # FastAPI will serialize this (hopefully Pydantic model) to JSON with 201 status
     except IntegrityError: 
         # This case should ideally be caught by the explicit check above.
@@ -122,3 +139,30 @@ async def delete_user(
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
+
+@users_router.get("/quota", status_code=200)
+async def get_user_quota(
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
+):
+    """Return real usage/quota information for the authenticated user.
+
+    This is intended for UI display and should reflect backend enforcement.
+    """
+    try:
+        user_id = user_data["user_id"]
+        files_used = await store.file_repo.count_files_for_user(user_id)
+        storage_used_bytes = await store.file_repo.total_storage_bytes_for_user(user_id)
+        workspaces_used = await store.workspace_repo.count_workspaces_for_user(user_id)
+
+        return {
+            "files_used": files_used,
+            "files_limit": FREE_DOC_LIMIT,
+            "storage_used_bytes": storage_used_bytes,
+            "storage_limit_bytes": FREE_STORAGE_LIMIT_BYTES,
+            "workspaces_used": workspaces_used,
+            "workspaces_limit": FREE_WORKSPACE_LIMIT,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching quota for user {user_data.get('user_id')}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not fetch quota")

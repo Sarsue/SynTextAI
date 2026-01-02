@@ -7,13 +7,8 @@ import React, {
   useRef 
 } from 'react';
 import {
-  signInWithRedirect,
   signOut as firebaseSignOut,
-  onAuthStateChanged,
-  getRedirectResult,
   GoogleAuthProvider,
-  setPersistence,
-  browserLocalPersistence,
   signInWithPopup,
   User
 } from 'firebase/auth';
@@ -42,343 +37,213 @@ interface AuthProps {}
 
 const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const navigate = useNavigate();
-  const { setUser, user, subscriptionStatus, setSubscriptionStatus } = useUserContext();
-  const [isLoading, setIsLoading] = useState(true);
+  const { user, subscriptionStatus, authLoading } = useUserContext();
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const isLoggingOut = useRef(false);
-  const isDev = window.location.hostname === 'localhost';
-  const { capture, identify, reset: resetAnalytics } = useAnalytics();
+  const { capture, reset: resetAnalytics } = useAnalytics();
 
-  // Safe wrapper for capture that handles the Promise return type
-  const safeCapture = async (event: string, properties?: Record<string, any>) => {
+  // Safe capture wrapper
+  const safeCapture = useCallback(async (event: string, properties?: Record<string, any>) => {
     try {
-      const result = await capture(event, properties);
-      return result;
+      await capture(event, properties);
     } catch (error) {
-      console.error(`Error capturing event ${event}:`, error);
-      return null;
+      console.error(`Analytics error:`, error);
     }
-  };
+  }, [capture]);
 
-  // Handle navigation based on auth state
+  // Redirect authenticated users to appropriate page
   useEffect(() => {
-    if (user && subscriptionStatus !== null) {
+    if (!authLoading && user && subscriptionStatus !== null) {
       const targetPath = subscriptionStatus === 'active' || subscriptionStatus === 'trialing' 
         ? '/chat' 
         : '/settings';
-      navigate(targetPath);
+      navigate(targetPath, { replace: true });
     }
-  }, [user, subscriptionStatus, navigate]);
+  }, [user, subscriptionStatus, authLoading, navigate]);
 
-  // Initialize auth state and set up listener
-  useEffect(() => {
-    const initializeAuth = async () => {
-      try {
-        await setPersistence(auth, browserLocalPersistence);
-      } catch (error) {
-        console.error('Failed to set persistence:', error);
-      }
+  const signInWithGoogle = useCallback(async () => {
+    if (user || isSigningIn) return;
 
-      const unsubscribe = onAuthStateChanged(auth, async (authUser) => {
-        try {
-          if (authUser) {
-            // Only update if we don't already have a user or if the user ID changed
-            if (!user || user.uid !== authUser.uid) {
-              // Identify the user in analytics
-              identify(authUser.uid, {
-                email: authUser.email,
-                name: authUser.displayName,
-                uid: authUser.uid,
-                provider: authUser.providerData?.[0]?.providerId
-              });
-              setUser(authUser);
-              
-              // Track login event
-              await safeCapture('user_logged_in', {
-                method: 'auto',
-                timestamp: new Date().toISOString()
-              });
-            }
-          } else if (user && !isLoggingOut.current) {
-            // Only clear if we currently have a user and it's not a manual logout
-            resetAnalytics();
-            setUser(null);
-            setSubscriptionStatus(null);
-          }
-        } catch (error) {
-          console.error('Error in auth state change:', error);
-          await safeCapture('auth_error', {
-            error: error instanceof Error ? error.message : 'Unknown error',
-            context: 'auth_state_change'
-          });
-        } finally {
-          if (isLoading) {
-            setIsLoading(false);
-          }
-        }
-      });
-
-      return () => {
-        unsubscribe();
-      };
-    };
-
-    initializeAuth();
-  }, [setUser, setSubscriptionStatus, identify, capture, resetAnalytics, isLoading, user]);
-
-  // Handle OAuth redirect result
-  useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result?.user) {
-          setUser(result.user);
-          const storedState = localStorage.getItem('authState');
-          const redirectPath = storedState ? JSON.parse(storedState).redirectPath : '/chat';
-          localStorage.removeItem('authState');
-          
-          const authIntent = localStorage.getItem('authIntent');
-          const isNewUser = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
-          
-          try {
-            if (isNewUser || authIntent === 'signup') {
-              await safeCapture('user_signup', {
-                isNewUser,
-                fromSignupButton: authIntent === 'signup',
-                method: 'google',
-                timestamp: new Date().toISOString()
-              });
-              navigate('/welcome');
-            } else {
-              await safeCapture('user_signin', {
-                fromSignupButton: authIntent === 'signup',
-                method: 'google',
-                timestamp: new Date().toISOString()
-              });
-              navigate(redirectPath);
-            }
-          } catch (error) {
-            console.error('Error capturing auth event:', error);
-            // Continue with navigation even if analytics fails
-            navigate(isNewUser || authIntent === 'signup' ? '/welcome' : redirectPath);
-          }
-          
-          localStorage.removeItem('authIntent');
-        }
-      } catch (error) {
-        console.error('Redirect sign-in error:', error);
-        safeCapture('auth_error', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          context: 'oauth_redirect'
-        }).catch(console.error);
-      }
-    };
-
-    handleRedirectResult();
-  }, [setUser, navigate, safeCapture]);
-
-  const signInWithGoogle = useCallback(async (intent: 'signin' | 'signup' = 'signin') => {
-    if (user) return;
-
+    setIsSigningIn(true);
     const provider = new GoogleAuthProvider();
+    
     try {
-      // Store the intent before starting auth flow
-      localStorage.setItem('authIntent', intent);
-      localStorage.setItem('authState', JSON.stringify({ 
-        redirectPath: window.location.pathname 
-      }));
-
-      // Sign out any existing session first
-      await firebaseSignOut(auth);
+      await safeCapture('auth_attempt', { method: 'google' });
       
-      // Track sign-in attempt
-      await safeCapture(`user_${intent}_attempt`, {
-        method: 'google',
-        timestamp: new Date().toISOString()
-      });
-
-      // Use popup in dev for easier debugging
-      if (isDev) {
-        await signInWithPopup(auth, provider);
-      } else {
-        await signInWithRedirect(auth, provider);
+      // Use popup for better mobile compatibility
+      const result = await signInWithPopup(auth, provider);
+      
+      if (result?.user) {
+        // Auto-detect if this is a new user
+        const isNewUser = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
+        
+        await safeCapture(isNewUser ? 'user_signup' : 'user_signin', {
+          method: 'google',
+          isNewUser
+        });
+        
+        // Navigation handled by useEffect above
+        // New users will see /welcome, returning users go to /chat or /settings
+        if (isNewUser) {
+          navigate('/welcome', { replace: true });
+        }
       }
     } catch (error) {
       console.error('Sign-in error:', error);
+      
+      // User-friendly error messages
+      const err = error as any;
+      let errorMessage = 'Failed to sign in. Please try again.';
+      if (err.code === 'auth/popup-blocked') {
+        errorMessage = 'Popup was blocked. Please allow popups and try again.';
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        errorMessage = 'Sign-in cancelled.';
+      } else if (err.code === 'auth/network-request-failed') {
+        errorMessage = 'Network error. Please check your connection.';
+      }
+      
       await safeCapture('auth_error', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        context: `google_${intent}`,
-        timestamp: new Date().toISOString()
+        error: err.message,
+        code: err.code
       });
+      
+      alert(errorMessage);
+    } finally {
+      setIsSigningIn(false);
     }
-  }, [user, isDev, capture]);
+  }, [user, isSigningIn, navigate, safeCapture]);
 
   const logOut = useCallback(async () => {
-    // Return a promise that resolves when logout is complete
-    return new Promise<void>(async (resolve, reject) => {
-      // Prevent multiple logout attempts
-      if (isLoggingOut.current) {
-        console.log('[Logout] Logout already in progress');
-        return reject(new Error('Logout already in progress'));
-      }
+    // Prevent multiple logout attempts
+    if (isLoggingOut.current) {
+      console.log('[Logout] Logout already in progress');
+      return;
+    }
+    
+    isLoggingOut.current = true;
+    
+    try {
+      // Clear storage
+      sessionStorage.clear();
       
-      isLoggingOut.current = true;
+      // Clear cookies
+      document.cookie.split(';').forEach(cookie => {
+        const [name] = cookie.split('=');
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+      });
       
-      const logStep = (step: string) => {
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`[Logout] ${step}`);
-        }
-      };
-
-      try {
-        logStep('Starting logout process');
-        
-        // 1. Reset user state immediately
-        logStep('Resetting user state');
-        const userEmail = user?.email || 'unknown';
-        setUser(null);
-        setSubscriptionStatus(null);
-        
-        // 2. Clear sensitive data from storage
-        logStep('Clearing storage');
-        const keysToRemove = [
-          'authState', 
-          'authIntent',
-          'posthog_ph_last_event_time',
-          'posthog_ph_last_event_ts',
-          'posthog_ph_last_event_ts_/'
-        ];
-        
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-        sessionStorage.clear();
-        
-        // Clear cookies
-        document.cookie.split(';').forEach(cookie => {
-          const [name] = cookie.split('=');
-          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-        });
-        
-        // 3. Sign out from Firebase
-        logStep('Signing out from Firebase');
-        try {
-          await firebaseSignOut(auth);
-          logStep('Firebase sign out successful');
-        } catch (error) {
-          console.error('[Logout] Error signing out from Firebase:', error);
-          // Continue with logout even if Firebase sign out fails
-        }
-        
-        // 4. Queue up analytics operations to run after logout
-        const trackAnalytics = async () => {
-          try {
-            await safeCapture('user_logout_attempt', {
-              timestamp: new Date().toISOString(),
-              source: 'auth_component',
-              user_email: userEmail
-            });
-            
-            // Reset analytics after capturing logout event
-            resetAnalytics();
-            
-            // If PostHog is available and has flush method, flush events
-            const posthog = getPosthog();
-            if (posthog?.flush) {
-              try {
-                const flushResult = posthog.flush();
-                if (flushResult && typeof flushResult.then === 'function') {
-                  await flushResult.catch(() => {});
-                }
-              } catch (e) {
-                console.error('[PostHog] Error flushing events:', e);
-              }
-            }
-          } catch (e) {
-            console.error('[Logout] Error in analytics cleanup:', e);
-          }
-        };
-        
-        // Don't await - let it run in background
-        trackAnalytics().catch(() => {});
-        
-        // 5. Mark logout as complete before redirect
-        logStep('Logout process completed');
-        isLoggingOut.current = false;
-        
-        // 6. Resolve the promise
-        resolve();
-        
-        // 7. Redirect to login
-        logStep('Redirecting to login');
-        window.location.href = '/login';
-        
-      } catch (error) {
-        console.error('[Logout] Error during logout:', error);
-        isLoggingOut.current = false;
-        reject(error);
-        
-        // Ensure we still redirect even if something fails
-        window.location.href = '/';
-      }
-    });
-  }, [capture, resetAnalytics, setUser, setSubscriptionStatus]);
+      // Sign out from Firebase
+      await firebaseSignOut(auth);
+      
+      // Track logout (don't wait for it)
+      safeCapture('user_logout', {
+        timestamp: new Date().toISOString()
+      }).catch(() => {});
+      
+      // Reset analytics
+      resetAnalytics();
+      
+      // Redirect to login
+      window.location.href = '/login';
+      
+    } catch (error) {
+      console.error('[Logout] Error:', error);
+      isLoggingOut.current = false;
+      // Still redirect even if something fails
+      window.location.href = '/login';
+    }
+  }, [safeCapture, resetAnalytics]);
   
   // Expose logOut via ref
   useImperativeHandle(ref, () => ({
     logOut
   }), [logOut]);
 
-  if (isLoading) {
-    return <div>Loading...</div>;
+  if (authLoading) {
+    return (
+      <div className="auth-container" style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        minHeight: '100vh',
+        fontSize: '1.2rem',
+        color: 'var(--text-color)'
+      }}>
+        Loading...
+      </div>
+    );
   }
 
   return (
-    <div className="auth-container">
+    <div className="auth-container" style={{
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '100vh',
+      padding: '20px'
+    }}>
       {!user ? (
-        <div className="auth-buttons" style={{ display: 'flex', gap: '15px' }}>
+        <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+          <h1 style={{ marginBottom: '10px', fontSize: '2rem' }}>Welcome to SynText AI</h1>
+          <p style={{ marginBottom: '30px', color: 'var(--text-secondary)', fontSize: '1rem' }}>
+            Sign in to continue
+          </p>
+          
           <button 
-            className="signin-link"
-            onClick={() => signInWithGoogle('signin')}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--accent-color)',
-              color: 'var(--accent-color)',
-              padding: '8px 15px',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 500,
-              transition: 'all 0.2s ease'
-            }}
-          >
-            Sign in with Google
-          </button>
-          <button 
-            className="signup-button"
-            onClick={() => signInWithGoogle('signup')}
+            onClick={signInWithGoogle}
+            disabled={isSigningIn}
             style={{
               background: 'var(--accent-color)',
               color: 'white',
               border: 'none',
-              padding: '8px 15px',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 500,
-              transition: 'all 0.2s ease'
+              padding: '12px 24px',
+              borderRadius: '8px',
+              cursor: isSigningIn ? 'not-allowed' : 'pointer',
+              fontWeight: 600,
+              fontSize: '1rem',
+              opacity: isSigningIn ? 0.7 : 1,
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              margin: '0 auto'
             }}
           >
-            Sign up with Google
+            {isSigningIn ? (
+              'Signing in...'
+            ) : (
+              <>
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+                  <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/>
+                  <path d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707 0-.593.102-1.17.282-1.709V4.958H.957C.347 6.173 0 7.548 0 9c0 1.452.348 2.827.957 4.042l3.007-2.335z" fill="#FBBC05"/>
+                  <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.462.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+                </svg>
+                Continue with Google
+              </>
+            )}
           </button>
+          
+          <p style={{ 
+            marginTop: '20px', 
+            fontSize: '0.85rem', 
+            color: 'var(--text-secondary)' 
+          }}>
+            New users will be automatically signed up
+          </p>
         </div>
       ) : (
         <button 
-          className="signup-button"
           onClick={logOut}
           disabled={isLoggingOut.current}
           style={{
             background: 'var(--accent-color)',
             color: 'white',
             border: 'none',
-            padding: '8px 15px',
-            borderRadius: '4px',
-            cursor: 'pointer',
+            padding: '10px 20px',
+            borderRadius: '6px',
+            cursor: isLoggingOut.current ? 'not-allowed' : 'pointer',
             fontWeight: 500,
             opacity: isLoggingOut.current ? 0.7 : 1
           }}

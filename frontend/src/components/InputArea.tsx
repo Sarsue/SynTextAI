@@ -8,19 +8,17 @@ import './InputArea.css';
 interface InputAreaProps {
     onSend: (message: string, files: File[]) => Promise<void>;
     isSending: boolean;
-    token: string | null;
-    onContentAdded: () => void;
+    onContentAdded: () => Promise<void>;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
     onSend,
     isSending,
-    token,
     onContentAdded
 }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-    const { darkMode } = useUserContext();
+    const { darkMode, user } = useUserContext();
     const { addToast } = useToast();
     const [youtubeUrl, setYoutubeUrl] = useState('');
     // Reference to the YouTube input element for focus management
@@ -172,26 +170,38 @@ const InputArea: React.FC<InputAreaProps> = ({
             addToast('Please enter a YouTube Video URL.', 'error');
             return;
         }
-        if (!token) {
+        if (!user) {
             addToast('Authentication token not found. Please log in again.', 'error');
             return;
         }
         try {
-            const response = await fetch(`/api/v1/files`, {
+            const idToken = await user.getIdToken(true);
+            let response = await fetch(`/api/v1/files`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${idToken}`
                 },
                 body: JSON.stringify({ type: 'youtube', url: youtubeUrl }),
             });
+            if (response.status === 401) {
+                const refreshed = await user.getIdToken(true);
+                response = await fetch(`/api/v1/files`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${refreshed}`
+                    },
+                    body: JSON.stringify({ type: 'youtube', url: youtubeUrl }),
+                });
+            }
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response.' }));
                 throw new Error(errorData.detail || 'Failed to add YouTube video');
             }
             setYoutubeUrl('');
             setShowYoutubeInput(false);
-            onContentAdded();
+            await onContentAdded();
             addToast('YouTube video added and is now processing.', 'success');
         } catch (error) {
             console.error('Error adding YouTube video:', error);

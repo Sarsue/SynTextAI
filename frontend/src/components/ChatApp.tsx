@@ -59,6 +59,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         setFileError: setContextFileError, 
         loadUserFiles, 
         deleteFileFromContext, // Added for centralized deletion
+        pollFileStatus, // Trigger immediate status check after upload
         authLoading
     } = useUserContext();
     const { addToast } = useToast();
@@ -212,24 +213,46 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     };
 
     const callApiWithToken = async (apiUrl: string, method: string, body?: any) => {
+        if (!user) {
+            console.error('User not available for callApiWithToken');
+            addToast('Authentication session expired. Please refresh.', 'error');
+            return Promise.reject(new Error('User not available'));
+        }
         if (!idTokenRef.current) {
             console.error('User token not available for callApiWithToken');
             addToast('Authentication session expired. Please refresh.', 'error');
             return Promise.reject(new Error('User token not available'));
         }
-        const headers: HeadersInit = { 'Authorization': `Bearer ${idTokenRef.current}` };
+        const tokenForCall = await user.getIdToken();
+        idTokenRef.current = tokenForCall;
+        let headers: HeadersInit = { 'Authorization': `Bearer ${tokenForCall}` };
         if (body && !(body instanceof FormData)) {
             headers['Content-Type'] = 'application/json';
         }
 
         try {
-            const response = await fetch(apiUrl, {
+            let response = await fetch(apiUrl, {
                 method,
                 headers,
                 mode: 'cors',
                 credentials: 'include',
                 body: (body && body instanceof FormData) ? body : (body ? JSON.stringify(body) : undefined)
             });
+            if (response.status === 401) {
+                const refreshed = await user.getIdToken(true);
+                idTokenRef.current = refreshed;
+                headers = { 'Authorization': `Bearer ${refreshed}` };
+                if (body && !(body instanceof FormData)) {
+                    headers['Content-Type'] = 'application/json';
+                }
+                response = await fetch(apiUrl, {
+                    method,
+                    headers,
+                    mode: 'cors',
+                    credentials: 'include',
+                    body: (body && body instanceof FormData) ? body : (body ? JSON.stringify(body) : undefined)
+                });
+            }
             return response;
         } catch (error) {
             console.error('Unexpected error calling API:', error);
@@ -301,7 +324,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         
                         addToast(fileData.message, 'success'); 
                         
-                        loadUserFiles(1, filePagination.pageSize); 
+                        // Load files list; status updates will stream via WebSocket
+                        await loadUserFiles(1, filePagination.pageSize);
                     } else {
                         capture(AnalyticsEvents.FILE_UPLOAD, {
                             success: false,
@@ -625,8 +649,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     <InputArea
                         onSend={handleSend}
                         isSending={isSending}
-                        token={idTokenRef.current}
-                        onContentAdded={() => {}}
+                        onContentAdded={async () => {
+                            await loadUserFiles(1, filePagination.pageSize);
+                        }}
                     />
                 </main>
 

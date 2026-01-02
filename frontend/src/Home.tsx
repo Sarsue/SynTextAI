@@ -105,16 +105,14 @@ const Home: React.FC = () => {
                     <h1 className="app-title">SynText AI</h1>
                 </div>
                 <div className="auth-buttons">
-                    <Link to="/login" className="signin-link">Sign In</Link>
                     <Link 
                         to="/login" 
                         className="signup-button"
                         onClick={() => {
-                            posthog.capture('homepage_signup_click');
-                            localStorage.setItem('authIntent', 'signup');
+                            posthog.capture('homepage_get_started_click');
                         }}
                     >
-                        Sign Up
+                        Get Started
                     </Link>
                 </div>
             </header>

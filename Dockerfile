@@ -38,7 +38,7 @@ RUN npm run build && \
     rm -rf /root/.npm /tmp/*
 
 # Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
-FROM python:3.10-slim AS base
+FROM python:3.10-slim-bookworm AS base
 
 # Define build arguments for Firebase credentials
 ARG FIREBASE_PROJECT_ID
@@ -73,7 +73,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install system dependencies
 RUN --mount=type=cache,target=/var/cache/apt \
-    apt-get update && \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update && \
     apt-get install -y --no-install-recommends \
     build-essential \
     ffmpeg \
@@ -87,6 +87,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     make \
     cmake \
     pkg-config \
+    ca-certificates \
     libssl-dev \
     libffi-dev \
     tesseract-ocr \
