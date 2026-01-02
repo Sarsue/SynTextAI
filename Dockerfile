@@ -174,7 +174,8 @@ PY\
 done\n\
 echo "❌ Failed to download Whisper model after ${MAX_RETRIES} attempts"\nexit 1\
 ' > /usr/local/bin/download-whisper-model && \
-    chmod +x /usr/local/bin/download-whisper-model
+    chmod +x /usr/local/bin/download-whisper-model && \
+    test -x /usr/local/bin/download-whisper-model
 
 # Copy the frontend build from the first stage
 COPY --from=build-step /app/frontend/build ./frontend/build
