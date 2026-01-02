@@ -1,7 +1,6 @@
 services:
   syntextaiapp:
-    image: syntextaiapp:latest
-    build: .
+    image: osasdeeon/syntextai:latest
     container_name: syntextaiapp
     restart: unless-stopped
     ports:
@@ -30,7 +29,7 @@ services:
         max-file: "3"
           
   worker:
-    image: syntextaiapp:latest
+    image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
     command: python -m api.worker
     env_file:
