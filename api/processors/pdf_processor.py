@@ -428,10 +428,6 @@ class PDFProcessor(FileProcessor):
             language = kwargs.get('language', 'English')
             comprehension_level = kwargs.get('comprehension_level', 'Beginner')
             key_concepts = generate_key_concepts(document_text=full_text, language=language, comprehension_level=comprehension_level, is_video=False)
-            # Assign page numbers based on content distribution (simple heuristic)
-            total_pages = len(pages)
-            for concept in key_concepts:
-                concept["source_page_number"] = 1  # Default to page 1, can improve later
             return key_concepts
         except Exception as e:
             self._log_error(f"Error generating key concepts for file {file_id}", e)

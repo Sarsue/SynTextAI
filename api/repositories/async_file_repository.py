@@ -364,6 +364,8 @@ class AsyncFileRepository(AsyncBaseRepository):
         user_id: int,
         query: str,
         query_embedding: List[float],
+        workspace_id: Optional[int] = None,
+        file_id: Optional[int] = None,
         vector_weight: float = None,
         bm25_weight: float = None,
         top_k: int = None,
@@ -378,6 +380,13 @@ class AsyncFileRepository(AsyncBaseRepository):
 
         async with self.get_async_session() as session:
             try:
+                where_clauses = ["f.user_id = :user_id"]
+                if workspace_id is not None:
+                    where_clauses.append("f.workspace_id = :workspace_id")
+                if file_id is not None:
+                    where_clauses.append("f.id = :file_id")
+
+                where_sql = " AND ".join(where_clauses)
                 sql = text(
                     """
                     WITH query AS (
@@ -388,15 +397,21 @@ class AsyncFileRepository(AsyncBaseRepository):
                     SELECT 
                       c.id AS id,
                       c.file_id AS file_id,
+                      c.segment_id AS segment_id,
                       c.content AS content,
+                      f.file_name AS file_name,
+                      f.file_url AS file_url,
+                      s.page_number AS page_number,
+                      s.meta_data AS meta_data,
                       (
                         :vector_weight * (1 - (c.embedding <-> q.embedding)) +
                         :bm25_weight * ts_rank_cd(to_tsvector('simple', c.content), q.keywords)
                       ) AS hybrid_score
                     FROM chunks c
                     JOIN files f ON f.id = c.file_id
+                    LEFT JOIN segments s ON s.id = c.segment_id
                     CROSS JOIN query q
-                    WHERE f.user_id = :user_id
+                    WHERE """ + where_sql + """
                     ORDER BY hybrid_score DESC
                     LIMIT :top_k
                     """
@@ -409,6 +424,8 @@ class AsyncFileRepository(AsyncBaseRepository):
                     "bm25_weight": bw,
                     "top_k": k,
                     "user_id": user_id,
+                    "workspace_id": workspace_id,
+                    "file_id": file_id,
                 }
 
                 result = await session.execute(sql, params)
@@ -418,7 +435,12 @@ class AsyncFileRepository(AsyncBaseRepository):
                     out.append({
                         "chunk_id": row.id,
                         "file_id": row.file_id,
+                        "segment_id": row.segment_id,
                         "content": row.content,
+                        "file_name": row.file_name,
+                        "file_url": row.file_url,
+                        "page_number": row.page_number,
+                        "meta_data": row.meta_data if row.meta_data is not None else {},
                         "hybrid_score": float(row.hybrid_score) if row.hybrid_score is not None else 0.0,
                     })
                 return out

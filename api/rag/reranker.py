@@ -44,8 +44,25 @@ class CrossEncoderReRanker(ReRankerInterface):
             candidate_contents = []
             for candidate in candidates:
                 content = candidate.get('content', '')
-                # Create concatenated text for scoring
-                content_text = f"{candidate.get('title', '')}: {content}"
+                file_name = candidate.get('file_name') or ''
+                page_number = candidate.get('page_number')
+                meta = candidate.get('meta_data') or {}
+
+                prefix_parts = []
+                if file_name:
+                    prefix_parts.append(f"file={file_name}")
+                if page_number is not None:
+                    prefix_parts.append(f"page={page_number}")
+                if meta.get('type') == 'video':
+                    start_time = meta.get('start_time')
+                    end_time = meta.get('end_time')
+                    if start_time is not None:
+                        prefix_parts.append(f"t={start_time}")
+                    if end_time is not None:
+                        prefix_parts.append(f"t_end={end_time}")
+
+                prefix = " ".join(prefix_parts)
+                content_text = f"{prefix}\n{content}" if prefix else content
                 candidate_contents.append(content_text)
                 
             # Generate query-document pairs for scoring
@@ -64,7 +81,7 @@ class CrossEncoderReRanker(ReRankerInterface):
                 
                 scores = []
                 for content in candidate_contents:
-                    doc_embedding = get_text_embedding(content[:200])  # Use shorter content for embedding
+                    doc_embedding = get_text_embedding(content[:600])
                     # Calculate cosine similarity (simplified)
                     similarity = self._compute_similarity(query_embedding, doc_embedding)
                     scores.append(similarity)
