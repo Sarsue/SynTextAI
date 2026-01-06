@@ -48,7 +48,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         }
     }, [user]);
 
-    const fetchWorkspaces = async () => {
+    const fetchWorkspaces = async (preferredWorkspaceId?: number) => {
         if (!user) return;
         
         try {
@@ -64,16 +64,28 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             }
 
             const data = await response.json();
-            const workspaceList = data.items || [];
+            const workspaceList: Workspace[] = (data.items || []).filter(
+                (ws: any): ws is Workspace => ws && typeof ws.id === 'number'
+            );
             setWorkspaces(workspaceList);
             
-            // Set current workspace to first one
+            // Set current workspace
             if (workspaceList.length > 0) {
-                setCurrentWorkspace(workspaceList[0]);
-                // Notify parent of initial workspace
-                if (onWorkspaceChange) {
-                    onWorkspaceChange(workspaceList[0].id);
+                const selectedWorkspace =
+                    (preferredWorkspaceId
+                        ? workspaceList.find((ws: Workspace) => ws.id === preferredWorkspaceId)
+                        : null) || workspaceList[0];
+
+                if (selectedWorkspace) {
+                    setCurrentWorkspace(selectedWorkspace);
+                    if (onWorkspaceChange) {
+                        onWorkspaceChange(selectedWorkspace.id);
+                    }
+                } else {
+                    setCurrentWorkspace(null);
                 }
+            } else {
+                setCurrentWorkspace(null);
             }
             
             setIsLoading(false);
@@ -116,30 +128,46 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 body: JSON.stringify({ name: newWorkspaceName.trim() }),
             });
 
-            const data = await response.json();
+            const rawText = await response.text();
+            let data: any = null;
+            if (rawText) {
+                try {
+                    data = JSON.parse(rawText);
+                } catch {
+                    data = { message: rawText };
+                }
+            }
 
             if (!response.ok) {
                 // Handle specific error codes
-                if (response.status === 402 && data.error_code === 'WORKSPACE_LIMIT_REACHED') {
+                const errorCode = data?.detail?.error_code || data?.error_code;
+                if (response.status === 402 && errorCode === 'WORKSPACE_LIMIT_REACHED') {
                     addToast('Workspace limit reached. Upgrade to premium to create more workspaces!', 'error');
                     setShowCreateModal(false);
                     return;
                 }
-                throw new Error(data.detail || 'Failed to create workspace');
+
+                const errorMessage =
+                    (typeof data?.detail === 'string' ? data.detail : data?.detail?.message) ||
+                    data?.message ||
+                    'Failed to create workspace';
+                throw new Error(errorMessage);
             }
 
             // Success
-            const newWorkspace = data.data;
+            const newWorkspace = (data as any)?.data ?? data;
+            const createdWorkspaceId =
+                typeof (newWorkspace as any)?.id === 'number'
+                    ? (newWorkspace as any).id
+                    : typeof (data as any)?.id === 'number'
+                        ? (data as any).id
+                        : undefined;
             addToast('Workspace created successfully!', 'success');
             setNewWorkspaceName('');
             setShowCreateModal(false);
             
             // Refresh workspaces list and switch to new workspace
-            await fetchWorkspaces();
-            setCurrentWorkspace(newWorkspace);
-            if (onWorkspaceChange) {
-                onWorkspaceChange(newWorkspace.id);
-            }
+            await fetchWorkspaces(createdWorkspaceId);
         } catch (err) {
             console.error('Error creating workspace:', err);
             const errorMsg = err instanceof Error ? err.message : 'Failed to create workspace';

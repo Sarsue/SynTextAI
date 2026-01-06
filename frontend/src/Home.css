@@ -15,6 +15,14 @@
     --search-shadow: rgba(0, 0, 0, 0.1);
     --footer-bg: #f9fafb;
     --footer-text: #374151;
+    --header-footer-bg: #ffffff;
+    --pricing-bg: #f9fafb;
+    --pricing-text: #111827;
+    --feature-bg: #ffffff;
+    --feature-text-color: #111827;
+    --feature-border: #e5e7eb;
+    --use-case-bg: #ffffff;
+    --use-case-border: #e5e7eb;
 }
 
 /* Dark Mode */
@@ -59,6 +67,25 @@ header {
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
 
+/* Marketing Nav */
+.home-nav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.home-nav-link {
+    color: var(--text-color);
+    text-decoration: none;
+    font-weight: 500;
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
+}
+
+.home-nav-link:hover {
+    opacity: 1;
+}
+
 /* Auth Buttons */
 .auth-buttons {
     display: flex;
@@ -76,7 +103,7 @@ header {
 
 .signin-link:hover {
     color: var(--accent-hover);
-    background-color: rgba(79, 70, 229, 0.08);
+    background-color: rgba(0, 123, 255, 0.1);
 }
 
 .signup-button {
@@ -92,6 +119,10 @@ header {
 .signup-button:hover {
     background-color: var(--accent-hover);
     transform: translateY(-1px);
+}
+
+.dark-mode .signin-link:hover {
+    background-color: rgba(187, 134, 252, 0.12);
 }
 
 /* Logo */
@@ -334,6 +365,174 @@ header {
     display: flex;
     flex-direction: column;
     gap: 2rem;
+}
+
+/* Synthesia-style Marketing Sections */
+.home-cta-row {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.home-pricing-anchor {
+    margin-top: 12px;
+    color: var(--secondary-color);
+    font-size: 0.95rem;
+}
+
+.home-section-header {
+    max-width: 900px;
+    margin: 0 auto 16px;
+    text-align: center;
+    padding: 0 1rem;
+}
+
+.home-section-title {
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    font-weight: 700;
+    margin: 0 0 8px;
+}
+
+.home-section-subtitle {
+    margin: 0;
+    color: var(--secondary-color);
+    line-height: 1.6;
+}
+
+.home-demo-section {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem 0 2rem;
+}
+
+.home-teams-section {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.home-teams-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+}
+
+.home-bottom-cta {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2.5rem 1rem 3rem;
+    text-align: center;
+}
+
+.home-social-proof {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 8px 12px;
+}
+
+.home-proof-title {
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.home-proof-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.home-proof-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+    border-radius: 999px;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.home-use-cases,
+.home-trust-section,
+.home-faq-section {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 0;
+}
+
+.home-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+.home-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: left;
+}
+
+.home-card-title {
+    margin: 0 0 8px;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.home-card-description {
+    margin: 0;
+    color: var(--secondary-color);
+    line-height: 1.6;
+}
+
+.home-faq {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.home-faq-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    color: var(--text-color);
+    font: inherit;
+    line-height: inherit;
+}
+
+.home-faq-question {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.home-faq-answer {
+    margin-top: 10px;
+    color: var(--secondary-color);
+    line-height: 1.6;
 }
 
 .home-input-preview {

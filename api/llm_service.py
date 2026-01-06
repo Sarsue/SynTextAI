@@ -144,28 +144,57 @@ def generate_key_concepts(document_text: str, language: str = "English", compreh
     doc_length = len(document_text)
     logger.info(f"Processing document ({doc_length} chars) for key concepts")
 
-    # Use sliding window for large documents to improve LLM parsing
+    # Use windowing for large documents to improve LLM parsing.
+    # For PDFs we window by Page markers (preserves source grounding).
+    # For videos we keep character windows (timestamps are embedded in the text).
     MAX_CHUNK_SIZE = 4000  # Smaller chunks = better JSON parsing
     OVERLAP = 500  # Overlap to avoid losing context at boundaries
 
-    if doc_length <= MAX_CHUNK_SIZE:
-        # Process as single chunk
-        concepts = _extract_key_concepts_from_chunk(document_text, language, comprehension_level, is_video, "Full Document")
-        all_concepts.extend(concepts)
-    else:
-        # Split into overlapping windows
-        chunk_num = 0
-        for start in range(0, doc_length, MAX_CHUNK_SIZE - OVERLAP):
-            end = min(start + MAX_CHUNK_SIZE, doc_length)
-            chunk = document_text[start:end]
-            chunk_num += 1
-            
-            logger.debug(f"Processing chunk {chunk_num} (chars {start}-{end})")
-            concepts = _extract_key_concepts_from_chunk(chunk, language, comprehension_level, is_video, f"Chunk {chunk_num}")
+    def _split_pdf_by_pages(text: str) -> List[str]:
+        # Matches blocks starting with "Page N" up to the next "Page M".
+        page_blocks = re.findall(r"(Page\s+\d+\s*\n[\s\S]*?)(?=\nPage\s+\d+\s*\n|\Z)", text)
+        if not page_blocks:
+            return [text]
+
+        grouped: List[str] = []
+        current: List[str] = []
+        current_len = 0
+        for block in page_blocks:
+            block_len = len(block)
+            # Keep 2-4 pages per window depending on density.
+            if current and (current_len + block_len) > 9000:
+                grouped.append("\n".join(current))
+                current = []
+                current_len = 0
+            current.append(block)
+            current_len += block_len
+
+        if current:
+            grouped.append("\n".join(current))
+        return grouped
+
+    if not is_video:
+        chunks = _split_pdf_by_pages(document_text)
+        for idx, chunk in enumerate(chunks, start=1):
+            concepts = _extract_key_concepts_from_chunk(chunk, language, comprehension_level, is_video, f"Pages window {idx}")
             all_concepts.extend(concepts)
-            
-            if end >= doc_length:
-                break
+    else:
+        if doc_length <= MAX_CHUNK_SIZE:
+            concepts = _extract_key_concepts_from_chunk(document_text, language, comprehension_level, is_video, "Full Document")
+            all_concepts.extend(concepts)
+        else:
+            chunk_num = 0
+            for start in range(0, doc_length, MAX_CHUNK_SIZE - OVERLAP):
+                end = min(start + MAX_CHUNK_SIZE, doc_length)
+                chunk = document_text[start:end]
+                chunk_num += 1
+
+                logger.debug(f"Processing chunk {chunk_num} (chars {start}-{end})")
+                concepts = _extract_key_concepts_from_chunk(chunk, language, comprehension_level, is_video, f"Chunk {chunk_num}")
+                all_concepts.extend(concepts)
+
+                if end >= doc_length:
+                    break
 
     logger.info(f"Extracted {len(all_concepts)} raw concepts")
 
@@ -407,6 +436,24 @@ JSON array:
         for concept in concepts:
             title = _sanitize_text_value(concept.get("concept_title", "")).strip()
             explanation = _sanitize_text_value(concept.get("concept_explanation", "")).strip()
+
+            # Filter out generic/non-actionable concept titles
+            generic_title = title.lower().strip()
+            if generic_title in {
+                "introduction",
+                "overview",
+                "conclusion",
+                "summary",
+                "background",
+                "preface",
+                "abstract",
+                "table of contents",
+                "references",
+                "appendix",
+            }:
+                logger.warning(f"Skipping generic concept title: '{title}'")
+                continue
+
             if (
                 title and explanation and
                 len(title) >= 3 and
@@ -525,24 +572,23 @@ def _validate_references(concepts: List[Dict[str, Any]], document_text: str, is_
                 valid.append(c)
                 continue
 
+            # Strict mode: if we have Page markers, we require a valid page number.
             if page is None:
-                c['source_page_number'] = min(pages)
-                valid.append(c)
+                logger.warning("Dropping concept with missing source_page_number")
                 continue
 
             try:
                 page_int = int(page)
             except Exception:
-                c['source_page_number'] = min(pages)
-                valid.append(c)
+                logger.warning(f"Dropping concept with non-integer source_page_number: {page}")
                 continue
 
             if page_int in pages:
                 c['source_page_number'] = page_int
                 valid.append(c)
             else:
-                c['source_page_number'] = min(pages)
-                valid.append(c)
+                logger.warning(f"Dropping concept with out-of-range source_page_number: {page_int}")
+                continue
     return valid
 
 # --- Standardize ---

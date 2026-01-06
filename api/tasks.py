@@ -341,7 +341,15 @@ async def process_file_data(
             error_msg = f"Fatal error in file processing pipeline: {str(e)[:1000]}"
             return await handle_processing_error(file_id_int, error_msg)
 
-async def process_query_data(id: str, history_id: str, message: str, language: str, comprehension_level: str):
+async def process_query_data(
+    id: str,
+    history_id: str,
+    message: str,
+    language: str,
+    comprehension_level: str,
+    workspace_id: int | None = None,
+    file_id: int | None = None,
+):
     """Processes a user query and generates a response using SyntextAgent with enhanced RAG."""
     try:
         # Get conversation history in formatted form
@@ -366,6 +374,8 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
                 user_id=int(id),
                 query=rewritten_query,
                 query_embedding=query_embedding,
+                workspace_id=workspace_id,
+                file_id=file_id,
                 top_k=15,
             )
             
@@ -379,6 +389,8 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
                             user_id=int(id),
                             query=term,
                             query_embedding=term_embedding,
+                            workspace_id=workspace_id,
+                            file_id=file_id,
                             top_k=5,
                         )
                         additional_results.extend(term_results)
@@ -397,14 +409,30 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             if file_types:
                 logger.info(f"Retrieved content from file types: {file_types}")
                 
-            # Deduplicate results by segment ID
-            seen_ids = set()
+            # Deduplicate results by segment_id when available, otherwise by chunk_id.
+            # NOTE: hybrid_search returns segment_id as a top-level field.
+            seen_keys = set()
             unique_results = []
             for result in all_results:
-                segment_id = result.get('meta_data', {}).get('segment_id', None)
-                if segment_id and segment_id not in seen_ids:
-                    seen_ids.add(segment_id)
-                    unique_results.append(result)
+                seg_id = result.get('segment_id')
+                chunk_id = result.get('chunk_id')
+                file_id = result.get('file_id')
+
+                dedup_key = (file_id, seg_id) if seg_id is not None else (file_id, chunk_id)
+                if dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
+                unique_results.append(result)
+
+            # Provide a normalized score field for downstream components.
+            # SmartChunkSelector expects `similarity_score`.
+            for r in unique_results:
+                if 'similarity_score' in r:
+                    continue
+                if r.get('hybrid_score') is not None:
+                    r['similarity_score'] = float(r.get('hybrid_score') or 0.0)
+                else:
+                    r['similarity_score'] = 0.0
             
             # Apply cross-encoder reranking
             try:
@@ -413,9 +441,31 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
             except Exception as rerank_error:
                 logger.warning(f"Reranking error: {rerank_error}, falling back to original ranking")
                 reranked_results = unique_results[:15] if len(unique_results) > 15 else unique_results
+
+            # Ensure reranked results expose similarity_score for chunk selection.
+            for r in reranked_results:
+                if r.get('rerank_score') is not None:
+                    r['similarity_score'] = float(r.get('rerank_score') or 0.0)
+                elif r.get('hybrid_score') is not None:
+                    r['similarity_score'] = float(r.get('hybrid_score') or 0.0)
+                else:
+                    r['similarity_score'] = 0.0
             
             # Select chunks that fit token budget while maximizing relevance and diversity
             context_chunks = smart_chunk_selection(reranked_results, rewritten_query)
+
+            try:
+                if context_chunks:
+                    logger.info(
+                        "Selected context chunks: " + ", ".join(
+                            [
+                                f"file={c.get('file_name','?')} page={c.get('page_number','?')} chunk_id={c.get('chunk_id','?')} score={c.get('similarity_score',0):.4f}"
+                                for c in context_chunks[:6]
+                            ]
+                        )
+                    )
+            except Exception:
+                pass
             
             # Generate response using the enhanced context
             response = syntext.query_pipeline(message, formatted_history, context_chunks, language, comprehension_level)
@@ -429,6 +479,8 @@ async def process_query_data(id: str, history_id: str, message: str, language: s
                 user_id=int(id),
                 query=message,
                 query_embedding=query_embedding,
+                workspace_id=workspace_id,
+                file_id=file_id,
                 top_k=10,
             )
             response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)

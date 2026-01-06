@@ -43,6 +43,8 @@ async def create_message(
     language: str = Query("English", description="Language of the message"),
     comprehension_level: str = Query("beginner", description="Comprehension level of the message"),
     history_id: int = Query(..., description="ID of the chat history"),
+    workspace_id: int | None = Query(None, description="Optional workspace ID to scope retrieval"),
+    file_id: int | None = Query(None, description="Optional file ID to scope retrieval"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -57,7 +59,16 @@ async def create_message(
         message_list = [user_request]
 
         # Enqueue the task for processing the query
-        background_tasks.add_task(process_query_data, user_id, history_id, message, language, comprehension_level)
+        background_tasks.add_task(
+            process_query_data,
+            user_id,
+            history_id,
+            message,
+            language,
+            comprehension_level,
+            workspace_id,
+            file_id,
+        )
         logger.info(f"Enqueued Task for processing {message}")
 
         return message_list

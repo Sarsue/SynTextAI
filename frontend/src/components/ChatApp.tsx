@@ -98,6 +98,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
 
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
+    const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const idTokenRef = useRef<string | null>(null); 
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState("chat"); 
@@ -382,8 +383,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         if (currentHistory !== null && !isNaN(currentHistory)) {
             const history = histories[currentHistory];
             if (history) {
+                const workspaceIdParam = currentWorkspaceId != null ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}` : '';
                 const linkDataResponse = await callApiWithToken(
-                    `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                    `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehension_level=${encodeURIComponent(comprehensionLevel)}${workspaceIdParam}`,
                     'POST'
                 );
                 if (linkDataResponse) {
@@ -412,8 +414,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     const newHistory: History = { id: createHistoryData.id, title: createHistoryData.title, messages: [] };
                     setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: newHistory }));
                     setCurrentHistory(newHistory.id);
+                    const workspaceIdParam = currentWorkspaceId != null ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}` : '';
                     const linkDataResponse = await callApiWithToken(
-                        `api/v1/messages?message=${encodeURIComponent(message)}&history-id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                        `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehension_level=${encodeURIComponent(comprehensionLevel)}${workspaceIdParam}`,
                         'POST'
                     );
                     if (linkDataResponse) {
@@ -632,6 +635,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     <KnowledgeBaseComponent
                         onFileClick={setSelectedFile}
                         darkMode={darkMode}
+                        onWorkspaceChange={setCurrentWorkspaceId}
                     />
                     <div className="settings-button-container">
                         <button onClick={handleSettingsClick} className="button-secondary settings-btn">

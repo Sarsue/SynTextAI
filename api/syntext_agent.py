@@ -160,6 +160,35 @@ class SyntextAgent:
                     logger.error("No response generated from LLM")
                     return "Sorry, I couldn't generate a response. Please try again."
 
+                # Step 7.5: Validate citation format. If we provided context, we require at least
+                # one valid [Segment N] citation, and N must refer to an existing segment.
+                num_segments = len(top_k_results)
+                cited = re.findall(r"\[Segment\s*([0-9]+)\]", llm_answer_with_citations)
+                if num_segments > 0:
+                    if not cited:
+                        logger.info("LLM response missing citations; refusing to answer without evidence")
+                        return (
+                            "I couldn't find enough evidence in your documents to answer that confidently. "
+                            "Please rephrase your question or ask about a more specific section."
+                        )
+
+                    invalid = []
+                    for c in cited:
+                        try:
+                            idx = int(c)
+                        except Exception:
+                            invalid.append(c)
+                            continue
+                        if idx < 1 or idx > num_segments:
+                            invalid.append(c)
+
+                    if invalid:
+                        logger.info(f"LLM response has invalid citations (out of range): {invalid}")
+                        return (
+                            "I couldn't validate the citations for that answer against your documents. "
+                            "Please rephrase your question or ask for a direct quote from the document."
+                        )
+
                 # Step 8: Combine LLM answer with improved source map
                 final_response = llm_answer_with_citations + "\n\n" + source_map
                 

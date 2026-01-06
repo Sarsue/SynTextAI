@@ -59,26 +59,33 @@ class SmartChunkSelector(ChunkSelectorInterface):
                 sorted_chunks = sorted_chunks[1:]
             
             # Strategy: Mix high relevance with diversity
-            seen_sources = set()
+            seen_keys = set()
             if selected_chunks:
-                first_source = selected_chunks[0].get('file_name', '')
-                seen_sources.add(first_source)
+                first = selected_chunks[0]
+                first_source = first.get('file_name', '')
+                first_seg = first.get('segment_id')
+                first_page = first.get('page_number')
+                first_key = (first_source, first_seg if first_seg is not None else first_page)
+                seen_keys.add(first_key)
             
             # Try to add diverse sources while respecting token budget
             for chunk in sorted_chunks:
                 chunk_content = chunk.get('content', '')
                 chunk_tokens = self._estimate_tokens(chunk_content)
                 source = chunk.get('file_name', '')
+                seg_id = chunk.get('segment_id')
+                page_num = chunk.get('page_number')
+                diversity_key = (source, seg_id if seg_id is not None else page_num)
                 
                 # Skip if adding this would exceed the token budget
                 if current_tokens + chunk_tokens > token_budget:
                     continue
                 
-                # Prioritize chunks from different sources
-                if source not in seen_sources:
+                # Prioritize diverse segments/pages first (even within the same file)
+                if diversity_key not in seen_keys:
                     selected_chunks.append(chunk)
                     current_tokens += chunk_tokens
-                    seen_sources.add(source)
+                    seen_keys.add(diversity_key)
                     
                 # Add more chunks from same source if we still have budget
                 elif current_tokens < (token_budget * 0.7):  # Only if we're using less than 70% of budget

@@ -38,6 +38,7 @@ const isYouTubeUrl = (url: string): boolean => {
 interface KnowledgeBaseComponentProps {
     onFileClick: (file: UploadedFile) => void;
     darkMode?: boolean;
+    onWorkspaceChange?: (workspaceId: number | null) => void;
 }
 
 interface FileStatus {
@@ -48,7 +49,7 @@ interface FileStatus {
     };
 }
 
-const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileClick, darkMode = false }) => {
+const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileClick, darkMode = false, onWorkspaceChange }) => {
     const {
         files, // Renamed from userFiles
         loadUserFiles,
@@ -115,6 +116,9 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const handleWorkspaceChange = (workspaceId: number) => {
         console.log('Workspace changed to:', workspaceId);
         setCurrentWorkspaceId(workspaceId);
+        if (onWorkspaceChange) {
+            onWorkspaceChange(workspaceId);
+        }
         // Files will reload automatically via useEffect
     };
 
