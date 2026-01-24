@@ -130,6 +130,12 @@ fi
 echo "[4/9] Setting up application directory..."
 mkdir -p "$APP_DIR"
 
+# Ensure docker-compose.yml is available inside APP_DIR so we can run compose from there.
+# This keeps relative bind mounts (e.g. ./api/config) resolving to /home/root/app/api/config.
+if [ -f /home/root/docker-compose.yml ]; then
+    cp /home/root/docker-compose.yml "$APP_DIR/docker-compose.yml"
+fi
+
 # Step 5: Copy environment file
 if [ -f /home/root/.env ]; then
     echo "✅ Copying environment file..."
@@ -273,7 +279,7 @@ pull_image "searxng/searxng:latest" || exit 1
 
 # Step 9: Bring up Docker containers
 echo "[9/9] Launching Docker containers..."
-sudo $COMPOSE_CMD -f docker-compose.yml up -d
+(cd "$APP_DIR" && sudo $COMPOSE_CMD -f docker-compose.yml up -d)
 
 echo "✅ Deployment completed successfully!"
 echo "📦 Docker images pulled and services started"
