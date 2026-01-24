@@ -72,7 +72,14 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error adding file {file_name}: {e}", exc_info=True)
                 return None
 
-    async def update_file_with_chunks(self, user_id: int, filename: str, file_type: str, extracted_data: List[Dict]) -> bool:
+    async def update_file_with_chunks(
+        self,
+        user_id: int,
+        filename: str,
+        file_type: str,
+        extracted_data: List[Dict],
+        file_id: Optional[int] = None,
+    ) -> bool:
         """Store processed file data with embeddings, segments, and metadata.
 
         Args:
@@ -85,13 +92,21 @@ class AsyncFileRepository(AsyncBaseRepository):
             bool: True if successful, False otherwise
         """
         async with self.get_async_session() as session:
+            file = None
             try:
                 # Get or create the file record
-                stmt = select(FileORM).where(
-                    and_(FileORM.user_id == user_id, FileORM.file_name == filename)
-                )
-                result = await session.execute(stmt)
-                file = result.scalar_one_or_none()
+                if file_id is not None:
+                    file = await session.get(FileORM, int(file_id))
+                else:
+                    # Filename is not unique (e.g. repeated YouTube URLs). Select newest match.
+                    stmt = (
+                        select(FileORM)
+                        .where(and_(FileORM.user_id == user_id, FileORM.file_name == filename))
+                        .order_by(FileORM.created_at.desc())
+                        .limit(1)
+                    )
+                    result = await session.execute(stmt)
+                    file = result.scalars().first()
 
                 if not file:
                     file = FileORM(

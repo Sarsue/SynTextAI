@@ -329,54 +329,71 @@ class YouTubeProcessor(FileProcessor):
         if not YouTubeTranscriptApi:
             logger.warning("YouTube Transcript API not available")
             return None
-            
+
         try:
-            logger.info(f"Attempting direct transcript fetch for {video_id} in language: {target_lang_code}")
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript = transcript_list.find_transcript([target_lang_code])
-            transcript_data = transcript.fetch()
+            # Prefer the simpler API which supports language fallbacks.
+            languages = [target_lang_code] if target_lang_code == 'en' else [target_lang_code, 'en']
+            logger.info(f"Attempting transcript fetch for {video_id} with languages={languages}")
+            transcript_data = YouTubeTranscriptApi.get_transcript(video_id, languages=languages)
 
             # Adapt YouTube API objects to dicts to match PDF standard
             adapted_transcript_data = []
             for entry in transcript_data:
+                # youtube_transcript_api commonly returns dicts like:
+                # {"text": "...", "start": 12.34, "duration": 4.56}
+                # but some implementations may return lightweight objects. Support both.
+                if isinstance(entry, dict):
+                    start = entry.get('start', 0)
+                    duration = entry.get('duration', 0)
+                    text = entry.get('text', '')
+                else:
+                    start = getattr(entry, 'start', 0)
+                    duration = getattr(entry, 'duration', 0)
+                    text = getattr(entry, 'text', '')
+
                 adapted_transcript_data.append({
-                    'start': entry.start,
-                    'duration': entry.duration,
-                    'text': entry.text
+                    'start': start,
+                    'duration': duration,
+                    'text': text,
                 })
 
             # Log YouTube API transcript format (DEBUG only)
             logger.debug(f"YouTube API transcript for video {video_id}: {len(adapted_transcript_data)} segments")
             logger.debug(f"YouTube API transcript first segment: {adapted_transcript_data[0] if adapted_transcript_data else 'None'}")
 
-            logger.info(f"Successfully fetched transcript in {target_lang_code}")
+            logger.info(f"Successfully fetched transcript for {video_id}")
             return adapted_transcript_data
-        except Exception as direct_fetch_error:
-            logger.warning(f"Direct transcript fetch failed: {direct_fetch_error}")
-            if target_lang_code != 'en':
-                try:
-                    logger.info(f"Attempting fallback to English transcript for {video_id}")
-                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                    transcript = transcript_list.find_transcript(['en'])
-                    transcript_data = transcript.fetch()
+        except Exception as primary_fetch_error:
+            logger.warning(f"Transcript fetch failed for {video_id}: {primary_fetch_error}")
 
-                    # Adapt English fallback to dicts
-                    adapted_transcript_data = []
-                    for entry in transcript_data:
-                        adapted_transcript_data.append({
-                            'start': entry.start,
-                            'duration': entry.duration,
-                            'text': entry.text
-                        })
+        # Fallback path for older transcript APIs or edge cases.
+        try:
+            logger.info(f"Attempting list_transcripts fallback for {video_id} in language: {target_lang_code}")
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript = transcript_list.find_transcript([target_lang_code])
+            transcript_data = transcript.fetch()
 
-                    # Log English fallback transcript format (DEBUG only)
-                    logger.debug(f"English fallback transcript for video {video_id}: {len(adapted_transcript_data)} segments")
-                    logger.debug(f"English fallback transcript first segment: {adapted_transcript_data[0] if adapted_transcript_data else 'None'}")
+            adapted_transcript_data = []
+            for entry in transcript_data:
+                if isinstance(entry, dict):
+                    start = entry.get('start', 0)
+                    duration = entry.get('duration', 0)
+                    text = entry.get('text', '')
+                else:
+                    start = getattr(entry, 'start', 0)
+                    duration = getattr(entry, 'duration', 0)
+                    text = getattr(entry, 'text', '')
 
-                    logger.info("Successfully fetched transcript in English as fallback")
-                    return adapted_transcript_data
-                except Exception as english_fetch_error:
-                    logger.warning(f"English transcript fallback also failed: {english_fetch_error}")
+                adapted_transcript_data.append({
+                    'start': start,
+                    'duration': duration,
+                    'text': text,
+                })
+
+            logger.info(f"Successfully fetched transcript via list_transcripts for {video_id}")
+            return adapted_transcript_data
+        except Exception as fallback_error:
+            logger.warning(f"Transcript list_transcripts fallback failed for {video_id}: {fallback_error}")
             return None
     
     async def _transcribe_with_whisper(self, video_id: str, target_lang_code: str) -> List[Dict[str, Any]]:
@@ -546,20 +563,41 @@ class YouTubeProcessor(FileProcessor):
         
         logger.info(f"Storing {len(chunks)} chunks for file_id: {file_id}")
         
-        # Prepare extracted_data for update_file_with_chunks (similar to PDF)
-        extracted_data = []
+        # Prepare extracted_data for update_file_with_chunks.
+        # AsyncFileRepository.update_file_with_chunks expects a list of segment dicts:
+        # { content, page_number, <meta...>, chunks: [{content, embedding}, ...] }
+        extracted_data: List[Dict[str, Any]] = []
+
         for chunk in chunks:
-            extracted_data.append({
-                'text': chunk['content'],  # Use 'text' for ChunkORM
-                'embedding': chunk['embedding'],
-                'metadata': chunk['metadata']
-            })
+            content = chunk.get('content', '')
+            embedding = chunk.get('embedding')
+            meta = chunk.get('metadata') or {}
+
+            # Persist video timestamps in Segment.meta_data so SyntextAgent can create citations.
+            start_time = meta.get('start_time')
+            end_time = meta.get('end_time')
+
+            segment_dict: Dict[str, Any] = {
+                'content': content,
+                'page_number': None,
+                'type': 'video',
+                'start_time': start_time,
+                'end_time': end_time,
+                'chunks': [
+                    {
+                        'content': content,
+                        'embedding': embedding,
+                    }
+                ],
+            }
+            extracted_data.append(segment_dict)
         
         success = await self.store.file_repo.update_file_with_chunks(
             user_id=int(user_id),
             filename=filename,
             file_type="youtube",
-            extracted_data=extracted_data
+            extracted_data=extracted_data,
+            file_id=int(file_id),
         )
         
         if success:

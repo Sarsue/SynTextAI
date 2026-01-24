@@ -9,15 +9,6 @@ from .interfaces import ReRankerInterface
 
 logger = logging.getLogger(__name__)
 
-# Try to import LLM service function
-try:
-    from ..llm_service import get_text_embedding
-except ImportError:
-    logger.warning("Could not import from llm_service, defining fallback function")
-    def get_text_embedding(text):
-        logger.error("llm_service.get_text_embedding not available")
-        return [0.0] * 768  # Return zero vector of typical embedding size
-
 
 class CrossEncoderReRanker(ReRankerInterface):
     """
