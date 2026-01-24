@@ -279,6 +279,7 @@ pull_image "searxng/searxng:latest" || exit 1
 
 # Step 9: Bring up Docker containers
 echo "[9/9] Launching Docker containers..."
+(cd "$APP_DIR" && sudo $COMPOSE_CMD -f docker-compose.yml down --remove-orphans)
 (cd "$APP_DIR" && sudo $COMPOSE_CMD -f docker-compose.yml up -d)
 
 echo "✅ Deployment completed successfully!"
