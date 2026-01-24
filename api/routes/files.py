@@ -188,6 +188,9 @@ async def save_file(
                         logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
                 
                 gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
+                if not gcs_url:
+                    logger.error(f"Failed to upload {file.filename} to storage (gcs_url is empty)")
+                    raise HTTPException(status_code=500, detail="Failed to upload file to storage")
                 file_id = await store.file_repo.add_file(
                     user_id=user_id, 
                     file_name=file.filename, 

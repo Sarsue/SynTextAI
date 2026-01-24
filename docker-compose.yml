@@ -16,6 +16,7 @@ services:
     # Database connection is handled via environment variables
     volumes:
       - syntextai_models:/app/models
+      - ./api/config:/app/api/config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
