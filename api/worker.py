@@ -23,6 +23,7 @@ from sqlalchemy import text
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 from pathlib import Path
 from api.models.orm_models import File
@@ -70,7 +71,7 @@ logger = logging.getLogger('syntextai-worker')
 MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "1"))
 
 # Polling configuration - Simplified to fixed 30-second intervals
-POLL_INTERVAL = 30  # Check for files every 30 seconds
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))  # Check for files every N seconds
 
 # API base URL for internal notifications (docker-compose sets this to http://syntextaiapp:3000)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/")
@@ -86,6 +87,20 @@ shutdown_event = asyncio.Event()
 
 # Global store instance to reuse across worker operations
 _store = None
+
+
+def _infer_user_gc_id_from_file_url(url: str) -> Optional[str]:
+    try:
+        if not url:
+            return None
+        parsed = urlparse(url)
+        parts = [p for p in (parsed.path or "").split("/") if p]
+        # Expected: /<bucket>/<user_gc_id>/...
+        if len(parts) < 2:
+            return None
+        return parts[1] or None
+    except Exception:
+        return None
 
 
 def get_repository_manager():
@@ -263,6 +278,22 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
 
         # Use async transaction to atomically fetch and update files
         async with store.file_repo.get_async_session() as session:
+            try:
+                count_stmt = select(text("count(*)")).select_from(File).where(File.processing_status == 'uploaded')
+                count_res = await session.execute(count_stmt)
+                uploaded_count = int(count_res.scalar() or 0)
+                if uploaded_count == 0:
+                    latest_stmt = (
+                        select(File.id, File.processing_status, File.file_name)
+                        .order_by(File.created_at.desc())
+                        .limit(1)
+                    )
+                    latest_res = await session.execute(latest_stmt)
+                    latest_row = latest_res.first()
+                    logger.info(f"No pending files found. uploaded_count=0 latest={latest_row}")
+            except Exception:
+                pass
+
             # Find files that need processing - simplified query without joinedload to avoid filtering issues
             stmt = (
                 select(File)
@@ -287,12 +318,15 @@ async def fetch_pending_files() -> List[Dict[str, Any]]:
             # Convert files to list of dictionaries
             pending_files = []
             for file in files_to_process:
+                inferred_gc_id = None
+                if file.file_url and "storage.googleapis.com" in (file.file_url or ""):
+                    inferred_gc_id = _infer_user_gc_id_from_file_url(file.file_url)
                 pending_files.append({
                     "id": file.id,
                     "file_name": file.file_name,
                     "file_url": file.file_url,
                     "user_id": file.user_id,
-                    "user_gc_id": "",
+                    "user_gc_id": inferred_gc_id or "",
                     "created_at": file.created_at
                 })
 

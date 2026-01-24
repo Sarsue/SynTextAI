@@ -22,6 +22,7 @@ from typing import Optional, List, Dict, Any
 from api.models.async_db import get_database_url
 from api.processors.factory import FileProcessingFactory
 import numpy as np  # Added for distractor generation
+from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
@@ -223,6 +224,26 @@ async def process_file_data(
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate key concepts, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id})")
 
+    def _infer_user_gc_id_from_file_url(url: str) -> Optional[str]:
+        """Infer firebase uid / GCS prefix from a public GCS URL.
+
+        Expected patterns:
+        - https://storage.googleapis.com/<bucket>/<user_gc_id>/<filename>
+        - https://storage.googleapis.com/<bucket>/<user_gc_id>/...
+        """
+        try:
+            if not url:
+                return None
+            parsed = urlparse(url)
+            # Path looks like: /<bucket>/<user_gc_id>/<filename>
+            parts = [p for p in (parsed.path or "").split("/") if p]
+            if len(parts) < 2:
+                return None
+            inferred = parts[1]
+            return inferred or None
+        except Exception:
+            return None
+
     async with store.file_repo.get_async_session() as transaction:  # Start transaction
         try:
             # Validate inputs
@@ -308,6 +329,13 @@ async def process_file_data(
 
                 if file_data is None:
                     logger.info(f"Downloading file {filename} from GCS")
+                    if not user_gc_id:
+                        inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
+                        if inferred_gc_id:
+                            logger.info(
+                                "user_gc_id missing; inferred from file_url for GCS download"
+                            )
+                            user_gc_id = inferred_gc_id
                     file_data = download_from_gcs(user_gc_id, filename)
                 if file_data is None:
                     return await handle_processing_error(file_id_int, f"Failed to download file {filename} from GCS")
