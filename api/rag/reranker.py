@@ -5,6 +5,7 @@ Re-ranking components for RAG systems.
 import logging
 from typing import List, Dict, Any
 
+from ..llm_service import get_text_embedding
 from .interfaces import ReRankerInterface
 
 logger = logging.getLogger(__name__)
