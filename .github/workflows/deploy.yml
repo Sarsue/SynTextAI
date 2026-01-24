@@ -113,10 +113,32 @@ jobs:
           echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
           chmod 600 .env
           
-          # Create Firebase credentials
-          mkdir -p api/config
-          echo "${{ secrets.FIREBASE_CREDENTIALS_JSON }}" > api/config/credentials.json
-          chmod 600 api/config/credentials.json
+          # Create Firebase/GCS service account credentials (JSON) for google-cloud-storage
+          # Do not rely on a prebuilt JSON blob secret because newline handling can corrupt JSON.
+          mkdir -p /home/root/app/api/config
+          python3 - <<'PY'
+          import json
+
+          creds = {
+              "type": "service_account",
+              "project_id": "${{ secrets.FIREBASE_PROJECT_ID }}",
+              "private_key_id": "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}",
+              "private_key": """${{ secrets.FIREBASE_PRIVATE_KEY }}""",
+              "client_email": "${{ secrets.FIREBASE_CLIENT_EMAIL }}",
+              "client_id": "${{ secrets.FIREBASE_CLIENT_ID }}",
+              "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+              "client_x509_cert_url": "${{ secrets.FIREBASE_CLIENT_CERT_URL }}",
+          }
+
+          # Validate JSON serialization now (fails fast if secrets are missing)
+          json.dumps(creds)
+
+          with open("/home/root/app/api/config/credentials.json", "w", encoding="utf-8") as f:
+              json.dump(creds, f)
+          PY
+          chmod 600 /home/root/app/api/config/credentials.json
           
           # Make deploy script executable and run it
           chmod +x deploy.sh
