@@ -177,6 +177,8 @@ server {
     http2 on;
     server_name $DOMAIN www.$DOMAIN;
 
+    client_max_body_size 100M;
+
     ssl_certificate /etc/ssl/certs/nginx-selfsigned.crt;
     ssl_certificate_key /etc/ssl/private/nginx-selfsigned.key;
 
