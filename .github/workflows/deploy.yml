@@ -116,28 +116,32 @@ jobs:
           # Create Firebase/GCS service account credentials (JSON) for google-cloud-storage
           # Do not rely on a prebuilt JSON blob secret because newline handling can corrupt JSON.
           mkdir -p /home/root/app/api/config
-          python3 - <<'PY'
-          import json
+          export FIREBASE_PROJECT_ID='${{ secrets.FIREBASE_PROJECT_ID }}'
+          export FIREBASE_PRIVATE_KEY_ID='${{ secrets.FIREBASE_PRIVATE_KEY_ID }}'
+          export FIREBASE_PRIVATE_KEY='${{ secrets.FIREBASE_PRIVATE_KEY }}'
+          export FIREBASE_CLIENT_EMAIL='${{ secrets.FIREBASE_CLIENT_EMAIL }}'
+          export FIREBASE_CLIENT_ID='${{ secrets.FIREBASE_CLIENT_ID }}'
+          export FIREBASE_CLIENT_CERT_URL='${{ secrets.FIREBASE_CLIENT_CERT_URL }}'
 
-          creds = {
-              "type": "service_account",
-              "project_id": "${{ secrets.FIREBASE_PROJECT_ID }}",
-              "private_key_id": "${{ secrets.FIREBASE_PRIVATE_KEY_ID }}",
-              "private_key": """${{ secrets.FIREBASE_PRIVATE_KEY }}""",
-              "client_email": "${{ secrets.FIREBASE_CLIENT_EMAIL }}",
-              "client_id": "${{ secrets.FIREBASE_CLIENT_ID }}",
-              "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-              "token_uri": "https://oauth2.googleapis.com/token",
-              "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-              "client_x509_cert_url": "${{ secrets.FIREBASE_CLIENT_CERT_URL }}",
-          }
+          python3 -c 'import json, os
+creds = {
+  "type": "service_account",
+  "project_id": os.environ.get("FIREBASE_PROJECT_ID", ""),
+  "private_key_id": os.environ.get("FIREBASE_PRIVATE_KEY_ID", ""),
+  "private_key": os.environ.get("FIREBASE_PRIVATE_KEY", "").replace("\\n", "\n"),
+  "client_email": os.environ.get("FIREBASE_CLIENT_EMAIL", ""),
+  "client_id": os.environ.get("FIREBASE_CLIENT_ID", ""),
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": os.environ.get("FIREBASE_CLIENT_CERT_URL", ""),
+}
+missing = [k for k in ("project_id","private_key_id","private_key","client_email","client_id","client_x509_cert_url") if not creds.get(k)]
+assert not missing, f"Missing Firebase credential fields: {missing}"
+with open("/home/root/app/api/config/credentials.json", "w", encoding="utf-8") as f:
+  json.dump(creds, f)
+print("Wrote /home/root/app/api/config/credentials.json")'
 
-          # Validate JSON serialization now (fails fast if secrets are missing)
-          json.dumps(creds)
-
-          with open("/home/root/app/api/config/credentials.json", "w", encoding="utf-8") as f:
-              json.dump(creds, f)
-          PY
           chmod 600 /home/root/app/api/config/credentials.json
           
           # Make deploy script executable and run it
