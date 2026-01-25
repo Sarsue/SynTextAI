@@ -61,11 +61,11 @@ async def create_message(
         # Enqueue the task for processing the query
         background_tasks.add_task(
             process_query_data,
-            user_id,
-            history_id,
             message,
             language,
             comprehension_level,
+            user_id,
+            history_id,
             workspace_id,
             file_id,
         )

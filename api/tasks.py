@@ -370,18 +370,18 @@ async def process_file_data(
             return await handle_processing_error(file_id_int, error_msg)
 
 async def process_query_data(
-    id: str,
-    history_id: str,
     message: str,
     language: str,
     comprehension_level: str,
+    id: int | None = None,
+    history_id: int | None = None,
     workspace_id: int | None = None,
     file_id: int | None = None,
 ):
     """Processes a user query and generates a response using SyntextAgent with enhanced RAG."""
     try:
         # Get conversation history in formatted form
-        formatted_history = await store.user_repo.format_user_chat_history(history_id, id)
+        formatted_history = await store.chat_repo.format_user_chat_history(history_id, id)
         
         # Try enhanced RAG pipeline first
         try:
@@ -399,7 +399,7 @@ async def process_query_data(
             
             # Enhanced retrieval: get more candidates for reranking via hybrid search
             vector_results = await store.file_repo.hybrid_search(
-                user_id=int(id),
+                user_id=id,
                 query=rewritten_query,
                 query_embedding=query_embedding,
                 workspace_id=workspace_id,
@@ -414,7 +414,7 @@ async def process_query_data(
                     try:
                         term_embedding = get_text_embedding(term)
                         term_results = await store.file_repo.hybrid_search(
-                            user_id=int(id),
+                            user_id=id,
                             query=term,
                             query_embedding=term_embedding,
                             workspace_id=workspace_id,
@@ -515,7 +515,7 @@ async def process_query_data(
             logger.info("Fallback to original RAG pipeline successful")
         
         # Save response and notify user
-        await store.user_repo.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)
+        await store.chat_repo.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)
         try:
             await websocket_manager.send_message(id, "message_received", {"status": "success", "history_id": history_id, "message": response})
         except Exception as ws_error:
