@@ -4,7 +4,6 @@ import os
 import re
 import gc
 from typing import Dict, List, Any, Optional, Tuple
-import yt_dlp
 from api.processors.base_processor import FileProcessor
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.processor_utils import generate_learning_materials_for_concepts, generate_learning_materials_for_concept, log_concept_processing_summary
@@ -246,16 +245,6 @@ class YouTubeProcessor(FileProcessor):
         
         if not video_id:
             raise ValueError(f"Could not extract video ID from YouTube URL: {filename}")
-
-        # Enforce maximum video duration before doing any heavy processing
-        duration_seconds = self._get_video_duration_seconds(video_id)
-        if duration_seconds is not None and duration_seconds > MAX_VIDEO_DURATION_SECONDS:
-            logger.warning(
-                f"YouTube video {video_id} duration {duration_seconds} seconds exceeds limit of {MAX_VIDEO_DURATION_SECONDS} seconds"
-            )
-            raise ValueError(
-                f"Video is too long ({int(duration_seconds // 60)} minutes). Maximum allowed duration is {int(MAX_VIDEO_DURATION_SECONDS // 60)} minutes."
-            )
             
         target_lang_code = LANGUAGE_CODE_MAP.get(language.lower(), 'en')
         
@@ -265,10 +254,7 @@ class YouTubeProcessor(FileProcessor):
         transcript_data = None
         while attempt < 3 and not transcript_data:
             try:
-                transcript_data = await self._transcribe_with_whisper(video_id, target_lang_code)
-                if not transcript_data:
-                    logger.warning(f"Whisper transcription failed for {video_id}, falling back to YouTube API (attempt {attempt+1})")
-                    transcript_data = await self._get_youtube_transcript(video_id, target_lang_code)
+                transcript_data = await self._get_youtube_transcript(video_id, target_lang_code)
                 if transcript_data:
                     full_text_check = '\n'.join([entry['text'] for entry in transcript_data])
                     if not full_text_check.strip():
@@ -303,26 +289,6 @@ class YouTubeProcessor(FileProcessor):
             "transcript_data": transcript_data,
             "video_id": video_id
         }
-
-    def _get_video_duration_seconds(self, video_id: str) -> Optional[float]:
-        """Fetch YouTube video duration in seconds using yt_dlp without downloading the video."""
-        try:
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=False)
-            duration = info.get('duration')
-            if duration is None:
-                logger.warning(f"No duration field found for YouTube video {video_id}")
-                return None
-            logger.info(f"YouTube video {video_id} duration: {duration} seconds")
-            return float(duration)
-        except Exception as e:
-            logger.warning(f"Failed to fetch duration for YouTube video {video_id}: {e}")
-            return None
     
     async def _get_youtube_transcript(self, video_id: str, target_lang_code: str) -> List[Dict[str, Any]]:
         """Attempt to get transcript via YouTube API."""
@@ -395,58 +361,6 @@ class YouTubeProcessor(FileProcessor):
         except Exception as fallback_error:
             logger.warning(f"Transcript list_transcripts fallback failed for {video_id}: {fallback_error}")
             return None
-    
-    async def _transcribe_with_whisper(self, video_id: str, target_lang_code: str) -> List[Dict[str, Any]]:
-        """Use Whisper for local transcription when YouTube API fails."""
-        try:
-            from api.tasks import download_youtube_audio_segment, transcribe_audio_chunked, adapt_whisper_segments_to_transcript_data
-        except ImportError as e:
-            logger.error(f"Whisper dependencies not available: {e}")
-            return None
-            
-        temp_audio_file_path = None
-        try:
-            logger.info(f"Attempting fallback to local Whisper transcription for video ID: {video_id}")
-            temp_audio_file_path = download_youtube_audio_segment(video_id, language_code_for_whisper=target_lang_code)
-            if not temp_audio_file_path:
-                logger.error(f"Failed to download audio for video ID {video_id}")
-                return None
-                
-            logger.info(f"Successfully downloaded audio to {temp_audio_file_path}")
-            whisper_lang_code = target_lang_code if target_lang_code and target_lang_code != 'en' else None
-            
-            try:
-                raw_whisper_segments, _ = await asyncio.wait_for(
-                    transcribe_audio_chunked(temp_audio_file_path, language=whisper_lang_code),
-                    timeout=300  # 5 minutes timeout to match transcription function
-                )
-                if raw_whisper_segments:
-                    transcript_data = adapt_whisper_segments_to_transcript_data(raw_whisper_segments)
-
-                    # Log raw Whisper segments before adaptation (DEBUG only)
-                    logger.debug(f"Raw Whisper segments for video {video_id}: {len(raw_whisper_segments)}")
-                    logger.debug(f"Raw Whisper first segment: {raw_whisper_segments[0] if raw_whisper_segments else 'None'}")
-                    logger.debug(f"Raw Whisper segment keys: {list(raw_whisper_segments[0].keys()) if raw_whisper_segments else 'None'}")
-
-                    logger.info(f"Successfully transcribed using Whisper with {len(raw_whisper_segments)} segments")
-                    return transcript_data
-                else:
-                    logger.error(f"Whisper transcription returned no segments for {video_id}")
-                    return None
-            except asyncio.TimeoutError:
-                logger.error(f"Whisper transcription timed out after 5 minutes for {video_id}")
-                return None
-            except Exception as whisper_error:
-                logger.error(f"Error during Whisper transcription: {whisper_error}", exc_info=True)
-                return None
-                
-        finally:
-            if temp_audio_file_path and os.path.exists(temp_audio_file_path):
-                try:
-                    os.remove(temp_audio_file_path)
-                    logger.info(f"Cleaned up temporary audio file: {temp_audio_file_path}")
-                except Exception as cleanup_error:
-                    logger.error(f"Error cleaning up temp file: {cleanup_error}")
     
     async def generate_embeddings(self, content: Dict[str, Any]) -> Dict[str, Any]:
         """Generate embeddings for full transcript, aligned with PDF processing."""

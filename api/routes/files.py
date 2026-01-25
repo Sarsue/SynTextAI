@@ -7,6 +7,11 @@ from sqlalchemy.orm import Session, joinedload
 from redis.exceptions import RedisError
 from ..utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
+import asyncio
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+except ImportError:
+    YouTubeTranscriptApi = None
 
 # PRODUCTION: File size limits to prevent OOM and abuse
 MAX_FILE_SIZE_MB = 100  # 100MB max for PDFs
@@ -24,7 +29,6 @@ from ..schemas.learning_content import (
     QuizQuestionCreate, QuizQuestionResponse, QuizQuestionsListResponse, QuizQuestionUpdate
 )
 from ..models import KeyConcept as KeyConceptORM, Flashcard as FlashcardORM, QuizQuestion as QuizQuestionORM, File
-import asyncio
 
 class FileResponse(BaseModel):
     id: int
@@ -49,6 +53,44 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI router
 files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
+
+LANGUAGE_CODE_MAP = {
+    "english": "en",
+    "spanish": "es",
+    "french": "fr",
+    "german": "de",
+    "italian": "it",
+    "portuguese": "pt",
+    "russian": "ru",
+    "japanese": "ja",
+    "korean": "ko",
+    "chinese": "zh",
+}
+
+
+async def _assert_youtube_transcript_available(video_id: str, target_lang_code: str) -> None:
+    if not YouTubeTranscriptApi:
+        raise HTTPException(status_code=503, detail="YouTube transcript support is not available on this server.")
+
+    languages = [target_lang_code] if target_lang_code == "en" else [target_lang_code, "en"]
+    try:
+        transcript = await asyncio.to_thread(
+            YouTubeTranscriptApi.get_transcript,
+            video_id,
+            languages=languages,
+        )
+    except Exception as e:
+        logger.info(f"Rejected YouTube URL; transcript unavailable for video_id={video_id}: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="This YouTube video doesn't have captions/transcript available. Please choose a video with captions (CC).",
+        )
+
+    if not transcript:
+        raise HTTPException(
+            status_code=400,
+            detail="This YouTube video doesn't have captions/transcript available. Please choose a video with captions (CC).",
+        )
 
 # Define a standardized API response model
 T = TypeVar('T')
@@ -115,6 +157,9 @@ async def save_file(
                 raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
 
             video_id = match.group(1)
+
+            target_lang_code = LANGUAGE_CODE_MAP.get((language or "English").lower(), "en")
+            await _assert_youtube_transcript_available(video_id=video_id, target_lang_code=target_lang_code)
 
             # For YouTube, the stored artifacts are typically transcripts and derived data.
             # Treat the initial record as a very small logical size to avoid blocking later

@@ -138,8 +138,8 @@ class AsyncFileRepository(AsyncBaseRepository):
                     if 'chunks' in segment_data:
                         for chunk_data in segment_data['chunks']:
                             chunk = ChunkORM(
+                                file_id=file.id,
                                 segment_id=segment.id,
-                                content=chunk_data.get('content', ''),
                                 embedding=chunk_data.get('embedding')
                             )
                             session.add(chunk)
