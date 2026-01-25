@@ -16,6 +16,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     isSending,
     onContentAdded
 }) => {
+    const YOUTUBE_UPLOAD_ENABLED = false;
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
     const { darkMode, user } = useUserContext();
@@ -234,13 +235,15 @@ const InputArea: React.FC<InputAreaProps> = ({
                     </div>
                 ))}
             </div>
-            {showYoutubeInput && (
+            {YOUTUBE_UPLOAD_ENABLED && showYoutubeInput && (
                 <div 
                     className="youtube-input-container" 
                     style={{ 
                         padding: '5px 0',
                         animation: 'fadeIn 0.2s ease-in-out',
                         overflow: 'hidden',
+                        display: 'flex',
+                        alignItems: 'center',
                     }}
                 >
                     <input
@@ -310,22 +313,24 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 >
                                     <span style={{ marginRight: '10px', fontSize: '1.2em' }}>📎</span> Upload Files
                                 </div>
-                                <div 
-                                    onClick={() => {
-                                        setShowYoutubeInput(true);
-                                        setShowAddMenu(false);
-                                    }}
-                                    style={{
-                                        padding: '10px 12px',
-                                        cursor: 'pointer',
-                                        borderRadius: '4px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        backgroundColor: darkMode ? '#444' : '#f5f5f5',
-                                    }}
-                                >
-                                    <span style={{ marginRight: '10px', fontSize: '1.2em' }}>📺</span> Add YouTube Video
-                                </div>
+                                {YOUTUBE_UPLOAD_ENABLED && (
+                                    <div 
+                                        onClick={() => {
+                                            setShowYoutubeInput(true);
+                                            setShowAddMenu(false);
+                                        }}
+                                        style={{
+                                            padding: '10px 12px',
+                                            cursor: 'pointer',
+                                            borderRadius: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            backgroundColor: darkMode ? '#444' : '#f5f5f5',
+                                        }}
+                                    >
+                                        <span style={{ marginRight: '10px', fontSize: '1.2em' }}>📺</span> Add YouTube Video
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
