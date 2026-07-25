@@ -42,8 +42,9 @@
 }
 
 .quota-icon {
-    font-size: 24px;
     flex-shrink: 0;
+    display: flex;
+    color: var(--text-secondary, #666);
 }
 
 .quota-info {
@@ -77,32 +78,7 @@
 }
 
 .expand-btn {
-    width: 32px;
-    height: 32px;
-    border: none;
-    background-color: rgba(0, 0, 0, 0.05);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 20px;
-    color: #666;
-    transition: all 0.2s ease;
     flex-shrink: 0;
-}
-
-.expand-btn:hover {
-    background-color: rgba(0, 0, 0, 0.1);
-}
-
-.dark-mode .expand-btn {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: #999;
-}
-
-.dark-mode .expand-btn:hover {
-    background-color: rgba(255, 255, 255, 0.15);
 }
 
 /* Quota Details (Expandable) */
@@ -138,6 +114,9 @@
 }
 
 .quota-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
     font-size: 13px;
     font-weight: 500;
     color: #333;
@@ -199,25 +178,21 @@
     line-height: 1.4;
 }
 
-.upgrade-button {
-    display: inline-block;
-    padding: 12px 28px;
+/* CTA-specific override: white pill on the purple gradient, instead of the
+   app's default accent color. Box model/typography come from shadcn's Button. */
+.upgrade-cta .upgrade-button {
     background-color: white;
     color: #667eea;
-    text-decoration: none;
-    border-radius: 8px;
-    font-size: 15px;
-    font-weight: 600;
-    transition: all 0.2s ease;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-.upgrade-button:hover {
+.upgrade-cta .upgrade-button:hover {
+    background-color: white;
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
-.upgrade-button:active {
+.upgrade-cta .upgrade-button:active {
     transform: translateY(0);
 }
 

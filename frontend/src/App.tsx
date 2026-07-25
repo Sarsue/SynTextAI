@@ -8,9 +8,10 @@ import Auth, { AuthRef } from './Auth';
 import Welcome from './Welcome';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
+import AcceptInvite from './components/AcceptInvite';
 import AnalyticsProvider from './components/AnalyticsProvider';
 
-const stripePromise = loadStripe(process.env.REACT_APP_STRIPE_API_KEY || "");
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_API_KEY || "");
 
 const App: React.FC = () => {
     const { user, subscriptionStatus } = useUserContext();
@@ -20,7 +21,7 @@ const App: React.FC = () => {
         <Elements stripe={stripePromise}>
             <AnalyticsProvider config={{
                 userId: user?.uid,
-                debugMode: process.env.NODE_ENV === 'development',
+                debugMode: import.meta.env.DEV,
             }}>
                 <Router>
                     <div className="app-container">
@@ -36,8 +37,8 @@ const App: React.FC = () => {
                             element={
                                 user ? (
                                     subscriptionStatus === 'active' || subscriptionStatus === 'trialing' ? (
-                                        <ChatApp 
-                                            user={user} 
+                                        <ChatApp
+                                            user={user}
                                             onLogout={() => authRef.current?.logOut()}
                                         />
                                     ) : (
@@ -53,7 +54,7 @@ const App: React.FC = () => {
                             element={user ? <SettingsPage stripePromise={stripePromise} user={user} /> : <Navigate to="/login" replace />}
                         />
 
-                        {/* ✅ Fix: Redirect all unknown routes to home */}
+                        <Route path="/invite/:token" element={<AcceptInvite />} />
                         <Route path="*" element={<Navigate to="/" />} />
                     </Routes>
                     </div>

@@ -4,302 +4,336 @@ import { Helmet } from 'react-helmet';
 import './Home.css';
 import { useUserContext } from './UserContext';
 import { usePostHog } from './components/AnalyticsProvider';
+import { Plus, Minus } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
+interface Vertical {
+    id: string;
+    label: string;
+    headline: string;
+    documents: string[];
+    examples: { q: string; a: string }[];
+}
+
+const verticals: Vertical[] = [
+    {
+        id: 'healthcare',
+        label: 'Healthcare',
+        headline: 'Your staff gets answers. You focus on patients.',
+        documents: ['Patient intake procedures', 'Billing & coding guides', 'HIPAA compliance policies', 'Treatment protocols', 'Insurance pre-auth checklists'],
+        examples: [
+            { q: 'What is the pre-auth process for MRI scans?', a: 'Sourced from your Insurance Pre-Auth Policy, p.4' },
+            { q: 'How do we handle a missed appointment fee?', a: 'Sourced from your Billing Procedures Manual, p.11' },
+        ],
+    },
+    {
+        id: 'accounting',
+        label: 'Accounting',
+        headline: 'Junior staff stop asking. Senior staff stop repeating.',
+        documents: ['Client onboarding checklists', 'Filing deadline calendars', 'Compliance procedures', 'Engagement letter templates', 'Software SOPs'],
+        examples: [
+            { q: 'What documents do we need for a new corporate client?', a: 'Sourced from your Client Onboarding SOP, p.2' },
+            { q: 'When is the T2 filing deadline for a December year-end?', a: 'Sourced from your Filing Deadlines Guide, p.7' },
+        ],
+    },
+    {
+        id: 'legal',
+        label: 'Legal',
+        headline: 'Find the precedent. Don\'t lose the billable hour.',
+        documents: ['Matter intake procedures', 'Client communication standards', 'Filing deadlines & court rules', 'Billing & disbursement policies', 'Conflict check procedures'],
+        examples: [
+            { q: 'What is our conflict check process for new clients?', a: 'Sourced from your Intake Procedures Manual, p.3' },
+            { q: 'What are the disbursement approval thresholds?', a: 'Sourced from your Billing Policy, p.9' },
+        ],
+    },
+    {
+        id: 'property',
+        label: 'Property Management',
+        headline: 'Your team handles it right the first time.',
+        documents: ['Lease agreement templates', 'Maintenance request procedures', 'Tenant communication policies', 'Move-in / move-out checklists', 'Vendor contact directories'],
+        examples: [
+            { q: 'What is the notice period required before a property inspection?', a: 'Sourced from your Tenant Policy Manual, p.6' },
+            { q: 'Who do we call for emergency HVAC repairs?', a: 'Sourced from your Vendor Directory, p.1' },
+        ],
+    },
+    {
+        id: 'trades',
+        label: 'Trades & HVAC',
+        headline: 'Techs get answers in the field. You stop getting calls.',
+        documents: ['Installation specifications', 'Warranty & service policies', 'Safety procedures', 'Equipment manuals', 'Quote & pricing guides'],
+        examples: [
+            { q: 'What is the warranty period on Carrier heat pump installations?', a: 'Sourced from your Warranty Policy, p.2' },
+            { q: 'What PPE is required for refrigerant handling?', a: 'Sourced from your Safety Procedures Manual, p.5' },
+        ],
+    },
+    {
+        id: 'insurance',
+        label: 'Insurance',
+        headline: 'Your agents look it up in seconds, not minutes.',
+        documents: ['Product & coverage guides', 'Underwriting guidelines', 'Claims procedures', 'Compliance & licensing docs', 'Client communication scripts'],
+        examples: [
+            { q: 'What does our commercial general liability policy exclude?', a: 'Sourced from your Product Guide, p.14' },
+            { q: 'What is the claims reporting window for property damage?', a: 'Sourced from your Claims Procedures, p.3' },
+        ],
+    },
+];
+
+const faqs = [
+    {
+        q: 'How is this different from searching a PDF?',
+        a: 'Search requires you to know what to look for. Syntext lets staff ask questions in plain English and get a direct answer with the exact source cited — no reading through results.',
+    },
+    {
+        q: 'What file types do you support?',
+        a: 'PDF and Word (.docx) files. If your SOPs, policies, or handbooks are in those formats, you are ready to go.',
+    },
+    {
+        q: 'How accurate are the answers?',
+        a: 'Syntext only answers from what is in your documents. If the answer is not there, it says so. Every answer includes a link to the source section so staff can verify.',
+    },
+    {
+        q: 'How do I add my team?',
+        a: 'Invite staff by email from inside the app. They click a link and they are in. No software to install.',
+    },
+    {
+        q: 'Is my data private?',
+        a: 'Your documents are only accessible to your workspace. We do not use your documents to train AI models.',
+    },
+    {
+        q: 'Can I try before committing?',
+        a: 'Yes. Every new workspace starts with a free trial. Upload your documents and invite your team before entering any payment details.',
+    },
+];
 
 const Home: React.FC = () => {
     const { darkMode } = useUserContext();
     const posthog = usePostHog();
-    const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+    const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
+    const [activeVertical, setActiveVertical] = useState<string>(verticals[0].id);
 
-    const demoEmbedUrl = 'https://www.youtube.com/embed/4oy5PdsxI4E';
-    const pilotContactHref = 'https://calendly.com/osasigbinedion/30min';
-    
-    // Core features to showcase
-    const features = [
-        { 
-            name: "Key Concepts with Citations", 
-            icon: "Cite", 
-            description: "Extract decision-relevant concepts and jump to the exact source page/timestamp"
-        },
-        { 
-            name: "Due Diligence Speed", 
-            icon: "Fast", 
-            description: "Turn dense PDFs and long videos into an evidence-backed brief faster"
-        },
-        { 
-            name: "Audit-Friendly Outputs", 
-            icon: "Trace", 
-            description: "Make defensible recommendations with an explicit trace back to the source"
-        },
-        { 
-            name: "One Place for PDF + Video", 
-            icon: "Media", 
-            description: "Analyze reports and recordings in one workflow—no context switching"
-        }
-    ];
-
-    const useCases = [
-        {
-            title: 'Due diligence briefs',
-            description: 'Turn dense packets into citeable concepts you can defend in a memo or deck.'
-        },
-        {
-            title: 'Market & competitor synthesis',
-            description: 'Extract the key ideas and claims fast, with direct links back to source.'
-        },
-        {
-            title: 'Policy & research notes',
-            description: 'Build evidence-backed notes you can share with your team with traceability.'
-        }
-    ];
-
-    const faqs = [
-        {
-            q: 'Is SynText AI self-serve?',
-            a: 'Yes. You can sign in and use it immediately. Teams can also start with a short pilot to validate fit before committing annually.'
-        },
-        {
-            q: 'How do citations work?',
-            a: 'SynText AI links concepts back to the source so you can quickly verify context and defend outputs. PDFs link to pages; videos link to timestamps.'
-        },
-        {
-            q: 'What formats do you support?',
-            a: 'Today: PDFs, pasted text, and YouTube links. We are iterating based on consultant workflows and real pilot feedback.'
-        },
-        {
-            q: 'How does pricing work?',
-            a: 'SynText AI offers professional annual plans. For teams, we recommend starting with a pilot and then moving to an annual subscription.'
-        }
-    ];
+    const vertical = verticals.find(v => v.id === activeVertical)!;
 
     return (
-        <div className={`app-container ${darkMode ? 'dark-mode' : ''}`}>
+        <div className={`home ${darkMode ? 'dark-mode' : ''}`}>
             <Helmet>
-                <title>SynText AI - Source-Linked Key Concepts for Consultants & Analysts</title>
-                <meta name="description" content="SynText AI turns dense PDFs and long videos into decision-ready key concepts with citations you can click. Built for consultants and analysts doing research, diligence, and client deliverables." />
-                <meta name="keywords" content="consulting research, due diligence, document analysis, key concepts, citations, evidence, policy research, analyst tool" />
-                <link rel="canonical" href="https://syntextai.com/" />
-                <script type="application/ld+json">
-                    {
-                        JSON.stringify({
-                            "@context": "https://schema.org",
-                            "@type": "WebApplication",
-                            "name": "SynText AI",
-                            "description": "SynText AI turns dense PDFs and long videos into decision-ready key concepts with citations you can click.",
-                            "applicationCategory": "BusinessApplication",
-                            "offers": {
-                                "@type": "Offer",
-                                "price": "0",
-                                "priceCurrency": "USD"
-                            }
-                        })
-                    }
-                </script>
+                <title>Syntext AI — Instant answers from your company documents</title>
+                <meta name="description" content="Upload your SOPs, policies, and manuals. Your staff gets instant cited answers." />
             </Helmet>
-            
-            {/* Minimal Header */}
-            <header className="consensus-header">
-                <div className="logo-container">
-                    <h1 className="app-title">SynText AI</h1>
-                </div>
-                <nav className="home-nav" aria-label="Primary">
-                    <a className="home-nav-link" href="#demo" onClick={() => posthog.capture('homepage_nav_click', { target: 'demo' })}>Demo</a>
-                    <a className="home-nav-link" href="#use-cases" onClick={() => posthog.capture('homepage_nav_click', { target: 'use_cases' })}>Use cases</a>
-                    <a className="home-nav-link" href="#trust" onClick={() => posthog.capture('homepage_nav_click', { target: 'trust' })}>Security</a>
-                    <a className="home-nav-link" href="#faq" onClick={() => posthog.capture('homepage_nav_click', { target: 'faq' })}>FAQ</a>
-                </nav>
-                <div className="auth-buttons">
-                    <a
-                        href={pilotContactHref}
-                        className="signup-button"
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={() => {
-                            posthog.capture('homepage_request_pilot_click', { location: 'header' });
-                        }}
-                    >
-                        Request a pilot
-                    </a>
-                    <Link
-                        to="/login"
-                        className="signin-link"
-                        onClick={() => {
-                            posthog.capture('homepage_sign_in_click', { location: 'header' });
-                        }}
-                    >
+
+            {/* Header */}
+            <header className="home-header">
+                <span className="home-logo">Syntext</span>
+                <div className="home-header-actions">
+                    <Link to="/login" className="home-link" onClick={() => posthog.capture('homepage_sign_in_click')}>
                         Sign in
                     </Link>
+                    <Button asChild className="home-btn-primary">
+                        <Link to="/login" onClick={() => posthog.capture('homepage_get_started_click', { location: 'header' })}>
+                            Get started
+                        </Link>
+                    </Button>
                 </div>
             </header>
 
-            {/* Main Hero with Search */}
-            <main className="consensus-main">
-                <div className="hero-section">
-                    <div className="hero-content">
-                        <h2 className="hero-title">Turn dense source material into citeable insights</h2>
-                        <p className="hero-text">SynText AI helps consultants and analysts synthesize PDFs and long videos into key concepts with clickable citations—so you can ship defensible recommendations faster.</p>
-                        <div className="home-cta-row">
-                            <a
-                                href={pilotContactHref}
-                                className="signup-button"
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={() => {
-                                    posthog.capture('homepage_request_pilot_click', { location: 'hero' });
-                                }}
-                            >
-                                Request a pilot
-                            </a>
-                            <a
-                                href="#demo"
-                                className="signin-link"
-                                onClick={() => {
-                                    posthog.capture('homepage_watch_demo_click', { location: 'hero' });
-                                }}
-                            >
-                                Watch demo
-                            </a>
-                        </div>
-                        <p className="home-pricing-anchor">Annual plans for professionals. Teams start with a pilot.</p>
-                    </div>
-                    <div className="home-social-proof" aria-label="Social proof">
-                        <div className="home-proof-title">Built for research-heavy workflows</div>
-                        <div className="home-proof-badges">
-                            <span className="home-proof-badge">Diligence</span>
-                            <span className="home-proof-badge">Research briefs</span>
-                            <span className="home-proof-badge">Client deliverables</span>
-                            <span className="home-proof-badge">Evidence review</span>
-                        </div>
-                    </div>
+            {/* Hero */}
+            <section className="home-hero">
+                <p className="home-label">AI assistant for small business teams</p>
+                <h1 className="home-headline">
+                    Your documents.<br />Your team's answers.
+                </h1>
+                <p className="home-subtext">
+                    Upload your SOPs, policies, and manuals. Staff get instant cited answers.<br />
+                    You stop being interrupted.
+                </p>
+                <div className="home-actions">
+                    <Button asChild className="home-btn-primary home-btn-lg">
+                        <Link to="/login" onClick={() => posthog.capture('homepage_get_started_click', { location: 'hero' })}>
+                            Start free trial
+                        </Link>
+                    </Button>
+                    <Button asChild variant="outline" className="home-btn-ghost home-btn-lg">
+                        <a href="https://calendly.com/osasigbinedion/30min" target="_blank" rel="noreferrer" onClick={() => posthog.capture('homepage_demo_click')}>
+                            Book a demo
+                        </a>
+                    </Button>
                 </div>
+                <p className="home-footnote">No credit card required.</p>
+            </section>
 
-                <section id="demo" className="home-demo-section">
-                    <div className="home-section-header">
-                        <h2 className="home-section-title">See it in action</h2>
-                        <p className="home-section-subtitle">Watch how SynText AI turns dense source material into citeable concepts you can use in a brief.</p>
-                    </div>
-                    <div className="video-container">
-                        <iframe
-                            src={demoEmbedUrl}
-                            frameBorder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            referrerPolicy="strict-origin-when-cross-origin"
-                            allowFullScreen
-                            title="SynText AI Demo"
-                        />
-                    </div>
-                </section>
-                
-                <section id="use-cases" className="home-use-cases">
-                    <div className="home-section-header">
-                        <h2 className="home-section-title">Use cases</h2>
-                        <p className="home-section-subtitle">Start where the pain is highest: dense inputs, tight deadlines, and high stakes.</p>
-                    </div>
-                    <div className="home-cards-grid">
-                        {useCases.map((uc) => (
-                            <div key={uc.title} className="home-card">
-                                <h3 className="home-card-title">{uc.title}</h3>
-                                <p className="home-card-description">{uc.description}</p>
-                            </div>
-                        ))}
-                    </div>
-                </section>
+            <div className="home-divider" />
 
-                {/* Features Section */}
-                <section className="features-section">
-                    <div className="home-section-header">
-                        <h2 className="home-section-title">One workflow for clarity + traceability</h2>
-                        <p className="home-section-subtitle">Fast synthesis without losing the source of truth.</p>
-                    </div>
-                    <div className="features-grid">
-                        {features.map((feature, index) => (
-                            <div className="feature-item" key={index}>
-                                <div className="feature-icon">{feature.icon}</div>
-                                <h3 className="feature-title">{feature.name}</h3>
-                                <p className="feature-description">{feature.description}</p>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-
-                <section id="trust" className="home-trust-section">
-                    <div className="home-section-header">
-                        <h2 className="home-section-title">Loved by users. Approved by teams.</h2>
-                        <p className="home-section-subtitle">Built for professionals who need clarity and an audit trail.</p>
-                    </div>
-                    <div className="home-cards-grid">
-                        <div className="home-card">
-                            <h3 className="home-card-title">No extra tools</h3>
-                            <p className="home-card-description">One workflow for PDFs and long videos—reduce context switching.</p>
+            {/* How it works */}
+            <section className="home-section">
+                <h2 className="home-section-heading">How it works</h2>
+                <div className="home-steps">
+                    {[
+                        { n: '01', title: 'Upload your documents', body: 'Add your SOPs, policy manuals, or employee handbooks. PDF and Word files supported.' },
+                        { n: '02', title: 'Invite your staff', body: 'Add team members by email. They get access immediately — no training required.' },
+                        { n: '03', title: 'Staff get cited answers', body: 'Your team asks questions in plain English and gets answers with direct links to the source.' },
+                    ].map(s => (
+                        <div key={s.n} className="home-step">
+                            <span className="home-step-n">{s.n}</span>
+                            <h3 className="home-step-title">{s.title}</h3>
+                            <p className="home-step-body">{s.body}</p>
                         </div>
-                        <div className="home-card">
-                            <h3 className="home-card-title">Traceability by design</h3>
-                            <p className="home-card-description">Verify outputs quickly by jumping back to source pages and timestamps.</p>
-                        </div>
-                        <div className="home-card">
-                            <h3 className="home-card-title">Team-ready</h3>
-                            <p className="home-card-description">Start with a pilot, then move to an annual plan with support.</p>
-                        </div>
-                    </div>
-                </section>
+                    ))}
+                </div>
+            </section>
 
-                <section id="faq" className="home-faq-section">
-                    <div className="home-section-header">
-                        <h2 className="home-section-title">You’ve likely got a few questions</h2>
-                    </div>
-                    <div className="home-faq">
-                        {faqs.map((item, idx) => {
-                            const isOpen = openFaqIndex === idx;
-                            return (
-                                <button
-                                    key={item.q}
-                                    type="button"
-                                    className={`home-faq-item ${isOpen ? 'open' : ''}`}
-                                    onClick={() => {
-                                        setOpenFaqIndex(isOpen ? null : idx);
-                                        posthog.capture('homepage_faq_toggle', { index: idx, open: !isOpen });
-                                    }}
-                                >
-                                    <div className="home-faq-question">{item.q}</div>
-                                    {isOpen ? <div className="home-faq-answer">{item.a}</div> : null}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </section>
-                
+            <div className="home-divider" />
 
-                {/* Simple CTA */}
-                <section className="home-bottom-cta">
-                    <h2 className="pricing-title">Ready to move faster with evidence?</h2>
-                    <p className="pricing-description">Try SynText AI and see how source-linked concepts fit your workflow.</p>
-                    <div className="home-cta-row">
-                        <a
-                            href={pilotContactHref}
-                            className="signup-button"
-                            target="_blank"
-                            rel="noreferrer"
+            {/* Vertical selector */}
+            <section className="home-section">
+                <h2 className="home-section-heading">Built for your industry</h2>
+
+                {/* Tabs */}
+                <div className="home-vtabs" role="tablist">
+                    {verticals.map(v => (
+                        <Button
+                            key={v.id}
+                            variant="ghost"
+                            role="tab"
+                            aria-selected={activeVertical === v.id}
+                            className={`home-vtab ${activeVertical === v.id ? 'home-vtab--active' : ''}`}
                             onClick={() => {
-                                posthog.capture('homepage_request_pilot_click', { location: 'bottom_cta' });
+                                setActiveVertical(v.id);
+                                posthog.capture('homepage_vertical_click', { vertical: v.id });
                             }}
                         >
-                            Request a pilot
-                        </a>
-                        <Link 
-                            to="/login" 
-                            className="signin-link"
-                            onClick={() => posthog.capture('cta_clicked')}
-                        >
-                            Try it now
-                        </Link>
-                    </div>
-                </section>
-            </main>
-
-            {/* Simplified Footer */}
-            <footer className="consensus-footer">
-                <div className="copyright">
-                    <p>© 2025 OSAS INC. All rights reserved.</p>
+                            {v.label}
+                        </Button>
+                    ))}
                 </div>
+
+                {/* Panel */}
+                <div className="home-vpanel" role="tabpanel">
+                    <div className="home-vpanel-left">
+                        <p className="home-vpanel-headline">{vertical.headline}</p>
+                        <p className="home-vpanel-label">Documents you'd upload</p>
+                        <ul className="home-vpanel-docs">
+                            {vertical.documents.map(d => <li key={d}>{d}</li>)}
+                        </ul>
+                    </div>
+                    <div className="home-vpanel-right">
+                        <p className="home-vpanel-label">Example questions your team asks</p>
+                        <div className="home-vpanel-examples">
+                            {vertical.examples.map(ex => (
+                                <div key={ex.q} className="home-vexample">
+                                    <p className="home-vexample-q">{ex.q}</p>
+                                    <p className="home-vexample-a">{ex.a}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div className="home-divider" />
+
+            {/* Features */}
+            <section className="home-section">
+                <h2 className="home-section-heading">Built for operations, not IT</h2>
+                <div className="home-features">
+                    {[
+                        { title: 'Cited answers', body: 'Every answer links to the exact section of your document. Staff can verify instantly.' },
+                        { title: 'Shared workspace', body: 'One place for your whole team. Everyone gets the same accurate answer from the same source.' },
+                        { title: 'Owner and staff roles', body: 'Owners manage documents and team members. Staff ask questions and read answers.' },
+                        { title: 'No onboarding needed', body: 'If your staff can send a text, they can use Syntext. Invite by email and they are ready.' },
+                    ].map(f => (
+                        <div key={f.title} className="home-feature">
+                            <h3 className="home-feature-title">{f.title}</h3>
+                            <p className="home-feature-body">{f.body}</p>
+                        </div>
+                    ))}
+                </div>
+            </section>
+
+            <div className="home-divider" />
+
+            {/* Pricing */}
+            <section className="home-section">
+                <h2 className="home-section-heading">Pricing</h2>
+                <p className="home-section-sub">One price per company. Add unlimited staff.</p>
+                <div className="home-pricing">
+                    <div className="home-plan">
+                        <div className="home-plan-name">Starter</div>
+                        <div className="home-plan-price">$99<span className="home-plan-period">/mo</span></div>
+                        <ul className="home-plan-features">
+                            <li>Up to 10 team members</li>
+                            <li>Unlimited documents</li>
+                            <li>Cited answers</li>
+                            <li>PDF and Word support</li>
+                            <li>Email support</li>
+                        </ul>
+                        <Button asChild variant="outline" className="home-btn-outline">
+                            <Link to="/login" onClick={() => posthog.capture('homepage_pricing_click', { plan: 'starter' })}>
+                                Get started
+                            </Link>
+                        </Button>
+                    </div>
+                    <div className="home-plan home-plan--featured">
+                        <div className="home-plan-badge">Most popular</div>
+                        <div className="home-plan-name">Business</div>
+                        <div className="home-plan-price">$249<span className="home-plan-period">/mo</span></div>
+                        <ul className="home-plan-features">
+                            <li>Unlimited team members</li>
+                            <li>Unlimited documents</li>
+                            <li>Cited answers</li>
+                            <li>PDF and Word support</li>
+                            <li>Priority support</li>
+                            <li>Onboarding call included</li>
+                        </ul>
+                        <Button asChild className="home-btn-primary">
+                            <Link to="/login" onClick={() => posthog.capture('homepage_pricing_click', { plan: 'business' })}>
+                                Get started
+                            </Link>
+                        </Button>
+                    </div>
+                </div>
+            </section>
+
+            <div className="home-divider" />
+
+            {/* FAQ */}
+            <section className="home-section home-section--narrow">
+                <h2 className="home-section-heading">Questions</h2>
+                <div className="home-faq">
+                    {faqs.map((item, idx) => {
+                        const open = openFaqIndex === idx;
+                        return (
+                            <Button
+                                key={item.q}
+                                variant="ghost"
+                                className={`home-faq-row ${open ? 'open' : ''}`}
+                                onClick={() => {
+                                    setOpenFaqIndex(open ? null : idx);
+                                    posthog.capture('homepage_faq_toggle', { index: idx });
+                                }}
+                            >
+                                <span className="home-faq-q">{item.q}</span>
+                                <span className="home-faq-icon">{open ? <Minus className="size-4" /> : <Plus className="size-4" />}</span>
+                                {open && <p className="home-faq-a">{item.a}</p>}
+                            </Button>
+                        );
+                    })}
+                </div>
+            </section>
+
+            <div className="home-divider" />
+
+            {/* Bottom CTA */}
+            <section className="home-cta">
+                <h2 className="home-cta-heading">Stop answering the same questions twice.</h2>
+                <Button asChild className="home-btn-primary home-btn-lg">
+                    <Link to="/login" onClick={() => posthog.capture('homepage_get_started_click', { location: 'bottom' })}>
+                        Start free trial
+                    </Link>
+                </Button>
+            </section>
+
+            {/* Footer */}
+            <footer className="home-footer">
+                <span>© 2025 Osas Inc.</span>
             </footer>
         </div>
     );

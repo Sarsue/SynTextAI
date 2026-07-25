@@ -16,22 +16,6 @@
     gap: 8px;
 }
 
-.control-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px;
-    border-radius: 50%;
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-}
-
-.control-button:hover {
-    background-color: var(--button-hover-bg);
-}
-
 #file-upload {
     display: none;
 }
@@ -56,20 +40,11 @@
     color: var(--text-color);
 }
 
-/* Text input styling */
+/* Text input layout only -- border/padding/focus ring come from shadcn's
+   Textarea itself, see InputArea.tsx. */
 .text-input {
-    padding: clamp(10px, 2vw, 12px);
-    border: 1px solid #ccc;
-    border-radius: clamp(4px, 1vw, 6px);
     margin-bottom: clamp(6px, 1vw, 8px);
     width: 100%;
-    font-size: clamp(12px, 2vw, 14px);
-    transition: border-color 0.3s ease;
-}
-
-.text-input:focus {
-    border-color: #0078d4;
-    outline: none;
 }
 
 /* Add any additional styles here */
@@ -79,54 +54,12 @@
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* File upload styling */
-.custom-file-upload {
-    display: inline-block;
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
-    padding: clamp(6px, 1vw, 8px) clamp(12px, 2vw, 16px);
-    border-radius: clamp(4px, 1vw, 6px);
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    font-size: clamp(14px, 2vw, 16px);
-}
-
-/* Ensure the file upload button is more visible in dark mode */
-.dark-mode .custom-file-upload {
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
-}
-
-.custom-file-upload:hover {
-    background-color: #005bb5;
-}
-
-/* Hide the default file input */
-.file-input input[type="file"] {
-    display: none;
-}
-
+/* Send button positioning only -- background/border/padding come from
+   shadcn's Button itself, see InputArea.tsx. */
 .send-button {
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
-    padding: clamp(8px, 1vw, 10px) clamp(14px, 2vw, 18px);
-    border: none;
-    border-radius: clamp(4px, 1vw, 6px);
-    cursor: pointer;
     position: absolute;
     bottom: clamp(12px, 2vw, 16px);
     right: clamp(12px, 2vw, 16px);
-    transition: background-color 0.3s ease;
-    font-size: clamp(14px, 2vw, 16px);
-}
-
-.send-button:hover {
-    background-color: #005bb5;
-}
-
-.send-button:disabled {
-    background-color: #aaa;
-    cursor: not-allowed;
 }
 
 /* Spinner */
@@ -167,36 +100,11 @@
     font-size: clamp(12px, 2vw, 14px);
 }
 
-.attached-file button {
-    background: none;
-    border: none;
-    color: #d9534f;
-    font-size: clamp(14px, 2vw, 16px);
-    margin-left: clamp(6px, 1vw, 8px);
-    cursor: pointer;
-}
-
-.attached-file button:hover {
-    color: #b52b27;
-}
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .input-area {
         padding: clamp(10px, 2vw, 14px);
-    }
-
-    .text-input {
-        font-size: clamp(11px, 2vw, 13px);
-    }
-
-    .custom-file-upload {
-        font-size: clamp(13px, 2vw, 15px);
-    }
-
-    .send-button {
-        padding: clamp(6px, 2vw, 8px) clamp(12px, 3vw, 14px);
-        font-size: clamp(13px, 2vw, 15px);
     }
 
     .attached-file {
@@ -207,19 +115,6 @@
 @media (max-width: 480px) {
     .input-area {
         padding: clamp(8px, 3vw, 12px);
-    }
-
-    .text-input {
-        font-size: clamp(10px, 3vw, 12px);
-    }
-
-    .custom-file-upload {
-        font-size: clamp(12px, 3vw, 14px);
-    }
-
-    .send-button {
-        padding: clamp(4px, 3vw, 6px) clamp(10px, 4vw, 12px);
-        font-size: clamp(12px, 3vw, 14px);
     }
 
     .attached-file {

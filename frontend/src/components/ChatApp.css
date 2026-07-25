@@ -50,24 +50,6 @@
     /* Positioned third */
 }
 
-/* Buttons */
-.settings-button,
-.logout-button-container button {
-    padding: clamp(8px, 2vw, 10px) clamp(16px, 4vw, 20px);
-    font-size: clamp(0.9rem, 2vw, 1rem);
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-top: auto;
-    transition: background-color 0.3s ease;
-}
-
-/* Hover Effect */
-.settings-button:hover,
-.logout-button-container button:hover {
-    opacity: 0.9;
-}
-
 /* Settings Button */
 .settings-button-container {
     margin-top: auto; /* Pushes it to the bottom */
@@ -77,36 +59,6 @@
 
 .dark-mode .settings-button-container {
     border-top-color: #444;
-}
-
-.settings-btn {
-    width: 100%;
-    padding: 12px;
-    background-color: transparent;
-    border: 1px solid #ccc;
-    color: var(--text-color);
-    border-radius: 8px;
-    font-size: 1rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    transition: background-color 0.2s, border-color 0.2s;
-}
-
-.settings-btn:hover {
-    background-color: #f0f0f0;
-    border-color: #bbb;
-}
-
-.dark-mode .settings-btn {
-    border-color: #555;
-}
-
-.dark-mode .settings-btn:hover {
-    background-color: #3a3a3a;
-    border-color: #666;
 }
 
 /* Mobile Adjustments */
@@ -135,11 +87,6 @@
         /* Show only the active tab content */
     }
 
-    .settings-button,
-    .logout-button-container button {
-        font-size: clamp(1rem, 3vw, 1.2rem);
-        padding: clamp(10px, 3vw, 14px);
-    }
 }
 
 @media (max-width: 480px) {
@@ -156,50 +103,20 @@
         padding: clamp(8px, 4vw, 12px);
     }
 
-    .settings-button,
-    .logout-button-container button {
-        font-size: clamp(1.1rem, 4vw, 1.3rem);
-        padding: clamp(12px, 4vw, 16px);
-    }
 }
 
-/* Tab Navigation - Mobile-only */
-.tabs {
+/* Tab Navigation - Mobile-only. Tab styling itself now comes from shadcn's
+   Tabs component (src/components/ui/tabs.tsx); this just controls when the
+   mobile tab bar shows at all. */
+.mobile-tabs {
     display: none;
-    flex-direction: row;
-    gap: 16px;
-    justify-content: center;
     margin-bottom: 16px;
-}
-
-.tabs button {
-    background-color: var(--tab-bg);
-    color: var(--text-color);
-    border: none;
-    padding: 12px 16px;
-    font-size: 1rem;
-    cursor: pointer;
-    border-radius: 8px;
-    transition: background-color 0.3s ease;
-}
-
-.tabs button:hover {
-    background-color: var(--hover-bg);
-}
-
-.tabs button.active {
-    background-color: var(--active-tab-bg);
 }
 
 /* Show tabs only on mobile screens */
 @media (max-width: 768px) {
-    .tabs {
+    .mobile-tabs {
         display: flex;
-    }
-
-    /* Style adjustments for the tabs */
-    .tabs button {
-        font-size: clamp(1rem, 3vw, 1.2rem);
     }
 
     .logout-button-container {

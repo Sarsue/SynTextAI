@@ -8,7 +8,7 @@ export const useAnalytics = () => {
   
   const capture = useCallback((event: string, properties: Record<string, any> = {}) => {
     if (!posthog) {
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[Analytics] Not initialized - event not captured:', event, properties);
       }
       return;
@@ -34,7 +34,7 @@ export const useAnalytics = () => {
 
   const identify = useCallback((userId: string, traits?: Record<string, any>) => {
     if (!posthog) {
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[Analytics] Not initialized - identify skipped');
       }
       return;
@@ -42,7 +42,7 @@ export const useAnalytics = () => {
     
     try {
       posthog.identify(userId, traits);
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[Analytics] Identified user:', userId);
       }
     } catch (error) {
@@ -52,7 +52,7 @@ export const useAnalytics = () => {
 
   const reset = useCallback(() => {
     if (!posthog) {
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[Analytics] Not initialized - reset skipped');
       }
       return;
@@ -60,7 +60,7 @@ export const useAnalytics = () => {
     
     try {
       posthog.reset();
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[Analytics] Reset');
       }
     } catch (error) {

@@ -1,81 +1,56 @@
-/* Define input text color variables for light and dark modes */
-:root {
-    --input-background-color: #ffffff;
-    /* Light input background */
-    --input-text-color: #000000;
-    /* Dark text for inputs */
-    --input-background-dark: #333;
-    /* Dark input background */
-    --input-text-dark: #ffffff;
-    /* White text for inputs in dark mode */
-}
-
-/* PaymentView styling */
 .PaymentView {
-    max-width: clamp(400px, 60vw, 600px);
-    width: 90%;
-    margin: clamp(15px, 2vw, 20px) auto;
-    padding: clamp(15px, 2vw, 20px);
-    border: 1px solid var(--header-footer-bg);
-    border-radius: clamp(6px, 1vw, 8px);
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    background-color: var(--background-color);
-    color: var(--text-color);
-    box-sizing: border-box;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    width: 100%;
 }
 
-/* Input and StripeElement styling */
-.PaymentView input,
+.PaymentView h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 16px;
+}
+
+.PaymentView p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 12px;
+}
+
 .PaymentView .StripeElement {
     width: 100%;
-    padding: clamp(8px, 1vw, 10px);
-    margin-bottom: clamp(12px, 1.5vw, 16px);
-    border: 1px solid var(--header-footer-bg);
-    border-radius: clamp(3px, 0.5vw, 4px);
-    background-color: var(--input-background-color);
-    color: var(--input-text-color);
-    transition: background-color 0.3s ease, color 0.3s ease;
-    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--input-background);
+    margin-bottom: 16px;
+    transition: border-color 0.15s;
 }
 
-/* For dark mode, define input-specific colors */
-.dark-mode .PaymentView input,
-.dark-mode .PaymentView .StripeElement {
-    background-color: var(--input-background-dark);
-    color: var(--input-text-dark);
-    /* Ensure card number text is white */
+.PaymentView .StripeElement--focus {
+    border-color: var(--text-secondary);
 }
 
-/* Button styling */
-.PaymentView button {
-    width: clamp(150px, 50%, 300px);
-    background-color: var(--button-bg);
-    color: var(--button-text-color);
-    padding: clamp(10px, 1vw, 12px);
-    border: none;
-    border-radius: clamp(3px, 0.5vw, 4px);
-    cursor: pointer;
-    font-size: clamp(14px, 1.5vw, 16px);
-    transition: background-color 0.3s ease, color 0.3s ease;
+.PaymentView input {
+    width: 100%;
+    margin-bottom: 12px;
 }
 
-.PaymentView button:hover {
-    opacity: 0.9;
-}
-
-/* Card details styling */
 .CardDetails {
-    margin-top: clamp(8px, 1vw, 10px);
-    padding: clamp(8px, 1vw, 10px);
-    border: 1px solid var(--header-footer-bg);
-    border-radius: clamp(4px, 0.5vw, 5px);
-    background-color: var(--background-color);
-    color: var(--text-color);
-    transition: background-color 0.3s ease, color 0.3s ease;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-surface);
+    margin-bottom: 16px;
 }
 
 .CardDetails p {
-    margin: clamp(4px, 0.5vw, 5px) 0;
-    font-size: clamp(12px, 1vw, 14px);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.PaymentView .error {
+    font-size: 0.85rem;
+    color: #dc2626;
+    margin-top: 10px;
 }

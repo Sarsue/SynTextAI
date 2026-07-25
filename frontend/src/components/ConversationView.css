@@ -87,26 +87,6 @@
     margin-top: clamp(4px, 1vw, 6px);
 }
 
-.icon-button {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: clamp(1rem, 2vw, 1.1rem);
-    padding: clamp(2px, 1vw, 4px);
-    transition: transform 0.1s ease;
-}
-
-.icon-button:hover {
-    transform: scale(1.2);
-}
-
-.copy-button {
-    color: #6c757d;
-}
-
-.copy-button:hover {
-    color: #5a6268;
-}
 
 .like-button.active {
     color: blue;
@@ -168,6 +148,54 @@
     .message-timestamp {
         font-size: clamp(0.55rem, 3vw, 0.6rem);
     }
+}
+
+/* Citation sources box */
+.citation-box {
+    margin-top: 10px;
+    padding: 10px 14px;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    background-color: rgba(0, 120, 212, 0.06);
+    font-size: 0.82rem;
+    color: #444;
+}
+
+.citation-label {
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #0078d4;
+    margin-bottom: 6px;
+}
+
+.citation-box a {
+    color: #0078d4;
+    text-decoration: underline;
+}
+
+.citation-box ul {
+    margin: 0;
+    padding-left: 16px;
+}
+
+.citation-box li {
+    margin-bottom: 4px;
+}
+
+.dark-mode .citation-box {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-top-color: rgba(255, 255, 255, 0.1);
+    color: #bbb;
+}
+
+.dark-mode .citation-label {
+    color: #5baef5;
+}
+
+.dark-mode .citation-box a {
+    color: #5baef5;
 }
 
 /* Message fade-in animation */

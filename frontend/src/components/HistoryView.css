@@ -4,12 +4,8 @@
     flex-direction: column;
     height: 100%;
     padding: clamp(8px, 1vw, 10px);
-    background-color: #f9f9f9;
+    background-color: var(--bg-surface);
     transition: background-color 0.3s;
-}
-
-.dark-mode .history-container {
-    background-color: #333;
 }
 
 /* History actions (fixed at the top) */
@@ -17,31 +13,6 @@
     display: flex;
     justify-content: space-between;
     padding-bottom: clamp(8px, 1vw, 10px);
-}
-
-.history-action {
-    padding: clamp(8px, 1vw, 10px) clamp(12px, 2vw, 15px);
-    border: none;
-    background-color: #007bff;
-    color: white;
-    cursor: pointer;
-    transition: background-color 0.3s;
-    border-radius: clamp(4px, 0.5vw, 5px);
-    flex-grow: 1;
-    /* Ensures buttons take equal width on smaller screens */
-    text-align: center;
-}
-
-.history-action:hover {
-    background-color: #0056b3;
-}
-
-.dark-mode .history-action {
-    background-color: #555;
-}
-
-.dark-mode .history-action:hover {
-    background-color: #777;
 }
 
 /* New bottom actions styles */
@@ -63,50 +34,27 @@
     padding: clamp(8px, 1vw, 10px);
     margin-bottom: clamp(4px, 0.5vw, 5px);
     cursor: pointer;
-    background-color: #fff;
-    border: 1px solid #ccc;
+    background-color: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: clamp(3px, 0.5vw, 4px);
     transition: background-color 0.3s, border-color 0.3s;
 }
 
 .history-item:hover {
-    background-color: #f0f0f0;
+    background-color: var(--bg-surface);
 }
 
 .history-item.selected {
-    background-color: #007bff;
-    color: white;
-    border-color: #0056b3;
+    background-color: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
 }
 
-.dark-mode .history-item {
-    background-color: #444;
-    color: white;
-    border-color: #555;
-}
-
-.dark-mode .history-item:hover {
-    background-color: #555;
-}
-
-.dark-mode .history-item.selected {
-    background-color: #007bff;
-    border-color: #0056b3;
-}
-
-/* Delete button styling */
+/* Delete button spacing only -- color/background/border come from the
+   shadcn Button (variant="ghost") itself, see HistoryView.tsx. */
 .delete-button {
-    background-color: transparent;
-    border: none;
-    color: red;
-    cursor: pointer;
-    font-size: clamp(14px, 1.5vw, 16px);
     margin-left: clamp(8px, 1vw, 10px);
-    transition: color 0.3s;
-}
-
-.delete-button:hover {
-    color: darkred;
 }
 
 /* Mobile view optimizations */
@@ -121,12 +69,6 @@
         gap: 6px;
     }
 
-    .history-action {
-        padding: clamp(6px, 2vw, 8px) clamp(10px, 3vw, 12px);
-        font-size: clamp(0.9rem, 2vw, 1rem);
-        width: 100%;
-    }
-
     .history-list {
         margin-top: clamp(6px, 2vw, 8px);
     }
@@ -135,10 +77,6 @@
         padding: clamp(6px, 2vw, 8px);
         margin-bottom: clamp(4px, 1vw, 6px);
         font-size: clamp(0.9rem, 2vw, 1rem);
-    }
-
-    .delete-button {
-        font-size: clamp(12px, 2vw, 14px);
     }
 }
 
@@ -153,12 +91,6 @@
         gap: 4px;
     }
 
-    .history-action {
-        padding: clamp(4px, 3vw, 6px) clamp(8px, 4vw, 10px);
-        font-size: clamp(0.8rem, 3vw, 0.9rem);
-        width: 100%;
-    }
-
     .history-list {
         margin-top: clamp(4px, 3vw, 6px);
     }
@@ -167,9 +99,5 @@
         padding: clamp(4px, 3vw, 6px);
         margin-bottom: clamp(4px, 2vw, 6px);
         font-size: clamp(0.8rem, 3vw, 0.9rem);
-    }
-
-    .delete-button {
-        font-size: clamp(10px, 3vw, 12px);
     }
 }

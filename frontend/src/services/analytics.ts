@@ -21,7 +21,7 @@ export interface PostHogConfig {
  */
 export function initPostHog(config: PostHogConfig = {}): typeof posthog {
   // Initialize PostHog with API key from environment variables
-  const apiKey = process.env.REACT_APP_POST_HOG_API_KEY || '';
+  const apiKey = import.meta.env.VITE_POST_HOG_API_KEY || '';
   const sessionId = config.sessionId || generateSessionId();
   
   // Initialize PostHog

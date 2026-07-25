@@ -1,7 +1,9 @@
 import React from 'react';
+import { Plus, X } from 'lucide-react';
 import { History } from './types';
 import './HistoryView.css';
 import { useUserContext } from '../UserContext';
+import { Button } from '@/components/ui/button';
 
 interface HistoryViewProps {
     histories: History[];
@@ -29,7 +31,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({
             <h3>📜</h3>
             {/* Action button always visible at the top */}
             <div className="history-actions">
-                <button className="history-action" onClick={onNewChat}>✚</button>
+                <Button onClick={onNewChat} className="w-full">
+                    <Plus className="size-4" /> New chat
+                </Button>
             </div>
 
             {/* History list */}
@@ -45,8 +49,10 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                                 ? history.messages[0].content.slice(0, 140) + (history.messages[0].content.length > 140 ? '...' : '')
                                 : 'No messages'}
                         </span>
-                        <button
-                            className="delete-button"
+                        <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="delete-button shrink-0"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 const isConfirmed = window.confirm('Are you sure you want to delete this history?');
@@ -55,8 +61,8 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                                 }
                             }}
                         >
-                            X
-                        </button>
+                            <X className="size-4" />
+                        </Button>
                     </div>
                 ))}
             </div>

@@ -3,41 +3,45 @@
 
 <head>
   <meta charset="utf-8" />
-  <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+  <link rel="icon" href="/favicon.ico" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#000000" />
-  
+
   <!-- Primary Meta Tags -->
   <title>SynText AI - Intelligent Text Analysis & Learning Tool</title>
   <meta name="title" content="SynText AI - Intelligent Text Analysis & Learning Tool">
   <meta name="description" content="Transform how you learn with SynText AI. Our platform analyzes documents, creates flashcards, generates quizzes, and extracts key concepts to enhance your learning experience." />
   <meta name="keywords" content="AI learning, document analysis, flashcards, quizzes, study tool, education technology, key concepts, learning assistant" />
   <meta name="author" content="SynText AI Team" />
-  
+
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://syntextai.com/" />
   <meta property="og:title" content="SynText AI - Intelligent Text Analysis & Learning Tool" />
   <meta property="og:description" content="Transform how you learn with SynText AI. Our platform analyzes documents, creates flashcards, generates quizzes, and extracts key concepts to enhance your learning experience." />
-  <meta property="og:image" content="%PUBLIC_URL%/og-image.png" />
-  
+  <meta property="og:image" content="/og-image.png" />
+
   <!-- Twitter -->
   <meta property="twitter:card" content="summary_large_image" />
   <meta property="twitter:url" content="https://syntextai.com/" />
   <meta property="twitter:title" content="SynText AI - Intelligent Text Analysis & Learning Tool" />
   <meta property="twitter:description" content="Transform how you learn with SynText AI. Our platform analyzes documents, creates flashcards, generates quizzes, and extracts key concepts to enhance your learning experience." />
-  <meta property="twitter:image" content="%PUBLIC_URL%/og-image.png" />
-  
+  <meta property="twitter:image" content="/og-image.png" />
+
   <!-- Canonical URL -->
   <link rel="canonical" href="https://syntextai.com/" />
-  
+
   <!-- Preconnect to critical domains -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="preconnect" href="https://js.stripe.com" crossorigin />
-  
-  <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-  
+
+  <!-- Primary UI font (see src/index.css --font) -->
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="apple-touch-icon" href="/logo192.png" />
+  <link rel="manifest" href="/manifest.json" />
+
   <!-- Structured Data - JSON-LD -->
   <script type="application/ld+json">
     {
@@ -54,7 +58,7 @@
       }
     }
   </script>
-  
+
   <!-- Stripe Payment Integration -->
   <script async src="https://js.stripe.com/v3/buy-button.js"></script>
 </head>
@@ -62,16 +66,7 @@
 <body>
   <noscript>You need to enable JavaScript to run this app.</noscript>
   <div id="root"></div>
-  <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
-
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
-
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
+  <script type="module" src="/src/index.tsx"></script>
 </body>
 
 </html>

@@ -1,14 +1,50 @@
 import React, { useState, useEffect } from 'react';
+import { Folder, Users, Plus, ChevronDown, Pencil, Trash2, Check, Package, AlertTriangle, X } from 'lucide-react';
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 import './WorkspaceSelector.css';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from '@/components/ui/dialog';
+import {
+    AlertDialog,
+    AlertDialogContent,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogFooter,
+    AlertDialogCancel,
+} from '@/components/ui/alert-dialog';
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+} from '@/components/ui/dropdown-menu';
 
 interface Workspace {
     id: number;
     name: string;
     user_id: number;
+    role: string;
     created_at: string;
     updated_at: string;
+}
+
+interface Member {
+    user_id: number;
+    email: string;
+    role: string;
+}
+
+interface PendingInvite {
+    id: number;
+    email: string;
+    expires_at: string;
 }
 
 interface WorkspaceSelectorProps {
@@ -19,7 +55,7 @@ interface WorkspaceSelectorProps {
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
     const { user, subscriptionStatus } = useUserContext();
     const { addToast } = useToast();
-    
+
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -35,11 +71,19 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [isDeleting, setIsDeleting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Invite / members state
+    const [showMembersModal, setShowMembersModal] = useState(false);
+    const [members, setMembers] = useState<Member[]>([]);
+    const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+    const [inviteEmail, setInviteEmail] = useState('');
+    const [isSendingInvite, setIsSendingInvite] = useState(false);
+
     // Backend entitlement rules:
     // - premium: active | trialing
     // - free: none (or missing)
     const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
     const isFreeUser = normalizedStatus === 'none';
+    const isOwner = currentWorkspace?.role === 'owner' || currentWorkspace?.user_id === user?.uid as any;
 
     // Fetch workspaces on mount
     useEffect(() => {
@@ -50,7 +94,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
     const fetchWorkspaces = async (preferredWorkspaceId?: number) => {
         if (!user) return;
-        
+
         try {
             const idToken = await user.getIdToken();
             const response = await fetch('/api/v1/workspaces', {
@@ -68,7 +112,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 (ws: any): ws is Workspace => ws && typeof ws.id === 'number'
             );
             setWorkspaces(workspaceList);
-            
+
             // Set current workspace
             if (workspaceList.length > 0) {
                 const selectedWorkspace =
@@ -87,7 +131,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             } else {
                 setCurrentWorkspace(null);
             }
-            
+
             setIsLoading(false);
         } catch (err) {
             console.error('Error fetching workspaces:', err);
@@ -165,7 +209,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             addToast('Workspace created successfully!', 'success');
             setNewWorkspaceName('');
             setShowCreateModal(false);
-            
+
             // Refresh workspaces list and switch to new workspace
             await fetchWorkspaces(createdWorkspaceId);
         } catch (err) {
@@ -273,10 +317,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             addToast('Workspace deleted successfully!', 'success');
             setShowDeleteModal(false);
             setWorkspaceToEdit(null);
-            
+
             // Fetch updated workspace list
             await fetchWorkspaces();
-            
+
             // If deleted current workspace, switch to first available
             if (currentWorkspace?.id === workspaceToEdit.id) {
                 const updatedWorkspaces = workspaces.filter(ws => ws.id !== workspaceToEdit.id);
@@ -307,6 +351,75 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         setError(null);
     };
 
+    const fetchMembers = async (wsId: number) => {
+        if (!user) return;
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/workspaces/${wsId}/members`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setMembers(data.members || []);
+                setPendingInvites(data.pending_invites || []);
+            }
+        } catch (err) {
+            console.error('Error fetching members:', err);
+        }
+    };
+
+    const handleOpenMembers = () => {
+        if (currentWorkspace) {
+            fetchMembers(currentWorkspace.id);
+            setShowMembersModal(true);
+            setShowDropdown(false);
+        }
+    };
+
+    const handleSendInvite = async () => {
+        if (!inviteEmail.trim() || !currentWorkspace || !user) return;
+        setIsSendingInvite(true);
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/workspaces/${currentWorkspace.id}/invites`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+                body: JSON.stringify({ email: inviteEmail.trim() }),
+            });
+            if (res.ok) {
+                addToast(`Invite sent to ${inviteEmail}`, 'success');
+                setInviteEmail('');
+                await fetchMembers(currentWorkspace.id);
+            } else {
+                const data = await res.json().catch(() => ({}));
+                addToast(data.detail || 'Failed to send invite', 'error');
+            }
+        } catch {
+            addToast('Failed to send invite', 'error');
+        } finally {
+            setIsSendingInvite(false);
+        }
+    };
+
+    const handleRemoveMember = async (targetUserId: number) => {
+        if (!currentWorkspace || !user) return;
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/workspaces/${currentWorkspace.id}/members/${targetUserId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${idToken}` },
+            });
+            if (res.ok) {
+                addToast('Member removed', 'success');
+                await fetchMembers(currentWorkspace.id);
+            } else {
+                addToast('Failed to remove member', 'error');
+            }
+        } catch {
+            addToast('Failed to remove member', 'error');
+        }
+    };
+
     if (isLoading) {
         return (
             <div className={`workspace-selector ${darkMode ? 'dark-mode' : ''}`}>
@@ -319,266 +432,269 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         <>
             <div className={`workspace-selector ${darkMode ? 'dark-mode' : ''}`}>
                 <div className="workspace-header">
-                    <button 
-                        className="workspace-info"
-                        onClick={() => setShowDropdown(!showDropdown)}
-                    >
-                        <span className="workspace-icon">📁</span>
-                        <div className="workspace-details">
-                            <span className="workspace-label">Workspace</span>
-                            <span className="workspace-name">
-                                {currentWorkspace?.name || 'My Workspace'}
-                            </span>
-                        </div>
-                        <span className="dropdown-icon">{showDropdown ? '▲' : '▼'}</span>
-                    </button>
-                    
-                    <button
-                        className="create-workspace-btn"
-                        onClick={() => setShowCreateModal(true)}
-                        title={isFreeUser && workspaces.length >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
-                    >
-                        <span className="btn-icon">+</span>
-                        <span className="btn-text">New</span>
-                    </button>
-                </div>
-
-                {/* Workspace Dropdown */}
-                {showDropdown && workspaces.length > 1 && (
-                    <div className="workspace-dropdown">
-                        {workspaces.map((workspace) => (
-                            <div key={workspace.id} className="workspace-item-wrapper">
-                                <button
-                                    className={`workspace-item ${currentWorkspace?.id === workspace.id ? 'active' : ''}`}
-                                    onClick={() => handleWorkspaceSelect(workspace)}
-                                >
-                                    <span className="workspace-item-icon">📁</span>
-                                    <span className="workspace-item-name">{workspace.name}</span>
-                                    {currentWorkspace?.id === workspace.id && (
-                                        <span className="check-icon">✓</span>
-                                    )}
-                                </button>
-                                <div className="workspace-item-actions">
-                                    <button
-                                        className="workspace-action-btn edit-btn"
-                                        onClick={(e) => handleRenameClick(workspace, e)}
-                                        title="Rename workspace"
-                                    >
-                                        ✏️
-                                    </button>
-                                    {workspaces.length > 1 && (
-                                        <button
-                                            className="workspace-action-btn delete-btn"
-                                            onClick={(e) => handleDeleteClick(workspace, e)}
-                                            title="Delete workspace"
-                                        >
-                                            🗑️
-                                        </button>
-                                    )}
+                    <DropdownMenu open={showDropdown} onOpenChange={setShowDropdown}>
+                        <DropdownMenuTrigger asChild>
+                            <button className="workspace-info">
+                                <Folder className="size-4 shrink-0" />
+                                <div className="workspace-details">
+                                    <span className="workspace-label">Workspace</span>
+                                    <span className="workspace-name">
+                                        {currentWorkspace?.name || 'My Workspace'}
+                                    </span>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                                <ChevronDown className={`size-4 shrink-0 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+                            </button>
+                        </DropdownMenuTrigger>
+                        {workspaces.length > 1 && (
+                            <DropdownMenuContent className="w-64">
+                                {workspaces.map((workspace) => (
+                                    <div key={workspace.id} className="workspace-item-wrapper">
+                                        <button
+                                            className={`workspace-item ${currentWorkspace?.id === workspace.id ? 'active' : ''}`}
+                                            onClick={() => handleWorkspaceSelect(workspace)}
+                                        >
+                                            <Folder className="size-4 shrink-0 workspace-item-icon" />
+                                            <span className="workspace-item-name">{workspace.name}</span>
+                                            {currentWorkspace?.id === workspace.id && (
+                                                <Check className="size-4 shrink-0" />
+                                            )}
+                                        </button>
+                                        <div className="workspace-item-actions">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                onClick={(e) => handleRenameClick(workspace, e)}
+                                                title="Rename workspace"
+                                            >
+                                                <Pencil className="size-3.5" />
+                                            </Button>
+                                            {workspaces.length > 1 && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    onClick={(e) => handleDeleteClick(workspace, e)}
+                                                    title="Delete workspace"
+                                                >
+                                                    <Trash2 className="size-3.5" />
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </DropdownMenuContent>
+                        )}
+                    </DropdownMenu>
+
+                    {isOwner && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleOpenMembers}
+                            title="Manage team members"
+                        >
+                            <Users className="size-4" /> Team
+                        </Button>
+                    )}
+                    {isOwner && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowCreateModal(true)}
+                            title={isFreeUser && workspaces.length >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
+                        >
+                            <Plus className="size-4" /> New
+                        </Button>
+                    )}
+                </div>
 
                 {isFreeUser && workspaces.length >= 1 && (
                     <div className="workspace-limit-banner">
-                        <span>📦</span>
+                        <Package className="size-4 shrink-0" />
                         <span>Free plan: 1 workspace. <a href="/settings">Upgrade</a> for more!</span>
                     </div>
                 )}
             </div>
 
             {/* Create Workspace Modal */}
-            {showCreateModal && (
-                <div className="modal-overlay" onClick={handleCancelCreate}>
-                    <div 
-                        className={`workspace-modal ${darkMode ? 'dark-mode' : ''}`}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="modal-header">
-                            <h3>Create New Workspace</h3>
-                            <button 
-                                className="close-btn"
-                                onClick={handleCancelCreate}
-                                aria-label="Close"
-                            >
-                                ×
-                            </button>
-                        </div>
+            <Dialog open={showCreateModal} onOpenChange={(open) => !open && handleCancelCreate()}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Create New Workspace</DialogTitle>
+                    </DialogHeader>
 
-                        <div className="modal-body">
-                            <div className="form-group">
-                                <label htmlFor="workspace-name">Workspace Name</label>
-                                <input
-                                    id="workspace-name"
-                                    type="text"
-                                    value={newWorkspaceName}
-                                    onChange={(e) => setNewWorkspaceName(e.target.value)}
-                                    placeholder="e.g., Personal Projects, Study Materials..."
-                                    maxLength={100}
-                                    autoFocus
-                                    disabled={isCreating}
-                                />
-                                <span className="input-hint">
-                                    Choose a descriptive name for organizing your files
-                                </span>
-                            </div>
-
-                            {error && (
-                                <div className="error-message">
-                                    {error}
-                                </div>
-                            )}
-
-                            {isFreeUser && workspaces.length >= 1 && (
-                                <div className="upgrade-prompt">
-                                    <p><strong>Free Tier Limit Reached</strong></p>
-                                    <p>Upgrade to premium to create unlimited workspaces and unlock more features!</p>
-                                    <a href="/settings" className="upgrade-link">View Plans →</a>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="modal-footer">
-                            <button
-                                className="cancel-btn"
-                                onClick={handleCancelCreate}
-                                disabled={isCreating}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="create-btn"
-                                onClick={handleCreateWorkspace}
-                                disabled={isCreating || !newWorkspaceName.trim() || (isFreeUser && workspaces.length >= 1)}
-                            >
-                                {isCreating ? 'Creating...' : 'Create Workspace'}
-                            </button>
-                        </div>
+                    <div className="form-group">
+                        <label htmlFor="workspace-name">Workspace Name</label>
+                        <Input
+                            id="workspace-name"
+                            type="text"
+                            value={newWorkspaceName}
+                            onChange={(e) => setNewWorkspaceName(e.target.value)}
+                            placeholder="e.g., Personal Projects, Study Materials..."
+                            maxLength={100}
+                            autoFocus
+                            disabled={isCreating}
+                        />
+                        <span className="input-hint">
+                            Choose a descriptive name for organizing your files
+                        </span>
                     </div>
-                </div>
-            )}
+
+                    {error && <div className="error-message">{error}</div>}
+
+                    {isFreeUser && workspaces.length >= 1 && (
+                        <div className="upgrade-prompt">
+                            <p><strong>Free Tier Limit Reached</strong></p>
+                            <p>Upgrade to premium to create unlimited workspaces and unlock more features!</p>
+                            <a href="/settings" className="upgrade-link">View Plans →</a>
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={handleCancelCreate} disabled={isCreating}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleCreateWorkspace}
+                            disabled={isCreating || !newWorkspaceName.trim() || (isFreeUser && workspaces.length >= 1)}
+                        >
+                            {isCreating ? 'Creating...' : 'Create Workspace'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Rename Workspace Modal */}
-            {showRenameModal && workspaceToEdit && (
-                <div className="modal-overlay" onClick={handleCancelRename}>
-                    <div 
-                        className={`workspace-modal ${darkMode ? 'dark-mode' : ''}`}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="modal-header">
-                            <h3>Rename Workspace</h3>
-                            <button 
-                                className="close-btn"
-                                onClick={handleCancelRename}
-                                aria-label="Close"
-                            >
-                                ×
-                            </button>
-                        </div>
+            <Dialog open={showRenameModal && !!workspaceToEdit} onOpenChange={(open) => !open && handleCancelRename()}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Rename Workspace</DialogTitle>
+                    </DialogHeader>
 
-                        <div className="modal-body">
-                            <div className="form-group">
-                                <label htmlFor="rename-workspace-name">New Name</label>
-                                <input
-                                    id="rename-workspace-name"
-                                    type="text"
-                                    value={renameWorkspaceName}
-                                    onChange={(e) => setRenameWorkspaceName(e.target.value)}
-                                    placeholder="Enter new workspace name..."
-                                    maxLength={100}
-                                    autoFocus
-                                    disabled={isRenaming}
-                                />
-                            </div>
-
-                            {error && (
-                                <div className="error-message">
-                                    {error}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="modal-footer">
-                            <button
-                                className="cancel-btn"
-                                onClick={handleCancelRename}
-                                disabled={isRenaming}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="create-btn"
-                                onClick={handleRenameWorkspace}
-                                disabled={isRenaming || !renameWorkspaceName.trim()}
-                            >
-                                {isRenaming ? 'Renaming...' : 'Rename'}
-                            </button>
-                        </div>
+                    <div className="form-group">
+                        <label htmlFor="rename-workspace-name">New Name</label>
+                        <Input
+                            id="rename-workspace-name"
+                            type="text"
+                            value={renameWorkspaceName}
+                            onChange={(e) => setRenameWorkspaceName(e.target.value)}
+                            placeholder="Enter new workspace name..."
+                            maxLength={100}
+                            autoFocus
+                            disabled={isRenaming}
+                        />
                     </div>
-                </div>
-            )}
 
-            {/* Delete Workspace Modal */}
-            {showDeleteModal && workspaceToEdit && (
-                <div className="modal-overlay" onClick={handleCancelDelete}>
-                    <div 
-                        className={`workspace-modal delete-modal ${darkMode ? 'dark-mode' : ''}`}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div className="modal-header">
-                            <h3>Delete Workspace</h3>
-                            <button 
-                                className="close-btn"
-                                onClick={handleCancelDelete}
-                                aria-label="Close"
-                            >
-                                ×
-                            </button>
-                        </div>
+                    {error && <div className="error-message">{error}</div>}
 
-                        <div className="modal-body">
-                            <div className="warning-message">
-                                <span className="warning-icon">⚠️</span>
-                                <div>
-                                    <p><strong>Are you sure you want to delete "{workspaceToEdit.name}"?</strong></p>
-                                    <p>This will permanently delete:</p>
-                                    <ul>
-                                        <li>All files in this workspace</li>
-                                        <li>All associated key concepts, flashcards, and quizzes</li>
-                                        <li>All chat history related to these files</li>
-                                    </ul>
-                                    <p><strong>This action cannot be undone.</strong></p>
-                                </div>
-                            </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={handleCancelRename} disabled={isRenaming}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleRenameWorkspace} disabled={isRenaming || !renameWorkspaceName.trim()}>
+                            {isRenaming ? 'Renaming...' : 'Rename'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
-                            {error && (
-                                <div className="error-message">
-                                    {error}
-                                </div>
-                            )}
-                        </div>
+            {/* Members / Invite Modal */}
+            <Dialog open={showMembersModal} onOpenChange={setShowMembersModal}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Team — {currentWorkspace?.name}</DialogTitle>
+                    </DialogHeader>
 
-                        <div className="modal-footer">
-                            <button
-                                className="cancel-btn"
-                                onClick={handleCancelDelete}
-                                disabled={isDeleting}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="delete-confirm-btn"
-                                onClick={handleDeleteWorkspace}
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? 'Deleting...' : 'Delete Workspace'}
-                            </button>
-                        </div>
+                    <div className="form-group" style={{ display: 'flex', gap: 8 }}>
+                        <Input
+                            type="email"
+                            placeholder="colleague@company.com"
+                            value={inviteEmail}
+                            onChange={e => setInviteEmail(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleSendInvite()}
+                            disabled={isSendingInvite}
+                            style={{ flex: 1 }}
+                        />
+                        <Button onClick={handleSendInvite} disabled={isSendingInvite || !inviteEmail.trim()}>
+                            {isSendingInvite ? 'Sending...' : 'Invite'}
+                        </Button>
                     </div>
-                </div>
-            )}
+
+                    {/* Current members */}
+                    {members.length > 0 && (
+                        <div style={{ marginTop: 20 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>Members</div>
+                            {members.map(m => (
+                                <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(128,128,128,0.15)' }}>
+                                    <span style={{ fontSize: 14 }}>{m.email}</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                        <span style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{m.role}</span>
+                                        {m.role !== 'owner' && (
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                onClick={() => handleRemoveMember(m.user_id)}
+                                                title="Remove member"
+                                            >
+                                                <X className="size-3.5" />
+                                            </Button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Pending invites */}
+                    {pendingInvites.length > 0 && (
+                        <div style={{ marginTop: 20 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>Pending Invites</div>
+                            {pendingInvites.map(inv => (
+                                <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(128,128,128,0.15)' }}>
+                                    <span style={{ fontSize: 14 }}>{inv.email}</span>
+                                    <span style={{ fontSize: 12, color: '#888' }}>Pending</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowMembersModal(false)}>Close</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Workspace Confirmation */}
+            <AlertDialog open={showDeleteModal && !!workspaceToEdit} onOpenChange={(open) => !open && handleCancelDelete()}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
+                            <AlertTriangle className="size-4 text-destructive" /> Delete Workspace
+                        </AlertDialogTitle>
+                    </AlertDialogHeader>
+
+                    <div className="warning-message">
+                        <p><strong>Are you sure you want to delete "{workspaceToEdit?.name}"?</strong></p>
+                        <p>This will permanently delete:</p>
+                        <ul>
+                            <li>All files in this workspace</li>
+                            <li>All associated key concepts, flashcards, and quizzes</li>
+                            <li>All chat history related to these files</li>
+                        </ul>
+                        <p><strong>This action cannot be undone.</strong></p>
+                    </div>
+
+                    {error && <div className="error-message">{error}</div>}
+
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={handleCancelDelete} disabled={isDeleting}>
+                            Cancel
+                        </AlertDialogCancel>
+                        <Button variant="destructive" onClick={handleDeleteWorkspace} disabled={isDeleting}>
+                            {isDeleting ? 'Deleting...' : 'Delete Workspace'}
+                        </Button>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </>
     );
 };

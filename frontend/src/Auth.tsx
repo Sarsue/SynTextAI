@@ -17,6 +17,7 @@ import { auth } from './firebase';
 import { useUserContext } from './UserContext';
 import { useAnalytics } from './hooks/useAnalytics';
 import { getPosthog } from './utils/analyticsQueue';
+import { Button } from '@/components/ui/button';
 
 // Extend the Window interface to include PostHog
 declare global {
@@ -160,61 +161,24 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   }), [logOut]);
 
   if (authLoading) {
-    return (
-      <div className="auth-container" style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center',
-        minHeight: '100vh',
-        fontSize: '1.2rem',
-        color: 'var(--text-color)'
-      }}>
-        Loading...
-      </div>
-    );
+    return <div className="auth-page"><span className="auth-loading">Loading...</span></div>;
   }
 
   return (
-    <div className="auth-container" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      padding: '20px'
-    }}>
+    <div className="auth-page">
       {!user ? (
-        <div style={{ textAlign: 'center', maxWidth: '400px' }}>
-          <h1 style={{ marginBottom: '10px', fontSize: '2rem' }}>Welcome to SynText AI</h1>
-          <p style={{ marginBottom: '30px', color: 'var(--text-secondary)', fontSize: '1rem' }}>
-            Sign in to continue
-          </p>
-          
-          <button 
+        <div className="auth-card">
+          <h1 className="auth-title">Syntext</h1>
+          <p className="auth-sub">Sign in to your workspace</p>
+          <Button
+            variant="outline"
+            className="auth-google-btn w-full"
             onClick={signInWithGoogle}
             disabled={isSigningIn}
-            style={{
-              background: 'var(--accent-color)',
-              color: 'white',
-              border: 'none',
-              padding: '12px 24px',
-              borderRadius: '8px',
-              cursor: isSigningIn ? 'not-allowed' : 'pointer',
-              fontWeight: 600,
-              fontSize: '1rem',
-              opacity: isSigningIn ? 0.7 : 1,
-              transition: 'all 0.2s ease',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              margin: '0 auto'
-            }}
           >
-            {isSigningIn ? (
-              'Signing in...'
-            ) : (
+            {isSigningIn ? 'Signing in...' : (
               <>
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
                   <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
                   <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/>
                   <path d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707 0-.593.102-1.17.282-1.709V4.958H.957C.347 6.173 0 7.548 0 9c0 1.452.348 2.827.957 4.042l3.007-2.335z" fill="#FBBC05"/>
@@ -223,33 +187,13 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
                 Continue with Google
               </>
             )}
-          </button>
-          
-          <p style={{ 
-            marginTop: '20px', 
-            fontSize: '0.85rem', 
-            color: 'var(--text-secondary)' 
-          }}>
-            New users will be automatically signed up
-          </p>
+          </Button>
+          <p className="auth-hint">New users are automatically signed up</p>
         </div>
       ) : (
-        <button 
-          onClick={logOut}
-          disabled={isLoggingOut.current}
-          style={{
-            background: 'var(--accent-color)',
-            color: 'white',
-            border: 'none',
-            padding: '10px 20px',
-            borderRadius: '6px',
-            cursor: isLoggingOut.current ? 'not-allowed' : 'pointer',
-            fontWeight: 500,
-            opacity: isLoggingOut.current ? 0.7 : 1
-          }}
-        >
-          {isLoggingOut.current ? 'Signing out...' : 'Sign Out'}
-        </button>
+        <Button onClick={logOut} disabled={isLoggingOut.current}>
+          {isLoggingOut.current ? 'Signing out...' : 'Sign out'}
+        </Button>
       )}
     </div>
   );

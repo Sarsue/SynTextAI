@@ -5,7 +5,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ConversationView from './ConversationView';
 import InputArea from './InputArea';
 import HistoryView from './HistoryView';
-import VoiceInput from './VoiceInput';
 import { Message, History } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
@@ -14,7 +13,8 @@ import { useToast } from '../contexts/ToastContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
-import Tabs from "./Tabs";
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import useAnalytics from '../hooks/useAnalytics';
 import { AnalyticsEvents, createEventProperties } from '../utils/analyticsEvents';
 import { trackPageView, trackAction, trackError, getPosthog } from '../utils/analyticsQueue';
@@ -34,9 +34,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         setUser,
         darkMode,
         toggleDarkMode,
-        setDarkMode: setContextDarkMode, 
-        userSettings,
-        setUserSettings,
+        setDarkMode: setContextDarkMode,
 
         isPollingMessages,
         setIsPollingMessages,
@@ -88,14 +86,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }
     }, [user, identify]);
 
-    // --- YouTube link upload state ---
-    const [youtubeUrl, setYoutubeUrl] = useState('');
-    const [isYoutubeSubmitting, setIsYoutubeSubmitting] = useState(false);
-    const [youtubeError, setYoutubeError] = useState('');
     const [histories, setHistories] = useState<{ [key: number]: History }>({});
     const [currentHistory, setCurrentHistory] = useState<number | null>(null);
-    const [selectedLanguage] = useState<string>(userSettings.selectedLanguage || '');
-    const [comprehensionLevel] = useState<string>(userSettings.comprehensionLevel || '');
 
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
@@ -267,7 +259,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         trackAction('copy_message', 'message', undefined, textToCopy.length);
         navigator.clipboard.writeText(textToCopy)
             .then(() => { 
-                if (process.env.NODE_ENV === 'development') {
+                if (import.meta.env.DEV) {
                     console.log('Text successfully copied to clipboard:', textToCopy);
                 }
                 capture(AnalyticsEvents.BUTTON_CLICK, {
@@ -291,8 +283,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 has_attachments: files.length > 0,
                 file_count: files.length,
                 file_types: files.map(file => file.type),
-                language: selectedLanguage,
-                comprehension_level: comprehensionLevel,
             }));
 
             if (files.length > 0) {
@@ -303,7 +293,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 try {
                     const startTime = Date.now();
                     const fileDataResponse = await callApiWithToken(
-                        `api/v1/files?language=${encodeURIComponent(selectedLanguage)}&comprehensionLevel=${encodeURIComponent(comprehensionLevel)}`,
+                        `api/v1/files?language=english`,
                         'POST',
                         formData
                     );
@@ -319,8 +309,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             file_types: files.map(file => file.type),
                             total_size: files.reduce((acc, file) => acc + file.size, 0),
                             upload_duration_ms: duration,
-                            language: selectedLanguage,
-                            comprehension_level: comprehensionLevel,
                         });
                         
                         addToast(fileData.message, 'success'); 
@@ -385,7 +373,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             if (history) {
                 const workspaceIdParam = currentWorkspaceId != null ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}` : '';
                 const linkDataResponse = await callApiWithToken(
-                    `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(history.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehension_level=${encodeURIComponent(comprehensionLevel)}${workspaceIdParam}`,
+                    `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(history.id)}&language=english${workspaceIdParam}`,
                     'POST'
                 );
                 if (linkDataResponse) {
@@ -416,7 +404,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     setCurrentHistory(newHistory.id);
                     const workspaceIdParam = currentWorkspaceId != null ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}` : '';
                     const linkDataResponse = await callApiWithToken(
-                        `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(newHistory.id)}&language=${encodeURIComponent(selectedLanguage)}&comprehension_level=${encodeURIComponent(comprehensionLevel)}${workspaceIdParam}`,
+                        `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(newHistory.id)}&language=english${workspaceIdParam}`,
                         'POST'
                     );
                     if (linkDataResponse) {
@@ -624,11 +612,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     return (
         <div className={`chat-app-container ${darkMode ? 'dark-mode' : ''}`}>
             {isMobile && (
-                <div className="tabs">
-                    <button className={activeTab === 'knowledge' ? 'active' : ''} onClick={() => setActiveTab('knowledge')}>Knowledge</button>
-                    <button className={activeTab === 'chat' ? 'active' : ''} onClick={() => setActiveTab('chat')}>Chat</button>
-                    <button className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')}>History</button>
-                </div>
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="mobile-tabs">
+                    <TabsList className="w-full">
+                        <TabsTrigger value="knowledge">Knowledge</TabsTrigger>
+                        <TabsTrigger value="chat">Chat</TabsTrigger>
+                        <TabsTrigger value="history">History</TabsTrigger>
+                    </TabsList>
+                </Tabs>
             )}
             <div className="layout-container">
                 <aside className={`sidebar-left knowledge-column ${activeTab === 'knowledge' ? 'active' : ''}`}>
@@ -638,9 +628,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         onWorkspaceChange={setCurrentWorkspaceId}
                     />
                     <div className="settings-button-container">
-                        <button onClick={handleSettingsClick} className="button-secondary settings-btn">
+                        <Button onClick={handleSettingsClick} variant="outline" className="w-full">
                             ⚙️ Settings
-                        </button>
+                        </Button>
                     </div>
                 </aside>
 
@@ -661,7 +651,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
                 <aside className={`sidebar-right history-column ${activeTab === 'history' ? 'active' : ''}`}>
                     <div className="logout-button-container">
-                        <button onClick={handleLogout} className="button-secondary">Logout</button>
+                        <Button onClick={handleLogout} variant="outline">Logout</Button>
                         <WebSocketStatusIndicator />
                     </div>
                     <HistoryView

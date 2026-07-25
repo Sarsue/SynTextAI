@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { X } from 'lucide-react';
 import PaymentView from './PaymentView';
 import DarkModeToggle from './DarkModeToggle';
 import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
-import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { Stripe } from '@stripe/stripe-js';
+import { Button } from '@/components/ui/button';
 
 interface SettingsPageProps {
     stripePromise: Promise<Stripe | null>;
@@ -14,29 +16,15 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, userSettings, setUserSettings, subscriptionStatus, setUser } = useUserContext();
+    const { darkMode, setDarkMode, subscriptionStatus, setUser } = useUserContext();
+    const didRedirect = useRef(false);
 
-    // Language and comprehension level states
-    const [selectedLanguage, setSelectedLanguage] = useState<string>(
-        userSettings.selectedLanguage || 'English' // Default to 'English' if empty
-    );
-    const [comprehensionLevel, setComprehensionLevel] = useState<string>(
-        userSettings.comprehensionLevel || 'Beginner' // Default to 'Beginner' if empty
-    );
-
-    // Update userSettings in context whenever any relevant state changes
     useEffect(() => {
-        setUserSettings({
-            ...userSettings,  // Preserving existing userSettings
-            selectedLanguage,
-            comprehensionLevel
-        });
-    }, [selectedLanguage, comprehensionLevel, setUserSettings]);
-
-    // Log the subscription status every time it changes
-    useEffect(() => {
-        console.log("Current subscription status:", subscriptionStatus);
-    }, [subscriptionStatus]);
+        if (!didRedirect.current && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing')) {
+            didRedirect.current = true;
+            navigate('/chat', { replace: true });
+        }
+    }, [subscriptionStatus, navigate]);
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(
@@ -88,15 +76,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
         }
     };
 
-    const validLanguages = ['English', 'French', 'German', 'Spanish', 'Chinese', 'Japanese'];
-    const validEducationLevels = ['Beginner', 'Intermediate', 'Advanced'];
 
     return (
         <div className={`settings-container ${darkMode ? 'dark-mode' : ''}`}>
             {/* Close Button */}
-            <button className="close-button" onClick={() => navigate('/chat')}>
-                ❌
-            </button>
+            <Button
+                variant="ghost"
+                size="icon-sm"
+                className="close-button"
+                onClick={() => navigate('/chat')}
+            >
+                <X className="size-4" />
+            </Button>
 
             {/* Settings Content */}
             <div className="settings-content">
@@ -112,38 +103,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                     </div>
                 </div>
 
-                {/* Language Selection Section */}
-                <div className="settings-section">
-                    <h2 className="section-title">Language</h2>
-                    <div className="section-content">
-                        <select
-                            value={selectedLanguage}
-                            onChange={(e) => setSelectedLanguage(e.target.value)}
-                        >
-                            <option value="">Select a language</option>
-                            {validLanguages.map((language) => (
-                                <option key={language} value={language}>{language}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-
-                {/* Comprehension Level Section */}
-                <div className="settings-section">
-                    <h2 className="section-title">Comprehension Level</h2>
-                    <div className="section-content">
-                        <select
-                            value={comprehensionLevel}
-                            onChange={(e) => setComprehensionLevel(e.target.value)}
-                        >
-                            <option value="">Select comprehension level</option>
-                            {validEducationLevels.map((level) => (
-                                <option key={level} value={level}>{level}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-
                 {/* Theme Section */}
                 <div className="settings-section">
                     <h2 className="section-title">Theme</h2>
@@ -153,23 +112,23 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 </div>
 
                 {/* Account Management Section */}
-                <h2 className="section-title text-red-500">Delete Account</h2>
-                <p className="text-sm text-gray-600">
-                    Deleting your account will permanently erase all of your data, including:
-                </p>
-                <ul className="list-disc text-gray-700 ml-5 my-2 text-sm">
-                    <li>Payment details 💳</li>
-                    <li>Chat history 💬</li>
-                    <li>Uploaded files 📂</li>
-                    <li>Account credentials 👤</li>
-                </ul>
-                <button
-                    className="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-700 transition duration-200"
-                    style={{ backgroundColor: "#ef4444" }} // Explicit inline style to override dark mode
-                    onClick={handleDeleteAccount}
-                >
-                    Delete My Account
-                </button>
+                <div className="settings-section">
+                    <h2 className="section-title text-destructive">Delete Account</h2>
+                    <div className="section-content">
+                        <p className="text-sm text-muted-foreground">
+                            Deleting your account will permanently erase all of your data, including:
+                        </p>
+                        <ul className="list-disc ml-5 text-sm text-muted-foreground">
+                            <li>Payment details</li>
+                            <li>Chat history</li>
+                            <li>Uploaded files</li>
+                            <li>Account credentials</li>
+                        </ul>
+                        <Button variant="destructive" onClick={handleDeleteAccount} className="w-fit">
+                            Delete My Account
+                        </Button>
+                    </div>
+                </div>
             </div>
         </div>
     );

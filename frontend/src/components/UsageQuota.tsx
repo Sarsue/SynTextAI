@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useUserContext } from '../UserContext';
 import './UsageQuota.css';
+import { AlertTriangle, BarChart3, HardDrive, FileText, Folder, Plus, Minus, TrendingUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface UsageQuotaProps {
     darkMode?: boolean;
@@ -88,7 +90,7 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
             <div className={`usage-quota ${darkMode ? 'dark-mode' : ''}`}>
                 <div className="quota-header">
                     <div className="quota-summary">
-                        <span className="quota-icon">⚠️</span>
+                        <span className="quota-icon"><AlertTriangle className="size-5" /></span>
                         <div className="quota-info">
                             <span className="quota-title">Access Restricted</span>
                             <span className="quota-subtitle">
@@ -96,9 +98,9 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
                             </span>
                         </div>
                     </div>
-                    <a href="/settings" className="upgrade-button">
-                        Fix Payment
-                    </a>
+                    <Button asChild size="sm">
+                        <a href="/settings">Fix Payment</a>
+                    </Button>
                 </div>
             </div>
         );
@@ -118,7 +120,7 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
             <div className="quota-header" onClick={() => setShowDetails(!showDetails)}>
                 <div className="quota-summary">
                     <span className="quota-icon">
-                        {isAtLimit ? '⚠️' : isNearLimit ? '📊' : '💾'}
+                        {isAtLimit ? <AlertTriangle className="size-5" /> : isNearLimit ? <BarChart3 className="size-5" /> : <HardDrive className="size-5" />}
                     </span>
                     <div className="quota-info">
                         <span className="quota-title">Free Plan Usage</span>
@@ -127,9 +129,14 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
                         </span>
                     </div>
                 </div>
-                <button className="expand-btn" aria-label={showDetails ? 'Hide details' : 'Show details'}>
-                    {showDetails ? '−' : '+'}
-                </button>
+                <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="expand-btn"
+                    aria-label={showDetails ? 'Hide details' : 'Show details'}
+                >
+                    {showDetails ? <Minus className="size-4" /> : <Plus className="size-4" />}
+                </Button>
             </div>
 
             {showDetails && (
@@ -137,7 +144,7 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
                     {/* Files Quota */}
                     <div className="quota-item">
                         <div className="quota-item-header">
-                            <span className="quota-label">📄 Documents</span>
+                            <span className="quota-label"><FileText className="size-3.5" /> Documents</span>
                             <span className="quota-value">
                                 {quotaData.files_used} / {quotaData.files_limit}
                             </span>
@@ -156,7 +163,7 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
                     {/* Storage Quota */}
                     <div className="quota-item">
                         <div className="quota-item-header">
-                            <span className="quota-label">💾 Storage</span>
+                            <span className="quota-label"><HardDrive className="size-3.5" /> Storage</span>
                             <span className="quota-value">
                                 {formatBytes(quotaData.storage_used_bytes)} / {formatBytes(quotaData.storage_limit_bytes)}
                             </span>
@@ -175,7 +182,7 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
                     {/* Workspaces Quota */}
                     <div className="quota-item">
                         <div className="quota-item-header">
-                            <span className="quota-label">📁 Workspaces</span>
+                            <span className="quota-label"><Folder className="size-3.5" /> Workspaces</span>
                             <span className="quota-value">
                                 {quotaData.workspaces_used} / {quotaData.workspaces_limit}
                             </span>
@@ -195,16 +202,16 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
                     {(isNearLimit || isAtLimit) && (
                         <div className="upgrade-cta">
                             <p className="cta-text">
-                                {isAtLimit 
-                                    ? '⚠️ You\'ve reached your limit!' 
-                                    : '📈 Running low on space?'}
+                                {isAtLimit
+                                    ? <><AlertTriangle className="size-4 inline align-text-bottom" /> You've reached your limit!</>
+                                    : <><TrendingUp className="size-4 inline align-text-bottom" /> Running low on space?</>}
                             </p>
                             <p className="cta-description">
                                 Upgrade to premium for unlimited documents, storage, and workspaces!
                             </p>
-                            <a href="/settings" className="upgrade-button">
-                                Upgrade Now
-                            </a>
+                            <Button asChild className="upgrade-button">
+                                <a href="/settings">Upgrade Now</a>
+                            </Button>
                         </div>
                     )}
                 </div>

@@ -5,6 +5,7 @@ import './PaymentView.css';
 import { useUserContext } from '../UserContext'; // Importing the context hook
 import { User } from 'firebase/auth';
 import posthog from '../services/analytics'; // Import PostHog for analytics
+import { Button } from '@/components/ui/button';
 
 interface PaymentViewProps {
     stripePromise: Promise<Stripe | null>;
@@ -309,18 +310,18 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                                 },
                             }}
                         />
-                        <button type="submit" disabled={isRequestPending}>
+                        <Button type="submit" disabled={isRequestPending}>
                             {isRequestPending ? 'Processing...' : 'Update Payment Method'}
-                        </button>
+                        </Button>
                     </form>
                 </>
             ) : subscriptionData?.subscription_status === 'none' ? (
                 // New user eligible for free trial
                 <>
                     <p>You have access to a free trial.</p>
-                    <button onClick={handleStartTrial} disabled={isRequestPending}>
+                    <Button onClick={handleStartTrial} disabled={isRequestPending}>
                         {isRequestPending ? 'Starting Trial...' : 'Start Free Trial'}
-                    </button>
+                    </Button>
                 </>
             ) : subscriptionData?.subscription_status === 'trialing' ? (
                 // Trial period active, prompt for subscription
@@ -334,9 +335,9 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                                 : ' Usage ends on this date unless you add a card and subscribe.'}
                         </p>
                     )}
-                    <button onClick={handleSubscribe} disabled={isRequestPending}>
+                    <Button onClick={handleSubscribe} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe Now'}
-                    </button>
+                    </Button>
                 </>
             ) : subscriptionData?.subscription_status === 'active' ? (
                 // Subscription is active, show card details and cancel button
@@ -358,17 +359,17 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                             </p>
                         </div>
                     )}
-                    <button onClick={handleCancelSubscription} disabled={isRequestPending}>
+                    <Button variant="outline" onClick={handleCancelSubscription} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Cancel Subscription'}
-                    </button>
+                    </Button>
                 </>
             ) : subscriptionData?.subscription_status === 'deleted' || subscriptionData?.subscription_status === 'canceled' ? (
                 // User has canceled or deleted subscription, prompt to subscribe again
                 <>
                     <p>Your subscription has been deleted or canceled.</p>
-                    <button onClick={handleSubscribe} disabled={isRequestPending}>
+                    <Button onClick={handleSubscribe} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe Again'}
-                    </button>
+                    </Button>
                 </>
             ) : (
                 // Default case: Prompt to subscribe if no status matches
@@ -386,9 +387,9 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                             },
                         }}
                     />
-                    <button type="submit" disabled={isRequestPending}>
+                    <Button type="submit" disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Subscribe'}
-                    </button>
+                    </Button>
                 </form>
             )}
 

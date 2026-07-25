@@ -302,10 +302,13 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
         if (response?.ok) {
             const data = await response.json();
-            setSubscriptionStatus(data.subscription_status ?? null);
+            setSubscriptionStatus(data.subscription_status ?? 'none');
             setSubscriptionData(data);
         } else {
+            // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
+            // fires instead of leaving the user stuck on the auth page indefinitely.
             console.error('Failed to fetch subscription status');
+            setSubscriptionStatus('none');
         }
     }, [user, _callApiWithTokenInternal]);
 

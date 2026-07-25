@@ -20,7 +20,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({
   // Initialize analytics on mount
   useEffect(() => {
     const defaultConfig: PostHogConfig = {
-      debugMode: process.env.NODE_ENV === 'development',
+      debugMode: import.meta.env.DEV,
       ...config
     };
 

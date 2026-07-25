@@ -29,14 +29,14 @@ class AnalyticsQueue {
       try {
         await action();
         // Log success in development
-        if (process.env.NODE_ENV === 'development') {
+        if (import.meta.env.DEV) {
           console.log(`[Analytics] Event sent: ${eventName}`, properties);
         }
       } catch (error) {
         if (retryCount < MAX_RETRIES) {
           // Exponential backoff
           const delay = RETRY_DELAY * Math.pow(2, retryCount);
-          if (process.env.NODE_ENV === 'development') {
+          if (import.meta.env.DEV) {
             console.warn(
               `[Analytics] Retry ${retryCount + 1}/${MAX_RETRIES} for ${eventName} in ${delay}ms`,
               error
@@ -107,7 +107,7 @@ export const trackCritical = (
 ): void => {
   const posthog = getPosthog();
   if (!posthog) {
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.warn('[Analytics] PostHog not available - event not queued:', eventName);
     }
     return;
@@ -131,7 +131,7 @@ export const trackPageView = (pageName: string, properties: Record<string, any> 
       page_name: pageName,
       ...properties,
     });
-  } else if (process.env.NODE_ENV === 'development') {
+  } else if (import.meta.env.DEV) {
     console.warn('[Analytics] Page view not tracked - PostHog not available:', pageName);
   }
 };
@@ -153,7 +153,7 @@ export const trackAction = (
       ...(label && { label }),
       ...(value !== undefined && { value }),
     });
-  } else if (process.env.NODE_ENV === 'development') {
+  } else if (import.meta.env.DEV) {
     console.warn('[Analytics] Action not tracked - PostHog not available:', { action, category });
   }
 };
@@ -167,10 +167,10 @@ export const trackError = (error: Error, context: Record<string, any> = {}): voi
     trackCritical(AnalyticsEvents.ERROR, {
       error_message: error.message,
       error_name: error.name,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      stack: import.meta.env.DEV ? error.stack : undefined,
       ...context,
     });
-  } else if (process.env.NODE_ENV === 'development') {
+  } else if (import.meta.env.DEV) {
     console.error('Error tracking failed - PostHog not available:', {
       error: error.message,
       context,

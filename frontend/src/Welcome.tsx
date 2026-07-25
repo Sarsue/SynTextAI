@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUserContext } from './UserContext';
 import { usePostHog } from './components/AnalyticsProvider';
 import './Welcome.css';
+import { Button } from '@/components/ui/button';
 
 const Welcome: React.FC = () => {
     const navigate = useNavigate();
@@ -58,38 +59,35 @@ const Welcome: React.FC = () => {
                             <div className="welcome-icon">👋</div>
                             <h2>Welcome, {user?.displayName?.split(' ')[0] || 'there'}!</h2>
                             <p>
-                                Thanks for joining SynText AI. We're excited to help you unlock knowledge
-                                from your documents and learn more effectively.
+                                Syntext AI turns your company documents into an instant knowledge base your whole team can use.
                             </p>
-                            <p>Let's get you set up in just a few quick steps.</p>
+                            <p>Let's get you set up in two quick steps.</p>
                         </div>
                     )}
-                    
+
                     {step === 2 && (
                         <div className="welcome-step">
-                            <div className="welcome-icon">🚀</div>
-                            <h2>Get Started Quickly</h2>
+                            <div className="welcome-icon">📂</div>
+                            <h2>Upload your documents</h2>
                             <p>
-                                With SynText AI, you can:
+                                Add your SOPs, policy manuals, employee handbooks, or any document your team needs to reference.
                             </p>
                             <ul className="feature-list">
-                                <li>Upload documents to analyze</li>
-                                <li>Generate flashcards and quizzes</li>
-                                <li>Extract key concepts from any text</li>
-                                <li>Ask questions about your documents</li>
+                                <li>PDF and Word (.docx) files supported</li>
+                                <li>Upload as many as you need</li>
+                                <li>Your documents stay private to your workspace</li>
                             </ul>
                         </div>
                     )}
-                    
+
                     {step === 3 && (
                         <div className="welcome-step">
                             <div className="welcome-icon">🎉</div>
-                            <h2>You're All Set!</h2>
+                            <h2>You're ready to go</h2>
                             <p>
-                                Your account is ready to use. Try uploading your first document
-                                or pasting some text to see SynText AI in action.
+                                Start your free trial, then upload your first document and invite your team.
                             </p>
-                            <p>Click "Get Started" to begin your journey!</p>
+                            <p>Your staff will get instant cited answers — and stop interrupting you.</p>
                         </div>
                     )}
                 </div>
@@ -97,17 +95,17 @@ const Welcome: React.FC = () => {
                 <div className="welcome-actions">
                     {step < totalSteps ? (
                         <>
-                            <button className="skip-button" onClick={handleSkip}>
+                            <Button variant="ghost" className="skip-button" onClick={handleSkip}>
                                 Skip Tour
-                            </button>
-                            <button className="next-button" onClick={handleNext}>
+                            </Button>
+                            <Button onClick={handleNext}>
                                 Next
-                            </button>
+                            </Button>
                         </>
                     ) : (
-                        <button className="complete-button" onClick={handleNext}>
+                        <Button className="complete-button" onClick={handleNext}>
                             Get Started
-                        </button>
+                        </Button>
                     )}
                 </div>
             </div>

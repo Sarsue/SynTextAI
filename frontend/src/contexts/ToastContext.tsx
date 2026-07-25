@@ -1,14 +1,8 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import './Toast.css';
+import React, { createContext, useContext, useCallback, ReactNode } from 'react';
+import { toast } from 'sonner';
+import { Toaster } from '@/components/ui/sonner';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
-
-export interface ToastMessage {
-  id: string;
-  message: string;
-  type: ToastType;
-  duration?: number;
-}
 
 interface ToastContextType {
   addToast: (message: string, type: ToastType, duration?: number) => void;
@@ -25,35 +19,14 @@ export const useToast = (): ToastContextType => {
 };
 
 export const ToastProvider: React.FC<{children: ReactNode}> = ({ children }) => {
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
-  const removeToast = useCallback((id: string) => {
-    setToasts(prevToasts => prevToasts.filter(toast => toast.id !== id));
-  }, []);
-
   const addToast = useCallback((message: string, type: ToastType, duration: number = 5000) => {
-    const id = Date.now().toString() + Math.random().toString(36).substring(2, 9);
-    const newToast: ToastMessage = { id, message, type, duration };
-
-    setToasts(prevToasts => [newToast, ...prevToasts]);
-
-    if (duration) {
-      setTimeout(() => {
-        removeToast(id);
-      }, duration);
-    }
-  }, [removeToast]);
+    toast[type](message, { duration });
+  }, []);
 
   return (
     <ToastContext.Provider value={{ addToast }}>
       {children}
-      <div className="toast-container-wrapper">
-        {toasts.map(toast => (
-          <div key={toast.id} className={`toast toast-${toast.type}`} onClick={() => removeToast(toast.id)}>
-            <span className="toast-message">{toast.message}</span>
-          </div>
-        ))}
-      </div>
+      <Toaster position="top-right" />
     </ToastContext.Provider>
   );
 };

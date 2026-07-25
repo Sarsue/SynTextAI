@@ -1,39 +1,40 @@
-import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './KnowledgeBase.css';
 import { UploadedFile } from './types';
 import { KnownWebSocketMessage, FileStatusUpdatePayload, FileStatusUpdateMessage } from '../types/websocketTypes';
-import Modal from './Modal';
 import WorkspaceSelector from './WorkspaceSelector';
 import UsageQuota from './UsageQuota';
 import { useToast } from '../contexts/ToastContext';
+import {
+    Library,
+    FileText,
+    CheckCircle2,
+    XCircle,
+    Upload,
+    Loader2,
+    FolderInput,
+    Trash2,
+    ChevronLeft,
+    ChevronRight,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuLabel,
+    DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import {
+    Select,
+    SelectTrigger,
+    SelectValue,
+    SelectContent,
+    SelectItem,
+} from '@/components/ui/select';
 
 import { useUserContext } from '../UserContext';
 
-// Helper function to identify YouTube URLs with more robust detection
-const isYouTubeUrl = (url: string): boolean => {
-    // Add more comprehensive detection - check for common YouTube URL patterns
-    const youtubePatterns = [
-        'youtube.com', 
-        'youtu.be',
-        'youtube',
-        'yt.com',
-        // Add full URL pattern matching
-        /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(.+)$/i
-    ];
-    
-    // Check if the URL matches any of the patterns
-    for (const pattern of youtubePatterns) {
-        if (typeof pattern === 'string' && url.includes(pattern)) {
-            console.log(`Detected YouTube URL: ${url} (matched pattern: ${pattern})`);
-            return true;
-        } else if (pattern instanceof RegExp && pattern.test(url)) {
-            console.log(`Detected YouTube URL: ${url} (matched regex pattern)`);
-            return true;
-        }
-    }
-    
-    return false;
-};
 
 interface KnowledgeBaseComponentProps {
     onFileClick: (file: UploadedFile) => void;
@@ -63,7 +64,6 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const [error, setError] = useState<string | null>(null);
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const [workspaces, setWorkspaces] = useState<Array<{id: number; name: string}>>([]);
-    const [showMoveMenu, setShowMoveMenu] = useState<number | null>(null);
     const { addToast } = useToast();
     const { user } = useUserContext(); 
 
@@ -141,10 +141,9 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
                 },
                 body: JSON.stringify({ workspace_id: targetWorkspaceId }),
             });
-            
+
             if (response.ok) {
                 addToast('File moved successfully', 'success');
-                setShowMoveMenu(null);
                 // Reload files to reflect the change
                 await loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId);
             } else {
@@ -168,8 +167,7 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
         loadUserFiles(newPage, filePagination.pageSize, currentWorkspaceId);
     }, [loadUserFiles, filePagination.pageSize, currentWorkspaceId]);
 
-    const handlePageSizeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newSize = Number(e.target.value);
+    const handlePageSizeChange = useCallback((newSize: number) => {
         loadUserFiles(1, newSize, currentWorkspaceId);
     }, [loadUserFiles, currentWorkspaceId]);
 
@@ -197,13 +195,33 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
         }
     };
 
+    const getStatusDisplay = (status: UploadedFile['status']) => {
+        switch (status) {
+            case 'processed':
+                return { icon: <CheckCircle2 className="size-3.5 text-green-600" />, label: 'Ready' };
+            case 'failed':
+                return { icon: <XCircle className="size-3.5 text-destructive" />, label: 'Failed' };
+            case 'uploaded':
+                return { icon: <Upload className="size-3.5" />, label: 'Uploaded' };
+            case 'extracting':
+                return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Extracting content...' };
+            case 'embedding':
+                return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Generating embeddings...' };
+            case 'storing':
+                return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Storing content...' };
+            case 'generating_concepts':
+                return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Generating key concepts...' };
+            default:
+                return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Processing...' };
+        }
+    };
+
     return (
         <div className={`knowledgebase-container ${darkMode ? 'dark-mode' : ''}`}>
             <WorkspaceSelector darkMode={darkMode} onWorkspaceChange={handleWorkspaceChange} />
             <UsageQuota darkMode={darkMode} />
             <div className="knowledgebase-header">
-                <h3>📚 Knowledge Base</h3>
-
+                <h3><Library className="size-4" /> Knowledge Base</h3>
             </div>
             <div className="file-status-legend">
                 <p><span className="status-indicator processing"></span> Processing</p>
@@ -240,92 +258,72 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
                                 <div className="file-item-header">
                                     <div className="file-info" onClick={() => handleFileClick(currentFile)}>
                                         <span className="file-icon">
-                                            {isYouTubeUrl(currentFile.file_name) ? '🎬' :
-                                             currentFile.file_name.endsWith('.mp4') ? '🎬' :
-                                             currentFile.file_name.endsWith('.pdf') ? '📄' :
-                                             currentFile.file_name.endsWith('.txt') ? '📝' :
-                                             currentFile.file_name.endsWith('.md') ? '📝' :
-                                             currentFile.file_name.endsWith('.jpg') || currentFile.file_name.endsWith('.jpeg') || currentFile.file_name.endsWith('.png') ? '🖼️' :
-                                             '📄'}
+                                            <FileText className="size-4" />
                                         </span>
-                                        
+
                                         <span className="file-link">
                                             <span className="file-name">
-                                                {isYouTubeUrl(currentFile.file_name)
-                                                    ? `YouTube: ${currentFile.file_name.length > 40 ? currentFile.file_name.substring(0, 37) + '...' : currentFile.file_name}`
-                                                    : currentFile.file_name.length > 30
-                                                        ? currentFile.file_name.substring(0, 27) + '...'
-                                                        : currentFile.file_name}
+                                                {currentFile.file_name.length > 30
+                                                    ? currentFile.file_name.substring(0, 27) + '...'
+                                                    : currentFile.file_name}
                                             </span>
                                             <span className="file-status">
                                                 {(() => {
-                                                    switch (currentFile.status) {
-                                                        case 'processed':
-                                                            return '✓ Ready';
-                                                        case 'failed':
-                                                            return '❌ Failed';
-                                                        case 'uploaded':
-                                                            return '📤 Uploaded';
-                                                        case 'extracting':
-                                                            return '🔍 Extracting content...';
-                                                        case 'embedding':
-                                                            return '🧠 Generating embeddings...';
-                                                        case 'storing':
-                                                            return '💾 Storing content...';
-                                                        case 'generating_concepts':
-                                                            return '🧩 Generating key concepts...';
-                                                        default:
-                                                            return '⏳ Processing...';
-                                                    }
+                                                    const { icon, label } = getStatusDisplay(currentFile.status);
+                                                    return <>{icon} {label}</>;
                                                 })()}
                                             </span>
                                         </span>
-                                        
+
                                         <div className="file-actions">
                                         {workspaces.length > 1 && (
-                                            <div className="move-menu-container">
-                                                <button
-                                                    className="kb-action-button move-button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setShowMoveMenu(showMoveMenu === currentFile.id ? null : currentFile.id);
-                                                    }}
-                                                    disabled={fileStatus[currentFile.id]?.isMoving || false}
-                                                    title="Move to workspace"
-                                                >
-                                                    {fileStatus[currentFile.id]?.isMoving ? '⏳' : '📁'}
-                                                </button>
-                                                {showMoveMenu === currentFile.id && (
-                                                    <div className="move-dropdown">
-                                                        <div className="move-dropdown-header">Move to:</div>
-                                                        {workspaces
-                                                            .filter(ws => ws.id !== currentWorkspaceId)
-                                                            .map(workspace => (
-                                                                <button
-                                                                    key={workspace.id}
-                                                                    className="move-dropdown-item"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        handleMoveFile(currentFile.id, workspace.id);
-                                                                    }}
-                                                                >
-                                                                    📁 {workspace.name}
-                                                                </button>
-                                                            ))}
-                                                    </div>
-                                                )}
-                                            </div>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        disabled={fileStatus[currentFile.id]?.isMoving || false}
+                                                        title="Move to workspace"
+                                                    >
+                                                        {fileStatus[currentFile.id]?.isMoving
+                                                            ? <Loader2 className="size-3.5 animate-spin" />
+                                                            : <FolderInput className="size-3.5" />}
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                                    <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                                                    {workspaces
+                                                        .filter(ws => ws.id !== currentWorkspaceId)
+                                                        .map(workspace => (
+                                                            <DropdownMenuItem
+                                                                key={workspace.id}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleMoveFile(currentFile.id, workspace.id);
+                                                                }}
+                                                            >
+                                                                <FolderInput className="size-3.5" />
+                                                                {workspace.name}
+                                                            </DropdownMenuItem>
+                                                        ))}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
                                         )}
-                                        <button
-                                            className="kb-action-button"
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 handleDeleteClick(currentFile, e);
                                             }}
                                             disabled={fileStatus[currentFile.id]?.isDeleting || false}
+                                            title="Delete file"
                                         >
-                                            {fileStatus[currentFile.id]?.isDeleting ? 'Deleting...' : <span className="delete-icon">🗑️</span>}
-                                        </button>
+                                            {fileStatus[currentFile.id]?.isDeleting
+                                                ? <Loader2 className="size-3.5 animate-spin" />
+                                                : <Trash2 className="size-3.5" />}
+                                        </Button>
                                         {/* Manual retry button removed, retry is automatic on click/expand for failed files */}
                                     </div>
                                     </div>
@@ -339,34 +337,44 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
 
 
             <div className="kb-help-text">
-                <p>Use the + button in the chat to upload files or YouTube videos</p>
-                <p>Processing happens automatically in the background</p>
-                <p>Files are ready when marked with a ✅</p>
+                <p>Upload PDF, DOCX, or TXT files using the 📎 button in the chat.</p>
+                <p>Processing happens automatically in the background.</p>
+                <p>Files are ready when marked with a ✓.</p>
             </div>
 
             <div className="kb-pagination-controls">
-                <button
+                <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => handlePageChange(filePagination.page - 1)}
                     disabled={filePagination.page <= 1}
-                    className="kb-action-button"
                 >
-                    &lt; Prev
-                </button>
-                <span>
+                    <ChevronLeft className="size-3.5" /> Prev
+                </Button>
+                <span className="kb-pagination-label">
                     Page {filePagination.page} of {Math.ceil(filePagination.totalItems / filePagination.pageSize) || 1}
                 </span>
-                <button
+                <Button
+                    variant="outline"
+                    size="sm"
                     onClick={() => handlePageChange(filePagination.page + 1)}
                     disabled={filePagination.page * filePagination.pageSize >= filePagination.totalItems}
-                    className="kb-action-button"
                 >
-                    Next &gt;
-                </button>
-                <select value={filePagination.pageSize} onChange={handlePageSizeChange} className="kb-page-size-selector">
-                    <option value={10}>10 / page</option>
-                    <option value={25}>25 / page</option>
-                    <option value={50}>50 / page</option>
-                </select>
+                    Next <ChevronRight className="size-3.5" />
+                </Button>
+                <Select
+                    value={String(filePagination.pageSize)}
+                    onValueChange={(value) => handlePageSizeChange(Number(value))}
+                >
+                    <SelectTrigger size="sm" className="w-28">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="10">10 / page</SelectItem>
+                        <SelectItem value="25">25 / page</SelectItem>
+                        <SelectItem value="50">50 / page</SelectItem>
+                    </SelectContent>
+                </Select>
             </div>
 
 

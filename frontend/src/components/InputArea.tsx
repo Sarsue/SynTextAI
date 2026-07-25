@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
+import { Paperclip, X } from 'lucide-react';
 
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
-import VoiceInput from './VoiceInput';
 import './InputArea.css';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 interface InputAreaProps {
     onSend: (message: string, files: File[]) => Promise<void>;
@@ -11,103 +14,74 @@ interface InputAreaProps {
     onContentAdded: () => Promise<void>;
 }
 
-const InputArea: React.FC<InputAreaProps> = ({
-    onSend,
-    isSending,
-    onContentAdded
-}) => {
-    const YOUTUBE_UPLOAD_ENABLED = false;
+const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-    const { darkMode, user } = useUserContext();
+    const { darkMode } = useUserContext();
     const { addToast } = useToast();
-    const [youtubeUrl, setYoutubeUrl] = useState('');
-    // Reference to the YouTube input element for focus management
-    const youtubeInputRef = React.useRef<HTMLInputElement>(null);
-    const [showYoutubeInput, setShowYoutubeInput] = useState(false);
-    const [showAddMenu, setShowAddMenu] = useState(false);
-
-    const handleVoiceInput = (transcript: string) => {
-        setMessage(prevMessage => {
-            const updatedMessage = prevMessage.trim()
-                ? `${prevMessage.trim()} ${transcript}`
-                : transcript;
-            return updatedMessage;
-        });
-    };
 
     const isFileSupported = (file: File): boolean => {
         const supportedTypes = [
-            'application/pdf', 'text/plain',
-            'image/jpeg', 'image/png', 'image/gif',
-            'video/mp4',
+            'application/pdf',
+            'text/plain',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/msword',
         ];
         return supportedTypes.includes(file.type);
     };
 
     const handleSendClick = () => {
         if (!message.trim() && attachedFiles.length === 0) {
-            addToast("Nothing to send. Please type a message or attach files.", 'info');
+            addToast('Please type a message or attach a file.', 'info');
             return;
         }
 
-        const filesToSend = attachedFiles.filter(isFileSupported); // Ensure only supported files are sent
-        let canProceed = true;
+        const filesToSend = attachedFiles.filter(isFileSupported);
 
         if (filesToSend.length !== attachedFiles.length && attachedFiles.length > 0) {
-            addToast('Some attached files have unsupported types and will be ignored.', 'warning');
+            addToast('Some files have unsupported types and will be skipped.', 'warning');
         }
 
         if (filesToSend.length > 10) {
-            addToast('Cannot send: Maximum of 10 files allowed per upload.', 'error');
-            canProceed = false;
+            addToast('Maximum of 10 files per upload.', 'error');
+            return;
         }
 
-        if (canProceed && (message.trim() || filesToSend.length > 0)) {
+        if (message.trim() || filesToSend.length > 0) {
             onSend(message, filesToSend).then(() => {
                 setMessage('');
                 setAttachedFiles([]);
             });
-        } else if (canProceed && !message.trim() && filesToSend.length === 0 && attachedFiles.length > 0) {
-            // This case means all attached files were unsupported, and there's no message
-            addToast('No valid files to send, and no message typed.', 'error');
         }
     };
 
     const handleAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const allSelectedFiles = Array.from(e.target.files || []);
-        if (allSelectedFiles.length === 0) return;
+        const selected = Array.from(e.target.files || []);
+        if (selected.length === 0) return;
 
-        const newlySupportedFiles = allSelectedFiles.filter(isFileSupported);
+        const supported = selected.filter(isFileSupported);
 
-        if (allSelectedFiles.length > 0 && newlySupportedFiles.length === 0) {
-            addToast('No supported files selected. Please choose PDF, video, image (JPG, PNG, GIF), or text files.', 'error');
+        if (supported.length === 0) {
+            addToast('Unsupported file type. Please upload PDF, DOCX, or TXT files.', 'error');
         } else {
-            if (allSelectedFiles.length > newlySupportedFiles.length && newlySupportedFiles.length > 0) {
-                addToast(`${allSelectedFiles.length - newlySupportedFiles.length} file(s) were not added due to unsupported type.`, 'info');
+            if (selected.length > supported.length) {
+                addToast(`${selected.length - supported.length} file(s) skipped — unsupported type.`, 'info');
             }
-
-            if (newlySupportedFiles.length > 0) {
-                setAttachedFiles((currentAttachedFiles: File[]) => {
-                    const combinedFiles = [...currentAttachedFiles, ...newlySupportedFiles];
-                    if (combinedFiles.length > 10) {
-                        const spaceRemaining = 10 - currentAttachedFiles.length;
-                        if (spaceRemaining > 0) {
-                            addToast(`Maximum of 10 files. Adding first ${spaceRemaining} of the selected supported files.`, 'warning');
-                            return [...currentAttachedFiles, ...newlySupportedFiles.slice(0, spaceRemaining)];
-                        }
-                        addToast(`Cannot add more files. Maximum of 10 files already attached.`, 'error');
-                        return currentAttachedFiles;
-                    }
-                    return combinedFiles;
-                });
-            }
+            setAttachedFiles(prev => {
+                const combined = [...prev, ...supported];
+                if (combined.length > 10) {
+                    const space = 10 - prev.length;
+                    addToast(`Adding first ${space} file(s). Maximum is 10.`, 'warning');
+                    return [...prev, ...supported.slice(0, space)];
+                }
+                return combined;
+            });
         }
-        e.target.value = ''; // Clear the input
+        e.target.value = '';
     };
 
     const handleRemoveFile = (fileToRemove: File) => {
-        setAttachedFiles((prevFiles: File[]) => prevFiles.filter((f: File) => f !== fileToRemove));
+        setAttachedFiles(prev => prev.filter(f => f !== fileToRemove));
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -117,241 +91,57 @@ const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
-    const handleYoutubeIconClick = () => {
-        setShowYoutubeInput(!showYoutubeInput);
-    };
-    
-    const toggleAddMenu = () => {
-        setShowAddMenu(!showAddMenu);
-        // Close YouTube input if dropdown is closed and YouTube was showing
-        if (showAddMenu && showYoutubeInput) {
-            setShowYoutubeInput(false);
-        }
-    };
-    
-    // Focus YouTube input when it appears
-    React.useEffect(() => {
-        if (showYoutubeInput && youtubeInputRef.current) {
-            // Small delay to ensure the input is rendered
-            setTimeout(() => {
-                youtubeInputRef.current?.focus();
-            }, 50);
-        } else if (!showYoutubeInput) {
-            // Clear YouTube URL when input is closed
-            setYoutubeUrl('');
-        }
-    }, [showYoutubeInput]);
-
-    // Handle clicking outside to close the dropdown and YouTube input
-    React.useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            const target = event.target as HTMLElement;
-            
-            // Close dropdown if open and clicked outside
-            if (showAddMenu && !target.closest('.add-content-menu') && !target.closest('.add-content-button')) {
-                setShowAddMenu(false);
-            }
-            
-            // Close YouTube input if open and clicked outside
-            if (showYoutubeInput && 
-                !target.closest('.youtube-input-container') && 
-                !target.closest('.add-content-menu')) {
-                setShowYoutubeInput(false);
-            }
-        };
-        
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [showAddMenu, showYoutubeInput]);
-
-    const handleAddYoutubeVideo = async () => {
-        if (!youtubeUrl.trim()) {
-            addToast('Please enter a YouTube Video URL.', 'error');
-            return;
-        }
-        if (!user) {
-            addToast('Authentication token not found. Please log in again.', 'error');
-            return;
-        }
-        try {
-            const idToken = await user.getIdToken(true);
-            let response = await fetch(`/api/v1/files`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${idToken}`
-                },
-                body: JSON.stringify({ type: 'youtube', url: youtubeUrl }),
-            });
-            if (response.status === 401) {
-                const refreshed = await user.getIdToken(true);
-                response = await fetch(`/api/v1/files`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${refreshed}`
-                    },
-                    body: JSON.stringify({ type: 'youtube', url: youtubeUrl }),
-                });
-            }
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: 'Failed to parse error response.' }));
-                throw new Error(errorData.detail || 'Failed to add YouTube video');
-            }
-            setYoutubeUrl('');
-            setShowYoutubeInput(false);
-            await onContentAdded();
-            addToast('YouTube video added and is now processing.', 'success');
-        } catch (error) {
-            console.error('Error adding YouTube video:', error);
-            let detailMessage = 'Please check the URL and try again.';
-            if (error instanceof Error) {
-                detailMessage = error.message;
-            } else if (typeof error === 'string') {
-                detailMessage = error;
-            }
-            addToast(`Failed to add YouTube video: ${detailMessage}`, 'error');
-        }
-    };
-
     return (
         <div className={`input-area ${darkMode ? 'dark-mode' : ''}`}>
-            <textarea
+            <Textarea
                 className="text-input"
-                placeholder="Type your message or paste a link..."
+                placeholder="Ask a question about your documents..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={isSending}
-                aria-label="Message input area"
+                aria-label="Message input"
             />
-            <div className="attached-files">
-                {attachedFiles.map((file, index) => (
-                    <div key={index} className="attached-file">
-                        <span>{file.name}</span>
-                        <button onClick={() => handleRemoveFile(file)} aria-label="Remove attached file">X</button>
-                    </div>
-                ))}
-            </div>
-            {YOUTUBE_UPLOAD_ENABLED && showYoutubeInput && (
-                <div 
-                    className="youtube-input-container" 
-                    style={{ 
-                        padding: '5px 0',
-                        animation: 'fadeIn 0.2s ease-in-out',
-                        overflow: 'hidden',
-                        display: 'flex',
-                        alignItems: 'center',
-                    }}
-                >
-                    <input
-                        ref={youtubeInputRef}
-                        type="text"
-                        value={youtubeUrl}
-                        onChange={(e) => setYoutubeUrl(e.target.value)}
-                        placeholder="YouTube Video URL"
-                        style={{ flexGrow: 1, padding: '8px', marginRight: '5px', borderRadius: '4px', border: darkMode ? '1px solid #555' : '1px solid #ccc' }}
-                        disabled={isSending}
-                    />
-                    <button
-                        onClick={handleAddYoutubeVideo}
-                        style={{ padding: '8px 15px', borderRadius: '4px' }}
-                        disabled={isSending || !youtubeUrl.trim()}
-                    >
-                        Add Video
-                    </button>
+            {attachedFiles.length > 0 && (
+                <div className="attached-files">
+                    {attachedFiles.map((file, index) => (
+                        <div key={index} className="attached-file">
+                            <span>{file.name}</span>
+                            <Button variant="ghost" size="icon-sm" onClick={() => handleRemoveFile(file)} aria-label="Remove file">
+                                <X className="size-3.5" />
+                            </Button>
+                        </div>
+                    ))}
                 </div>
             )}
             <div className="input-controls">
                 <div className="left-controls">
-                    <VoiceInput
-                        onTranscript={handleVoiceInput}
-                        darkMode={darkMode}
-                    />
-                    <div className="add-content-wrapper" style={{ position: 'relative' }}>
-                        <span
-                            className="control-button add-content-button"
-                            onClick={toggleAddMenu}
-                            aria-label="Add content"
-                            style={{ cursor: 'pointer', fontSize: '1.5em' }}
-                        >
-                            ➕
-                        </span>
-                        
-                        {showAddMenu && (
-                            <div 
-                                className="add-content-menu"
-                                style={{
-                                    position: 'absolute',
-                                    bottom: '60px',
-                                    left: '0',
-                                    backgroundColor: darkMode ? '#333' : 'white',
-                                    border: darkMode ? '1px solid #555' : '1px solid #ccc',
-                                    borderRadius: '8px',
-                                    padding: '8px',
-                                    zIndex: 10,
-                                    boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                                    minWidth: '180px'
-                                }}
-                            >
-                                <div 
-                                    onClick={() => {
-                                        document.getElementById('file-upload')?.click();
-                                        setShowAddMenu(false);
-                                    }}
-                                    style={{
-                                        padding: '10px 12px',
-                                        cursor: 'pointer',
-                                        borderRadius: '4px',
-                                        marginBottom: '8px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        backgroundColor: darkMode ? '#444' : '#f5f5f5',
-                                    }}
-                                >
-                                    <span style={{ marginRight: '10px', fontSize: '1.2em' }}>📎</span> Upload Files
-                                </div>
-                                {YOUTUBE_UPLOAD_ENABLED && (
-                                    <div 
-                                        onClick={() => {
-                                            setShowYoutubeInput(true);
-                                            setShowAddMenu(false);
-                                        }}
-                                        style={{
-                                            padding: '10px 12px',
-                                            cursor: 'pointer',
-                                            borderRadius: '4px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            backgroundColor: darkMode ? '#444' : '#f5f5f5',
-                                        }}
-                                    >
-                                        <span style={{ marginRight: '10px', fontSize: '1.2em' }}>📺</span> Add YouTube Video
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
+                    <label
+                        htmlFor="file-upload"
+                        title="Attach files (PDF, DOCX, TXT)"
+                        className={cn(buttonVariants({ variant: 'ghost', size: 'icon' }), 'cursor-pointer')}
+                    >
+                        <Paperclip className="size-4" />
+                    </label>
                     <input
                         id="file-upload"
                         type="file"
                         multiple
+                        accept=".pdf,.docx,.doc,.txt"
                         onChange={handleAttachment}
                         disabled={isSending}
-                        aria-label="File upload input"
-                        style={{ display: 'none' }} // Keep it hidden, we trigger it via our custom UI
+                        aria-label="File upload"
+                        style={{ display: 'none' }}
                     />
                 </div>
-                <button
+                <Button
                     onClick={handleSendClick}
                     disabled={isSending || (!message.trim() && attachedFiles.length === 0)}
-                    className="send-button"
                     aria-label="Send message"
+                    className="send-button"
                 >
-                    {isSending ? '💬' : '✉️'}
-                </button>
+                    {isSending ? 'Sending...' : 'Send'}
+                </Button>
             </div>
         </div>
     );
