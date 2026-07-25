@@ -25,4 +25,5 @@ Testing
 
 CMDS
 uvicorn api.app:app --reload --host 0.0.0.0 --port 3000
+python -m api.workers.worker
 docker-compose -f docker-compose.yml -f docker-compose.local.yml up --build && docker-compose logs -f

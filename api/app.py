@@ -2,13 +2,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from .websocket_manager import websocket_manager
+from .core.websocket_manager import websocket_manager
 from .repositories.repository_manager import RepositoryManager
 from dotenv import load_dotenv
-from .firebase_setup import initialize_firebase
+from .core.firebase_setup import initialize_firebase
 import os
 import logging
-from .utils import decode_firebase_token
+from .core.utils import decode_firebase_token
 # Load environment variables
 load_dotenv()
 

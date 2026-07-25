@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, 
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
-from api.utils import decode_firebase_token
-from api.tasks import delete_user_task
+from ..core.utils import decode_firebase_token
+from api.workflows.tasks import delete_user_task
 from api.repositories.repository_manager import RepositoryManager
 from api.models import Workspace
 import logging
 
-from api.limits import FREE_DOC_LIMIT, FREE_STORAGE_LIMIT_BYTES, FREE_WORKSPACE_LIMIT
+from api.core.limits import FREE_DOC_LIMIT, FREE_STORAGE_LIMIT_BYTES, FREE_WORKSPACE_LIMIT
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')

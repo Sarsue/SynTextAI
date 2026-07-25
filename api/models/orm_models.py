@@ -9,6 +9,8 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from datetime import datetime
 from typing import List, Optional
+import uuid
+from sqlalchemy.dialects.postgresql import UUID
 
 Base = declarative_base()
 
@@ -38,6 +40,36 @@ class Workspace(Base):
 
     user = relationship("User", back_populates="workspaces")
     files = relationship("File", back_populates="workspace", cascade="all, delete-orphan")
+    members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
+    invites = relationship("WorkspaceInvite", back_populates="workspace", cascade="all, delete-orphan")
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False, default="staff")  # "owner" | "staff"
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    workspace = relationship("Workspace", back_populates="members")
+    user = relationship("User")
+
+
+class WorkspaceInvite(Base):
+    __tablename__ = "workspace_invites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    email = Column(String, nullable=False)
+    token = Column(String, nullable=False, unique=True, index=True)
+    status = Column(String, nullable=False, default="pending")  # "pending" | "accepted" | "expired"
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+    workspace = relationship("Workspace", back_populates="invites")
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
@@ -95,9 +127,6 @@ class File(Base):
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
     user = relationship("User", back_populates="files")
     workspace = relationship("Workspace", back_populates="files")
-    key_concepts = relationship("KeyConcept", backref="file", cascade="all, delete-orphan", lazy="selectin")
-    flashcards = relationship("Flashcard", back_populates="file", cascade="all, delete-orphan")
-    quiz_questions = relationship("QuizQuestion", back_populates="file", cascade="all, delete-orphan")
 
 class Segment(Base):
     __tablename__ = "segments"
@@ -136,31 +165,6 @@ class Chunk(Base):
     def __repr__(self):
         return f"<Chunk(id={self.id}, file_id={self.file_id}, segment_id={self.segment_id}, embedding={self.embedding[:50]}...)>"
 
-class KeyConcept(Base):
-    __tablename__ = "key_concepts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
-    
-    concept_title = Column(String, nullable=False)
-    concept_explanation = Column(Text, nullable=False)
-    
-
-
-    source_page_number = Column(Integer, nullable=True) 
-    source_video_timestamp_start_seconds = Column(Integer, nullable=True)
-    source_video_timestamp_end_seconds = Column(Integer, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_custom = Column(Boolean, default=False, nullable=False)
-    
-    # Relationships
-    flashcards = relationship("Flashcard", back_populates="key_concept", cascade="all, delete-orphan")
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    def __repr__(self):
-        return f"<KeyConcept(id={self.id}, file_id={self.file_id}, title='{self.concept_title[:30]}...')>"
-
 class ChatHistory(Base):
     __tablename__ = "chat_histories"
     
@@ -187,34 +191,68 @@ class Message(Base):
     chat_history = relationship("ChatHistory", back_populates="messages")
 
 
-class Flashcard(Base):
-    __tablename__ = "flashcards"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
-    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
-    question = Column(String)
-    answer = Column(String)
-    is_custom = Column(Boolean, nullable=False, server_default='false')
-    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
-    
-    # Relationships
-    file = relationship("File", back_populates="flashcards")
-    key_concept = relationship("KeyConcept", back_populates="flashcards")
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
 
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        nullable=False,
+        server_default=text("gen_random_uuid()"),
+    )
 
-class QuizQuestion(Base):
-    __tablename__ = "quiz_questions"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
-    key_concept_id = Column(Integer, ForeignKey("key_concepts.id", ondelete="CASCADE"), nullable=True)
-    question = Column(String, nullable=False)
-    question_type = Column(String, nullable=False)
-    correct_answer = Column(String, nullable=False)
-    distractors = Column(JSON, nullable=True)
-    is_custom = Column(Boolean, nullable=False, server_default='false')
-    created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=True)
-    
-    # Relationships
-    file = relationship("File", back_populates="quiz_questions")
+    run_type = Column(String, nullable=False)
+    agent_name = Column(String, nullable=False)
+    agent_version = Column(String, nullable=True)
+
+    status = Column(String, nullable=False, default="queued", index=True)
+    priority = Column(Integer, nullable=False, default=100)
+
+    payload = Column(JSON, nullable=False)
+    result = Column(JSON, nullable=True)
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=True, index=True)
+    chat_history_id = Column(Integer, ForeignKey("chat_histories.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    last_error = Column(Text, nullable=True)
+
+    locked_by = Column(String, nullable=True)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    run_after = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "run_type": self.run_type,
+            "agent_name": self.agent_name,
+            "agent_version": self.agent_version,
+            "status": self.status,
+            "priority": self.priority,
+            "payload": self.payload,
+            "result": self.result,
+            "user_id": self.user_id,
+            "workspace_id": self.workspace_id,
+            "file_id": self.file_id,
+            "chat_history_id": self.chat_history_id,
+            "attempts": self.attempts,
+            "max_attempts": self.max_attempts,
+            "last_error": self.last_error,
+            "locked_by": self.locked_by,
+            "locked_at": self.locked_at,
+            "lease_expires_at": self.lease_expires_at,
+            "run_after": self.run_after,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }

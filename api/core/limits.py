@@ -3,7 +3,7 @@ from typing import Dict
 
 from fastapi import HTTPException, status
 
-from .repositories.repository_manager import RepositoryManager
+from ..repositories.repository_manager import RepositoryManager
 
 FREE_DOC_LIMIT = 5
 FREE_STORAGE_LIMIT_BYTES = 500 * 1024 * 1024  # 500 MB

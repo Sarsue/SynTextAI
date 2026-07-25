@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from .repositories.repository_manager import RepositoryManager
+from ..repositories.repository_manager import RepositoryManager
 from .utils import decode_firebase_token
 
 

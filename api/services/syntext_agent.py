@@ -2,10 +2,14 @@ import re
 import logging
 from typing import List, Dict, Any, Tuple
 
-from api.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation_dspy
+from api.services.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation_dspy
+from api.rag.pipeline import RAGPipeline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+rag_pipeline = RAGPipeline(config={"search_engine": {"default_alpha": 0.7}})
 
 
 class SyntextAgent:
@@ -126,8 +130,11 @@ class SyntextAgent:
                     available_context_tokens = MAX_TOKENS_CONTEXT - non_context_tokens - 100  # 100 token buffer
                     
                     # Smart truncation targeting most relevant segments
-                    from rag_utils import smart_chunk_selection
-                    reduced_chunks = smart_chunk_selection(top_k_results, query, available_context_tokens)
+                    reduced_chunks = rag_pipeline.chunk_selector.select(
+                        top_k_results,
+                        query,
+                        token_budget=available_context_tokens,
+                    )
                     formatted_context, source_map = self._format_context_and_sources(reduced_chunks)
                     
                     # Rebuild prompt with reduced context

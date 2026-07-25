@@ -277,6 +277,15 @@ pull_image() {
 pull_image "osasdeeon/syntextai:latest" || exit 1
 pull_image "searxng/searxng:latest" || exit 1
 
+# Step 8.5: Run database migrations against the freshly pulled image, before
+# the new containers start serving traffic. --entrypoint sh skips the
+# Whisper-model-download entrypoint, which migrations don't need.
+echo "[8.5/9] Running database migrations..."
+if ! (cd "$APP_DIR" && sudo $COMPOSE_CMD -f docker-compose.yml run --rm --entrypoint sh syntextaiapp -c "cd api && alembic upgrade head"); then
+    echo "❌ Migration failed — aborting deploy before touching running containers."
+    exit 1
+fi
+
 # Step 9: Bring up Docker containers
 echo "[9/9] Launching Docker containers..."
 (cd "$APP_DIR" && sudo $COMPOSE_CMD -f docker-compose.yml down --remove-orphans)

@@ -166,6 +166,15 @@ class AsyncChatRepository(AsyncBaseRepository):
                 logger.error(f"Error getting chat histories: {e}", exc_info=True)
                 return []
 
+    async def user_owns_chat_history(self, chat_history_id: int, user_id: int) -> bool:
+        """Check whether chat_history_id exists and belongs to user_id."""
+        async with self.get_async_session() as session:
+            stmt = select(ChatHistoryORM.id).where(
+                and_(ChatHistoryORM.id == chat_history_id, ChatHistoryORM.user_id == user_id)
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+
     async def get_messages_for_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, Any]]:
         """Get all messages for a specific chat history.
 

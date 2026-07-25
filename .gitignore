@@ -12,6 +12,9 @@ searxng/uwsgi.ini.new
 # production
 /build
 *.ini
+# alembic.ini has no secrets (DB URL comes from env vars via env.py) and
+# needs to be committed so every environment can run migrations.
+!api/alembic.ini
 
 persona.json 
 prompts/

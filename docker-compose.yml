@@ -32,7 +32,7 @@ services:
   worker:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
-    command: python -m api.worker
+    command: python -m api.workers.worker
     env_file:
       - .env
     environment:

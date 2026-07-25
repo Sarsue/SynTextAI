@@ -24,10 +24,11 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse
+import uuid
 from dotenv import load_dotenv
 from pathlib import Path
-from api.models.orm_models import File
-from api.tasks import process_file_data
+from api.models.orm_models import AgentRun
+from api.workflows.tasks import process_file_data
 # Add the parent directory to sys.path to fix imports
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, base_dir)
@@ -165,6 +166,194 @@ async def update_file_status(file_id: int, status: str, error: str = None) -> No
         raise
 
 
+async def update_agent_run(
+    run_id: uuid.UUID,
+    *,
+    status: str,
+    result: Optional[Dict[str, Any]] = None,
+    last_error: Optional[str] = None,
+    started_at: Optional[datetime] = None,
+    finished_at: Optional[datetime] = None,
+    locked_by: Optional[str] = None,
+    locked_at: Optional[datetime] = None,
+    lease_expires_at: Optional[datetime] = None,
+) -> None:
+    store = get_repository_manager()
+    async with store.agent_run_repo.get_async_session() as session:
+        run = await session.get(AgentRun, run_id)
+        if not run:
+            return
+        run.status = status
+        if result is not None:
+            run.result = result
+        if last_error is not None:
+            run.last_error = last_error
+        if started_at is not None:
+            run.started_at = started_at
+        if finished_at is not None:
+            run.finished_at = finished_at
+        if locked_by is not None:
+            run.locked_by = locked_by
+        if locked_at is not None:
+            run.locked_at = locked_at
+        if lease_expires_at is not None:
+            run.lease_expires_at = lease_expires_at
+        run.updated_at = datetime.utcnow()
+        await session.commit()
+
+
+async def process_agent_run(run_id: uuid.UUID) -> None:
+    store = get_repository_manager()
+
+    async with semaphore:
+        if shutdown_event.is_set():
+            return
+
+        async with store.agent_run_repo.get_async_session() as session:
+            run = await session.get(AgentRun, run_id)
+            if not run:
+                return
+            payload = run.payload or {}
+            run_type = run.run_type
+
+        if run_type == "ingest_file":
+            file_id = payload.get("file_id")
+            user_id = payload.get("user_id")
+            filename = payload.get("filename")
+            file_url = payload.get("file_url")
+            is_youtube = bool(payload.get("is_youtube"))
+            language = payload.get("language") or "English"
+            comprehension_level = payload.get("comprehension_level") or "Beginner"
+
+            if not file_id or not user_id or not filename or not file_url:
+                await update_agent_run(
+                    run_id,
+                    status="failed",
+                    last_error="Missing required payload fields for ingest_file",
+                    finished_at=datetime.utcnow(),
+                )
+                return
+
+            inferred_gc_id = payload.get("user_gc_id") or _infer_user_gc_id_from_file_url(str(file_url)) or ""
+
+            try:
+                result = await process_file_data(
+                    user_gc_id=str(inferred_gc_id),
+                    file_id=int(file_id),
+                    user_id=int(user_id),
+                    filename=str(filename),
+                    file_url=str(file_url),
+                    is_youtube=is_youtube,
+                    language=str(language),
+                    comprehension_level=str(comprehension_level),
+                )
+
+                final_status = result.get(
+                    "final_status",
+                    "processed" if result.get("success", False) else "failed",
+                )
+                await update_file_status(int(file_id), final_status)
+
+                await update_agent_run(
+                    run_id,
+                    status="succeeded" if result.get("success", False) else "failed",
+                    result=result,
+                    finished_at=datetime.utcnow(),
+                )
+                return
+            except Exception as e:
+                try:
+                    await update_file_status(int(file_id), "failed", error=str(e))
+                except Exception:
+                    pass
+
+                await update_agent_run(
+                    run_id,
+                    status="failed",
+                    last_error=str(e)[:2000],
+                    finished_at=datetime.utcnow(),
+                )
+                raise
+
+        if run_type == "answer_query":
+            from api.workflows.tasks import run_query_pipeline
+
+            user_id = payload.get("user_id")
+            history_id = payload.get("history_id")
+            message = payload.get("message")
+            language = payload.get("language") or "English"
+            comprehension_level = payload.get("comprehension_level") or "beginner"
+            workspace_id = payload.get("workspace_id")
+            file_id = payload.get("file_id")
+
+            if not user_id or not history_id or not message:
+                await update_agent_run(
+                    run_id,
+                    status="failed",
+                    last_error="Missing required payload fields for answer_query",
+                    finished_at=datetime.utcnow(),
+                )
+                return
+
+            try:
+                formatted_history = await store.chat_repo.format_user_chat_history(int(history_id), int(user_id))
+                result = await run_query_pipeline(
+                    user_id=int(user_id),
+                    message=str(message),
+                    language=str(language),
+                    comprehension_level=str(comprehension_level),
+                    formatted_history=formatted_history,
+                    workspace_id=int(workspace_id) if workspace_id is not None else None,
+                    file_id=int(file_id) if file_id is not None else None,
+                )
+                response = result.get("response")
+                if response:
+                    await store.chat_repo.add_message(
+                        content=str(response),
+                        sender="bot",
+                        user_id=int(user_id),
+                        chat_history_id=int(history_id),
+                    )
+                    await notify_client(
+                        user_id=int(user_id),
+                        event_type="message_received",
+                        data={
+                            "status": "success",
+                            "history_id": int(history_id),
+                            "message": str(response),
+                        },
+                    )
+
+                await update_agent_run(
+                    run_id,
+                    status="succeeded",
+                    result=result,
+                    finished_at=datetime.utcnow(),
+                )
+                return
+            except Exception as e:
+                await notify_client(
+                    user_id=int(user_id),
+                    event_type="message_received",
+                    data={"status": "error", "error": str(e)},
+                )
+                await update_agent_run(
+                    run_id,
+                    status="failed",
+                    last_error=str(e)[:2000],
+                    finished_at=datetime.utcnow(),
+                )
+                raise
+
+        await update_agent_run(
+            run_id,
+            status="failed",
+            last_error=f"Unsupported run_type: {run_type}",
+            finished_at=datetime.utcnow(),
+        )
+        return
+
+
 async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> None:
     """Notify the API to relay an event to the frontend over WebSocket.
 
@@ -190,151 +379,42 @@ async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> 
     await asyncio.to_thread(_post)
 
 
-async def process_file(file_id: int, user_id: int, user_gc_id: str, filename: str, 
-                     file_url: str, language: str = "English", 
-                     comprehension_level: str = "Beginner") -> None:
-    """Process a single file with concurrency control"""
-    logger.info(f"[TRACE] Starting process_file for file_id: {file_id}, filename: {filename}")
-    
+async def fetch_pending_runs(limit: int = 10) -> List[uuid.UUID]:
     try:
-        # Use a semaphore to limit concurrent processing
-        async with semaphore:
-            if shutdown_event.is_set():
-                logger.info(f"[TRACE] Shutdown requested, skipping processing of file {file_id}")
-                return
-                
-            # Determine if this is a YouTube URL
-            is_youtube = any(s in file_url.lower() for s in ['youtube.com', 'youtu.be'])
-            logger.info(f"[TRACE] File type detection - is_youtube: {is_youtube}")
-                
-            # Process the file with up to 3 attempts (exponential backoff)
-            last_error: Optional[Exception] = None
-            for attempt in range(3):
-                try:
-                    # Let process_file_data handle phase status updates; we only set final state
-                    result = await process_file_data(
-                        user_gc_id=user_gc_id,
-                        file_id=file_id,
-                        user_id=user_id,
-                        filename=filename,
-                        file_url=file_url,
-                        is_youtube=is_youtube,
-                        language=language,
-                        comprehension_level=comprehension_level
-                    )
+        from sqlalchemy import select, or_
 
-                    final_status = result.get('final_status', 'processed' if result.get('success', False) else 'failed')
-                    await update_file_status(file_id, final_status)
-                    await notify_client(
-                        user_id=user_id,
-                        event_type="file_status_update",
-                        data={"file_id": int(file_id), "status": final_status},
-                    )
-                    logger.info(f"Completed processing file {filename} (ID: {file_id}) with status {final_status}")
-                    last_error = None
-                    break
-                except Exception as e:
-                    last_error = e
-                    logger.error(f"Attempt {attempt+1} failed for file {file_id}: {e}", exc_info=True)
-                    if attempt < 2:
-                        # Backoff: 1s, 2s
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    # Final failure: mark failed and propagate
-                    try:
-                        await update_file_status(file_id, "failed", error=str(e))
-                        await notify_client(
-                            user_id=user_id,
-                            event_type="file_status_update",
-                            data={"file_id": int(file_id), "status": "failed"},
-                        )
-                    finally:
-                        pass
-                    raise
-                
-    except Exception as e:
-        logger.error(f"[FATAL] Unhandled error in process_file for file {file_id}: {str(e)}", exc_info=True)
-        # Make one final attempt to mark as failed
-        try:
-            await update_file_status(file_id, "failed")
-            await notify_client(
-                user_id=user_id,
-                event_type="file_status_update",
-                data={"file_id": int(file_id), "status": "failed"},
-            )
-        except Exception as final_err:
-            logger.error(f"[FATAL] Failed final status update for file {file_id}: {str(final_err)}")
-        raise
-
-
-async def fetch_pending_files() -> List[Dict[str, Any]]:
-    """Fetch files with 'uploaded' status from the database and mark them as processing"""
-    try:
-        from api.models.orm_models import File
-        from sqlalchemy import select
-
-        # Use the shared repository manager function
         store = get_repository_manager()
+        worker_id = os.getenv("WORKER_ID") or str(os.getpid())
 
-        # Use async transaction to atomically fetch and update files
-        async with store.file_repo.get_async_session() as session:
-            try:
-                count_stmt = select(text("count(*)")).select_from(File).where(File.processing_status == 'uploaded')
-                count_res = await session.execute(count_stmt)
-                uploaded_count = int(count_res.scalar() or 0)
-                if uploaded_count == 0:
-                    latest_stmt = (
-                        select(File.id, File.processing_status, File.file_name)
-                        .order_by(File.created_at.desc())
-                        .limit(1)
-                    )
-                    latest_res = await session.execute(latest_stmt)
-                    latest_row = latest_res.first()
-                    logger.info(f"No pending files found. uploaded_count=0 latest={latest_row}")
-            except Exception:
-                pass
-
-            # Find files that need processing - simplified query without joinedload to avoid filtering issues
+        async with store.agent_run_repo.get_async_session() as session:
+            now = datetime.utcnow()
             stmt = (
-                select(File)
-                .where(File.processing_status == 'uploaded')
-                .order_by(File.created_at.asc())
+                select(AgentRun)
+                .where(
+                    AgentRun.status == "queued",
+                    or_(AgentRun.run_after.is_(None), AgentRun.run_after <= now),
+                )
+                .order_by(AgentRun.priority.asc(), AgentRun.created_at.asc())
                 .with_for_update(skip_locked=True)
-                .limit(10)
+                .limit(limit)
             )
 
-            result = await session.execute(stmt)
-            files_to_process = result.scalars().all()
+            res = await session.execute(stmt)
+            runs = res.scalars().all()
+            run_ids: List[uuid.UUID] = []
+            for run in runs:
+                run.status = "running"
+                run.locked_by = str(worker_id)
+                run.locked_at = now
+                run.started_at = now
+                run.lease_expires_at = now + timedelta(minutes=15)
+                run.updated_at = now
+                run_ids.append(run.id)
 
-            # Update status to extracting to claim the files.
-            # We avoid introducing a separate 'processing' status because the frontend
-            # and API progress mapping expect the existing lifecycle states.
-            for file in files_to_process:
-                file.processing_status = 'extracting'
-
-            # Commit the transaction to release the lock and persist status changes
             await session.commit()
-
-            # Convert files to list of dictionaries
-            pending_files = []
-            for file in files_to_process:
-                inferred_gc_id = None
-                if file.file_url and "storage.googleapis.com" in (file.file_url or ""):
-                    inferred_gc_id = _infer_user_gc_id_from_file_url(file.file_url)
-                pending_files.append({
-                    "id": file.id,
-                    "file_name": file.file_name,
-                    "file_url": file.file_url,
-                    "user_id": file.user_id,
-                    "user_gc_id": inferred_gc_id or "",
-                    "created_at": file.created_at
-                })
-
-            logger.info(f"Fetched {len(pending_files)} files for processing")
-            return pending_files
-
+            return run_ids
     except Exception as e:
-        logger.error(f"Error fetching pending files: {str(e)}")
+        logger.error(f"Error fetching pending agent runs: {str(e)}")
         return []
 
 
@@ -342,25 +422,14 @@ async def worker_loop() -> None:
     """Main worker loop that polls for files and processes them with fixed 30-second intervals"""
     while not shutdown_event.is_set():
         try:
-            # Fetch pending files
-            pending_files = await fetch_pending_files()
+            run_ids = await fetch_pending_runs(limit=10)
 
-            if pending_files:
-                logger.info(f"Found {len(pending_files)} files to process")
+            if run_ids:
+                logger.info(f"Found {len(run_ids)} agent runs to process")
 
-                # Create tasks for each file
                 tasks = []
-                for file in pending_files:
-                    # Create task for processing this file
-                    task = asyncio.create_task(
-                        process_file(
-                            file_id=file["id"],
-                            user_id=file["user_id"],
-                            user_gc_id=file["user_gc_id"],
-                            filename=file["file_name"],
-                            file_url=file["file_url"],
-                        )
-                    )
+                for run_id in run_ids:
+                    task = asyncio.create_task(process_agent_run(run_id))
                     tasks.append(task)
                     running_tasks.append(task)
 
@@ -375,7 +444,7 @@ async def worker_loop() -> None:
                     if task in running_tasks:
                         running_tasks.remove(task)
             else:
-                logger.info(f"No pending files found. Next poll in {POLL_INTERVAL} seconds")
+                logger.info(f"No pending agent runs found. Next poll in {POLL_INTERVAL} seconds")
 
             # Wait before polling again with fixed interval
             await asyncio.sleep(POLL_INTERVAL)
@@ -416,7 +485,7 @@ async def main():
     
     # Preload Whisper model
     try:
-        from api.tasks import load_whisper_model_if_needed
+        from api.workflows.tasks import load_whisper_model_if_needed
         whisper = load_whisper_model_if_needed()
         if whisper:
             logger.info("✅ Whisper model preloaded")

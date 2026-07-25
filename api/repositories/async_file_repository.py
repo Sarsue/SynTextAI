@@ -8,7 +8,7 @@ import numpy as np
 from scipy.spatial.distance import cosine, euclidean
 
 from .async_base_repository import AsyncBaseRepository
-from ..models import File as FileORM, Chunk as ChunkORM, KeyConcept as KeyConceptORM
+from ..models import File as FileORM, Chunk as ChunkORM
 from ..models import Segment as SegmentORM
 
 # Import SQLAlchemy async components
@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 import os
 import requests
 
-from api.websocket_manager import websocket_manager
+from api.core.websocket_manager import websocket_manager
 
 logger = logging.getLogger(__name__)
 
@@ -287,9 +287,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                 error_msg = f"Error deleting file {file_id}: {str(e)[:1000]}"
                 logger.error(error_msg, exc_info=True)
                 try:
-                    await session.execute(text("DELETE FROM flashcards WHERE file_id = :file_id"), {"file_id": file_id})
-                    await session.execute(text("DELETE FROM quiz_questions WHERE file_id = :file_id"), {"file_id": file_id})
-                    await session.execute(text("DELETE FROM key_concepts WHERE file_id = :file_id"), {"file_id": file_id})
                     await session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
                     await session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
                     await session.execute(text("DELETE FROM files WHERE id = :file_id AND user_id = :user_id"),
@@ -332,21 +329,24 @@ class AsyncFileRepository(AsyncBaseRepository):
 
                 file_ids = [file.id for file in files]
 
-                # Get chunks with embeddings, limited to improve performance
-                stmt = select(ChunkORM).where(
-                    and_(ChunkORM.file_id.in_(file_ids), ChunkORM.embedding != None)
-                ).limit(1000)
+                # Get chunks with embeddings and their linked segments for text
+                stmt = (
+                    select(ChunkORM, SegmentORM)
+                    .outerjoin(SegmentORM, SegmentORM.id == ChunkORM.segment_id)
+                    .where(and_(ChunkORM.file_id.in_(file_ids), ChunkORM.embedding != None))
+                    .limit(1000)
+                )
                 result = await session.execute(stmt)
-                chunks = result.scalars().all()
+                rows = result.all()
 
-                if not chunks:
+                if not rows:
                     return []
 
                 # Calculate similarity scores
                 results = []
                 query_embedding_np = np.array(query_embedding)
 
-                for chunk in chunks:
+                for chunk, segment in rows:
                     chunk_embedding = np.array(chunk.embedding)
                     if similarity_type.lower() == 'cosine':
                         similarity = 1 - cosine(query_embedding_np, chunk_embedding)
@@ -357,7 +357,10 @@ class AsyncFileRepository(AsyncBaseRepository):
                     results.append({
                         'chunk_id': chunk.id,
                         'file_id': chunk.file_id,
-                        'content': chunk.content,
+                        'segment_id': chunk.segment_id,
+                        'content': (segment.content if segment is not None else ''),
+                        'page_number': (segment.page_number if segment is not None else None),
+                        'meta_data': (segment.meta_data if (segment is not None and segment.meta_data is not None) else {}),
                         'similarity': float(similarity)
                     })
 
@@ -413,14 +416,14 @@ class AsyncFileRepository(AsyncBaseRepository):
                       c.id AS id,
                       c.file_id AS file_id,
                       c.segment_id AS segment_id,
-                      c.content AS content,
+                      COALESCE(s.content, '') AS content,
                       f.file_name AS file_name,
                       f.file_url AS file_url,
                       s.page_number AS page_number,
                       s.meta_data AS meta_data,
                       (
                         :vector_weight * (1 - (c.embedding <-> q.embedding)) +
-                        :bm25_weight * ts_rank_cd(to_tsvector('simple', c.content), q.keywords)
+                        :bm25_weight * ts_rank_cd(to_tsvector('simple', COALESCE(s.content, '')), q.keywords)
                       ) AS hybrid_score
                     FROM chunks c
                     JOIN files f ON f.id = c.file_id

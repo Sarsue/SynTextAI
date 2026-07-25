@@ -8,13 +8,12 @@ import asyncio
 from faster_whisper import WhisperModel
 import yt_dlp
 import requests
-from api.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
+from api.core.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
-from api.llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_mcq_from_key_concepts as llm_generate_mcq_from_key_concepts
-from api.syntext_agent import SyntextAgent
-from api.rag_utils import rag_pipeline
+from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding, generate_mcq_from_key_concepts as llm_generate_mcq_from_key_concepts
+from api.services.syntext_agent import SyntextAgent
 import stripe
-from api.websocket_manager import websocket_manager
+from api.core.websocket_manager import websocket_manager
 from dotenv import load_dotenv
 from fastapi import HTTPException
 import gc
@@ -23,6 +22,8 @@ from api.models.async_db import get_database_url
 from api.processors.factory import FileProcessingFactory
 import numpy as np  # Added for distractor generation
 from urllib.parse import urlparse
+from api.agents.query_agent import QueryAgent
+from api.agents.ingestion_agent import IngestionAgent
 
 # Load environment variables
 load_dotenv()
@@ -75,6 +76,7 @@ stripe.api_key = os.getenv('STRIPE_SECRET')
 DATABASE_URL = get_database_url()
 store = RepositoryManager(database_url=DATABASE_URL)
 syntext = SyntextAgent()
+query_agent = QueryAgent(store=store, syntext=syntext)
 
 # Model is only loaded when needed to save memory
 @contextmanager
@@ -211,16 +213,19 @@ async def handle_processing_error(file_id: int, error_msg: str) -> dict:
         logger.error(f"Failed to update file status to failed for {file_id}: {db_error}")
     return {"success": False, "error_message": error_msg}
 
-async def process_file_data(
-    user_gc_id: str,
-    file_id: str,
-    user_id: str,
+
+async def _process_file_data_impl(
+    *,
+    user_id: int,
+    file_id: int,
     filename: str,
     file_url: str,
+    user_gc_id: str,
+    workspace_id: int | None,
     is_youtube: bool = False,
-    language: str = "English",
-    comprehension_level: str = "Beginner"
-):
+    language: str = "en",
+    comprehension_level: str = "Beginner",
+) -> Dict[str, Any]:
     """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate key concepts, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id})")
 
@@ -268,24 +273,28 @@ async def process_file_data(
                     "filename": filename,
                     "file_type": FileUtils.determine_file_type(filename),
                     "status": "pending",
-                    "url": file_url
+                    "url": file_url,
                 }
                 file_result = await store.file_repo.create_file(file_data)
-                if not file_result or not file_result.get('id'):
+                if not file_result or not file_result.get("id"):
                     logger.error(f"Failed to create file record for file_id: {file_id}")
-                    return await handle_processing_error(file_id_int, f"Failed to create file record for file_id: {file_id}")
+                    return await handle_processing_error(
+                        file_id_int, f"Failed to create file record for file_id: {file_id}"
+                    )
                 logger.info(f"Created file record for file_id: {file_id}")
                 file = file_result
 
             # Update file type if not set
-            if not file.get('file_type'):
+            if not file.get("file_type"):
                 new_file_type = FileUtils.determine_file_type(filename)
                 success = await store.file_repo.update_file_type(file_id_int, new_file_type)
                 if not success:
-                    return await handle_processing_error(file_id_int, f"Failed to update file type for file ID: {file_id}")
+                    return await handle_processing_error(
+                        file_id_int, f"Failed to update file type for file ID: {file_id}"
+                    )
 
             # Check processing status
-            if file.get('processing_status') == "processed":
+            if file.get("processing_status") == "processed":
                 logger.info(f"File {file_id} is already processed")
                 return {"success": True, "final_status": "processed", "error_message": None}
 
@@ -311,7 +320,7 @@ async def process_file_data(
                     file_url=file_url,
                     user_gc_id=user_gc_id,
                     language=language,
-                    comprehension_level=comprehension_level
+                    comprehension_level=comprehension_level,
                 )
             else:
                 file_data = None
@@ -332,13 +341,13 @@ async def process_file_data(
                     if not user_gc_id:
                         inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
                         if inferred_gc_id:
-                            logger.info(
-                                "user_gc_id missing; inferred from file_url for GCS download"
-                            )
+                            logger.info("user_gc_id missing; inferred from file_url for GCS download")
                             user_gc_id = inferred_gc_id
                     file_data = download_from_gcs(user_gc_id, filename)
                 if file_data is None:
-                    return await handle_processing_error(file_id_int, f"Failed to download file {filename} from GCS")
+                    return await handle_processing_error(
+                        file_id_int, f"Failed to download file {filename} from GCS"
+                    )
 
                 logger.info(f"Downloaded file {filename}, size: {len(file_data)} bytes")
                 result = await processor.process(
@@ -349,12 +358,14 @@ async def process_file_data(
                     file_url=file_url,
                     user_gc_id=user_gc_id,
                     language=language,
-                    comprehension_level=comprehension_level
+                    comprehension_level=comprehension_level,
                 )
 
             if not result.get("success", False):
-                error_msg = result.get('error', 'Unknown error during file processing')
-                return await handle_processing_error(file_id_int, f"Processing failed for file ID {file_id}: {error_msg}")
+                error_msg = result.get("error", "Unknown error during file processing")
+                return await handle_processing_error(
+                    file_id_int, f"Processing failed for file ID {file_id}: {error_msg}"
+                )
 
             await store.file_repo.update_file_status(file_id_int, "processed")
             logger.info(f"File processing completed successfully for {filename}")
@@ -362,12 +373,107 @@ async def process_file_data(
                 "success": True,
                 "final_status": "processed",
                 "message": f"Successfully processed file {filename}",
-                "error_message": None
+                "error_message": None,
             }
 
         except Exception as e:
             error_msg = f"Fatal error in file processing pipeline: {str(e)[:1000]}"
             return await handle_processing_error(file_id_int, error_msg)
+
+async def process_file_data(
+    user_id: int,
+    file_id: int,
+    filename: str,
+    file_url: str,
+    user_gc_id: str,
+    workspace_id: int | None,
+    is_youtube: bool = False,
+    language: str = "en",
+    comprehension_level: str = "Beginner",
+) -> Dict[str, Any]:
+    """Processes the uploaded file via the LangGraph ingestion agent with a safe fallback."""
+    try:
+        ingestion_agent = IngestionAgent(process_fn=_process_file_data_impl)
+        return await ingestion_agent.run(
+            user_id=user_id,
+            file_id=file_id,
+            filename=filename,
+            file_url=file_url,
+            user_gc_id=user_gc_id,
+            workspace_id=workspace_id,
+            is_youtube=is_youtube,
+            language=language,
+            comprehension_level=comprehension_level,
+        )
+    except Exception as agent_error:
+        logger.warning(
+            {
+                "event": "process_file_data.agent_failed_fallback",
+                "file_id": file_id,
+                "error": str(agent_error),
+            }
+        )
+        return await _process_file_data_impl(
+            user_id=user_id,
+            file_id=file_id,
+            filename=filename,
+            file_url=file_url,
+            user_gc_id=user_gc_id,
+            workspace_id=workspace_id,
+            is_youtube=is_youtube,
+            language=language,
+            comprehension_level=comprehension_level,
+        )
+
+
+async def run_query_pipeline(
+    *,
+    user_id: int,
+    message: str,
+    language: str,
+    comprehension_level: str,
+    formatted_history: str = "",
+    workspace_id: int | None = None,
+    file_id: int | None = None,
+) -> Dict[str, Any]:
+    """Run retrieval + generation for a single query without persisting chat messages."""
+    try:
+        logger.info({"event": "run_query_pipeline.agent_start", "message": message})
+        return await query_agent.run(
+            user_id=user_id,
+            message=message,
+            language=language,
+            comprehension_level=comprehension_level,
+            formatted_history=formatted_history,
+            workspace_id=workspace_id,
+            file_id=file_id,
+        )
+    except Exception as agent_error:
+        logger.warning(
+            {
+                "event": "run_query_pipeline.agent_failed_fallback",
+                "message": message,
+                "error": str(agent_error),
+            }
+        )
+        query_embedding = get_text_embedding(message)
+        topK_chunks = await store.file_repo.hybrid_search(
+            user_id=user_id,
+            query=message,
+            query_embedding=query_embedding,
+            workspace_id=workspace_id,
+            file_id=file_id,
+            top_k=10,
+        )
+        response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
+        return {
+            "response": response,
+            "context_chunks": topK_chunks,
+            "rewritten_query": message,
+            "expanded_terms": [],
+            "mode": "fallback",
+            "error": str(agent_error),
+        }
 
 async def process_query_data(
     message: str,
@@ -379,140 +485,23 @@ async def process_query_data(
     file_id: int | None = None,
 ):
     """Processes a user query and generates a response using SyntextAgent with enhanced RAG."""
+    if id is None or history_id is None:
+        raise HTTPException(status_code=400, detail="Missing user_id or history_id for query processing")
     try:
         # Get conversation history in formatted form
         formatted_history = await store.chat_repo.format_user_chat_history(history_id, id)
-        
-        # Try enhanced RAG pipeline first
-        try:
-            logger.info(f"Processing query with enhanced RAG: '{message}'")
-            from api.rag_utils import process_query, hybrid_search, cross_encoder_rerank, smart_chunk_selection
-            
-            # Process and expand the query
-            rewritten_query, expanded_terms = process_query(message, formatted_history)
-            logger.info(f"Original query: '{message}', Rewritten: '{rewritten_query}'")
-            if expanded_terms:
-                logger.info(f"Query expansion terms: {', '.join(expanded_terms)}")
-            
-            # Generate embeddings for the query
-            query_embedding = get_text_embedding(rewritten_query)
-            
-            # Enhanced retrieval: get more candidates for reranking via hybrid search
-            vector_results = await store.file_repo.hybrid_search(
-                user_id=id,
-                query=rewritten_query,
-                query_embedding=query_embedding,
-                workspace_id=workspace_id,
-                file_id=file_id,
-                top_k=15,
-            )
-            
-            # If we have expanded terms, try to get additional results and combine them
-            additional_results = []
-            if expanded_terms:
-                for term in expanded_terms[:3]:  # Limit to top 3 expansion terms
-                    try:
-                        term_embedding = get_text_embedding(term)
-                        term_results = await store.file_repo.hybrid_search(
-                            user_id=id,
-                            query=term,
-                            query_embedding=term_embedding,
-                            workspace_id=workspace_id,
-                            file_id=file_id,
-                            top_k=5,
-                        )
-                        additional_results.extend(term_results)
-                    except Exception as term_error:
-                        logger.warning(f"Error retrieving results for expansion term '{term}': {term_error}")
-            
-            # Combine all retrieved results
-            all_results = vector_results + additional_results
-            
-            # Log file types being retrieved to verify all file types work with RAG
-            file_types = {}
-            for result in all_results:
-                if 'file_name' in result:
-                    file_ext = result['file_name'].split('.')[-1].lower() if '.' in result['file_name'] else 'unknown'
-                    file_types[file_ext] = file_types.get(file_ext, 0) + 1
-            if file_types:
-                logger.info(f"Retrieved content from file types: {file_types}")
-                
-            # Deduplicate results by segment_id when available, otherwise by chunk_id.
-            # NOTE: hybrid_search returns segment_id as a top-level field.
-            seen_keys = set()
-            unique_results = []
-            for result in all_results:
-                seg_id = result.get('segment_id')
-                chunk_id = result.get('chunk_id')
-                file_id = result.get('file_id')
 
-                dedup_key = (file_id, seg_id) if seg_id is not None else (file_id, chunk_id)
-                if dedup_key in seen_keys:
-                    continue
-                seen_keys.add(dedup_key)
-                unique_results.append(result)
+        result = await run_query_pipeline(
+            user_id=id,
+            message=message,
+            language=language,
+            comprehension_level=comprehension_level,
+            formatted_history=formatted_history,
+            workspace_id=workspace_id,
+            file_id=file_id,
+        )
 
-            # Provide a normalized score field for downstream components.
-            # SmartChunkSelector expects `similarity_score`.
-            for r in unique_results:
-                if 'similarity_score' in r:
-                    continue
-                if r.get('hybrid_score') is not None:
-                    r['similarity_score'] = float(r.get('hybrid_score') or 0.0)
-                else:
-                    r['similarity_score'] = 0.0
-            
-            # Apply cross-encoder reranking
-            try:
-                reranked_results = cross_encoder_rerank(rewritten_query, unique_results, top_k=15)
-                logger.info(f"Reranked {len(unique_results)} results to {len(reranked_results)} top results")
-            except Exception as rerank_error:
-                logger.warning(f"Reranking error: {rerank_error}, falling back to original ranking")
-                reranked_results = unique_results[:15] if len(unique_results) > 15 else unique_results
-
-            # Ensure reranked results expose similarity_score for chunk selection.
-            for r in reranked_results:
-                if r.get('rerank_score') is not None:
-                    r['similarity_score'] = float(r.get('rerank_score') or 0.0)
-                elif r.get('hybrid_score') is not None:
-                    r['similarity_score'] = float(r.get('hybrid_score') or 0.0)
-                else:
-                    r['similarity_score'] = 0.0
-            
-            # Select chunks that fit token budget while maximizing relevance and diversity
-            context_chunks = smart_chunk_selection(reranked_results, rewritten_query)
-
-            try:
-                if context_chunks:
-                    logger.info(
-                        "Selected context chunks: " + ", ".join(
-                            [
-                                f"file={c.get('file_name','?')} page={c.get('page_number','?')} chunk_id={c.get('chunk_id','?')} score={c.get('similarity_score',0):.4f}"
-                                for c in context_chunks[:6]
-                            ]
-                        )
-                    )
-            except Exception:
-                pass
-            
-            # Generate response using the enhanced context
-            response = syntext.query_pipeline(message, formatted_history, context_chunks, language, comprehension_level)
-            logger.info("Enhanced RAG pipeline completed successfully")
-            
-        except Exception as rag_error:
-            # Fallback to original RAG pipeline if enhanced version fails
-            logger.warning(f"Enhanced RAG pipeline failed: {rag_error}. Falling back to original pipeline.")
-            query_embedding = get_text_embedding(message)
-            topK_chunks = await store.file_repo.hybrid_search(
-                user_id=int(id),
-                query=message,
-                query_embedding=query_embedding,
-                workspace_id=workspace_id,
-                file_id=file_id,
-                top_k=10,
-            )
-            response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
-            logger.info("Fallback to original RAG pipeline successful")
+        response = result["response"]
         
         # Save response and notify user
         await store.chat_repo.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)

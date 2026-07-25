@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
 from typing import List
-from ..utils import get_user_id
+from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
-from ..llm_service import get_text_embedding
+from ..services.llm_service import get_text_embedding
 import logging
 from typing import Dict
 # Set up logging
@@ -49,29 +49,56 @@ async def create_message(
     store: RepositoryManager = Depends(get_store)
 ):
     try:
-        from tasks import process_query_data
         user_id = user_data["user_id"]
-        
+
+        # Verify the caller actually owns history_id / workspace_id / file_id before
+        # touching them — these are attacker-controlled query params, and without this
+        # check a user could inject messages into (and get RAG answers grounded in)
+        # another user's chat history, workspace, or documents.
+        if not await store.chat_repo.user_owns_chat_history(history_id, user_id):
+            raise HTTPException(status_code=404, detail="Chat history not found")
+
+        if workspace_id is not None:
+            workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+            if workspace_id not in [ws["id"] for ws in workspaces]:
+                raise HTTPException(status_code=404, detail="Workspace not found")
+
+        if file_id is not None:
+            file_record = await store.file_repo.get_file_by_id(file_id)
+            if not file_record or file_record.get("user_id") != user_id:
+                raise HTTPException(status_code=404, detail="File not found")
+
         # Save the user message to the history
         user_request = await store.chat_repo.add_message(
             content=message, sender='user', user_id=user_id, chat_history_id=history_id
         )
         message_list = [user_request]
 
-        # Enqueue the task for processing the query
-        background_tasks.add_task(
-            process_query_data,
-            message,
-            language,
-            comprehension_level,
-            user_id,
-            history_id,
-            workspace_id,
-            file_id,
+        await store.agent_run_repo.enqueue_run(
+            run_type="answer_query",
+            agent_name="QueryAgent",
+            agent_version=None,
+            payload={
+                "user_id": int(user_id),
+                "history_id": int(history_id),
+                "message": message,
+                "language": language,
+                "comprehension_level": comprehension_level,
+                "workspace_id": int(workspace_id) if workspace_id is not None else None,
+                "file_id": int(file_id) if file_id is not None else None,
+            },
+            user_id=int(user_id),
+            chat_history_id=int(history_id),
+            workspace_id=int(workspace_id) if workspace_id is not None else None,
+            file_id=int(file_id) if file_id is not None else None,
+            priority=10,
+            max_attempts=3,
         )
-        logger.info(f"Enqueued Task for processing {message}")
+        logger.info(f"Enqueued agent run for query processing history_id={history_id}")
 
         return message_list
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error creating message: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error creating message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not create message")

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import LLM service function
 try:
-    from ..llm_service import prompt_llm
+    from ..services.llm_service import prompt_llm
 except ImportError:
     logger.warning("Could not import from llm_service, defining fallback function")
     def prompt_llm(text):
