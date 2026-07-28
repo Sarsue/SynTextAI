@@ -359,7 +359,7 @@ class AsyncUserRepository(AsyncBaseRepository):
                     logger.warning(f"No subscription found for Stripe customer ID: {stripe_customer_id}")
                     return None
                 
-                subscription = Subscription(
+                subscription = SubscriptionORM(
                     id=sub_orm.id,
                     user_id=sub_orm.user_id,
                     stripe_customer_id=sub_orm.stripe_customer_id,
@@ -378,7 +378,7 @@ class AsyncUserRepository(AsyncBaseRepository):
                 
                 card_details = None
                 if card_details_orm:
-                    card_details = CardDetails(
+                    card_details = CardDetailsORM(
                         id=card_details_orm.id,
                         subscription_id=card_details_orm.subscription_id,
                         card_last4=card_details_orm.card_last4,

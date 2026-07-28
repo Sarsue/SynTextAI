@@ -1,11 +1,12 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
 
 from api.rag.pipeline import RAGPipeline
+from api.services.llm_service import get_text_embedding
 
 logger = logging.getLogger(__name__)
 

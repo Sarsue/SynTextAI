@@ -88,12 +88,10 @@ async def fetch_link_metadata(url: str, link_type: str) -> Dict[str, Any]:
                 return await fetch_youtube_metadata(url, session)
             elif link_type == 'reddit':
                 return await fetch_reddit_metadata(url, session)
-            elif link_type == 'instagram':
-                return await fetch_instagram_metadata(url, session)
-            elif link_type == 'twitter':
-                return await fetch_twitter_metadata(url, session)
-            elif link_type == 'linkedin':
-                return await fetch_linkedin_metadata(url, session)
+            elif link_type in ('instagram', 'twitter', 'linkedin'):
+                # No dedicated scraper for these yet -- Open Graph tags cover
+                # public post/profile pages well enough as a fallback.
+                return await fetch_webpage_metadata(url, session)
             else:
                 return await fetch_webpage_metadata(url, session)
     except Exception as e:

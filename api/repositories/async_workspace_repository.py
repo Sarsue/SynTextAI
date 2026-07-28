@@ -53,10 +53,7 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
         async with self.get_async_session() as session:
             try:
                 # Owned workspaces
-                owned_stmt = (
-                    select(WorkspaceORM, func.literal("owner").label("role"))
-                    .where(WorkspaceORM.user_id == user_id)
-                )
+                owned_stmt = select(WorkspaceORM).where(WorkspaceORM.user_id == user_id)
                 # Member workspaces
                 member_stmt = (
                     select(WorkspaceORM, WorkspaceMember.role)
@@ -65,11 +62,20 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                     .where(WorkspaceORM.user_id != user_id)  # exclude owned (already in first query)
                 )
 
-                owned = (await session.execute(owned_stmt)).all()
+                owned = (await session.execute(owned_stmt)).scalars().all()
                 members = (await session.execute(member_stmt)).all()
 
                 results = []
-                for ws, role in owned + members:
+                for ws in owned:
+                    results.append({
+                        "id": ws.id,
+                        "name": ws.name,
+                        "user_id": ws.user_id,
+                        "role": "owner",
+                        "created_at": ws.created_at,
+                        "updated_at": ws.updated_at,
+                    })
+                for ws, role in members:
                     results.append({
                         "id": ws.id,
                         "name": ws.name,

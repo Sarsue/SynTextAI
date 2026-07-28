@@ -10,6 +10,7 @@ SQLAlchemy>=2.0.0
 alembic>=1.13.0
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
+pgvector>=0.3.6
 
 # Auth / cloud storage
 firebase-admin>=6.4.0
@@ -23,7 +24,11 @@ posthog>=3.5.0
 langgraph>=0.2.0
 numpy>=1.24.0
 scipy>=1.10.0
+scikit-learn>=1.4.0
 tiktoken>=0.6.0
+tenacity>=8.3.0
+# Pinned below 3.0 to avoid PyArrow conflicts
+dspy>=2.0.0,<3.0.0
 
 # LlamaIndex utilities used by chunking
 llama-index-core>=0.10.0
@@ -34,6 +39,7 @@ nltk>=3.8.1
 # File processing
 faster-whisper>=1.0.0
 yt-dlp>=2024.1.0
+youtube-transcript-api>=1.0.0
 
 # PDF / OCR
 PyMuPDF>=1.23.0

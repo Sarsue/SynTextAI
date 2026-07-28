@@ -62,7 +62,6 @@
     ]
   },
   "devDependencies": {
-    "@tailwindcss/oxide-darwin-x64": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react-helmet": "^6.1.11",
     "@vitejs/plugin-react": "^4.7.0",

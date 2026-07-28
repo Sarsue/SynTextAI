@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import PaymentView from './PaymentView';
@@ -16,15 +16,7 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, subscriptionStatus, setUser } = useUserContext();
-    const didRedirect = useRef(false);
-
-    useEffect(() => {
-        if (!didRedirect.current && (subscriptionStatus === 'active' || subscriptionStatus === 'trialing')) {
-            didRedirect.current = true;
-            navigate('/chat', { replace: true });
-        }
-    }, [subscriptionStatus, navigate]);
+    const { darkMode, setDarkMode, setUser } = useUserContext();
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(

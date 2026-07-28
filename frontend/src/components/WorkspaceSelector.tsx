@@ -83,7 +83,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // - free: none (or missing)
     const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
     const isFreeUser = normalizedStatus === 'none';
-    const isOwner = currentWorkspace?.role === 'owner' || currentWorkspace?.user_id === user?.uid as any;
+    const isOwner = currentWorkspace?.role === 'owner';
 
     // Fetch workspaces on mount
     useEffect(() => {
@@ -271,11 +271,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 throw new Error(data.detail || 'Failed to rename workspace');
             }
 
+            const renamedWorkspaceId = workspaceToEdit.id;
             addToast('Workspace renamed successfully!', 'success');
             setShowRenameModal(false);
             setRenameWorkspaceName('');
             setWorkspaceToEdit(null);
-            await fetchWorkspaces();
+            await fetchWorkspaces(renamedWorkspaceId);
         } catch (err) {
             console.error('Error renaming workspace:', err);
             const errorMsg = err instanceof Error ? err.message : 'Failed to rename workspace';
@@ -495,16 +496,14 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                             <Users className="size-4" /> Team
                         </Button>
                     )}
-                    {isOwner && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowCreateModal(true)}
-                            title={isFreeUser && workspaces.length >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
-                        >
-                            <Plus className="size-4" /> New
-                        </Button>
-                    )}
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowCreateModal(true)}
+                        title={isFreeUser && workspaces.length >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
+                    >
+                        <Plus className="size-4" /> New
+                    </Button>
                 </div>
 
                 {isFreeUser && workspaces.length >= 1 && (
