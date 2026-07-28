@@ -15,7 +15,6 @@ class IngestionAgentState(TypedDict, total=False):
     file_url: str
     user_gc_id: str
     workspace_id: Optional[int]
-    is_youtube: bool
     language: str
     comprehension_level: str
 
@@ -52,7 +51,6 @@ class IngestionAgent:
         file_url: str,
         user_gc_id: str,
         workspace_id: int | None = None,
-        is_youtube: bool = False,
         language: str = "en",
         comprehension_level: str = "Beginner",
     ) -> Dict[str, Any]:
@@ -63,7 +61,6 @@ class IngestionAgent:
             "file_url": file_url,
             "user_gc_id": user_gc_id,
             "workspace_id": workspace_id,
-            "is_youtube": is_youtube,
             "language": language,
             "comprehension_level": comprehension_level,
         }
@@ -78,7 +75,6 @@ class IngestionAgent:
                 "event": "ingestion_agent.start",
                 "file_id": state.get("file_id"),
                 "filename": state.get("filename"),
-                "is_youtube": bool(state.get("is_youtube")),
             }
         )
 
@@ -89,7 +85,6 @@ class IngestionAgent:
             file_url=state["file_url"],
             user_gc_id=state.get("user_gc_id") or "",
             workspace_id=state.get("workspace_id"),
-            is_youtube=bool(state.get("is_youtube")),
             language=state.get("language") or "en",
             comprehension_level=state.get("comprehension_level") or "Beginner",
         )

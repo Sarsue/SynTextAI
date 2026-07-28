@@ -8,14 +8,12 @@ services:
     env_file:
       - .env
     environment:
-      - WHISPER_CACHE_DIR=/app/models
       - PYTHONUNBUFFERED=1
       # App DB pool (keep low to avoid exhausting managed Postgres connection limits)
       - DB_POOL_SIZE=2
       - DB_MAX_OVERFLOW=1
     # Database connection is handled via environment variables
     volumes:
-      - syntextai_models:/app/models
       - ./api/config:/app/api/config
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -55,10 +53,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  syntextai_models:
-    driver: local
 
 networks:
   default:

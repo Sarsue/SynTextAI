@@ -62,7 +62,6 @@ services:
     environment:
       - MAX_CONCURRENT_TASKS=3
       - POLL_INTERVAL=10
-      - WHISPER_CACHE_DIR=/root/.cache/whisper
       # PostgreSQL SSL cert path
       - DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
       # Worker-specific connection pool settings (smaller to avoid exhausting DB connections)

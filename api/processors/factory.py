@@ -7,7 +7,6 @@ from typing import Optional, Dict, Any, Type
 
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
-from api.processors.youtube_processor import YouTubeProcessor
 from api.processors.pdf_processor import PDFProcessor
 from api.repositories.repository_manager import RepositoryManager
 
@@ -37,15 +36,6 @@ class FileProcessingFactory:
         Returns:
             An instance of the appropriate FileProcessor subclass, or None if no suitable processor found
         """
-        # Handle YouTube links
-        if filename and isinstance(filename, str) and filename.startswith('http'):
-            if 'youtube.com' in filename or 'youtu.be' in filename:
-                logger.info(f"Selected YouTubeProcessor for: {filename}")
-                return YouTubeProcessor(self.store)
-            else:
-                logger.info(f"URL detected but not YouTube: {filename}")
-                # Could add other URL-based processors here in the future
-        
         # Handle files by extension
         try:
             _, ext = os.path.splitext(filename)

@@ -127,28 +127,11 @@
 
 .pdf-viewer,
 .video-player,
-.image-viewer,
-.youtube-iframe {
+.image-viewer {
     width: 100%;
     height: 100%;
     border: none;
     display: block;
-}
-
-.youtube-container {
-    width: 100%;
-    height: 100%;
-    position: relative;
-    overflow: hidden;
-}
-
-.youtube-container .youtube-iframe {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    border: none;
 }
 
 .video-player,

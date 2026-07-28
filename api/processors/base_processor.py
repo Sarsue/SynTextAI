@@ -47,45 +47,15 @@ class FileProcessor(ABC):
     async def generate_embeddings(self, content: Dict[str, Any]) -> Dict[str, Any]:
         """
         Generate embeddings for the extracted content.
-        
+
         Args:
             content: Extracted content
-            
+
         Returns:
             Dict containing content with embeddings
         """
         pass
-        
-    @abstractmethod
-    async def generate_key_concepts(self, content: Dict[str, Any], **kwargs) -> List[Dict[str, Any]]:
-        """
-        Generate key concepts from the content.
-        
-        Args:
-            content: Processed content
-            **kwargs: Additional parameters
-            
-        Returns:
-            List of key concepts
-        """
-        pass
-        
-    @abstractmethod
-    async def generate_learning_materials(self, 
-                                        file_id: str,
-                                        key_concepts: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate learning materials from key concepts.
-        
-        Args:
-            file_id: File ID
-            key_concepts: List of key concepts
-            
-        Returns:
-            Dict containing generated learning materials
-        """
-        pass
-        
+
     def _log_error(self, message: str, error: Exception, exc_info: bool = True) -> None:
         """Utility method for consistent error logging."""
         logger.error(f"{message}: {error}", exc_info=exc_info)

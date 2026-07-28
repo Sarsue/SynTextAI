@@ -26,8 +26,7 @@ export const AnalyticsEvents = {
   FILE_DELETE_FAILED: 'file_delete_failed',
   FILE_VIEW_CLICKED: 'file_view_clicked',
   FILE_VIEW_CLOSED: 'file_view_closed',
-  YOUTUBE_LINK_SUBMITTED: 'youtube_link_submitted',
-  
+
   // Knowledge Base
   KNOWLEDGE_BASE_SEARCH: 'knowledge_base_search',
   KNOWLEDGE_BASE_ADD: 'knowledge_base_add',

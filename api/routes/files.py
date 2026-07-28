@@ -1,5 +1,4 @@
 import os
-import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
 from typing import List, Dict, Optional, Any
@@ -8,10 +7,6 @@ from redis.exceptions import RedisError
 from ..core.utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
 import asyncio
-try:
-    from youtube_transcript_api import YouTubeTranscriptApi
-except ImportError:
-    YouTubeTranscriptApi = None
 
 # PRODUCTION: File size limits to prevent OOM and abuse
 MAX_FILE_SIZE_MB = 100  # 100MB max for PDFs
@@ -47,44 +42,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI router
 files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
-
-LANGUAGE_CODE_MAP = {
-    "english": "en",
-    "spanish": "es",
-    "french": "fr",
-    "german": "de",
-    "italian": "it",
-    "portuguese": "pt",
-    "russian": "ru",
-    "japanese": "ja",
-    "korean": "ko",
-    "chinese": "zh",
-}
-
-
-async def _assert_youtube_transcript_available(video_id: str, target_lang_code: str) -> None:
-    if not YouTubeTranscriptApi:
-        raise HTTPException(status_code=503, detail="YouTube transcript support is not available on this server.")
-
-    languages = [target_lang_code] if target_lang_code == "en" else [target_lang_code, "en"]
-    try:
-        transcript = await asyncio.to_thread(
-            YouTubeTranscriptApi.get_transcript,
-            video_id,
-            languages=languages,
-        )
-    except Exception as e:
-        logger.info(f"Rejected YouTube URL; transcript unavailable for video_id={video_id}: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail="This YouTube video doesn't have captions/transcript available. Please choose a video with captions (CC).",
-        )
-
-    if not transcript:
-        raise HTTPException(
-            status_code=400,
-            detail="This YouTube video doesn't have captions/transcript available. Please choose a video with captions (CC).",
-        )
 
 # Define a standardized API response model
 T = TypeVar('T')
@@ -149,77 +106,8 @@ async def save_file(
 
         content_type = request.headers.get("content-type", "")
 
-        # --- YouTube JSON Upload ---
-        if content_type.startswith("application/json"):
-            data = await request.json()
-            if not (data and isinstance(data, dict) and data.get("type") == "youtube"):
-                raise HTTPException(status_code=400, detail="Invalid payload for YouTube link upload.")
-
-            url = data.get("url", "")
-            # Improved regex to match various YouTube URL formats and extract video ID
-            youtube_regex = re.compile(r"(?:https?://)?(?:www\.)?(?:youtube\.com|youtu\.be|m\.youtube\.com)/(?:watch\?v=|embed/|v/|)([a-zA-Z0-9_-]{11})")
-            match = youtube_regex.search(url)
-            if not url or not match:
-                raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
-
-            video_id = match.group(1)
-
-            target_lang_code = LANGUAGE_CODE_MAP.get((language or "English").lower(), "en")
-            await _assert_youtube_transcript_available(video_id=video_id, target_lang_code=target_lang_code)
-
-            # For YouTube, the stored artifacts are typically transcripts and derived data.
-            # Treat the initial record as a very small logical size to avoid blocking later
-            # transcription-based accounting; this keeps enforcement simple for now.
-            await assert_can_create_doc(store, user_id, new_doc_size_bytes=0)
-            
-            # If workspace_id not provided, get user's first workspace (default)
-            actual_workspace_id = workspace_id
-            if not actual_workspace_id:
-                workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-                if workspaces:
-                    actual_workspace_id = workspaces[0]["id"]
-                    logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
-
-            file_id = await store.file_repo.add_file(
-                user_id=user_id, 
-                file_name=url, 
-                file_url=url, 
-                file_size_bytes=0,
-                workspace_id=actual_workspace_id
-            )
-            if not file_id:
-                raise HTTPException(status_code=500, detail="Failed to create file record for YouTube URL.")
-
-            file_record = await store.file_repo.get_file_by_id(file_id=file_id)
-
-            await store.agent_run_repo.enqueue_run(
-                run_type="ingest_file",
-                agent_name="IngestionAgent",
-                agent_version=None,
-                payload={
-                    "file_id": int(file_id),
-                    "user_id": int(user_id),
-                    "workspace_id": int(actual_workspace_id) if actual_workspace_id is not None else None,
-                    "filename": url,
-                    "file_url": url,
-                    "is_youtube": True,
-                    "language": language,
-                    "comprehension_level": comprehension_level,
-                },
-                user_id=int(user_id),
-                workspace_id=int(actual_workspace_id) if actual_workspace_id is not None else None,
-                file_id=int(file_id),
-                priority=200,
-                max_attempts=3,
-            )
-
-            return UploadResponse(
-                message="YouTube link processed successfully.",
-                files=[FileResponse.model_validate(file_record)]
-            )
-
         # --- Multipart File Upload ---
-        elif content_type.startswith("multipart/form-data"):
+        if content_type.startswith("multipart/form-data"):
             if not files:
                 raise HTTPException(status_code=400, detail="No files were uploaded.")
 
@@ -287,7 +175,6 @@ async def save_file(
                         "workspace_id": int(actual_workspace_id) if actual_workspace_id is not None else None,
                         "filename": file.filename,
                         "file_url": gcs_url,
-                        "is_youtube": False,
                         "language": language,
                         "comprehension_level": comprehension_level,
                     },

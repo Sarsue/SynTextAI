@@ -166,8 +166,6 @@ def delete_from_gcs(user_gc_id, filename):
 
 def detect_content_type(text: str) -> str:
     """Heuristically detect content type from text."""
-    if re.search(r'\[\d{2}:\d{2}(?::\d{2})?\]', text):
-        return "youtube"
     if re.search(r'Page \d+', text, re.IGNORECASE):
         return "pdf"
     if re.search(r'^#+\s|\n#{1,6}\s', text):
@@ -178,9 +176,7 @@ def detect_content_type(text: str) -> str:
 
 def clean_text(text: str, content_type: str) -> str:
     """Clean irrelevant elements or markers from text."""
-    if content_type == "youtube":
-        text = re.sub(r'\[(Music|Applause|Ad)\]', '', text, flags=re.IGNORECASE)
-    elif content_type == "pdf":
+    if content_type == "pdf":
         text = re.sub(r'Page \d+(?: of \d+)?\s*\n?', '', text, flags=re.IGNORECASE)
     elif content_type == "markdown":
         text = re.sub(r'#.*?\n', '', text)
@@ -216,29 +212,16 @@ def chunk_text(
 
         # Configure splitter
         separators = ["\n\n", "\n", ".", " ", ""]  # Recursive splitting
-        if content_type == "youtube":
-            # For YouTube, use standard recursive splitting (Whisper transcripts don't have timestamp markers)
-            splitter = RecursiveTextSplitter(
-                chunk_size=target_chunk_tokens * 4 if content_type == "pdf" else target_chunk_tokens,
-                chunk_overlap=int(target_chunk_tokens * 0.2)
-            )
-            split_chunks = splitter.split_text(text)
-            chunks = [
-                {"content": chunk, "metadata": {"doc_type": "youtube"}}
-                for chunk in split_chunks
-            ]
-        else:
-            # For other types, use recursive splitter
-            splitter = RecursiveTextSplitter(
-                    chunk_size=target_chunk_tokens * 4 if content_type == "pdf" else target_chunk_tokens,
-                    chunk_overlap=int(target_chunk_tokens * 0.2)
+        splitter = RecursiveTextSplitter(
+            chunk_size=target_chunk_tokens * 4 if content_type == "pdf" else target_chunk_tokens,
+            chunk_overlap=int(target_chunk_tokens * 0.2)
         )
 
-            split_chunks = splitter.split_text(text)
-            chunks = [
-                {"content": chunk, "metadata": {"section": i + 1, "doc_type": content_type}}
-                for i, chunk in enumerate(split_chunks)
-            ]
+        split_chunks = splitter.split_text(text)
+        chunks = [
+            {"content": chunk, "metadata": {"section": i + 1, "doc_type": content_type}}
+            for i, chunk in enumerate(split_chunks)
+        ]
 
         logger.info(f"Chunked {content_type} text into {len(chunks)} parts")
         return chunks

@@ -2,11 +2,7 @@ import logging
 import json
 import re
 import os
-import tempfile
-from contextlib import contextmanager
 import asyncio
-from faster_whisper import WhisperModel
-import yt_dlp
 import requests
 from api.core.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
@@ -28,28 +24,6 @@ from api.agents.ingestion_agent import IngestionAgent
 # Load environment variables
 load_dotenv()
 
-# Load Whisper model once at startup
-whisper_model = None  # Initialize as None, will be loaded by load_whisper_model
-
-def load_whisper_model_if_needed():
-    global whisper_model
-    if whisper_model is None:
-        try:
-            logger.info("Loading faster-whisper model...")
-            # Use default model location (faster-whisper will handle downloading)
-            whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-            logger.info("Faster-whisper model loaded.")
-        except Exception as e:
-            logger.warning(f"Failed to load small Whisper model: {e}")
-            logger.info("Falling back to tiny model...")
-            try:
-                whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
-                logger.info("Tiny Whisper model loaded as fallback.")
-            except Exception as tiny_e:
-                logger.error(f"Failed to load tiny Whisper model: {tiny_e}")
-                whisper_model = None
-    return whisper_model
-
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -66,7 +40,6 @@ LANGUAGE_CODE_MAP = {
     "japanese": "ja",
     "korean": "ko",
     "chinese": "zh",
-    # Add more as needed. The youtube_transcript_api might also accept full names.
 }
 
 # Initialize Stripe
@@ -78,130 +51,16 @@ store = RepositoryManager(database_url=DATABASE_URL)
 syntext = SyntextAgent()
 query_agent = QueryAgent(store=store, syntext=syntext)
 
-# Model is only loaded when needed to save memory
-@contextmanager
-def load_whisper_model():
-    model = WhisperModel("small", device="cpu", compute_type="int8")
-    try:
-        yield model
-    finally:
-        del model  # Explicitly delete to free memory
-
 class FileUtils:
     """Utility class for file-related operations."""
 
     @staticmethod
     def determine_file_type(filename: str) -> str:
         """Determine file type based on filename."""
-        if "youtube.com" in filename or "youtu.be" in filename:
-            return "youtube"
-        elif filename.lower().endswith(".pdf"):
+        if filename.lower().endswith(".pdf"):
             return "pdf"
         else:
             return "unknown"
-
-async def transcribe_audio_chunked(file_path: str, language: str = "en", chunk_duration_ms: int = 30000, overlap_ms: int = 5000) -> tuple[list, any]:
-    model = load_whisper_model_if_needed()  # Ensure model is loaded
-    if model is None:
-        logger.error(f"Whisper model failed to load, cannot transcribe {file_path}")
-        return [], None
-
-    transcribe_params = {
-        'language': language if language else None,  # None for auto-detect, or specify lang code
-        'beam_size': 5,
-        'vad_filter': False,  # Disable VAD since YouTube API fallback works perfectly
-    }
-    logger.info(f"Transcribing audio file {file_path} with params: {transcribe_params}")
-    logger.info(f"Audio file size: {os.path.getsize(file_path)} bytes")
-
-    try:
-        # Run the blocking transcribe call in a separate thread with timeout
-        logger.info(f"Starting transcription thread for {file_path}")
-        segments_generator, info = await asyncio.wait_for(
-            asyncio.to_thread(model.transcribe, file_path, **transcribe_params),
-            timeout=300  # 5 minutes should be enough for most videos
-        )
-
-        # Convert generator to list of segments with progress logging
-        processed_segments = []
-        segments_list = list(segments_generator)  # Convert to list first
-        logger.info(f"Starting to process {len(segments_list)} segments...")
-
-        for i, segment in enumerate(segments_list):
-            processed_segments.append({
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text
-            })
-            if i % 10 == 0:  # Log progress every 10 segments
-                logger.info(f"Processed {i+1}/{len(segments_list)} segments so far...")
-
-        logger.info(f"Transcription successful for {file_path}. Detected language: {info.language}, Confidence: {info.language_probability}")
-        return processed_segments, info
-    except asyncio.TimeoutError:
-        logger.error(f"Transcription timed out after 5 minutes for {file_path}")
-        return [], None
-    except Exception as e:
-        logger.error(f"Error during transcription of {file_path}: {e}", exc_info=True)
-        return [], None
-
-def download_youtube_audio_segment(video_id: str, language_code_for_whisper: Optional[str] = None) -> Optional[str]:
-    """Downloads audio from a YouTube video, trying to get an audio track that matches the language if possible."""
-    output_dir = tempfile.mkdtemp()
-    output_template = os.path.join(output_dir, '%(id)s.%(ext)s')
-
-    ydl_opts = {
-        'format': 'bestaudio/best',  # Prioritize best audio quality
-        'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,  # Sometimes helps with SSL issues
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',  # Or 'wav', 'm4a'
-            'preferredquality': '192',  # Standard quality
-        }],
-    }
-
-    logger.info(f"Attempting to download audio for YouTube video ID: {video_id} with options: {ydl_opts}")
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(f'https://www.youtube.com/watch?v={video_id}', download=True)
-            downloaded_file = ydl.prepare_filename(info_dict)
-            # yt-dlp might add .webm or other extension before ffmpeg converts it.
-            # The actual output file will be what ffmpeg creates (e.g., .mp3)
-            base, _ = os.path.splitext(downloaded_file)
-            expected_mp3_file = base + '.mp3'
-            if os.path.exists(expected_mp3_file):
-                logger.info(f"Audio successfully downloaded and converted to: {expected_mp3_file}")
-                return expected_mp3_file
-            else:
-                # Fallback check if the original downloaded file (before potential conversion) exists
-                if os.path.exists(downloaded_file):
-                    logger.warning(f"FFmpeg postprocessing to MP3 might have failed. Using original download: {downloaded_file}")
-                    return downloaded_file
-                logger.error(f"Audio download for {video_id} seemed to complete, but expected file {expected_mp3_file} not found.")
-                return None
-    except yt_dlp.utils.DownloadError as de:
-        logger.error(f"yt-dlp DownloadError for video ID {video_id}: {de}")
-        return None
-    except Exception as e:
-        logger.error(f"Error downloading YouTube audio for video ID {video_id}: {e}", exc_info=True)
-        return None
-
-def adapt_whisper_segments_to_transcript_data(whisper_segments: list) -> list:
-    """Converts Whisper segments to the format expected by downstream processing (dicts like PDF)."""
-    transcript_data = []
-    for segment in whisper_segments:
-        start_time = float(segment['start'])
-        end_time = float(segment['end'])
-        duration = end_time - start_time
-        transcript_data.append({
-            'start': start_time,
-            'duration': duration,
-            'text': segment['text']
-        })
-    return transcript_data
 
 async def handle_processing_error(file_id: int, error_msg: str) -> dict:
     """Handle errors during file processing by updating status and logging."""
@@ -222,11 +81,10 @@ async def _process_file_data_impl(
     file_url: str,
     user_gc_id: str,
     workspace_id: int | None,
-    is_youtube: bool = False,
     language: str = "en",
     comprehension_level: str = "Beginner",
 ) -> Dict[str, Any]:
-    """Processes the uploaded file: download, extract/transcribe, generate embeddings, generate key concepts, and update database."""
+    """Processes the uploaded file: download, extract, generate embeddings, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id})")
 
     def _infer_user_gc_id_from_file_url(url: str) -> Optional[str]:
@@ -310,56 +168,43 @@ async def _process_file_data_impl(
             logger.info(f"Using processor: {processor.__class__.__name__}")
 
             # Process file
-            is_youtube_url = is_youtube or "youtube.com" in filename or "youtu.be" in filename
-            if is_youtube_url:
-                logger.info(f"Processing YouTube video: {filename}")
-                result = await processor.process(
-                    user_id=user_id,
-                    file_id=file_id,
-                    filename=filename,
-                    file_url=file_url,
-                    user_gc_id=user_gc_id,
-                    language=language,
-                    comprehension_level=comprehension_level,
+            file_data = None
+
+            if file_url:
+                try:
+                    logger.info(f"Downloading file {filename} from file_url")
+                    resp = await asyncio.to_thread(requests.get, file_url, timeout=30)
+                    if resp.ok and resp.content:
+                        file_data = resp.content
+                    else:
+                        logger.warning(f"Failed to download file from file_url (status={resp.status_code})")
+                except Exception as e:
+                    logger.warning(f"Error downloading file from file_url: {e}")
+
+            if file_data is None:
+                logger.info(f"Downloading file {filename} from GCS")
+                if not user_gc_id:
+                    inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
+                    if inferred_gc_id:
+                        logger.info("user_gc_id missing; inferred from file_url for GCS download")
+                        user_gc_id = inferred_gc_id
+                file_data = download_from_gcs(user_gc_id, filename)
+            if file_data is None:
+                return await handle_processing_error(
+                    file_id_int, f"Failed to download file {filename} from GCS"
                 )
-            else:
-                file_data = None
 
-                if file_url:
-                    try:
-                        logger.info(f"Downloading file {filename} from file_url")
-                        resp = await asyncio.to_thread(requests.get, file_url, timeout=30)
-                        if resp.ok and resp.content:
-                            file_data = resp.content
-                        else:
-                            logger.warning(f"Failed to download file from file_url (status={resp.status_code})")
-                    except Exception as e:
-                        logger.warning(f"Error downloading file from file_url: {e}")
-
-                if file_data is None:
-                    logger.info(f"Downloading file {filename} from GCS")
-                    if not user_gc_id:
-                        inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
-                        if inferred_gc_id:
-                            logger.info("user_gc_id missing; inferred from file_url for GCS download")
-                            user_gc_id = inferred_gc_id
-                    file_data = download_from_gcs(user_gc_id, filename)
-                if file_data is None:
-                    return await handle_processing_error(
-                        file_id_int, f"Failed to download file {filename} from GCS"
-                    )
-
-                logger.info(f"Downloaded file {filename}, size: {len(file_data)} bytes")
-                result = await processor.process(
-                    user_id=user_id,
-                    file_id=file_id,
-                    filename=filename,
-                    file_data=file_data,
-                    file_url=file_url,
-                    user_gc_id=user_gc_id,
-                    language=language,
-                    comprehension_level=comprehension_level,
-                )
+            logger.info(f"Downloaded file {filename}, size: {len(file_data)} bytes")
+            result = await processor.process(
+                user_id=user_id,
+                file_id=file_id,
+                filename=filename,
+                file_data=file_data,
+                file_url=file_url,
+                user_gc_id=user_gc_id,
+                language=language,
+                comprehension_level=comprehension_level,
+            )
 
             if not result.get("success", False):
                 error_msg = result.get("error", "Unknown error during file processing")
@@ -387,7 +232,6 @@ async def process_file_data(
     file_url: str,
     user_gc_id: str,
     workspace_id: int | None,
-    is_youtube: bool = False,
     language: str = "en",
     comprehension_level: str = "Beginner",
 ) -> Dict[str, Any]:
@@ -401,7 +245,6 @@ async def process_file_data(
             file_url=file_url,
             user_gc_id=user_gc_id,
             workspace_id=workspace_id,
-            is_youtube=is_youtube,
             language=language,
             comprehension_level=comprehension_level,
         )
@@ -420,7 +263,6 @@ async def process_file_data(
             file_url=file_url,
             user_gc_id=user_gc_id,
             workspace_id=workspace_id,
-            is_youtube=is_youtube,
             language=language,
             comprehension_level=comprehension_level,
         )

@@ -14,7 +14,6 @@ interface FileViewerComponentProps {
 const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose, onError, darkMode }) => {
     const [fileType, setFileType] = useState<string>('unknown');
     const [pdfIframeSrc, setPdfIframeSrc] = useState<string>(file.file_url);
-    const [youtubeIframeSrc, setYoutubeIframeSrc] = useState<string>('');
 
     const pdfViewerRef = useRef<HTMLIFrameElement>(null);
     const videoPlayerRef = useRef<HTMLVideoElement>(null);
@@ -23,15 +22,9 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
 
     useEffect(() => {
         setPdfIframeSrc(fileUrl);
-        setYoutubeIframeSrc('');
     }, [fileUrl]);
 
     const getFileType = (urlOrName: string): string | null => {
-        const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|shorts\/)|youtu\.be\/)/i;
-        if (youtubeRegex.test(urlOrName)) {
-            return 'youtube';
-        }
-
         const extension = urlOrName.split('.').pop()?.toLowerCase();
         if (!extension) {
             return null;
@@ -75,27 +68,7 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
             return <div className="processing-indicator">{statusMessage}</div>;
         }
 
-        if (fileType === 'youtube') {
-            let videoId = '';
-            const url = file.file_url || '';
-            const match = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|embed)\/|.*[?\&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{11})/);
-            if (match && match[1]) {
-                videoId = match[1];
-            }
-            return (
-                <div className="youtube-container file-content-area">
-                    <iframe
-                        className="youtube-iframe"
-                        width="100%"
-                        src={youtubeIframeSrc || `https://www.youtube.com/embed/${videoId}`}
-                        title="YouTube video player"
-                        frameBorder="0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                    />
-                </div>
-            );
-        } else if (fileType === 'pdf') {
+        if (fileType === 'pdf') {
             return (
                 <div className="pdf-container file-content-area">
                     <iframe

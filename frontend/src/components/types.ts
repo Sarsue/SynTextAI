@@ -26,7 +26,7 @@ export interface UploadedFile {
     file_name: string;
     file_url: string;
     created_at?: string;
-    file_type: 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'youtube';
+    file_type: 'pdf' | 'image' | 'audio' | 'video' | 'text';
     status: ProcessingStatus; // Current processing state
 
 }
@@ -38,8 +38,6 @@ export interface KeyConcept {
     concept_explanation: string | null;
     display_order: number | null;
     source_page_number: number | null;
-    source_video_timestamp_start_seconds: number | null;
-    source_video_timestamp_end_seconds: number | null;
     created_at: string;
     is_custom: boolean;
 }

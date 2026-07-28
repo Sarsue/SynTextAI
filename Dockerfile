@@ -36,7 +36,7 @@ RUN npm run build && \
     npm cache clean --force && \
     rm -rf /root/.npm /tmp/*
 
-# Stage 2: Set up the Python backend with FFmpeg, Whisper, and dependencies
+# Stage 2: Set up the Python backend and dependencies
 FROM python:3.10-slim-bookworm AS base
 
 # Define build arguments for Firebase credentials
@@ -67,16 +67,13 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=100 \
-    POETRY_VERSION=1.5.1 \
-    WHISPER_CACHE_DIR=/app/models
+    POETRY_VERSION=1.5.1
 
 # Install system dependencies
 RUN --mount=type=cache,target=/var/cache/apt \
     apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update && \
     apt-get install -y --no-install-recommends \
     build-essential \
-    ffmpeg \
-    libsndfile1 \
     curl \
     supervisor \
     libpq-dev \
@@ -111,17 +108,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy the rest of the backend files
 COPY api/ ./api/
 
-# Create model directory
-RUN mkdir -p $WHISPER_CACHE_DIR && chmod 777 $WHISPER_CACHE_DIR
-
-# Install the script that downloads the model at runtime (kept as a real
-# file under api/scripts/ rather than generated via RUN echo -- a Dockerfile
-# line-continued echo strips newlines and previously produced a corrupted,
-# unexecutable script).
-COPY api/scripts/download-whisper-model.sh /usr/local/bin/download-whisper-model
-RUN chmod +x /usr/local/bin/download-whisper-model && \
-    test -x /usr/local/bin/download-whisper-model
-
 # Copy the frontend build from the first stage
 COPY --from=build-step /app/frontend/build ./frontend/build
 
@@ -142,7 +128,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
 # Create a simple entrypoint script
-RUN echo '#!/bin/sh\n\nif [ "${SKIP_WHISPER_DOWNLOAD:-0}" = "1" ]; then\n    echo "⚠️ Warning: SKIP_WHISPER_DOWNLOAD=1 set. Proceeding without downloading Whisper model."\nelif [ -f "/usr/local/bin/download-whisper-model" ]; then\n    if ! /usr/local/bin/download-whisper-model; then\n        echo "⚠️ Warning: Failed to download Whisper model. The app will start but may not function correctly."\n    fi\nelse\n    echo "⚠️ Warning: download-whisper-model not found. The app will start but may not function correctly."\nfi\n\nexec "$@"' > /entrypoint.sh && \
+RUN echo '#!/bin/sh\nexec "$@"' > /entrypoint.sh && \
     chmod +x /entrypoint.sh
 
 # Set the entrypoint

@@ -221,7 +221,7 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
             user_id = payload.get("user_id")
             filename = payload.get("filename")
             file_url = payload.get("file_url")
-            is_youtube = bool(payload.get("is_youtube"))
+            workspace_id = payload.get("workspace_id")
             language = payload.get("language") or "English"
             comprehension_level = payload.get("comprehension_level") or "Beginner"
 
@@ -243,7 +243,7 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                     user_id=int(user_id),
                     filename=str(filename),
                     file_url=str(file_url),
-                    is_youtube=is_youtube,
+                    workspace_id=int(workspace_id) if workspace_id is not None else None,
                     language=str(language),
                     comprehension_level=str(comprehension_level),
                 )
@@ -482,19 +482,7 @@ async def main():
     # Note: Embedding model preload removed - using HTTP API (Voyage AI)
     # No local model to preload
     logger.info("✅ Using HTTP-based embeddings (Voyage AI) - no model preload needed")
-    
-    # Preload Whisper model
-    try:
-        from api.workflows.tasks import load_whisper_model_if_needed
-        whisper = load_whisper_model_if_needed()
-        if whisper:
-            logger.info("✅ Whisper model preloaded")
-        else:
-            logger.warning("⚠️ Whisper model not available")
-    except Exception as e:
-        logger.error(f"❌ Failed to preload Whisper model: {e}")
-        logger.warning("Worker will continue but YouTube transcription may fail")
-    
+
     # Start the worker loop
     try:
         await worker_loop()
