@@ -81,7 +81,7 @@ const verticals: Vertical[] = [
 const faqs = [
     {
         q: 'How is this different from searching a PDF?',
-        a: 'Search requires you to know what to look for. Syntext lets staff ask questions in plain English and get a direct answer with the exact source cited — no reading through results.',
+        a: 'Search requires you to know what to look for. Syntext lets staff ask questions in plain English and get a direct answer with the exact source cited, with no reading through results.',
     },
     {
         q: 'What file types do you support?',
@@ -116,7 +116,7 @@ const Home: React.FC = () => {
     return (
         <div className={`home ${darkMode ? 'dark-mode' : ''}`}>
             <Helmet>
-                <title>Syntext AI — Instant answers from your company documents</title>
+                <title>Syntext AI: Instant answers from your company documents</title>
                 <meta name="description" content="Upload your SOPs, policies, and manuals. Your staff gets instant cited answers." />
             </Helmet>
 
@@ -152,8 +152,8 @@ const Home: React.FC = () => {
                         </Link>
                     </Button>
                     <Button asChild variant="outline" className="home-btn-ghost home-btn-lg">
-                        <a href="https://calendly.com/osasigbinedion/30min" target="_blank" rel="noreferrer" onClick={() => posthog.capture('homepage_demo_click')}>
-                            Book a demo
+                        <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click')}>
+                            Want a demo? Contact us
                         </a>
                     </Button>
                 </div>
@@ -168,7 +168,7 @@ const Home: React.FC = () => {
                 <div className="home-steps">
                     {[
                         { n: '01', title: 'Upload your documents', body: 'Add your SOPs, policy manuals, or employee handbooks. PDF and Word files supported.' },
-                        { n: '02', title: 'Invite your staff', body: 'Add team members by email. They get access immediately — no training required.' },
+                        { n: '02', title: 'Invite your staff', body: 'Add team members by email. They get access immediately, no training required.' },
                         { n: '03', title: 'Staff get cited answers', body: 'Your team asks questions in plain English and gets answers with direct links to the source.' },
                     ].map(s => (
                         <div key={s.n} className="home-step">
@@ -290,6 +290,13 @@ const Home: React.FC = () => {
                         </Button>
                     </div>
                 </div>
+                <p className="home-footnote">
+                    Payments are securely handled by Stripe. Sign up and you're in, no setup call required.
+                    Want a demo or a trial run first?{' '}
+                    <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click', { location: 'pricing' })}>
+                        Reach out to us
+                    </a>.
+                </p>
             </section>
 
             <div className="home-divider" />
@@ -304,7 +311,7 @@ const Home: React.FC = () => {
                             <Button
                                 key={item.q}
                                 variant="ghost"
-                                className={`home-faq-row ${open ? 'open' : ''}`}
+                                className={`home-faq-row h-auto items-start ${open ? 'open' : ''}`}
                                 onClick={() => {
                                     setOpenFaqIndex(open ? null : idx);
                                     posthog.capture('homepage_faq_toggle', { index: idx });
@@ -333,7 +340,7 @@ const Home: React.FC = () => {
 
             {/* Footer */}
             <footer className="home-footer">
-                <span>© 2025 Osas Inc.</span>
+                <span>© 2026 Osas Inc.</span>
             </footer>
         </div>
     );

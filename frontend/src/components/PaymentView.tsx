@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStripe, useElements, Elements, CardElement } from '@stripe/react-stripe-js';
 import type { Stripe } from '@stripe/stripe-js';
 import './PaymentView.css';
@@ -15,6 +16,7 @@ interface PaymentViewProps {
 
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode }) => {
     const { fetchSubscriptionStatus, setSubscriptionStatus, subscriptionData, setSubscriptionData } = useUserContext(); // Getting subscriptionStatus from context
+    const navigate = useNavigate();
     const stripe = useStripe();
     const elements = useElements();
     const [email, setEmail] = useState(user?.email || '');
@@ -100,6 +102,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
 
             setSubscriptionData(data);
             setSubscriptionStatus(data.subscription_status); // Update context with the new subscription status
+            navigate('/chat');
         } catch (error) {
             console.error("Error during subscription:", error);
             
@@ -150,6 +153,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             
             setSubscriptionData(data);
             setSubscriptionStatus('trialing'); // Update context with new subscription status
+            navigate('/chat');
         } catch (error) {
             console.error("Error starting trial:", error);
             
