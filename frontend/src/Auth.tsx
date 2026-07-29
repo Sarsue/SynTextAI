@@ -55,8 +55,20 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   // Redirect authenticated users to appropriate page
   useEffect(() => {
     if (!authLoading && user && subscriptionStatus !== null) {
-      const targetPath = subscriptionStatus === 'active' || subscriptionStatus === 'trialing' 
-        ? '/chat' 
+      // A pending workspace invite takes priority over the normal
+      // subscription-based redirect, otherwise AcceptInvite.tsx's
+      // "store token, send to /login, login will redirect back" flow
+      // silently loses the invite: the user lands on /chat or /settings
+      // instead and the accept-invite POST never fires.
+      const pendingInviteToken = sessionStorage.getItem('pending_invite_token');
+      if (pendingInviteToken) {
+        sessionStorage.removeItem('pending_invite_token');
+        navigate(`/invite/${pendingInviteToken}`, { replace: true });
+        return;
+      }
+
+      const targetPath = subscriptionStatus === 'active' || subscriptionStatus === 'trialing'
+        ? '/chat'
         : '/settings';
       navigate(targetPath, { replace: true });
     }

@@ -89,6 +89,24 @@ async def check_ownership(file_id: int, user_id: int, store: RepositoryManager) 
     if not file_record or file_record.get("user_id") != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
+    """Raise 403 unless user_id is the owner of workspace_id.
+
+    Uploading was previously unauthorized entirely: any authenticated user could
+    pass an arbitrary workspace_id and upload into a workspace they weren't even
+    a member of, since only file-level ownership was ever checked, never workspace
+    membership. "Owners manage documents, staff ask questions and read answers" is
+    the product's own stated model (see syntextai.com's feature list) but nothing
+    on the backend enforced it. This closes both gaps at once: not a member -> 403,
+    member but not owner -> 403.
+    """
+    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the workspace owner can upload documents."
+        )
+
 # Route to save file
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=UploadResponse)
 async def save_file(
@@ -110,6 +128,19 @@ async def save_file(
         if content_type.startswith("multipart/form-data"):
             if not files:
                 raise HTTPException(status_code=400, detail="No files were uploaded.")
+
+            # Resolve the target workspace once for the whole request (it's the
+            # same workspace for every file in this upload) and gate on it before
+            # touching any file, instead of re-resolving and re-checking per file.
+            actual_workspace_id = workspace_id
+            if not actual_workspace_id:
+                workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+                if workspaces:
+                    actual_workspace_id = workspaces[0]["id"]
+                    logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
+
+            if actual_workspace_id:
+                await check_can_upload_to_workspace(actual_workspace_id, user_id, store)
 
             uploaded_files_responses = []
             for file in files:
@@ -138,15 +169,7 @@ async def save_file(
 
                 # Reset file pointer after reading
                 await file.seek(0)
-                
-                # If workspace_id not provided, get user's first workspace (default)
-                actual_workspace_id = workspace_id
-                if not actual_workspace_id:
-                    workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-                    if workspaces:
-                        actual_workspace_id = workspaces[0]["id"]
-                        logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
-                
+
                 gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
                 if not gcs_url:
                     logger.error(f"Failed to upload {file.filename} to storage (gcs_url is empty)")

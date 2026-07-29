@@ -22,9 +22,25 @@ async def add_coop_coep_headers(request: Request, call_next):
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
     # response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none" # or "require-corp"
     return response
+# allow_origins=["*"] combined with allow_credentials=True let any site on the
+# internet make authenticated requests using a logged-in user's credentials.
+# Lock this to the real frontend domain(s). CORS_ORIGINS (comma-separated) lets
+# this be widened for staging/other domains via env without a code change;
+# falls back to production + common local dev ports if unset.
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+if cors_origins_env:
+    allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+else:
+    allowed_origins = [
+        "https://syntextai.com",
+        "https://www.syntextai.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
