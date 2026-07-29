@@ -175,17 +175,25 @@ code, not assumed, last checked 2026-07-29:
   `npm audit`/`pip-audit` directly against the actual lockfiles instead — counts won't
   match GitHub's Dependabot tally exactly, different scope/tooling, but same
   underlying packages):
-  - **Frontend (`npm audit --omit=dev`): 40 findings, two real clusters.** `tar`
-    (critical, no fix available upstream) comes in through `canvas` →
-    `@mapbox/node-pre-gyp`, used only to extract prebuilt native binaries during
-    `npm install`, never runs against user input at runtime, low practical risk
-    despite the label. `undici` (high) is pulled in by `firebase`'s subpackages —
-    undici is Node's HTTP client, not a browser API, and this is a client-rendered
-    SPA (no SSR), so that code path likely never executes in the actual shipped
-    browser bundle. The real fix is upgrading `firebase` from `^10.7.1` (installed
-    10.14.1) to the current major (12.x), a 2-major-version jump that risks breaking
-    Auth/Firestore call sites. Not attempted blind, needs real login testing against
-    each major version before upgrading, not a mechanical `npm audit fix`.
+  - **Frontend (`npm audit --omit=dev`): 40 findings originally, down to 30 after
+    the firebase upgrade below.** `tar` (critical, no fix available upstream) comes
+    in through `canvas` → `@mapbox/node-pre-gyp`, used only to extract prebuilt
+    native binaries during `npm install`, never runs against user input at runtime,
+    low practical risk despite the label. A second `undici` instance now comes from
+    `shadcn` (a devDependency CLI tool) → `@dotenvx/dotenvx`, same low-risk
+    reasoning: devDependency, doesn't ship to the browser bundle.
+  - **`firebase` upgraded `^10.7.1` → `^12.16.0`, closing the original undici
+    cluster (2026-07-29).** This app only imports `firebase/app` and
+    `firebase/auth` (checked every import site), never firestore/storage/functions,
+    which is where the vulnerable undici dependency chain actually lived — real
+    risk surface was narrower than the audit output suggested. Verified before
+    committing: `tsc --noEmit` against the whole app, zero errors; `npm run build`
+    (the real production build, not just type-check), succeeds cleanly. Firebase
+    12.x requires Node >=20; the actual Dockerfile already uses `node:20-alpine`,
+    so production is unaffected, but anyone developing locally on Node 18 needs to
+    upgrade. **Not yet tested: an actual live Google sign-in popup click-through**
+    — types and build passing doesn't guarantee runtime auth behavior is identical.
+    Osas is testing this live himself.
   - **Backend (`pip-audit -r api/requirements.txt`): 2 findings at the time, one now
     moot.** `dspy` 2.6.27 (`PYSEC-2026-1318`) — removed entirely 2026-07-29, see
     "Recent changes," it was never actually functioning. `diskcache` 5.6.3
@@ -242,12 +250,12 @@ for it.
    status-based redirect) reads correctly on inspection; this SCA gap is the
    one substantive finding.
 5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
-6. ~~Triage the 34 Dependabot vulnerabilities~~ — **triaged 2026-07-29**, see "Known gaps" above. One real open decision: whether to attempt the firebase v10→v12 upgrade (needs real login testing, not done here).
+6. ~~Triage the 34 Dependabot vulnerabilities~~ — **triaged 2026-07-29**, see "Known gaps" above.
 
 **Tier 1 — cheap, closes an existing gap:**
-7. Wire `TextProcessor` into the factory for `.txt`/`.md` (confirm it works first)
-8. Demo workspace — sample documents + example Q&A, needed for sales demos to work live
-9. Clean up orphaned EdTech generator functions in `tasks.py`
+7. ~~Wire `TextProcessor` into the factory for `.txt`/`.md`~~ — **closed 2026-07-29.** Rewrote it, the old version was incompatible with the current codebase, not just unverified.
+8. ~~Demo workspace~~ — **not needed.** Osas already has a real test customer for demos instead of a synthetic one.
+9. ~~Clean up orphaned EdTech generator functions in `tasks.py`~~ — **closed 2026-07-29.**
 
 **Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
 10. Google Drive / SharePoint sync
@@ -328,8 +336,8 @@ gaps above and the healthcare/legal verticals in the target market.
 - Rate limiting budget (30/min chat, 10/min upload, IP-based) is a first-pass default,
   confirm or adjust once there's real usage data
 - Whether Redis is meant to be doing more than it currently is, or is leftover
-- Whether the firebase v10→v12 upgrade is worth doing now (closes the undici
-  vulnerability cluster, but is a 2-major-version jump needing real login testing)
+- Whether the firebase v12 upgrade's live Google sign-in flow actually works
+  end to end (types and build pass; Osas is testing this live)
 - Whether to build a standalone AI search surface or just fix the marketing copy
 - Whether the report-only CSP policy is clean (check browser console for violations)
   before switching it to enforced
