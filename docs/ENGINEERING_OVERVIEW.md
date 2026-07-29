@@ -299,6 +299,34 @@ for it.
 8. ~~Demo workspace~~ — **not needed.** Osas already has a real test customer for demos instead of a synthetic one.
 9. ~~Clean up orphaned EdTech generator functions in `tasks.py`~~ — **closed 2026-07-29.**
 
+**Efficiency backlog (audited 2026-07-29 against a longer external review):**
+
+Closed, or moot after the EdTech and YouTube removals:
+
+| Item | Status |
+|---|---|
+| Prefer captions over Whisper; keep model warm | Moot, `faster-whisper`/`yt-dlp` gone |
+| Defer flashcards/quizzes until chat-ready | Moot, that stage no longer exists, so `processed` **is** chat-ready |
+| Heavy models loaded in API contexts | Moot, nothing heavy left to load |
+| Many sequential LLM calls for learning materials | Moot, same reason |
+| Per-stage timing metrics | **Done 2026-07-29**, see "Recent changes" |
+| Size/type-based worker concurrency | **Done 2026-07-29**, plus the batch barrier and lease bugs found alongside it |
+
+Premise checked and found wrong, so **do not act on these**:
+
+- *"Q&A sends a ~120k-token prompt."* It does not. `rag/pipeline.py` selects context at `token_budget=3000`, already inside the recommended 3k–8k. `MAX_TOKENS_CONTEXT=120000` is only a ceiling that triggers *reduction*. The one real sliver: chat history is not capped separately from document context.
+- *"Frontend duplicates status work via polling and WebSocket."* There is no `setInterval` anywhere in the frontend. WebSocket is the only continuous channel; `pollFileStatus` is a one-shot manual nudge that already skips terminal statuses.
+
+Genuinely still open, roughly in value order:
+
+18. Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages. Batching and empty-chunk filtering already exist.
+19. Event queue instead of polling. `POLL_INTERVAL` defaults to 30s, so that is the idle-latency floor before work starts. `redis>=5.0.0` is already a dependency, so this is cheaper than it looks.
+20. Embedding dedupe by chunk hash, so re-uploads and retries stop re-paying the embedding cost.
+21. Short-TTL query cache keyed by user, document set, and normalized question.
+22. Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.
+
+Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
+
 **Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
 10. Google Drive / SharePoint sync
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
@@ -331,6 +359,63 @@ compliance-sensitive customer will eventually ask for," especially given the sec
 gaps above and the healthcare/legal verticals in the target market.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-07-29 (worker concurrency, stage timing, dead-code sweep):** The worker
+  used one global semaphore for every run type, so with the production
+  `MAX_CONCURRENT_TASKS=1` a **chat question queued behind a document upload**.
+  One tenant uploading a large PDF stopped every other tenant from getting an
+  answer. Queries and ingests now have separate budgets (`QUERY_CONCURRENCY=4`,
+  `INGEST_CONCURRENCY=2`), and a file at or above `HEAVY_FILE_BYTES` (8MB) takes
+  an exclusive slot so two large documents never overlap.
+
+  The loop also had a **batch barrier** that defeated the priority ordering
+  entirely: it claimed a batch then waited on `ALL_COMPLETED` before polling
+  again, so the batch moved at the speed of its slowest member and nothing new
+  was claimed meanwhile. Queries are enqueued at `priority=10` against `200` for
+  ingests, but a query arriving a second after a big PDF was not *looked at*
+  until that PDF finished. The loop now wakes on `FIRST_COMPLETED` and refills
+  the freed slot immediately.
+
+  Also added: a per-tenant cap (`MAX_RUNS_PER_USER=3`) so one user queueing
+  twenty files cannot starve others, and **lease reclaim** —
+  `lease_expires_at` was written but never read, so a worker killed mid-job left
+  runs stuck in `running` forever, never retried, never surfaced, with the user's
+  upload silently stalled.
+
+  On the old "sequential processing prevents OOM" rationale: it was stricter
+  than necessary. `PDFProcessor` already batches 50 pages, so peak memory per
+  job is bounded by the batch, not the document size. The heavy slot is the
+  belt-and-braces guard. **Watch worker RSS against the TIMING logs before
+  raising `INGEST_CONCURRENCY` further**; the container is capped at 2GB.
+
+  The worker also had a permanently-failing healthcheck: it shares an image
+  whose `HEALTHCHECK` curls port 3000, which the worker never serves. It was
+  always red, so real stalls were invisible. The loop now writes a heartbeat and
+  the compose healthcheck asserts freshness.
+
+  **Verified against the local stack**, not just reasoned about: expired leases
+  reclaimed and requeued, per-user cap held (claimed 3, deferred 3), and
+  in-flight top-up observed at 2/6 while jobs were still running, which is the
+  batch barrier being gone. All three containers healthy.
+
+  New `api/core/timing.py` emits structured `TIMING` log lines per stage: queue
+  wait (upload or question until work actually starts), download,
+  extract/embed/store, and query latency with chunk counts. Log-based rather
+  than PostHog so it survives analytics failures and behaves identically in the
+  worker, which has no request context. Read them with:
+
+  ```bash
+  docker logs syntextai-worker-local 2>&1 | grep TIMING
+  ```
+
+  Dead code: AST reachability analysis from the four externally-called entry
+  points in `llm_service.py` found **13 unreachable functions, 744 lines** — the
+  entire key-concepts and MCQ cluster. Removed, along with four now-unused
+  imports, the dead `generating_concepts` status in `files.py`, and its three
+  frontend handlers. Note the earlier orphan audit missed all of this because it
+  worked at file level ("is this file imported?") and `llm_service.py` obviously
+  is; vulture does not flag unused module-level functions at default confidence.
+  **For function-level dead code, do the reachability pass, not a grep.**
 
 - **2026-07-29 (migration chain fixed, local Postgres added):** A fresh
   `alembic upgrade head` did not work at all. `add_workspace_members_invites`
