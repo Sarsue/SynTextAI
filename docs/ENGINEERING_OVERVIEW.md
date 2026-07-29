@@ -204,7 +204,26 @@ for it.
 1. ~~Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB~~ — **verified already applied 2026-07-29.** `alembic current` matches the single head, and a direct `information_schema.tables` query confirmed both tables exist live. The "multiple divergent heads, no tracked alembic.ini" gap was also stale: only one head exists (`b8f6b3f63f7d`), and `alembic.ini` is git-tracked. `docs/migrations/drop_learning_content_tables.sql` was redundant for the same reason, the `flashcards`/`quiz_questions`/`key_concepts` drop it described had already happened via the alembic migration of the same name, confirmed those tables no longer exist, removed the now-dead script.
 2. ~~Pending invite lost after login~~ — **closed 2026-07-29**, see "Recent changes."
 3. ~~Staff role enforcement missing on the backend~~ — **closed 2026-07-29**, see "Recent changes."
-4. Stripe end-to-end not confirmed on the live environment
+4. **Stripe reviewed 2026-07-29, real gap found: no 3D Secure / SCA handling.**
+   `create_subscription` in `subscriptions.py` creates the subscription with a
+   payment method directly and just returns whatever status Stripe gives back.
+   If a card requires additional authentication (SCA, common on EU/UK cards,
+   increasingly enforced elsewhere), Stripe returns status `"incomplete"`
+   rather than `"active"`, and the subscription needs a client-side
+   `stripe.confirmCardPayment(client_secret)` step to complete. Checked the
+   frontend (`PaymentView.tsx`): no `confirmCardPayment`, no `client_secret`,
+   no `requires_action` handling anywhere. `isCardUpdateRequired` (line ~292)
+   treats any status outside `['none','active','deleted','canceled','trialing']`
+   as "your card needs updating", which is the wrong message for a customer
+   stuck in SCA, they'd be told to enter a new card when they actually just
+   need to complete a 3D Secure popup. Net effect: some fraction of signups
+   from SCA-required cards likely fail silently with a confusing message.
+   Didn't attempt a blind fix, this needs live Stripe test-mode iteration
+   (test-mode has cards that specifically trigger 3D Secure) to get right,
+   not a guess. The rest of the trial → active → redirect flow (start-trial,
+   the webhook handler's subscription.updated/deleted handling, Auth.tsx's
+   status-based redirect) reads correctly on inspection; this SCA gap is the
+   one substantive finding.
 5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
 6. Triage the 34 Dependabot vulnerabilities
 
