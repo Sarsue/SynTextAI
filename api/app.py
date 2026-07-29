@@ -22,6 +22,40 @@ async def add_coop_coep_headers(request: Request, call_next):
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
     # response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none" # or "require-corp"
     return response
+
+# Content-Security-Policy, built from the actual third-party origins this app
+# loads (frontend/index.html, frontend/src/services/analytics.ts, Firebase
+# Auth's fixed API domains, GCS-hosted uploaded files). Shipped in
+# Report-Only mode: it's observable (violations show in the browser devtools
+# console) without risking breaking Stripe checkout, Firebase auth, or
+# PostHog analytics in production on a policy that's never been run against
+# live traffic. Check the console for violations, then switch the header
+# name below from Content-Security-Policy-Report-Only to
+# Content-Security-Policy once it's confirmed clean.
+_CSP_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' https://js.stripe.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: https://storage.googleapis.com",
+    "connect-src 'self' https://app.posthog.com https://identitytoolkit.googleapis.com "
+    "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com",
+    "frame-src https://js.stripe.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+])
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy-Report-Only"] = _CSP_POLICY
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # nginx already terminates TLS in front of this app (see deploy.sh) — HSTS
+    # tells browsers to only ever use HTTPS for this domain going forward.
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 # allow_origins=["*"] combined with allow_credentials=True let any site on the
 # internet make authenticated requests using a logged-in user's credentials.
 # Lock this to the real frontend domain(s). CORS_ORIGINS (comma-separated) lets
