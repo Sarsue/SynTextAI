@@ -1,5 +1,32 @@
 
 services:
+  # Throwaway local Postgres so migrations and features can be tested without
+  # touching the managed production database. pgvector image, because the
+  # chunks table needs the vector extension.
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: syntextai-postgres-local
+    environment:
+      # Hardcoded on purpose. Compose interpolates ${...} from .env, which is
+      # the production file, so ${DATABASE_PASSWORD} here would pull the real
+      # managed-database password. These must stay literal.
+      - POSTGRES_DB=syntextai
+      - POSTGRES_USER=syntext
+      - POSTGRES_PASSWORD=localdev
+    ports:
+      # 5433 on the host, so this never collides with a local Postgres install
+      - "5433:5432"
+    volumes:
+      - postgres_local_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syntext -d syntextai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syntextai_network
+    restart: unless-stopped
+
   syntextaiapp:
     build:
       context: .
@@ -26,9 +53,12 @@ services:
       - ./.env.dev:/app/.env
       # Mount CA certificate for PostgreSQL SSL
       - ./api/config/ca-certificate.crt:/app/api/config/ca-certificate.crt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - syntextai_network
-    
+
     deploy:
       resources:
         limits:
@@ -85,3 +115,6 @@ services:
 networks:
   syntextai_network:
     driver: bridge
+
+volumes:
+  postgres_local_data:

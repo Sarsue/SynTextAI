@@ -1,14 +1,20 @@
 """Add workspace_members and workspace_invites tables
 
 Revision ID: add_workspace_members_invites
-Revises: fix_key_concepts_is_custom
+Revises: b2d181e6791f
 Create Date: 2026-05-13 00:00:00.000000
+
+Both tables carry a foreign key to workspaces.id, so this has to run after
+b2d181e6791f, which creates that table. It originally revised
+fix_key_concepts_is_custom, far earlier in the chain, which meant a fresh
+`alembic upgrade head` died on "relation workspaces does not exist". It only
+ever worked in production because those tables were created by hand.
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = 'add_workspace_members_invites'
-down_revision = 'fix_key_concepts_is_custom'
+down_revision = 'b2d181e6791f'
 branch_labels = None
 depends_on = None
 
