@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, Type
 from api.processors.base_processor import FileProcessor
 from api.processors.pdf_processor import PDFProcessor
 from api.processors.docx_processor import DocxProcessor
+from api.processors.text_processor import TextProcessor
 from api.repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
@@ -64,8 +65,8 @@ class FileProcessingFactory:
             'm4a': None,
             
             # Text files
-            'txt': None,  # TODO: Implement TextProcessor
-            'md': None,
+            'txt': TextProcessor,
+            'md': TextProcessor,
             
             # Document files
             'docx': DocxProcessor,
