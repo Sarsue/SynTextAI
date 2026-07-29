@@ -8,9 +8,9 @@ from abc import ABC, abstractmethod
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 import logging
 import os
-from typing import Callable, TypeVar, Generic, Optional, Any, AsyncGenerator
+from typing import Callable, TypeVar, Optional, Any
 
-from ..models.async_db import get_engine, get_session_factory, get_async_session, init_db, close_db
+from ..models.async_db import get_engine, get_session_factory, get_async_session, init_db
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@ import logging
 import os
 import asyncio
 import requests
-from api.core.utils import format_timestamp, download_from_gcs, chunk_text, delete_from_gcs
+from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
 from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding
 from api.services.syntext_agent import SyntextAgent

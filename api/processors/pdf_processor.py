@@ -7,11 +7,8 @@ import asyncio
 import gc
 from typing import Dict, List, Any, Optional, Tuple
 from io import BytesIO
-import tempfile
-import base64
 import json
 from datetime import datetime
-import hashlib
 
 import pytesseract
 from PIL import Image
@@ -20,12 +17,6 @@ import fitz  # PyMuPDF
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.services.llm_service import get_text_embeddings_in_batches
-from pdfminer.layout import LAParams
-from pdfminer.pdfinterp import PDFPageInterpreter
-from pdfminer.pdfdevice import PDFDevice
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.converter import TextConverter
 from api.core.utils import chunk_text
 logger = logging.getLogger(__name__)
 

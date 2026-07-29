@@ -1,4 +1,3 @@
-from datetime import date
 from typing import Dict
 
 from fastapi import HTTPException, status

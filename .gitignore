@@ -232,3 +232,7 @@ env/
 # GitHub Actions SSH keys
 do_github_actions*
 
+
+# Local backups of env files (may contain live secrets)
+*.bak
+.env.*.bak

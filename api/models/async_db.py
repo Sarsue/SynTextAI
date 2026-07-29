@@ -8,8 +8,7 @@ from the previous implementation while maintaining centralized configuration.
 import logging
 import ssl
 import os
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from typing import Optional
 from urllib.parse import quote_plus
 
 # Robust imports with fallbacks

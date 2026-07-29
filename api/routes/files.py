@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
 from typing import List, Dict, Optional, Any
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from redis.exceptions import RedisError
 from ..core.utils import get_user_id, upload_to_gcs, delete_from_gcs
 import logging
@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from ..core.dependencies import get_store, authenticate_user
 from ..core.limits import assert_can_create_doc
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from ..models import File
 
 class FileResponse(BaseModel):
