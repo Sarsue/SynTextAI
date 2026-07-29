@@ -48,11 +48,44 @@ dependency," lean simple until there's a concrete reason not to.
 | Infra | DigitalOcean droplet, nginx reverse proxy (TLS termination), Docker Compose |
 | Analytics | PostHog |
 
-Local dev: `docker-compose -f docker-compose.yml -f docker-compose.local.yml up --build`,
-or run the API directly with `uvicorn api.app:app --reload --host 0.0.0.0 --port 3000`
-plus the worker in a separate process (`python -m api.workers.worker`). See
-`env.example` for every config value the app expects — copy it to `.env` and fill in
-values (your dev credentials come from Osas, not this repo).
+Local dev:
+
+```bash
+docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
+```
+
+`docker-compose.local.yml` is standalone, not an override layer on
+`docker-compose.yml`. It brings up three services: `postgres` (throwaway local
+pgvector database on host port 5433), `syntextaiapp` (port 3000), and `worker`.
+
+**Pass `--env-file .env.dev`.** It does two different jobs. The `env_file:` keys
+inside the compose file already point the containers at `.env.dev`, but compose
+interpolates `${...}` build args from `.env` by default, which is the production
+file. Without the flag the frontend gets built with the **live** Stripe
+publishable key, so test-mode checkout will not work.
+
+| File | Used by | Stripe |
+|---|---|---|
+| `.env` | `docker-compose.yml`, deploys | `sk_live` / `pk_live` |
+| `.env.dev` | `docker-compose.local.yml` | `sk_test` / `pk_test` |
+
+Never hand-swap these. The local stack is bound to `.env.dev` so it cannot reach
+live payment infrastructure.
+
+Migrations run against the local database with:
+
+```bash
+docker compose -f docker-compose.local.yml --env-file .env.dev run --rm --no-deps -w /app/api --entrypoint sh syntextaiapp -c "alembic upgrade head"
+```
+
+To reset to a clean database, `DROP SCHEMA public CASCADE; CREATE SCHEMA public;`
+then re-run the above. Rebuild the image (`--build`) after any `requirements.txt`
+change; the `./api:/app/api` mount refreshes code but not installed packages.
+
+Alternatively run the API directly with
+`uvicorn api.app:app --reload --host 0.0.0.0 --port 3000` plus the worker in a
+separate process (`python -m api.workers.worker`). See `env.example` for every
+config value the app expects (your dev credentials come from Osas, not this repo).
 
 ## Codebase map
 
@@ -78,13 +111,15 @@ api/
   workflows/        Internal job orchestration (tasks.py) — ingest/query dispatch, NOT
                      customer-facing workflow automation (see "Known gaps").
   processors/       File-type-specific ingestion: PDFProcessor (works), DocxProcessor
-                     (works, added 2026-07-29), TextProcessor (built, not wired in).
-                     Video/audio removed 2026-07-29.
+                     (works, added 2026-07-29), TextProcessor (rewritten and wired in
+                     for .txt/.md, 2026-07-29). Video/audio removed 2026-07-29.
   services/         External integrations — email, LLM calls, link processing
   core/             Cross-cutting: auth dependency, Firebase setup, rate/plan limits,
                      websocket manager, shared utils
   schemas/          Pydantic request/response models
-  middleware/        (currently empty — see "Known gaps" below)
+  middleware/        (empty. The CORS, security-header and rate-limit middleware
+                     added 2026-07-29 all live in app.py, not here. Delete this
+                     package or move them into it; right now it misleads.)
   alembic/          DB migrations
 frontend/src/       React app
 ```
@@ -227,6 +262,13 @@ for it.
 
 **Tier 0 — blocking, not features, fix before a real customer touches this:**
 1. ~~Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB~~ — **verified already applied 2026-07-29.** `alembic current` matches the single head, and a direct `information_schema.tables` query confirmed both tables exist live. The "multiple divergent heads, no tracked alembic.ini" gap was also stale: only one head exists (`b8f6b3f63f7d`), and `alembic.ini` is git-tracked. `docs/migrations/drop_learning_content_tables.sql` was redundant for the same reason, the `flashcards`/`quiz_questions`/`key_concepts` drop it described had already happened via the alembic migration of the same name, confirmed those tables no longer exist, removed the now-dead script.
+
+   **Correction, same day:** "applied on the live DB" was true but hid a real
+   problem. Those tables were created *by hand*, and the migration that was
+   supposed to create them was ordered before the one that creates `workspaces`,
+   so building a database from scratch failed outright. Checking `alembic current`
+   against a live database cannot catch this; only rebuilding from empty can.
+   Fixed and verified with a full drift check, see "Recent changes."
 2. ~~Pending invite lost after login~~ — **closed 2026-07-29**, see "Recent changes."
 3. ~~Staff role enforcement missing on the backend~~ — **closed 2026-07-29**, see "Recent changes."
 4. **Stripe reviewed 2026-07-29, real gap found: no 3D Secure / SCA handling.**
@@ -289,6 +331,68 @@ compliance-sensitive customer will eventually ask for," especially given the sec
 gaps above and the healthcare/legal verticals in the target market.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-07-29 (migration chain fixed, local Postgres added):** A fresh
+  `alembic upgrade head` did not work at all. `add_workspace_members_invites`
+  revised `fix_key_concepts_is_custom`, but both tables it creates carry a foreign
+  key to `workspaces.id`, and `workspaces` is not created until `b2d181e6791f`,
+  much later in the chain. Upgrading an empty database died on
+  `UndefinedTable: relation "workspaces" does not exist`. Production never
+  surfaced this because those two tables were created by hand, so the bad ordering
+  was invisible for as long as nobody built a database from scratch. Fixed by
+  repointing `down_revision` at `b2d181e6791f`, which keeps the existing merge at
+  `befb0c5f5d70` valid because `20260227_teaching_agent` also descends from it.
+  Does not replay in production: alembic stores only the current revision and prod
+  is already at head.
+
+  **Drift check result: clean.** All 30 migrations now apply to a fresh database
+  reaching `b8f6b3f63f7d`, and the resulting schema matches live production
+  exactly, 154 of 154 objects across columns, indexes, constraints and extensions.
+  So production's hand-created tables happen to match what the migration produces,
+  and prod needs no remediation. Worth re-running this check after any future
+  hand-edit to the production schema; the comparison uses `information_schema` and
+  `pg_indexes`/`pg_constraint` queries rather than `pg_dump`, so client/server
+  version skew cannot introduce false differences.
+
+  Added a `pgvector/pgvector:pg16` service to `docker-compose.local.yml` on host
+  port 5433, with the app and worker gated on its healthcheck. Its credentials are
+  **hardcoded, not interpolated**. Compose substitutes `${...}` from `.env`, which
+  is the production file, so `${DATABASE_PASSWORD}` there would inject the real
+  managed-database password into a local container. Local testing no longer touches
+  production data.
+
+  Also pinned the local stack to `.env.dev` in all four places (both services,
+  both `env_file` and the `load_dotenv()` volume mount). Environment now follows
+  the compose file instead of being hand-swapped. A branch cannot select an
+  environment, because `.env*` files are gitignored and therefore identical no
+  matter what is checked out; binding it in compose means the local stack always
+  gets test-mode Stripe and can never reach live payment infrastructure.
+
+  Note: the local image must be rebuilt after any `requirements.txt` change. The
+  `./api:/app/api` mount refreshes code but not site-packages, so a stale image
+  fails at import with `ModuleNotFoundError` for newer deps such as `slowapi`.
+
+- **2026-07-29 (orphan code and package audit):** Removed `pdfminer.six` (imported
+  in `pdf_processor.py` but never called; PyMuPDF does all extraction), ~12 unused
+  Python imports across 8 files, 15 npm packages with no importer, and four dead
+  files: `alembic/env_temp.py` (a debugging hack that mocked out pgvector),
+  `models/db.py` (old sync session module superseded by `async_db.py`, zero
+  importers), `routes/init.py` (empty), and `services/flashcard_quiz_utils.py`
+  (EdTech leftovers whose backing tables no longer exist).
+
+  Three packages that read as unused are **not**, and must stay. Now recorded inline
+  in `requirements.txt`: `scikit-learn` (`cosine_similarity` imported lazily inside
+  functions in `rag/search_engine.py` and `rag/reranker.py`), `nltk` (hard
+  dependency of `llama-index-core`), `python-multipart` (required implicitly by
+  FastAPI's `UploadFile` parsing). Likewise `tailwindcss`, `shadcn` and
+  `tw-animate-css` on the frontend, which `depcheck` flags because they arrive via
+  CSS `@import` in `src/index.css` rather than from TS. Lesson: neither `vulture`
+  nor `depcheck` sees lazy imports or CSS imports, so verify every flagged package
+  by hand before removing it.
+
+  `alembic/versions/c9530c25560e_*.py` is an empty autogenerate stub (`pass`/`pass`).
+  Left in place deliberately: `20260215_add_agent_runs` revises it, so deleting it
+  would break the chain for no benefit.
 
 - **2026-07-29 (multi-tenancy verified, invite gap fixed):** Checked whether the
   workspace model correctly handles a real scenario: someone invited as staff to
