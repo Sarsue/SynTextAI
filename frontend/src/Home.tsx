@@ -76,6 +76,16 @@ const verticals: Vertical[] = [
             { q: 'What is the claims reporting window for property damage?', a: 'Sourced from your Claims Procedures, p.3' },
         ],
     },
+    {
+        id: 'manufacturing',
+        label: 'Manufacturing',
+        headline: 'Technicians get the fix. Machines stay running.',
+        documents: ['Equipment manuals', 'Maintenance SOPs', 'Torque & spec sheets', 'Safety procedures', 'Troubleshooting guides'],
+        examples: [
+            { q: 'What is the torque spec for the drive shaft bolts on the CNC lathe?', a: 'Sourced from your Equipment Manual, p.22' },
+            { q: 'What is the lockout/tagout procedure before servicing the conveyor motor?', a: 'Sourced from your Safety Procedures Manual, p.8' },
+        ],
+    },
 ];
 
 const faqs = [
