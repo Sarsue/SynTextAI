@@ -154,7 +154,7 @@ code, not assumed, last checked 2026-07-29:
 
 | Promised | Reality |
 |---|---|
-| **Knowledge assistants** | Shipped, real. Chat with citations, the RAG pipeline described above, workspace/invite. No gap. |
+| **Knowledge assistants** | Shipped, real, **and was silently broken until 2026-07-29** — see "Recent changes." Chat with citations, the RAG pipeline described above, workspace/invite. Fixed and live-verified against the real LLM endpoint now. |
 | **AI search** | Not a separate capability. No standalone search route exists anywhere in `api/routes/`. It's the same `HybridSearchEngine` chat uses, described as two things in copy. Either stop marketing it as separate, or build an actual standalone search route + view on top of the existing (already-good) retrieval engine. |
 | **Document processing** | PDF and DOCX work (`api/processors/factory.py`'s `processor_map`). `.txt`/`.md`/`.doc`/video/audio don't — `TextProcessor` is fully built at `api/processors/text_processor.py` but never imported by the factory, dead code. The site's file-type claims now match reality after the 2026-07-29 DOCX fix (see "Recent changes" below); check `Home.tsx`'s FAQ/pricing copy again before claiming `.txt`/`.md` support. |
 | **Workflow automation** | Doesn't exist as a product feature. `api/workflows/tasks.py` is internal job orchestration (ingest/query dispatch), not customer-facing automation, no approval workflows, SOP generation, or business-process logic anywhere. This is Phase 3 on the roadmap below, don't market it before it's built. |
@@ -186,11 +186,11 @@ code, not assumed, last checked 2026-07-29:
     10.14.1) to the current major (12.x), a 2-major-version jump that risks breaking
     Auth/Firestore call sites. Not attempted blind, needs real login testing against
     each major version before upgrading, not a mechanical `npm audit fix`.
-  - **Backend (`pip-audit -r api/requirements.txt`): 2 findings, neither has a fix
-    version yet.** `dspy` 2.6.27 (`PYSEC-2026-1318`) is actively imported in
-    `llm_service.py`, the core LLM-calling service, worth monitoring for a patched
-    release. `diskcache` 5.6.3 (`PYSEC-2026-2447`) isn't directly imported anywhere
-    in this codebase, likely a transitive dependency of `dspy` or another package.
+  - **Backend (`pip-audit -r api/requirements.txt`): 2 findings at the time, one now
+    moot.** `dspy` 2.6.27 (`PYSEC-2026-1318`) — removed entirely 2026-07-29, see
+    "Recent changes," it was never actually functioning. `diskcache` 5.6.3
+    (`PYSEC-2026-2447`) isn't directly imported anywhere in this codebase, likely a
+    transitive dependency of another package; no fix version available yet.
 - **No DB-level RLS** — every new route touching a resource ID from the URL/query needs
   an explicit ownership check (`check_ownership` helper exists, reuse it) or a
   `user_id`-scoped repository query. There's no safety net underneath you if you skip
@@ -282,7 +282,28 @@ gaps above and the healthcare/legal verticals in the target market.
 
 ## Recent changes (chronological, most recent first)
 
-- **2026-07-29:** Tier 0 sprint — fixed the pending-invite-lost-after-login bug in
+- **2026-07-29 (critical fix):** Chat answer generation was silently broken in
+  production. `generate_explanation_dspy` (called from `SyntextAgent.query_pipeline`,
+  which is called from every live chat query via `QueryAgent._generate`) depended on
+  a DSPy predictor (`explain_predictor`) that was never actually configured, the
+  "configuration" code was a no-op `pass`. Every call fell through to a hardcoded
+  placeholder string ("This section discusses X... (Explanation generated via
+  fallback method)") that never contained a `[Segment N]` citation. `query_pipeline`
+  requires at least one valid citation whenever context was retrieved, so **every
+  real chat query with retrieved context was being refused** with "I couldn't find
+  enough evidence in your documents to answer that confidently," regardless of what
+  was actually in the uploaded documents. Fixed by renaming the function to
+  `generate_explanation` and pointing it at `gradient_chat`, the already-working
+  LLM-calling function used everywhere else in `llm_service.py` except this one path.
+  Live-verified against the real DigitalOcean inference endpoint (not just compiled):
+  a direct test call returned the exact expected output. Side finding from that same
+  test: a 10-token `max_tokens` budget returned empty content from the model
+  (`openai-gpt-oss-20b` appears to consume some budget on internal reasoning before
+  output), 1500 worked reliably, worth keeping in mind for any other low-`max_tokens`
+  call elsewhere in this file. This also made `dspy` genuinely removable, it was
+  imported but never functionally exercised, removed from `requirements.txt` and the
+  dead `explain_predictor`/`gemini_lm` scaffolding deleted.
+- **2026-07-29 (Tier 0 sprint):** fixed the pending-invite-lost-after-login bug in
   `Auth.tsx`; added workspace-owner authorization to file upload (`files.py` had no
   membership check at all before this, any authenticated user could upload into any
   workspace_id); locked CORS to real domains; fixed 12 instances of raw exception

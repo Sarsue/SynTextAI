@@ -27,8 +27,6 @@ scipy>=1.10.0
 scikit-learn>=1.4.0
 tiktoken>=0.6.0
 tenacity>=8.3.0
-# Pinned below 3.0 to avoid PyArrow conflicts
-dspy>=2.0.0,<3.0.0
 
 # LlamaIndex utilities used by chunking
 llama-index-core>=0.10.0

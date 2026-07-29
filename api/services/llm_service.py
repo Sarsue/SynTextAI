@@ -3,7 +3,6 @@ import re
 import json
 import numpy as np
 from typing import List, Dict, Any
-import dspy
 import requests
 import time
 import os
@@ -89,47 +88,37 @@ def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
 
     logger.error(f"HTTP chat completion error after retries: {last_err}")
     return ""
-# DSPy Configuration - Make it completely optional
-gemini_lm = None
-explain_predictor = None
-try:
-    # Keep DSPy optional; if you later wire an OpenAI-compatible client in DSPy, configure it here.
-    # For now, we avoid hard dependency and use fallback paths if not configured.
-    pass
-except Exception as e:
-    logger.warning(f"DSPy configuration failed: {e}. Using fallback methods.")
-    explain_predictor = None
-
 def token_count(content: str, model: str = None) -> int:
     return max(1, int(len(content.split()) * 1.5))
-# --- New DSPy-based Explanation Function --- >
-def generate_explanation_dspy(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_length: int = 2000) -> str:
-    """Generates an explanation for a text chunk using DSPy if configured; falls back otherwise."""
+
+def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_length: int = 2000) -> str:
+    """Generates an explanation/answer for a prompt via the real LLM (gradient_chat).
+
+    Previously routed through a DSPy predictor that was never actually
+    configured (the "configuration" step was a no-op `pass`), so this always
+    fell through to a canned placeholder string with no [Segment N] citations
+    in it. Since query_pipeline's citation check requires at least one valid
+    citation whenever context was retrieved, that meant every real chat query
+    was refused with "I couldn't find enough evidence..." regardless of what
+    was actually in the documents. `language`/`comprehension_level` are kept
+    as parameters for call-site compatibility; the main caller (query_pipeline)
+    already bakes both directly into the prompt text.
+    """
     if not text_chunk:
-        logging.warning("generate_explanation_dspy called with empty text_chunk.")
+        logging.warning("generate_explanation called with empty text_chunk.")
         return ""
 
-    # Truncate context if necessary (DSPy might handle this, but belt-and-suspenders)
-    truncated_chunk = text_chunk[:max_context_length]
+    truncated_chunk = text_chunk[:max_context_length] if max_context_length else text_chunk
 
     try:
-        # Check if DSPy is available and configured
-        if not explain_predictor:
-            logging.warning("DSPy explanation predictor not available. Using fallback explanation.")
-            return f"This section discusses {truncated_chunk[:100]}... (Explanation generated via fallback method)"
-
-        response = explain_predictor(context=truncated_chunk, language=language, comprehension_level=comprehension_level)
-        if response and hasattr(response, 'explanation') and response.explanation:
-             logging.debug(f"DSPy generated explanation: {response.explanation[:50]}...")
-             return response.explanation
-        else:
-            logging.warning(f"DSPy predictor returned empty or invalid response for chunk: {truncated_chunk[:50]}...")
-            return f"This section covers key concepts related to: {truncated_chunk[:100]}... (Fallback explanation)"
-
+        response = gradient_chat(truncated_chunk, max_tokens=1500)
+        if response:
+            return response
+        logging.warning(f"LLM returned empty response for chunk: {truncated_chunk[:50]}...")
+        return ""
     except Exception as e:
-        logging.error(f"Error generating explanation with DSPy: {e}", exc_info=True)
-        # Return a fallback explanation instead of failing
-        return f"This section discusses important concepts in {language}. The content focuses on {truncated_chunk[:100]}... (Explanation generated via fallback method)"
+        logging.error(f"Error generating explanation: {e}", exc_info=True)
+        return ""
 
 # --- Key concept extraction ---
 def generate_key_concepts(document_text: str, language: str = "English", comprehension_level: str = "Beginner", is_video: bool = False) -> List[Dict[str, Any]]:

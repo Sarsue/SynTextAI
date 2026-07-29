@@ -2,7 +2,7 @@ import re
 import logging
 from typing import List, Dict, Any, Tuple
 
-from api.services.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation_dspy
+from api.services.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation
 from api.rag.pipeline import RAGPipeline
 
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +71,7 @@ class SyntextAgent:
                 if convo_history and len(convo_history) > 1500:  # If history is long
                     try:
                         summarization_prompt = f"Summarize this conversation history briefly, focusing on the most important points and context needed to answer follow-up questions:\n\n{convo_history}"
-                        history_summary = generate_explanation_dspy(summarization_prompt, language=language, comprehension_level=comprehension_level)
+                        history_summary = generate_explanation(summarization_prompt, language=language, comprehension_level=comprehension_level)
                         history_prompt = f"\n\nPrevious Conversation Summary:\n{history_summary}\n\n"
                     except Exception as e:
                         logger.warning(f"Failed to summarize conversation history: {e}")
@@ -156,7 +156,7 @@ class SyntextAgent:
                         full_prompt = full_prompt[:MAX_TOKENS_CONTEXT * 4]  # Rough character approximation
 
                 # Step 7: Call the LLM with the combined context and instructions
-                llm_answer_with_citations = generate_explanation_dspy(
+                llm_answer_with_citations = generate_explanation(
                     full_prompt,
                     language=language,
                     comprehension_level=comprehension_level,
