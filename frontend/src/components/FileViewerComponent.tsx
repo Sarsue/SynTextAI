@@ -42,7 +42,6 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose
         extracting: 'Extracting content from the file...',
         embedding: 'Generating embeddings for semantic search...',
         storing: 'Storing extracted content and metadata...',
-        generating_concepts: 'Processing...',
         processed: 'Processed successfully.',
         failed: 'File processing failed. Please try again later.'
     };

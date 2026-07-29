@@ -17,7 +17,6 @@ export type ProcessingStatus =
   | 'extracting'
   | 'embedding'
   | 'storing'
-  | 'generating_concepts'
   | 'processed'
   | 'failed';
 

@@ -19,14 +19,15 @@ import sys
 import signal
 import time
 import requests
+from contextlib import asynccontextmanager
 from sqlalchemy import text
-from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 import uuid
 from dotenv import load_dotenv
 from pathlib import Path
+from api.core.timing import emit
 from api.models.orm_models import AgentRun
 from api.workflows.tasks import process_file_data
 # Add the parent directory to sys.path to fix imports
@@ -66,24 +67,83 @@ logging.basicConfig(
 )
 logger = logging.getLogger('syntextai-worker')
 
-# Maximum number of concurrent file processing tasks
-# PRODUCTION: Set to 1 to prevent OOM with large PDFs (1000+ pages)
-# Processing files sequentially ensures stable memory usage
-MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "1"))
+# --------------------------------------------------------------------------
+# Concurrency
+#
+# Ingestion and querying have completely different cost profiles, so they get
+# separate budgets. A single global limit meant a chat question queued behind a
+# document upload: with the old MAX_CONCURRENT_TASKS=1, one tenant uploading a
+# 500-page PDF blocked every other tenant from getting an answer at all.
+#
+#   queries  are IO-bound: retrieval plus HTTP calls to the embedding and chat
+#            endpoints. No local model is loaded (the "cross-encoder" reranker
+#            is embedding-similarity based), so these are cheap and several run
+#            at once.
+#   ingests  are the memory-hungry side, so they stay tightly capped, and a
+#            file at or above HEAVY_FILE_BYTES additionally takes an exclusive
+#            slot so two big documents never overlap.
+#
+# On the original "sequential processing prevents OOM" rationale: PDFProcessor
+# already batches 50 pages at a time, so peak memory per job is bounded by the
+# batch rather than by total document size. That makes the global limit of 1
+# stricter than it needed to be. The heavy slot here is the belt-and-braces
+# guard, not the primary protection.
+#
+# The worker container is capped at 2GB. Watch actual RSS against the TIMING
+# logs before raising INGEST_CONCURRENCY further.
+# --------------------------------------------------------------------------
+QUERY_CONCURRENCY = int(os.getenv("QUERY_CONCURRENCY", "4"))
+INGEST_CONCURRENCY = int(os.getenv("INGEST_CONCURRENCY", "2"))
 
-# Polling configuration - Simplified to fixed 30-second intervals
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))  # Check for files every N seconds
+# A file at or above this size takes the exclusive heavy slot.
+HEAVY_FILE_BYTES = int(os.getenv("HEAVY_FILE_BYTES", str(8 * 1024 * 1024)))
+
+# Per-tenant cap on simultaneously running jobs, so one user queueing twenty
+# files cannot starve everyone else. Queries and ingests count together.
+MAX_RUNS_PER_USER = int(os.getenv("MAX_RUNS_PER_USER", "3"))
+
+# Total in-flight ceiling across all run types.
+MAX_INFLIGHT = int(os.getenv("MAX_INFLIGHT", str(QUERY_CONCURRENCY + INGEST_CONCURRENCY)))
+
+# Idle poll interval. The loop also wakes as soon as any running task finishes,
+# so this only governs how long it sleeps when there is nothing to do.
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))
+
+# Runs whose lease expired are considered abandoned (worker killed mid-job) and
+# are returned to the queue.
+LEASE_MINUTES = int(os.getenv("LEASE_MINUTES", "15"))
 
 # API base URL for internal notifications (docker-compose sets this to http://syntextaiapp:3000)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/")
 
 
-# Global semaphore for limiting concurrent file processing
-semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+query_semaphore = asyncio.Semaphore(QUERY_CONCURRENCY)
+ingest_semaphore = asyncio.Semaphore(INGEST_CONCURRENCY)
+heavy_ingest_semaphore = asyncio.Semaphore(1)
 
-# Track running tasks to ensure graceful shutdown
-running_tasks = []
+# user_id -> number of runs currently executing, used for the per-tenant cap.
+inflight_by_user: Dict[int, int] = {}
+
+# Track running tasks to ensure graceful shutdown. A set, because the loop adds
+# and removes entries as jobs start and finish rather than in batches.
+running_tasks: set = set()
 shutdown_event = asyncio.Event()
+
+# How often to sweep for runs whose lease expired.
+RECLAIM_INTERVAL = int(os.getenv("RECLAIM_INTERVAL", "60"))
+
+# Liveness heartbeat. The worker serves no HTTP, so the image's HEALTHCHECK
+# (which curls port 3000) could never pass for it and left the container
+# permanently unhealthy, hiding real stalls. The loop touches this file on every
+# iteration and the container healthcheck asserts it is recent.
+HEARTBEAT_PATH = os.getenv("WORKER_HEARTBEAT_PATH", "/tmp/worker_heartbeat")
+
+
+def _touch_heartbeat() -> None:
+    try:
+        Path(HEARTBEAT_PATH).write_text(str(int(time.time())))
+    except Exception:
+        logger.debug("Could not write heartbeat", exc_info=True)
 
 
 # Global store instance to reuse across worker operations
@@ -202,19 +262,58 @@ async def update_agent_run(
         await session.commit()
 
 
+@asynccontextmanager
+async def _acquire_slot(run_type: str, payload: Dict[str, Any]):
+    """Take the right concurrency slot for this run type.
+
+    Queries and ingests draw on separate budgets so neither can starve the
+    other, and a large file additionally takes the exclusive heavy slot.
+    """
+    if run_type == "answer_query":
+        async with query_semaphore:
+            yield
+        return
+
+    file_bytes = payload.get("file_size_bytes") or 0
+    is_heavy = file_bytes >= HEAVY_FILE_BYTES
+
+    async with ingest_semaphore:
+        if is_heavy:
+            async with heavy_ingest_semaphore:
+                logger.info(
+                    f"Ingest holding exclusive heavy slot ({file_bytes} bytes >= {HEAVY_FILE_BYTES})"
+                )
+                yield
+        else:
+            yield
+
+
 async def process_agent_run(run_id: uuid.UUID) -> None:
     store = get_repository_manager()
 
-    async with semaphore:
+    async with store.agent_run_repo.get_async_session() as session:
+        run = await session.get(AgentRun, run_id)
+        if not run:
+            return
+        payload = run.payload or {}
+        run_type = run.run_type
+        run_user_id = run.user_id
+        queued_at = run.created_at
+        started_at = run.started_at
+
+    # Queue wait is the headline latency number: how long the user sat there
+    # after uploading or asking before any work began.
+    if queued_at and started_at:
+        emit(
+            "queue_wait",
+            ms=(started_at - queued_at).total_seconds() * 1000,
+            run_type=run_type,
+            user_id=run_user_id,
+        )
+
+    async with _acquire_slot(run_type, payload):
         if shutdown_event.is_set():
             return
-
-        async with store.agent_run_repo.get_async_session() as session:
-            run = await session.get(AgentRun, run_id)
-            if not run:
-                return
-            payload = run.payload or {}
-            run_type = run.run_type
 
         if run_type == "ingest_file":
             file_id = payload.get("file_id")
@@ -379,7 +478,76 @@ async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> 
     await asyncio.to_thread(_post)
 
 
-async def fetch_pending_runs(limit: int = 10) -> List[uuid.UUID]:
+async def reclaim_expired_runs() -> int:
+    """Return abandoned runs to the queue.
+
+    `lease_expires_at` was previously written but never read, so a worker killed
+    mid-job left its runs stuck in "running" forever: never retried, never
+    surfaced, invisible to the user whose upload silently stopped.
+    """
+    try:
+        from sqlalchemy import select
+
+        store = get_repository_manager()
+        async with store.agent_run_repo.get_async_session() as session:
+            now = datetime.utcnow()
+            stmt = (
+                select(AgentRun)
+                .where(
+                    AgentRun.status == "running",
+                    AgentRun.lease_expires_at.is_not(None),
+                    AgentRun.lease_expires_at < now,
+                )
+                .with_for_update(skip_locked=True)
+                .limit(20)
+            )
+            runs = (await session.execute(stmt)).scalars().all()
+            for run in runs:
+                attempts = (run.attempts or 0) + 1
+                run.attempts = attempts
+                if attempts >= (run.max_attempts or 3):
+                    run.status = "failed"
+                    run.last_error = "Lease expired; worker presumed dead. Out of attempts."
+                    run.finished_at = now
+                    if run.file_id:
+                        logger.warning(f"Run {run.id} abandoned permanently; marking file {run.file_id} failed")
+                else:
+                    run.status = "queued"
+                    run.locked_by = None
+                    run.locked_at = None
+                    run.lease_expires_at = None
+                    run.last_error = "Lease expired; worker presumed dead. Requeued."
+                run.updated_at = now
+
+            if runs:
+                logger.warning(f"Reclaimed {len(runs)} run(s) with expired leases")
+                emit("lease_reclaimed", count=len(runs))
+            await session.commit()
+
+            # Files whose run was permanently abandoned should not sit in a
+            # perpetual "extracting" state in the UI.
+            for run in runs:
+                if run.status == "failed" and run.file_id:
+                    try:
+                        await update_file_status(int(run.file_id), "failed", error="Processing was interrupted")
+                    except Exception:
+                        logger.debug(f"Could not mark file {run.file_id} failed", exc_info=True)
+
+            return len(runs)
+    except Exception as e:
+        logger.error(f"Error reclaiming expired runs: {e}")
+        return 0
+
+
+async def fetch_pending_runs(limit: int = 10) -> List[Tuple[uuid.UUID, Optional[int]]]:
+    """Claim up to `limit` queued runs, respecting the per-tenant cap.
+
+    Candidates are read in priority order, then filtered against the per-user
+    in-flight count. Rows we decline are simply left untouched, so they stay
+    queued and remain available to this worker's next pass or another worker.
+    """
+    if limit <= 0:
+        return []
     try:
         from sqlalchemy import select, or_
 
@@ -396,62 +564,107 @@ async def fetch_pending_runs(limit: int = 10) -> List[uuid.UUID]:
                 )
                 .order_by(AgentRun.priority.asc(), AgentRun.created_at.asc())
                 .with_for_update(skip_locked=True)
-                .limit(limit)
+                # Over-fetch so that skipping a user at their cap does not cost
+                # us the whole batch.
+                .limit(max(limit * 4, 20))
             )
 
             res = await session.execute(stmt)
             runs = res.scalars().all()
-            run_ids: List[uuid.UUID] = []
+
+            # Provisional per-user tally, seeded from what is already running.
+            tally = dict(inflight_by_user)
+            claimed: List[Tuple[uuid.UUID, Optional[int]]] = []
+            deferred = 0
             for run in runs:
+                if len(claimed) >= limit:
+                    break
+                uid = run.user_id
+                if uid is not None:
+                    if tally.get(uid, 0) >= MAX_RUNS_PER_USER:
+                        deferred += 1
+                        continue
+                    tally[uid] = tally.get(uid, 0) + 1
+
                 run.status = "running"
                 run.locked_by = str(worker_id)
                 run.locked_at = now
                 run.started_at = now
-                run.lease_expires_at = now + timedelta(minutes=15)
+                run.lease_expires_at = now + timedelta(minutes=LEASE_MINUTES)
                 run.updated_at = now
-                run_ids.append(run.id)
+                claimed.append((run.id, uid))
 
             await session.commit()
-            return run_ids
+            if deferred:
+                logger.info(f"Deferred {deferred} run(s) whose owner is at the per-user cap of {MAX_RUNS_PER_USER}")
+            return claimed
     except Exception as e:
         logger.error(f"Error fetching pending agent runs: {str(e)}")
         return []
 
 
+async def _run_tracked(run_id: uuid.UUID, user_id: Optional[int]) -> None:
+    """Run one job while maintaining the per-user in-flight count."""
+    if user_id is not None:
+        inflight_by_user[user_id] = inflight_by_user.get(user_id, 0) + 1
+    try:
+        await process_agent_run(run_id)
+    except Exception:
+        logger.exception(f"Agent run {run_id} raised")
+    finally:
+        if user_id is not None:
+            remaining = inflight_by_user.get(user_id, 1) - 1
+            if remaining > 0:
+                inflight_by_user[user_id] = remaining
+            else:
+                inflight_by_user.pop(user_id, None)
+
+
 async def worker_loop() -> None:
-    """Main worker loop that polls for files and processes them with fixed 30-second intervals"""
+    """Claim work continuously, topping up to capacity as jobs finish.
+
+    The previous version fetched a batch and then waited on ALL_COMPLETED before
+    polling again, which made the whole batch move at the speed of its slowest
+    member. A chat question claimed alongside a 500-page PDF could not even be
+    looked at until that PDF finished, and no new work was picked up in the
+    meantime, so priority ordering never got a chance to matter. Now the loop
+    wakes the moment any job finishes and immediately refills the freed slot.
+    """
+    last_reclaim = 0.0
     while not shutdown_event.is_set():
         try:
-            run_ids = await fetch_pending_runs(limit=10)
+            _touch_heartbeat()
 
-            if run_ids:
-                logger.info(f"Found {len(run_ids)} agent runs to process")
+            # Return abandoned runs to the queue periodically.
+            if time.monotonic() - last_reclaim > RECLAIM_INTERVAL:
+                await reclaim_expired_runs()
+                last_reclaim = time.monotonic()
 
-                tasks = []
-                for run_id in run_ids:
-                    task = asyncio.create_task(process_agent_run(run_id))
-                    tasks.append(task)
-                    running_tasks.append(task)
+            capacity = MAX_INFLIGHT - len(running_tasks)
+            if capacity > 0:
+                claimed = await fetch_pending_runs(limit=capacity)
+                if claimed:
+                    logger.info(
+                        f"Claimed {len(claimed)} run(s); in-flight {len(running_tasks)}/{MAX_INFLIGHT}"
+                    )
+                for run_id, uid in claimed:
+                    task = asyncio.create_task(_run_tracked(run_id, uid))
+                    running_tasks.add(task)
+                    task.add_done_callback(running_tasks.discard)
 
-                # Wait for all tasks to complete
-                completed_tasks, _ = await asyncio.wait(
-                    tasks,
-                    return_when=asyncio.ALL_COMPLETED
+            if running_tasks:
+                # Wake as soon as any job completes so its slot is refilled
+                # immediately, rather than waiting out the poll interval.
+                await asyncio.wait(
+                    set(running_tasks),
+                    timeout=POLL_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-
-                # Clean up completed tasks
-                for task in completed_tasks:
-                    if task in running_tasks:
-                        running_tasks.remove(task)
             else:
-                logger.info(f"No pending agent runs found. Next poll in {POLL_INTERVAL} seconds")
-
-            # Wait before polling again with fixed interval
-            await asyncio.sleep(POLL_INTERVAL)
+                await asyncio.sleep(POLL_INTERVAL)
 
         except Exception as e:
             logger.exception(f"Error in worker loop: {str(e)}")
-            # On error, still use the fixed poll interval before trying again
             await asyncio.sleep(POLL_INTERVAL)
 
 
@@ -470,7 +683,12 @@ def handle_shutdown(sig, frame):
 
 async def main():
     """Main entry point for the worker"""
-    logger.info(f"Starting SynText AI Worker (Max Concurrent Tasks: {MAX_CONCURRENT_TASKS})")
+    logger.info(
+        "Starting SynText AI Worker "
+        f"(queries={QUERY_CONCURRENCY}, ingests={INGEST_CONCURRENCY}, "
+        f"heavy>={HEAVY_FILE_BYTES // (1024 * 1024)}MB, per-user cap={MAX_RUNS_PER_USER}, "
+        f"max in-flight={MAX_INFLIGHT})"
+    )
     
     # Register signal handlers
     signal.signal(signal.SIGINT, handle_shutdown)

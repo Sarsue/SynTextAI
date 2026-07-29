@@ -209,8 +209,6 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
                 return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Generating embeddings...' };
             case 'storing':
                 return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Storing content...' };
-            case 'generating_concepts':
-                return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Generating key concepts...' };
             default:
                 return { icon: <Loader2 className="size-3.5 animate-spin" />, label: 'Processing...' };
         }

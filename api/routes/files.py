@@ -202,6 +202,9 @@ async def save_file(
                         "file_url": gcs_url,
                         "language": language,
                         "comprehension_level": comprehension_level,
+                        # Lets the worker classify this as a heavy or light
+                        # ingest without an extra DB round trip.
+                        "file_size_bytes": int(file_size),
                     },
                     user_id=int(user_id),
                     workspace_id=int(actual_workspace_id) if actual_workspace_id is not None else None,
@@ -275,7 +278,6 @@ def _status_to_progress(status: Optional[str]) -> int:
         "extracting": 10,
         "embedding": 40,
         "storing": 70,
-        "generating_concepts": 90,
         "processed": 100,
         "failed": 0,
     }

@@ -1,7 +1,9 @@
 import logging
 import os
 import asyncio
+import time
 import requests
+from api.core.timing import emit, stage
 from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
 from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding
@@ -166,6 +168,7 @@ async def _process_file_data_impl(
 
             # Process file
             file_data = None
+            download_started = time.perf_counter()
 
             if file_url:
                 try:
@@ -192,16 +195,29 @@ async def _process_file_data_impl(
                 )
 
             logger.info(f"Downloaded file {filename}, size: {len(file_data)} bytes")
-            result = await processor.process(
-                user_id=user_id,
-                file_id=file_id,
-                filename=filename,
-                file_data=file_data,
-                file_url=file_url,
-                user_gc_id=user_gc_id,
-                language=language,
-                comprehension_level=comprehension_level,
+            emit(
+                "download",
+                ms=(time.perf_counter() - download_started) * 1000,
+                file_id=file_id_int,
+                bytes=len(file_data),
             )
+
+            with stage(
+                "extract_embed_store",
+                file_id=file_id_int,
+                processor=processor.__class__.__name__,
+                bytes=len(file_data),
+            ):
+                result = await processor.process(
+                    user_id=user_id,
+                    file_id=file_id,
+                    filename=filename,
+                    file_data=file_data,
+                    file_url=file_url,
+                    user_gc_id=user_gc_id,
+                    language=language,
+                    comprehension_level=comprehension_level,
+                )
 
             if not result.get("success", False):
                 error_msg = result.get("error", "Unknown error during file processing")
@@ -278,15 +294,18 @@ async def run_query_pipeline(
     """Run retrieval + generation for a single query without persisting chat messages."""
     try:
         logger.info({"event": "run_query_pipeline.agent_start", "message": message})
-        return await query_agent.run(
-            user_id=user_id,
-            message=message,
-            language=language,
-            comprehension_level=comprehension_level,
-            formatted_history=formatted_history,
-            workspace_id=workspace_id,
-            file_id=file_id,
-        )
+        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="agent") as ctx:
+            result = await query_agent.run(
+                user_id=user_id,
+                message=message,
+                language=language,
+                comprehension_level=comprehension_level,
+                formatted_history=formatted_history,
+                workspace_id=workspace_id,
+                file_id=file_id,
+            )
+            ctx["chunks"] = len(result.get("context_chunks") or [])
+        return result
     except Exception as agent_error:
         logger.warning(
             {
@@ -295,16 +314,18 @@ async def run_query_pipeline(
                 "error": str(agent_error),
             }
         )
-        query_embedding = get_text_embedding(message)
-        topK_chunks = await store.file_repo.hybrid_search(
-            user_id=user_id,
-            query=message,
-            query_embedding=query_embedding,
-            workspace_id=workspace_id,
-            file_id=file_id,
-            top_k=10,
-        )
-        response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
+        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="fallback") as ctx:
+            query_embedding = get_text_embedding(message)
+            topK_chunks = await store.file_repo.hybrid_search(
+                user_id=user_id,
+                query=message,
+                query_embedding=query_embedding,
+                workspace_id=workspace_id,
+                file_id=file_id,
+                top_k=10,
+            )
+            ctx["chunks"] = len(topK_chunks or [])
+            response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
         return {
             "response": response,
             "context_chunks": topK_chunks,

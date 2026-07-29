@@ -31,10 +31,23 @@ services:
     image: osasdeeon/syntextai:latest
     container_name: syntextai-worker
     command: python -m api.workers.worker
+    # The shared image healthchecks port 3000, which the worker never
+    # serves. Assert loop liveness via the heartbeat file instead.
+    healthcheck:
+      test: ["CMD-SHELL", "test $(( $(date +%s) - $(cat /tmp/worker_heartbeat 2>/dev/null || echo 0) )) -lt 180"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     env_file:
       - .env
     environment:
-      - MAX_CONCURRENT_TASKS=1
+      # Queries and ingests have separate budgets so a large upload can never
+      # block another tenant's chat. Ingests stay capped for memory; a file
+      # over HEAVY_FILE_BYTES additionally takes an exclusive slot.
+      - QUERY_CONCURRENCY=4
+      - INGEST_CONCURRENCY=2
+      - MAX_RUNS_PER_USER=3
       - POLL_INTERVAL=10
       - API_BASE_URL=http://syntextaiapp:3000  # ⬅️ Use service name instead of localhost
       # Worker-specific connection pool settings (smaller to avoid exhausting DB connections)
