@@ -192,12 +192,6 @@ code, not assumed, last checked 2026-07-29:
   and related functions in `workflows/tasks.py` are unreachable (the routes that called
   them were removed 2026-07-24) but the functions themselves weren't deleted. Harmless,
   cheap cleanup whenever that file is touched.
-- **`docs/migrations/drop_learning_content_tables.sql` written, not applied** — drops
-  the now-unused `flashcards`/`quiz_questions`/`key_concepts` tables. Needs a deliberate
-  go-ahead from Osas before running against the real DB.
-- **Alembic has multiple divergent heads and no tracked `alembic.ini`** — resolve this
-  before writing the next real migration, don't guess a `down_revision` against an
-  already-inconsistent chain.
 - **Whether Redis (in `requirements.txt`, imported in `files.py`) is meant to be doing
   more than it currently is, or is leftover from an earlier design** — unconfirmed.
 
@@ -207,11 +201,11 @@ Update this section as items close or new ones turn up, don't spin up a new doc 
 for it.
 
 **Tier 0 — blocking, not features, fix before a real customer touches this:**
-1. Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB
-2. Pending invite lost after login (`Auth.tsx` doesn't read `sessionStorage.pending_invite_token`)
-3. Staff role enforcement missing on the backend (roles exist in DB, nothing stops staff uploading via direct API call)
+1. ~~Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB~~ — **verified already applied 2026-07-29.** `alembic current` matches the single head, and a direct `information_schema.tables` query confirmed both tables exist live. The "multiple divergent heads, no tracked alembic.ini" gap was also stale: only one head exists (`b8f6b3f63f7d`), and `alembic.ini` is git-tracked. `docs/migrations/drop_learning_content_tables.sql` was redundant for the same reason, the `flashcards`/`quiz_questions`/`key_concepts` drop it described had already happened via the alembic migration of the same name, confirmed those tables no longer exist, removed the now-dead script.
+2. ~~Pending invite lost after login~~ — **closed 2026-07-29**, see "Recent changes."
+3. ~~Staff role enforcement missing on the backend~~ — **closed 2026-07-29**, see "Recent changes."
 4. Stripe end-to-end not confirmed on the live environment
-5. CORS, rate limiting, exception leakage, security headers (see "Known gaps" above)
+5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
 6. Triage the 34 Dependabot vulnerabilities
 
 **Tier 1 — cheap, closes an existing gap:**
@@ -252,19 +246,32 @@ gaps above and the healthcare/legal verticals in the target market.
 
 ## Recent changes (chronological, most recent first)
 
-- **2026-07-29:** DOCX processing implemented and closed. Manufacturing added as a
-  named vertical (positioning stayed broad SMB, see "What SyntextAI is" above).
-  Capability gap analysis performed against the four promised capabilities.
+- **2026-07-29:** Tier 0 sprint — fixed the pending-invite-lost-after-login bug in
+  `Auth.tsx`; added workspace-owner authorization to file upload (`files.py` had no
+  membership check at all before this, any authenticated user could upload into any
+  workspace_id); locked CORS to real domains; fixed 12 instances of raw exception
+  leakage across 5 route files and, while doing that, found and fixed a real bug where
+  4 Stripe subscription routes were re-catching their own legitimately-raised
+  `HTTPException`s in a generic handler and mangling the status code/message; added
+  security headers (CSP in report-only mode, HSTS, X-Frame-Options, etc.); added
+  IP-based rate limiting to chat and upload; verified the `workspace_members`/
+  `workspace_invites` migration was already applied (docs previously said otherwise),
+  and that the "multiple divergent Alembic heads" gap was stale, only one head exists.
+  DOCX processing implemented and closed. Manufacturing added as a named vertical
+  (positioning stayed broad SMB, see "What SyntextAI is" above). Capability gap
+  analysis performed against the four promised capabilities.
 - **2026-07-29 (earlier):** YouTube/Whisper ingestion removed.
 - **2026-07-24:** Manufacturing/maintenance-technician reposition drafted in detail,
   briefly marked "ready to GTM," then shelved. Flashcard/quiz/key-concept feature
-  removal executed (routes + frontend panel; DB migration and `tasks.py` cleanup still
-  pending).
+  removal executed (routes + frontend panel; DB tables confirmed dropped and the
+  `tasks.py` generator functions are the one remaining cleanup item).
 
 ## Questions to bring to Osas, not guess at
 
-- Rate limiting approach/budget (per-user? per-workspace? which endpoints first?)
+- Rate limiting budget (30/min chat, 10/min upload, IP-based) is a first-pass default,
+  confirm or adjust once there's real usage data
 - Whether Redis is meant to be doing more than it currently is, or is leftover
 - Priority/severity triage on the 34 Dependabot vulnerabilities
 - Whether to build a standalone AI search surface or just fix the marketing copy
-- When to run `docs/migrations/drop_learning_content_tables.sql` against the real DB
+- Whether the report-only CSP policy is clean (check browser console for violations)
+  before switching it to enforced
