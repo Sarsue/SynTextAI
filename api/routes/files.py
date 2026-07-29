@@ -16,6 +16,7 @@ from ..repositories.repository_manager import RepositoryManager
 from fastapi.responses import JSONResponse
 from ..core.dependencies import get_store, authenticate_user
 from ..core.limits import assert_can_create_doc
+from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from pydantic import BaseModel, Field, validator
 from ..models import File
 
@@ -109,6 +110,7 @@ async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: 
 
 # Route to save file
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=UploadResponse)
+@limiter.limit(UPLOAD_RATE_LIMIT)
 async def save_file(
     request: Request,
     language: str = Query(default="English"),

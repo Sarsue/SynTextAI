@@ -2,7 +2,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from .core.websocket_manager import websocket_manager
+from .core.rate_limit import limiter
 from .repositories.repository_manager import RepositoryManager
 from dotenv import load_dotenv
 from .core.firebase_setup import initialize_firebase
@@ -14,6 +17,11 @@ load_dotenv()
 
 # Initialize FastAPI
 app = FastAPI(max_request_body_size= 2 * 1024 * 1024 * 1024)
+
+# Rate limiting (see core/rate_limit.py for the shared Limiter instance and
+# budget rationale). Endpoints opt in individually via @limiter.limit(...).
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Middleware to add COOP and COEP headers
 @app.middleware("http")

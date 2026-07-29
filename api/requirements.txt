@@ -48,6 +48,9 @@ python-docx>=1.1.0
 # Redis client (imported in routes)
 redis>=5.0.0
 
+# Rate limiting
+slowapi>=0.1.9
+
 # Email
 sendgrid>=6.11.0
 email-validator>=2.1.0

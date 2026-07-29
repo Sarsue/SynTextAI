@@ -3,6 +3,7 @@ from typing import List
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
 from ..services.llm_service import get_text_embedding
+from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
 import logging
 from typing import Dict
 # Set up logging
@@ -37,7 +38,9 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
 
 # Route to create a new message
 @messages_router.post("", status_code=201)
+@limiter.limit(CHAT_RATE_LIMIT)
 async def create_message(
+    request: Request,
     background_tasks: BackgroundTasks,
     message: str = Query(..., description="The message content"),
     language: str = Query("English", description="Language of the message"),
