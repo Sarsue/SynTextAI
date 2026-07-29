@@ -32,22 +32,24 @@ on top of the existing `HybridSearchEngine` (the hard part, retrieval
 quality, is already done; this would mostly be a new route + frontend
 view).
 
-### 3. Document processing — PDF only, and there's a live false claim
+### 3. Document processing — PDF + DOCX now, rest still gap
 
-`api/processors/factory.py`'s `processor_map` (lines 49-72):
+`api/processors/factory.py`'s `processor_map`:
 
 | Extension | Processor | Status |
 |---|---|---|
 | `pdf` | `PDFProcessor` | Works |
-| `docx`, `doc` | `None` | **Not implemented** — `# TODO: Implement DocxProcessor` |
+| `docx` | `DocxProcessor` | **Closed 2026-07-29** — extracts paragraph text split into logical sections at Heading 1/2/Title styles (Word has no fixed page concept, sections stand in for citation anchoring the way PDF page numbers do), plus table content as trailing sections. Mirrors `PDFProcessor`'s chunk/embed/store shape exactly. Tested against a generated sample SOP with headings, body text, and a table, all three extracted correctly, including a heading-with-no-body-text edge case (e.g. a title immediately followed by the first section heading) that initially got silently dropped and was fixed before shipping. |
+| `doc` | `None` | Not implemented, legacy binary `.doc` format, `python-docx` only reads `.docx`. Low priority, `.docx` covers current Word usage. |
 | `txt`, `md` | `None` | **Not implemented** — `TextProcessor` class exists at `api/processors/text_processor.py` but is never imported by the factory or anywhere else. Dead code, not wired in. |
 | `mp4`/`mov`/`avi`/`mkv`/`webm`, `mp3`/`wav`/`m4a` | `None` | Not implemented (video/audio ingestion was recently and deliberately removed — see git log `777d863`) |
 
-**Live false claim:** `frontend/src/Home.tsx` says "PDF and Word (.docx)
-files" are supported in four places (the FAQ answer, the "How it works"
-step 1 copy, and both pricing tier feature lists — lines 98, 180, 275, 292).
-A .docx upload today has no processor and will fail. This isn't a roadmap
-gap, it's a live promise the product can't keep right now.
+The "PDF and Word (.docx) files" claim on `Home.tsx` (FAQ, "How it works"
+step 1, both pricing tiers) is now true. **Not yet end-to-end tested against
+a live upload through the real API/worker/DB path** — the extraction logic
+itself is verified, but the full pipeline (upload → GCS → worker → chunk
+storage → citation in a real chat answer) should get one real test run
+before telling a customer DOCX works.
 
 Separately, for manual/technical-manual-heavy customers specifically:
 `PDFProcessor` OCRs image-only pages to plain text with no table-structure
@@ -75,10 +77,9 @@ pass along with the `text_processor.py` dead code.
 
 ## Urgent — fix before the next real customer conversation
 
-1. **DOCX claim is false and live in four places** (`Home.tsx` lines 98,
-   180, 275, 292). Fastest fix: remove the claim, say "PDF" only until a
-   `DocxProcessor` exists. Real fix: build `DocxProcessor` following the
-   `FileProcessor` interface `PDFProcessor` already implements.
+1. ~~DOCX claim is false and live in four places~~ **Closed 2026-07-29** —
+   `DocxProcessor` implemented and wired in. Still needs one real
+   upload-through-chat end-to-end test before pitching it live (see above).
 2. **`text_processor.py` is fully built and orphaned** — wiring it into
    `factory.py`'s `processor_map` for `txt`/`md` is probably a small,
    fast win to close (confirm it actually works end-to-end first, it's

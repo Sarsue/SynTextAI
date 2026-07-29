@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, Type
 # Use absolute imports instead of relative imports
 from api.processors.base_processor import FileProcessor
 from api.processors.pdf_processor import PDFProcessor
+from api.processors.docx_processor import DocxProcessor
 from api.repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
@@ -67,8 +68,8 @@ class FileProcessingFactory:
             'md': None,
             
             # Document files
-            'docx': None,  # TODO: Implement DocxProcessor
-            'doc': None,
+            'docx': DocxProcessor,
+            'doc': None,  # legacy binary .doc format, not implemented (python-docx only reads .docx)
         }
         
         processor_class = processor_map.get(ext)
