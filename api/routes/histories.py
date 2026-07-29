@@ -46,8 +46,8 @@ async def create_history(
         history = await store.chat_repo.add_chat_history(title, user_id)
         return history
     except Exception as e:
-        logger.error(f"Error creating chat history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error creating chat history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not create chat history")
 
 # Route to get all chat histories for a user
 @histories_router.get("")
@@ -60,8 +60,8 @@ async def get_history_messages(
         message_list = await store.chat_repo.get_all_user_chat_histories(user_id)
         return message_list
     except Exception as e:
-        logger.error(f"Error retrieving chat histories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error retrieving chat histories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve chat histories")
 
 # Route to get messages for a specific chat history
 @histories_router.get("/messages")
@@ -75,8 +75,8 @@ async def get_specific_history_messages(
         message_list = await store.chat_repo.get_messages_for_chat_history(user_id, history_id)
         return message_list
     except Exception as e:
-        logger.error(f"Error retrieving messages for history {history_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error retrieving messages for history {history_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve messages for this history")
 
 # Route to delete a specific chat history
 @histories_router.delete("", status_code=200)
@@ -90,8 +90,8 @@ async def delete_specific_history_messages(
         await store.chat_repo.delete_chat_history(user_id, history_id)
         return {"message": "History deleted successfully", "deletedHistoryId": history_id}
     except Exception as e:
-        logger.error(f"Error deleting history {history_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error deleting history {history_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not delete this history")
 
 # Route to delete all chat histories for a user
 @histories_router.delete("/all", status_code=200)
@@ -104,5 +104,5 @@ async def delete_all_user_histories(
         await store.chat_repo.delete_all_user_histories(user_id)
         return {"message": "All histories deleted successfully"}
     except Exception as e:
-        logger.error(f"Error deleting all histories for user {user_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error deleting all histories for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not delete histories")

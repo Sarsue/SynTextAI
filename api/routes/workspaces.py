@@ -47,7 +47,7 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
         raise
     except Exception as e:
         logger.exception("Error during user authentication")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication failed")
 
 
 class WorkspaceCreate(BaseModel):

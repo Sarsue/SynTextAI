@@ -75,7 +75,7 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
         raise
     except Exception as e:
         logger.exception("Error during user authentication")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication failed")
 
 async def check_ownership(file_id: int, user_id: int, store: RepositoryManager) -> None:
     """Raise 404 unless file_id exists and belongs to user_id.
@@ -223,7 +223,7 @@ async def save_file(
         raise
     except Exception as e:
         logger.error(f"Error saving file: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Could not save file")
 
 # Route to retrieve files
 @files_router.get("", response_class=JSONResponse)

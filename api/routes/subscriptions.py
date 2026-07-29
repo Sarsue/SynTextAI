@@ -170,9 +170,11 @@ async def start_trial(
                 'has_active_payment_method': False,
             }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error starting trial: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error starting trial: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not start trial")
 
 # Route to cancel a subscription
 @subscriptions_router.post("/cancel", status_code=200)
@@ -201,8 +203,11 @@ async def cancel_sub(
             'subscription_status': cancellation_result['status']
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        logger.error(f"Error cancelling subscription: {e}", exc_info=True)
+        raise HTTPException(status_code=403, detail="Could not cancel subscription")
 
 # Route to create a subscription
 @subscriptions_router.post("/subscribe", status_code=201)
@@ -293,9 +298,11 @@ async def create_subscription(
                 'has_active_payment_method': True,
             }
 
-        except Exception as e:
-            # Handle card errors
-            error_msg = str(e)
+        except stripe.error.CardError as e:
+            # Stripe's own card-decline messages are written to be shown to the
+            # customer (e.g. "Your card has insufficient funds") — safe to surface,
+            # unlike a generic exception which might carry internal detail.
+            logger.info(f"Card declined for user {user_id}: {e.user_message or e}")
             await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
                 stripe_customer_id=stripe_customer_id,
@@ -303,11 +310,23 @@ async def create_subscription(
                 status="none",
                 current_period_end=None,
             )
-            raise HTTPException(status_code=400, detail=error_msg)
+            raise HTTPException(status_code=400, detail=e.user_message or "Your card was declined.")
+        except Exception as e:
+            logger.error(f"Error creating subscription for user {user_id}: {e}", exc_info=True)
+            await store.user_repo.add_or_update_subscription(
+                user_id=user_id,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=None,
+                status="none",
+                current_period_end=None,
+            )
+            raise HTTPException(status_code=400, detail="Could not create subscription")
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Subscription error: {str(e)}")
-        raise HTTPException(status_code=403, detail=str(e))
+        logger.error(f"Subscription error: {e}", exc_info=True)
+        raise HTTPException(status_code=403, detail="Could not process subscription")
 
 # Route to update payment method
 @subscriptions_router.post("/update-payment", status_code=200)
@@ -345,8 +364,14 @@ async def update_payment(
 
         return {'success': True}
 
+    except HTTPException:
+        raise
+    except stripe.error.CardError as e:
+        logger.info(f"Card declined updating payment method for user {user_id}: {e.user_message or e}")
+        raise HTTPException(status_code=400, detail=e.user_message or "Your card was declined.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error updating payment method for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not update payment method")
 
 # Route to handle Stripe webhooks
 @subscriptions_router.post("/webhook")
