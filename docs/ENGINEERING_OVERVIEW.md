@@ -171,9 +171,26 @@ code, not assumed, last checked 2026-07-29:
   `histories.py` / the fixed parts of `messages.py`.
 - **No security headers** (CSP, HSTS, X-Frame-Options) at either the app or nginx layer
   (`deploy.sh`) — only debug headers are currently set in production nginx config.
-- **34 Dependabot vulnerabilities flagged on the repo** (1 critical, 14 high, 16
-  moderate, 3 low) as of the 2026-07-29 push — not yet triaged. Check
-  `github.com/Sarsue/SynTextAI/security/dependabot` before the next push.
+- **Dependency vulnerabilities triaged 2026-07-29** (`gh` CLI wasn't available, ran
+  `npm audit`/`pip-audit` directly against the actual lockfiles instead — counts won't
+  match GitHub's Dependabot tally exactly, different scope/tooling, but same
+  underlying packages):
+  - **Frontend (`npm audit --omit=dev`): 40 findings, two real clusters.** `tar`
+    (critical, no fix available upstream) comes in through `canvas` →
+    `@mapbox/node-pre-gyp`, used only to extract prebuilt native binaries during
+    `npm install`, never runs against user input at runtime, low practical risk
+    despite the label. `undici` (high) is pulled in by `firebase`'s subpackages —
+    undici is Node's HTTP client, not a browser API, and this is a client-rendered
+    SPA (no SSR), so that code path likely never executes in the actual shipped
+    browser bundle. The real fix is upgrading `firebase` from `^10.7.1` (installed
+    10.14.1) to the current major (12.x), a 2-major-version jump that risks breaking
+    Auth/Firestore call sites. Not attempted blind, needs real login testing against
+    each major version before upgrading, not a mechanical `npm audit fix`.
+  - **Backend (`pip-audit -r api/requirements.txt`): 2 findings, neither has a fix
+    version yet.** `dspy` 2.6.27 (`PYSEC-2026-1318`) is actively imported in
+    `llm_service.py`, the core LLM-calling service, worth monitoring for a patched
+    release. `diskcache` 5.6.3 (`PYSEC-2026-2447`) isn't directly imported anywhere
+    in this codebase, likely a transitive dependency of `dspy` or another package.
 - **No DB-level RLS** — every new route touching a resource ID from the URL/query needs
   an explicit ownership check (`check_ownership` helper exists, reuse it) or a
   `user_id`-scoped repository query. There's no safety net underneath you if you skip
@@ -225,7 +242,7 @@ for it.
    status-based redirect) reads correctly on inspection; this SCA gap is the
    one substantive finding.
 5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
-6. Triage the 34 Dependabot vulnerabilities
+6. ~~Triage the 34 Dependabot vulnerabilities~~ — **triaged 2026-07-29**, see "Known gaps" above. One real open decision: whether to attempt the firebase v10→v12 upgrade (needs real login testing, not done here).
 
 **Tier 1 — cheap, closes an existing gap:**
 7. Wire `TextProcessor` into the factory for `.txt`/`.md` (confirm it works first)
@@ -290,7 +307,8 @@ gaps above and the healthcare/legal verticals in the target market.
 - Rate limiting budget (30/min chat, 10/min upload, IP-based) is a first-pass default,
   confirm or adjust once there's real usage data
 - Whether Redis is meant to be doing more than it currently is, or is leftover
-- Priority/severity triage on the 34 Dependabot vulnerabilities
+- Whether the firebase v10→v12 upgrade is worth doing now (closes the undici
+  vulnerability cluster, but is a 2-major-version jump needing real login testing)
 - Whether to build a standalone AI search surface or just fix the marketing copy
 - Whether the report-only CSP policy is clean (check browser console for violations)
   before switching it to enforced
