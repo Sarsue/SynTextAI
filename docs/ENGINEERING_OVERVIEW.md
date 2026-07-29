@@ -290,6 +290,28 @@ gaps above and the healthcare/legal verticals in the target market.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-07-29 (multi-tenancy verified, invite gap fixed):** Checked whether the
+  workspace model correctly handles a real scenario: someone invited as staff to
+  workspace A later wants their own SyntextAI account and to invite others to their
+  own workspace B. Verified sound at the schema and repository level:
+  `count_workspaces_for_user` (used by the free-plan 1-workspace limit) only counts
+  `Workspace.user_id == user_id`, i.e. *owned* workspaces, staff memberships in
+  other people's workspaces never count against it. `list_workspaces_for_user`
+  correctly merges owned + staff-membership workspaces into one list with the right
+  role on each. `list_members` correctly synthesizes the owner (from
+  `Workspace.user_id`) plus staff (`WorkspaceMember` rows) into one members list.
+  No conflict, no double-counting, this works as expected.
+
+  Found one real gap while checking this: `accept_invite` never verified the
+  invite's target email matched the authenticated user's actual email, it just
+  added whoever was logged in (with a valid, unexpired token) as staff. The token
+  being an unguessable UUID4 was the only real protection, a forwarded email,
+  pasted link, or leaked URL would let anyone with it join as staff regardless of
+  who it was actually sent to. Fixed in `workspaces.py`'s `accept_invite` route:
+  now compares the invite's email against the authenticated user's verified email
+  (case-insensitive) before accepting, returns a clear 403 naming the expected
+  email on mismatch.
+
 - **2026-07-29 (critical fix):** Chat answer generation was silently broken in
   production. `generate_explanation_dspy` (called from `SyntextAgent.query_pipeline`,
   which is called from every live chat query via `QueryAgent._generate`) depended on

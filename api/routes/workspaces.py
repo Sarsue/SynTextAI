@@ -422,8 +422,27 @@ async def accept_invite(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
 ):
-    """Authenticated user accepts an invite and joins the workspace."""
+    """Authenticated user accepts an invite and joins the workspace.
+
+    The invite token is an unguessable UUID4, but that alone doesn't guarantee
+    the person accepting is the person the invite was actually sent to, a
+    forwarded email, a pasted link, or a leaked URL would otherwise let anyone
+    who has the link join as staff. Check the invite's target email against
+    the authenticated user's verified email before accepting.
+    """
     user_id = user_data["user_id"]
+    invite = await store.workspace_repo.get_invite_by_token(token)
+    if not invite or invite.get("status") != "pending":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is invalid, expired, or already used")
+
+    account_email = (user_data["user_info"].get("email") or "").strip().lower()
+    invite_email = (invite.get("email") or "").strip().lower()
+    if account_email != invite_email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"This invite was sent to {invite['email']}. Sign in with that email to accept it."
+        )
+
     workspace_id = await store.workspace_repo.accept_invite(token, user_id)
     if not workspace_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is invalid, expired, or already used")
