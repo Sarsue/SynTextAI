@@ -17,7 +17,10 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-    const { darkMode } = useUserContext();
+    const { darkMode, currentWorkspaceRole } = useUserContext();
+    // No workspace selected yet means a personal, pre-workspace context, where
+    // uploading is still the user's own.
+    const canUpload = currentWorkspaceRole === null || currentWorkspaceRole === 'owner';
     const { addToast } = useToast();
 
     const isFileSupported = (file: File): boolean => {
@@ -116,23 +119,30 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
             )}
             <div className="input-controls">
                 <div className="left-controls">
-                    <label
-                        htmlFor="file-upload"
-                        title="Attach files (PDF, DOCX, TXT)"
-                        className={cn(buttonVariants({ variant: 'ghost', size: 'icon' }), 'cursor-pointer')}
-                    >
-                        <Paperclip className="size-4" />
-                    </label>
-                    <input
-                        id="file-upload"
-                        type="file"
-                        multiple
-                        accept=".pdf,.docx,.doc,.txt"
-                        onChange={handleAttachment}
-                        disabled={isSending}
-                        aria-label="File upload"
-                        style={{ display: 'none' }}
-                    />
+                    {/* Uploading is owner-only on the backend, so staff would
+                        attach a file, hit send and get a 403. Hide the control
+                        rather than offer an action that cannot succeed. */}
+                    {canUpload && (
+                        <>
+                            <label
+                                htmlFor="file-upload"
+                                title="Attach files (PDF, DOCX, TXT)"
+                                className={cn(buttonVariants({ variant: 'ghost', size: 'icon' }), 'cursor-pointer')}
+                            >
+                                <Paperclip className="size-4" />
+                            </label>
+                            <input
+                                id="file-upload"
+                                type="file"
+                                multiple
+                                accept=".pdf,.docx,.doc,.txt"
+                                onChange={handleAttachment}
+                                disabled={isSending}
+                                aria-label="File upload"
+                                style={{ display: 'none' }}
+                            />
+                        </>
+                    )}
                 </div>
                 <Button
                     onClick={handleSendClick}

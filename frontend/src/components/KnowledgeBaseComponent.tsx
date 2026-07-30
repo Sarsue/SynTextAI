@@ -65,7 +65,10 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const [workspaces, setWorkspaces] = useState<Array<{id: number; name: string}>>([]);
     const { addToast } = useToast();
-    const { user } = useUserContext(); 
+    const { user, currentWorkspaceRole } = useUserContext();
+    // Managing documents is owner-only. Staff read and ask questions.
+    const canManageDocuments = currentWorkspaceRole === null || currentWorkspaceRole === 'owner';
+
 
     useEffect(() => {
         if (contextFileError) {
@@ -308,20 +311,25 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
                                         )}
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDeleteClick(currentFile, e);
-                                            }}
-                                            disabled={fileStatus[currentFile.id]?.isDeleting || false}
-                                            title="Delete file"
-                                        >
-                                            {fileStatus[currentFile.id]?.isDeleting
-                                                ? <Loader2 className="size-3.5 animate-spin" />
-                                                : <Trash2 className="size-3.5" />}
-                                        </Button>
+                                        {/* Deleting is restricted to the file's
+                                            uploader, so for staff this button
+                                            could only ever return 404. */}
+                                        {canManageDocuments && (
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteClick(currentFile, e);
+                                                }}
+                                                disabled={fileStatus[currentFile.id]?.isDeleting || false}
+                                                title="Delete file"
+                                            >
+                                                {fileStatus[currentFile.id]?.isDeleting
+                                                    ? <Loader2 className="size-3.5 animate-spin" />
+                                                    : <Trash2 className="size-3.5" />}
+                                            </Button>
+                                        )}
                                         {/* Manual retry button removed, retry is automatic on click/expand for failed files */}
                                     </div>
                                     </div>
@@ -335,9 +343,19 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
 
 
             <div className="kb-help-text">
-                <p>Upload PDF, DOCX, or TXT files using the 📎 button in the chat.</p>
-                <p>Processing happens automatically in the background.</p>
-                <p>Files are ready when marked with a ✓.</p>
+                {canManageDocuments ? (
+                    <>
+                        <p>Upload PDF, DOCX, or TXT files using the 📎 button in the chat.</p>
+                        <p>Processing happens automatically in the background.</p>
+                        <p>Files are ready when marked with a ✓.</p>
+                    </>
+                ) : (
+                    <>
+                        <p>These are your team's shared documents.</p>
+                        <p>Ask a question in the chat and answers will cite them.</p>
+                        <p>Your workspace owner manages what's here.</p>
+                    </>
+                )}
             </div>
 
             <div className="kb-pagination-controls">

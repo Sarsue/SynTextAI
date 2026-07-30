@@ -16,7 +16,7 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, setUser } = useUserContext();
+    const { darkMode, setDarkMode, setUser, isMemberOnly, isEntitled } = useUserContext();
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(
@@ -83,17 +83,43 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
 
             {/* Settings Content */}
             <div className="settings-content">
-                {/* Payment Section */}
-                <div className="settings-section">
-                    <h2 className="section-title">Payment</h2>
-                    <div className="section-content">
-                        <PaymentView
-                            stripePromise={stripePromise}
-                            user={user}
-                            darkMode={darkMode}
-                        />
+                {/* Payment, owners only.
+
+                    An invited member has no subscription of their own: their
+                    access is paid for by whoever owns the workspace. Showing
+                    them a payment form pushed them into starting a second,
+                    duplicate trial for an organization that already pays. If
+                    the owner's plan lapses they are told who to talk to, and
+                    are never asked to fix somebody else's billing. */}
+                {isMemberOnly ? (
+                    <div className="settings-section">
+                        <h2 className="section-title">Plan</h2>
+                        <div className="section-content">
+                            {isEntitled ? (
+                                <p className="text-sm text-muted-foreground">
+                                    Your access is included in your team's plan. The workspace
+                                    owner manages billing, so there's nothing for you to set up.
+                                </p>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">
+                                    Your team's plan needs attention, so some features are
+                                    unavailable. Contact your workspace owner to restore access.
+                                </p>
+                            )}
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="settings-section">
+                        <h2 className="section-title">Payment</h2>
+                        <div className="section-content">
+                            <PaymentView
+                                stripePromise={stripePromise}
+                                user={user}
+                                darkMode={darkMode}
+                            />
+                        </div>
+                    </div>
+                )}
 
                 {/* Theme Section */}
                 <div className="settings-section">

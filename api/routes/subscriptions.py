@@ -76,6 +76,8 @@ async def subscription_status(
                 'has_active_payment_method': False,
                 'entitled': entitlement['entitled'],
                 'entitlement_source': entitlement['source'],
+                'is_org_owner': entitlement['is_org_owner'],
+                'is_member_only': entitlement['is_member_only'],
             }
 
         # Unpack the tuple (subscription_dict, card_details_dict)
@@ -100,6 +102,8 @@ async def subscription_status(
             'has_active_payment_method': bool(card_last4 and card_brand),
             'entitled': entitlement['entitled'],
             'entitlement_source': entitlement['source'],
+            'is_org_owner': entitlement['is_org_owner'],
+            'is_member_only': entitlement['is_member_only'],
         }
 
         return response

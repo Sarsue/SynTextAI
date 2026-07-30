@@ -48,7 +48,23 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
         billing_user_id the user whose plan and usage govern, i.e. the account
                         that should be charged and counted against
         status          the governing subscription status string
+        is_org_owner    True if they own at least one workspace, i.e. they are
+                        an administrator of an organization and billing is
+                        theirs to manage
+        is_member_only  True if they belong to workspaces but own none. A pure
+                        invitee. They must never be shown billing, and must
+                        never be asked to fix somebody else's lapsed plan.
     """
+    try:
+        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+    except Exception:
+        workspaces = []
+
+    owned = [ws for ws in workspaces if ws.get("user_id") == user_id]
+    joined = [ws for ws in workspaces if ws.get("user_id") != user_id]
+    is_org_owner = len(owned) > 0
+    is_member_only = not is_org_owner and len(joined) > 0
+
     own_status = await _get_subscription_status(store, user_id)
     if _is_premium_plan(own_status):
         return {
@@ -56,19 +72,16 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
             "source": "own",
             "billing_user_id": user_id,
             "status": own_status,
+            "is_org_owner": is_org_owner,
+            "is_member_only": is_member_only,
         }
 
     # Not paying personally. If they are staff in someone else's workspace, the
     # owner's plan covers them.
-    try:
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-    except Exception:
-        workspaces = []
-
-    for ws in workspaces:
+    for ws in joined:
         owner_id = ws.get("user_id")
-        if not owner_id or owner_id == user_id:
-            continue  # their own workspace, already covered by own_status
+        if not owner_id:
+            continue
         owner_status = await _get_subscription_status(store, owner_id)
         if _is_premium_plan(owner_status):
             return {
@@ -76,6 +89,8 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
                 "source": "workspace",
                 "billing_user_id": owner_id,
                 "status": owner_status,
+                "is_org_owner": is_org_owner,
+                "is_member_only": is_member_only,
             }
 
     return {
@@ -83,6 +98,8 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
         "source": None,
         "billing_user_id": user_id,
         "status": own_status,
+        "is_org_owner": is_org_owner,
+        "is_member_only": is_member_only,
     }
 
 

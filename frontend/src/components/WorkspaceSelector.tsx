@@ -53,7 +53,7 @@ interface WorkspaceSelectorProps {
 }
 
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
-    const { user, subscriptionStatus } = useUserContext();
+    const { user, subscriptionStatus, setCurrentWorkspaceRole } = useUserContext();
     const { addToast } = useToast();
 
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -130,14 +130,17 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
                 if (selectedWorkspace) {
                     setCurrentWorkspace(selectedWorkspace);
+                    setCurrentWorkspaceRole(selectedWorkspace.role);
                     if (onWorkspaceChange) {
                         onWorkspaceChange(selectedWorkspace.id);
                     }
                 } else {
                     setCurrentWorkspace(null);
+                    setCurrentWorkspaceRole(null);
                 }
             } else {
                 setCurrentWorkspace(null);
+                setCurrentWorkspaceRole(null);
             }
 
             setIsLoading(false);
@@ -238,6 +241,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
     const handleWorkspaceSelect = (workspace: Workspace) => {
         setCurrentWorkspace(workspace);
+        setCurrentWorkspaceRole(workspace.role);
         setShowDropdown(false);
         if (onWorkspaceChange) {
             onWorkspaceChange(workspace.id);

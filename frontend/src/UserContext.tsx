@@ -51,6 +51,16 @@ interface UserContextType {
     // inherits it as staff of a paid workspace. Route on this, not on
     // subscriptionStatus, which is only ever about this user's own billing.
     isEntitled: boolean;
+    // Owns at least one workspace, so billing and org administration are theirs.
+    isOrgOwner: boolean;
+    // Belongs to workspaces but owns none: a pure invitee. Never show billing,
+    // and never ask them to fix somebody else's lapsed plan.
+    isMemberOnly: boolean;
+    // Role in the workspace currently selected: 'owner' | 'staff' | null.
+    // Permissions are per workspace, so the UI must key off this rather than
+    // any account-level flag.
+    currentWorkspaceRole: string | null;
+    setCurrentWorkspaceRole: (role: string | null) => void;
     fetchSubscriptionStatus: () => void;
     subscriptionData: SubscriptionData | null;
     setSubscriptionData: (data: SubscriptionData | null) => void;
@@ -89,6 +99,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
     const [isEntitled, setIsEntitled] = useState<boolean>(false);
+    const [isOrgOwner, setIsOrgOwner] = useState<boolean>(false);
+    const [isMemberOnly, setIsMemberOnly] = useState<boolean>(false);
+    const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<string | null>(null);
     const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
     const [socket, setSocket] = useState<WebSocket | null>(null);
     const [webSocketStatus, setWebSocketStatus] = useState<WebSocketStatus>('disconnected');
@@ -313,6 +326,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setIsEntitled(
                 data.entitled ?? ['active', 'trialing'].includes(data.subscription_status)
             );
+            // Default to owner when an older backend omits these, so nobody is
+            // locked out of their own billing by a missing field.
+            setIsOrgOwner(data.is_org_owner ?? true);
+            setIsMemberOnly(data.is_member_only ?? false);
             setSubscriptionData(data);
         } else {
             // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
@@ -320,6 +337,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.error('Failed to fetch subscription status');
             setSubscriptionStatus('none');
             setIsEntitled(false);
+            setIsOrgOwner(true);
+            setIsMemberOnly(false);
         }
     }, [user, _callApiWithTokenInternal]);
 
@@ -391,6 +410,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         subscriptionStatus,
         setSubscriptionStatus,
         isEntitled,
+        isOrgOwner,
+        isMemberOnly,
+        currentWorkspaceRole,
+        setCurrentWorkspaceRole,
         fetchSubscriptionStatus,
         subscriptionData,
         setSubscriptionData,
