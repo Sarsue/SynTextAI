@@ -101,3 +101,19 @@
         font-size: clamp(0.8rem, 3vw, 0.9rem);
     }
 }
+/* Conversation preview label.
+ *
+ * Removed by the GUI cleanup in f89e924 while the markup kept using it, so the
+ * preview rendered as unconstrained inline text and long questions pushed the
+ * delete button out of the row. */
+.history-content {
+    flex: 1;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    font-size: 0.9rem;
+}

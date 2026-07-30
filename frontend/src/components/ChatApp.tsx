@@ -164,6 +164,57 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         clearIncomingChatMessage();
     }, [incomingChatMessage, currentHistory, clearIncomingChatMessage]);
 
+    // Load the conversation list.
+    //
+    // fetchHistories was defined and never called: no effect, no invocation
+    // anywhere. GET /histories was therefore never requested, and the History
+    // tab was permanently empty no matter how many conversations existed.
+    useEffect(() => {
+        if (user) fetchHistories();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user]);
+
+    // Load a conversation's messages when it is opened.
+    //
+    // The list endpoint returns a preview, not the messages, and the endpoint
+    // that does return them was never called either, so selecting a past
+    // conversation showed an empty thread.
+    useEffect(() => {
+        if (!user || currentHistory == null) return;
+        if ((histories[currentHistory]?.messages?.length ?? 0) > 0) return;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await callApiWithToken(
+                    `api/v1/histories/messages?history_id=${encodeURIComponent(currentHistory)}`,
+                    'GET'
+                );
+                if (!res?.ok || cancelled) return;
+                const data = await res.json();
+                if (!Array.isArray(data) || cancelled) return;
+                setHistories(prev => ({
+                    ...prev,
+                    [currentHistory]: {
+                        ...(prev[currentHistory] || { id: currentHistory, title: 'Chat', messages: [] }),
+                        messages: data.map((m: any) => ({
+                            id: m.id,
+                            content: m.content,
+                            sender: m.sender,
+                            timestamp: m.timestamp,
+                            liked: false,
+                            disliked: false,
+                        })),
+                    },
+                }));
+            } catch (e) {
+                console.error('Could not load messages for this conversation', e);
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user, currentHistory]);
+
     const handleDeleteMessage = async (messageId: number, historyId: number) => {
         console.log('handleDeleteMessage called with:', { messageId, historyId });
         trackAction('delete_message', 'chat', historyId.toString());

@@ -45,9 +45,15 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                         className={`history-item ${selectedHistoryId === history.id ? 'selected' : ''}`}
                     >
                         <span className="history-content">
+                            {/* The list endpoint returns a title and a preview,
+                                not the messages, which are fetched only when a
+                                conversation is opened. Keying the label off
+                                messages[0] therefore labelled every row "No
+                                messages". The title is the question that started
+                                the conversation, which is what identifies it. */}
                             {history.messages.length > 0
                                 ? history.messages[0].content.slice(0, 140) + (history.messages[0].content.length > 140 ? '...' : '')
-                                : 'No messages'}
+                                : (history.title || 'New chat')}
                         </span>
                         <Button
                             variant="ghost"
