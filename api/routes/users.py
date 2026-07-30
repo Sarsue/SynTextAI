@@ -98,17 +98,29 @@ async def create_user( # Function name remains 'create_user'
             raise HTTPException(status_code=500, detail="Could not create user.")
         logger.info(f"POST /users: Created user {new_user_id} ({email})")
 
-        # Signing up creates an organization. It is the tenant that owns
-        # workspaces and holds the subscription, so it has to exist before
-        # anything else can hang off it.
-        org_label = (email.split("@")[0] or "My").strip()
-        organization_id = await store.org_repo.create_organization(
-            name=f"{org_label}'s Organization",
-            owner_user_id=new_user_id,
-        )
-        if not organization_id:
-            logger.error(f"POST /users: Failed to create organization for user {new_user_id}")
+        # Someone arriving on an invite is joining a company, not starting one.
+        # Creating an organization for them anyway would leave them owning a
+        # phantom company they never asked for, and would pop the "choose an
+        # organization" screen on their very first sign-in. Accepting the invite
+        # is what places them in the inviting organization. They can start their
+        # own later via POST /organizations, so this is a default, not a ceiling.
+        joining_existing_org = await store.workspace_repo.has_pending_invite_for_email(email)
+
+        organization_id = None
+        if joining_existing_org:
+            logger.info(
+                f"POST /users: {email} has a pending invite, so no organization is created for them"
+            )
         else:
+            org_label = (email.split("@")[0] or "My").strip()
+            organization_id = await store.org_repo.create_organization(
+                name=f"{org_label}'s Organization",
+                owner_user_id=new_user_id,
+            )
+            if not organization_id:
+                logger.error(f"POST /users: Failed to create organization for user {new_user_id}")
+
+        if organization_id:
             try:
                 await store.workspace_repo.create_workspace(
                     user_id=new_user_id,

@@ -259,6 +259,7 @@ async def retrieve_files(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     workspace_id: Optional[int] = Query(None, description="Filter by workspace ID"),
+    organization_id: Optional[int] = Query(None, description="Active organization; scopes results to one tenant"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -273,7 +274,9 @@ async def retrieve_files(
         if workspace_id is not None:
             await check_can_read_workspace(workspace_id, user_id, store)
         else:
-            accessible_ids = await store.workspace_repo.accessible_workspace_ids(user_id)
+            accessible_ids = await store.workspace_repo.accessible_workspace_ids(
+                user_id, organization_id=organization_id
+            )
 
         paginated_result = await store.file_repo.get_files_for_user(
             user_id,

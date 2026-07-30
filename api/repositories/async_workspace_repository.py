@@ -146,13 +146,22 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error listing workspaces for user {user_id}: {e}", exc_info=True)
                 return []
 
-    async def accessible_workspace_ids(self, user_id: int) -> List[int]:
-        """Return every workspace id this user may read, owned or joined as staff.
+    async def accessible_workspace_ids(
+        self, user_id: int, organization_id: Optional[int] = None
+    ) -> List[int]:
+        """Workspace ids this user may read, restricted to one organization.
 
         Document visibility is a property of the workspace, not of whoever
         uploaded the file. Callers use this to scope queries by workspace rather
         than by files.user_id, which previously meant an invited staff member
         saw none of the workspace's documents at all.
+
+        Pass organization_id to keep results inside the tenant the user is
+        currently working in. Without it, somebody who belongs to two companies
+        gets both companies' workspaces in one flat list: not a data leak, since
+        membership is still required, but the boundary between two clients'
+        knowledge bases stops being visible, which is exactly what a dental or
+        legal customer is trusting us with.
         """
         async with self.get_async_session() as session:
             try:
@@ -168,11 +177,17 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                     )
                     .where(OrganizationMember.user_id == user_id)
                 )
+                if organization_id is not None:
+                    via_org = via_org.where(WorkspaceORM.organization_id == organization_id)
                 # Legacy workspace_members rows are still honoured so nothing is
                 # lost for anyone not yet migrated onto an organization.
                 legacy = select(WorkspaceMember.workspace_id).where(
                     WorkspaceMember.user_id == user_id
                 )
+                if organization_id is not None:
+                    legacy = legacy.join(
+                        WorkspaceORM, WorkspaceORM.id == WorkspaceMember.workspace_id
+                    ).where(WorkspaceORM.organization_id == organization_id)
                 org_ids = [r for r in (await session.execute(via_org)).scalars().all()]
                 legacy_ids = [r for r in (await session.execute(legacy)).scalars().all()]
                 return sorted(set(org_ids) | set(legacy_ids))
@@ -463,6 +478,27 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 await session.rollback()
                 logger.error(f"Error accepting invite {token}: {e}", exc_info=True)
                 return None
+
+    async def has_pending_invite_for_email(self, email: str) -> bool:
+        """True if this address has an unexpired invite waiting.
+
+        Used at signup to tell "joining a company" apart from "starting one".
+        Reading it from the invite table rather than trusting a client-supplied
+        flag means it cannot be spoofed to dodge creating an organization.
+        """
+        if not email:
+            return False
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(WorkspaceInvite.id).where(
+                    func.lower(WorkspaceInvite.email) == email.strip().lower(),
+                    WorkspaceInvite.status == "pending",
+                    WorkspaceInvite.expires_at > datetime.utcnow(),
+                ).limit(1)
+                return (await session.execute(stmt)).scalar_one_or_none() is not None
+            except Exception as e:
+                logger.error(f"Error checking pending invites for {email}: {e}", exc_info=True)
+                return False
 
     async def list_pending_invites(self, workspace_id: int) -> List[Dict[str, Any]]:
         """Return pending invites for a workspace."""

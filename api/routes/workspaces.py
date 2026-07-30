@@ -3,7 +3,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Path, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from ..repositories.repository_manager import RepositoryManager
@@ -92,6 +92,7 @@ class InviteInfoResponse(BaseModel):
 
 @workspaces_router.get("", response_model=Dict[str, List[WorkspaceResponse]])
 async def list_workspaces(
+    organization_id: Optional[int] = Query(None, description="Active organization; scopes results to one tenant"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -103,7 +104,18 @@ async def list_workspaces(
     try:
         user_id = user_data["user_id"]
         workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-        
+
+        # Keep the list inside the tenant the user is working in, so somebody
+        # who belongs to two companies never sees both companies' workspaces
+        # side by side with no boundary between them.
+        if organization_id is not None:
+            allowed = set(
+                await store.workspace_repo.accessible_workspace_ids(
+                    user_id, organization_id=organization_id
+                )
+            )
+            workspaces = [ws for ws in workspaces if ws["id"] in allowed]
+
         # Convert datetime objects to ISO strings
         items = [
             {
