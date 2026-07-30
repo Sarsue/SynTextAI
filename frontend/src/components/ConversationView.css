@@ -35,7 +35,11 @@
 
 .sent {
     align-self: flex-end;
-    background: linear-gradient(135deg, #0078d4, #005bb5);
+    /* Darkened from #0078d4. White on that measured 4.53:1, which only just
+       clears the 4.5 minimum and does so at the lightest point of the gradient,
+       so body text sat right on the edge of legible. This is 6.2:1 rising to
+       8.6:1 across the gradient. */
+    background: linear-gradient(135deg, #0062b1, #0a4d8c);
     color: #fff;
 }
 
@@ -47,7 +51,7 @@
 
 /* Dark mode message styles */
 .dark-mode .sent {
-    background: linear-gradient(135deg, #005a9e, #004c80);
+    background: linear-gradient(135deg, #00538f, #073d6f);
 }
 
 .dark-mode .received {

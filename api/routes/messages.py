@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
 from typing import List
 from ..core.utils import get_user_id
@@ -72,10 +73,24 @@ async def create_message(
                 raise HTTPException(status_code=404, detail="File not found")
 
         # Save the user message to the history
-        user_request = await store.chat_repo.add_message(
+        message_id = await store.chat_repo.add_message(
             content=message, sender='user', user_id=user_id, chat_history_id=history_id
         )
-        message_list = [user_request]
+        if not message_id:
+            raise HTTPException(status_code=500, detail="Could not save message")
+
+        # add_message returns the new id, and returning [id] handed the client a
+        # list of bare integers where it expected message objects. It read
+        # .content and .timestamp off a number, got undefined, and
+        # new Date(undefined).toISOString() threw, so sendMessage aborted before
+        # rendering anything: the sent message never appeared, the conversation
+        # stayed empty, and the failure looked like the answer never arriving.
+        message_list = [{
+            "id": message_id,
+            "content": message,
+            "sender": "user",
+            "timestamp": datetime.utcnow().isoformat(),
+        }]
 
         await store.agent_run_repo.enqueue_run(
             run_type="answer_query",
