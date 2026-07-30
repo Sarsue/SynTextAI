@@ -358,7 +358,117 @@ that in mind when weighing "fastest to ship" against "closer to what a
 compliance-sensitive customer will eventually ask for," especially given the security
 gaps above and the healthcare/legal verticals in the target market.
 
+## The tenant model (decided 2026-07-29, not yet built)
+
+**The single biggest structural gap in the product.** There is no organization
+entity. `Workspace` is doing three unrelated jobs at once: billing entity
+(`workspaces.user_id` implies who pays), security boundary (membership grants
+access), and document container. `Subscription` attaches to a *user*, not a
+company. Every multi-user defect found on 2026-07-29 traces back to this.
+
+Target model, tenant and objects, in the Entra sense:
+
+| Table | Purpose | Change |
+|---|---|---|
+| `organizations` | The tenant. Billing entity and security boundary. | **new** |
+| `organization_members` | user ↔ org with role: `owner`, `admin`, `member` | **new** |
+| `subscriptions` | Keyed to `organization_id`, gains `seats` | re-key from `user_id` |
+| `workspaces` | Document container inside an org, many per org | `organization_id` replaces `user_id` |
+| invites | Invite to the **org**, not a single workspace | re-scope |
+| `files` | `workspace_id` is the boundary; `user_id` becomes "uploaded by" | semantics change |
+
+Decisions already made:
+
+- **Signup creates an organization**, not just a user. You always act inside an
+  org, and the switcher is an org-and-workspace switcher.
+- **Invites are org-level**, since seats are an org property and membership
+  should grant access to the org's workspaces.
+- **Org membership initially grants access to all the org's workspaces.** Add
+  per-workspace ACLs ("HR docs are managers-only") only when a customer asks.
+- **Three roles**, because `admin` is cheap now and expensive to retrofit:
+  `owner` (billing plus everything), `admin` (manage members, no billing),
+  `member` (use it). This is the admin view versus user view split.
+- **Settings splits in two**: Account for everyone (theme, sign out, delete own
+  account), Admin for owners only (billing, members, workspace management). Staff
+  should not have a billing route to reach, rather than having a hidden button.
+- **A person can be staff in one org and own another.** Entitlement is therefore
+  **per organization, never a global per-user boolean**. They can be premium in
+  one context and free in another simultaneously.
+
+Cases to handle that nothing covers today:
+
+- Staff must **never** be shown a payment form when the *owner's* subscription
+  lapses. They get "this workspace's plan needs attention, contact the owner."
+- Removing someone from an org leaves their uploads with the org. A departing
+  employee does not take the SOPs.
+
+**Do this migration soon.** With one test customer, backfilling one org per
+existing owner is trivial. Every added customer makes it heavier, and the data
+at risk is billing data.
+
+### Pricing (agreed 2026-07-29, site copy not yet updated)
+
+Moving to base plus included seats plus overage. Headline prices unchanged:
+
+| Plan | Now | Agreed |
+|---|---|---|
+| Starter | $99, up to 10 members | **$99, 10 seats included, +$9/seat** |
+| Business | $249, unlimited members | **$249, 30 seats included, +$7/seat** |
+
+Reasoning worth preserving: pure per-seat suppresses the adoption that makes a
+knowledge base sticky, because the buyer declines to add the receptionist and
+then the receptionist keeps interrupting people, which is the problem the
+product sells against. Marginal cost tracks documents and queries, not headcount,
+so seats are a value metric and should be priced cheaply. But "unlimited" at
+$249 caps revenue exactly on the largest, best-served accounts, which is the
+real leak. 30 included covers most of the 10-50 target, so the overage catches
+outliers rather than nickel-and-diming the median.
+
+Also agreed: annual prepay at two months free, and seat removal must be instant
+and self-serve so customers trust the overage.
+
+Implementation notes: needs Stripe quantity-based subscription items with
+quantity synced on member add/remove, and **four** price IDs (two base, two
+per-seat) against the single `STRIPE_PRICE_ID` configured today. Seats are an
+org property, so this depends on the tenant migration.
+
+Not doing yet: usage-based query pricing. It tracks cost best but makes bills
+unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
+answer that with fair-use limits rather than repricing everyone.
+
 ## Recent changes (chronological, most recent first)
+
+- **2026-07-29 (multi-user actually works now):** Invited staff could join a
+  workspace and then **do nothing in it**. Both read paths filtered on
+  `files.user_id` with `workspace_id` only ANDed on top, and documents belong to
+  whoever uploaded them, normally the owner. So a staff member listed zero
+  documents, retrieved zero chunks, and got no answers at all. Collaboration was
+  not missing polish, it did not function. Visibility now follows the workspace
+  via `accessible_workspace_ids()`, with `check_can_read_workspace` authorizing
+  any requested workspace, since `workspace_id` alone now scopes reads.
+
+  **Two authorization holes closed.** `update_workspace` and `delete_workspace`
+  both said owner-only in their docstrings, then checked
+  `list_workspaces_for_user`, which returns workspaces the caller merely belongs
+  to. Any invited staff member could rename and **permanently delete** the
+  owner's workspace and every document in it. The role was in that response and
+  simply unused. The delete route's "cannot delete your last workspace" guard
+  also counted memberships, so one owned plus one joined looked like two.
+
+  Also fixed: staff were pushed through trial signup because entitlement was
+  per-user. `resolve_entitlement` now follows workspace membership to the owner's
+  plan for app access, and `assert_can_create_doc` resolves limits against the
+  workspace's billing owner with usage counted per workspace. Note the
+  deliberate asymmetry: app access is a global question, but quota and the
+  workspace-creation limit stay keyed to the user's own subscription, because a
+  person can be premium in someone else's org and free in their own.
+
+  Verified against the local stack: staff see 1 document where they saw 0, an
+  outsider sees 0 and resolves no accessible workspaces, reads allow owner and
+  staff and 403 outsiders, uploads stay owner-only, rename/delete admits the
+  owner and blocks staff.
+
+  **This is interim.** The correct fix is the tenant model above.
 
 - **2026-07-29 (worker concurrency, stage timing, dead-code sweep):** The worker
   used one global semaphore for every run type, so with the production
