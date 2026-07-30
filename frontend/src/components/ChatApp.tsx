@@ -58,7 +58,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         loadUserFiles, 
         deleteFileFromContext, // Added for centralized deletion
         pollFileStatus, // Trigger immediate status check after upload
-        authLoading
+        authLoading,
+        incomingChatMessage,
+        clearIncomingChatMessage
     } = useUserContext();
     const { addToast } = useToast();
     const { webSocketStatus } = useUserContext();
@@ -126,6 +128,41 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }, 1000);
         return true; 
     };
+
+    // Render answers pushed over the websocket.
+    //
+    // The worker generates the answer, saves it, and notifies the API, which
+    // relays it to the browser. Nothing consumed that event, so answers arrived
+    // and were dropped: the conversation stayed empty even though the reply was
+    // already in the database. This is the missing last hop.
+    useEffect(() => {
+        if (!incomingChatMessage) return;
+
+        const targetHistoryId = incomingChatMessage.historyId ?? currentHistory;
+        if (targetHistoryId == null) {
+            clearIncomingChatMessage();
+            return;
+        }
+
+        const botMessage: Message = {
+            id: Date.now(),
+            sender: 'bot',
+            content: incomingChatMessage.content,
+            timestamp: new Date().toISOString(),
+            liked: false,
+            disliked: false,
+        };
+
+        setHistories(prev => ({
+            ...prev,
+            [targetHistoryId]: {
+                ...(prev[targetHistoryId] || { id: targetHistoryId, title: 'New Chat', messages: [] }),
+                messages: [...(prev[targetHistoryId]?.messages || []), botMessage],
+            },
+        }));
+        setIsSending(false);
+        clearIncomingChatMessage();
+    }, [incomingChatMessage, currentHistory, clearIncomingChatMessage]);
 
     const handleDeleteMessage = async (messageId: number, historyId: number) => {
         console.log('handleDeleteMessage called with:', { messageId, historyId });

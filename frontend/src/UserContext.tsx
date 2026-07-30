@@ -14,6 +14,13 @@ import { useToast } from './contexts/ToastContext';
 import { User as FirebaseUser, getAuth, onAuthStateChanged } from 'firebase/auth';
 import { KnownWebSocketMessage, FileStatusUpdatePayload } from './types/websocketTypes';
 
+export interface IncomingChatMessage {
+    historyId: number | null;
+    content: string;
+    isError: boolean;
+    receivedAt: number;
+}
+
 export interface OrgContext {
     organization_id: number;
     name: string | null;
@@ -75,6 +82,10 @@ interface UserContextType {
     // any account-level flag.
     currentWorkspaceRole: string | null;
     setCurrentWorkspaceRole: (role: string | null) => void;
+    // Answers arrive over the websocket, but the conversation lives in ChatApp,
+    // so the socket handler parks the latest one here for it to consume.
+    incomingChatMessage: IncomingChatMessage | null;
+    clearIncomingChatMessage: () => void;
     // The tenant the user chose at sign-in. Everything is scoped to it, so
     // entitlement and role can never be blended across two organizations the
     // user happens to belong to.
@@ -123,6 +134,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isOrgOwner, setIsOrgOwner] = useState<boolean>(false);
     const [isMemberOnly, setIsMemberOnly] = useState<boolean>(false);
     const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<string | null>(null);
+    const [incomingChatMessage, setIncomingChatMessage] = useState<IncomingChatMessage | null>(null);
+    const clearIncomingChatMessage = useCallback(() => setIncomingChatMessage(null), []);
     const [activeOrganizationId, setActiveOrganizationId] = useState<number | null>(() => {
         const stored = localStorage.getItem('active_organization_id');
         return stored ? Number(stored) : null;
@@ -306,6 +319,23 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         break;
                     }
 
+                    // The backend has been sending this since chat was built, and
+                    // nothing listened for it: the switch handled only file
+                    // events, so every answer was delivered and dropped. The
+                    // request succeeded, the worker succeeded, the socket
+                    // delivered, and the conversation stayed empty.
+                    case 'message_received': {
+                        const data: any = parsedMessage.data || {};
+                        setIncomingChatMessage({
+                            historyId: data.history_id ?? null,
+                            content: data.status === 'error'
+                                ? (data.error || 'Something went wrong generating that answer.')
+                                : (data.message || ''),
+                            isError: data.status === 'error',
+                            receivedAt: Date.now(),
+                        });
+                        break;
+                    }
                     case 'file_status_error': {
                         break;
                     }
@@ -499,6 +529,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isMemberOnly,
         currentWorkspaceRole,
         setCurrentWorkspaceRole,
+        incomingChatMessage,
+        clearIncomingChatMessage,
         activeOrganizationId,
         orgContext,
         setActiveOrganization,

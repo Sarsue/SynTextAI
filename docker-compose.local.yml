@@ -97,6 +97,12 @@ services:
     env_file:
       - .env.dev
     environment:
+      # Inside the worker container localhost is the worker, not the API, so the
+      # default sends every websocket notification to itself and it is refused.
+      # The answer is generated and saved, but the browser never hears about it
+      # and the message appears to vanish. Present in docker-compose.yml,
+      # missing here.
+      - API_BASE_URL=http://syntextaiapp:3000
       - QUERY_CONCURRENCY=4
       - INGEST_CONCURRENCY=2
       - MAX_RUNS_PER_USER=3
