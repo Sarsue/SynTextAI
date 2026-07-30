@@ -336,6 +336,25 @@ extraction are one migration: move the model work onto hardware we own, then
 spend the now-cheap inference on capabilities that were previously unaffordable.
 Sequenced, because each phase depends on the one before it.
 
+**Do nothing yet, and know exactly what would change that.** A serverless-GPU
+proposal was weighed on 2026-07-30 and declined, not because self-hosting is
+urgent but because we already satisfy its core advice: chat runs on DigitalOcean's
+hosted endpoint and embeddings on Voyage, so GPU spend is already zero and already
+scales to nothing when idle. Moving to serverless GPU would swap one hosted setup
+for another and buy a migration for no gain. Two specifics also disqualified it:
+cold starts of 30-120s are acceptable for background ingestion but fatal for
+interactive chat, and its single synchronous `/ask` endpoint would discard the job
+queue, per-tenant fairness and progress updates built on 2026-07-29.
+
+Start phase 1 when any of these becomes true, and not before:
+
+- Hosted inference consistently exceeds roughly $500-1,000/month.
+- Vision extraction (phase 2) is wanted and per-page hosted vision pricing makes
+  ingestion uneconomic. Measure this rather than assuming it.
+- A customer requires on-prem, at which point this stops being a cost decision
+  and becomes a sales one.
+- Latency or provider reliability becomes a product complaint.
+
 **Phase 1 — Serve our own models.** `gradient_chat` posts OpenAI-shaped payloads
 to `{INFERENCE_BASE_URL}/chat/completions`, and embeddings to
 `{DO_EMBEDDINGS_URL}/embeddings`. vLLM serves exactly those, so switching is a
