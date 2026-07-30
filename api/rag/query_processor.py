@@ -9,14 +9,36 @@ from .interfaces import QueryProcessorInterface
 
 logger = logging.getLogger(__name__)
 
-# Try to import LLM service function
-try:
-    from ..services.llm_service import prompt_llm
-except ImportError:
-    logger.warning("Could not import from llm_service, defining fallback function")
-    def prompt_llm(text):
-        logger.error("llm_service.prompt_llm not available")
-        return "LLM service unavailable. Please check dependencies."
+from ..services.llm_service import gradient_chat
+
+
+# The configured chat model is a reasoning model: it spends tokens thinking
+# before emitting any content, so a small budget is consumed entirely by
+# reasoning and the response comes back with an empty content field. Measured on
+# 2026-07-30: 120 tokens returned nothing for these prompts regardless of how
+# tersely they were written, while 400 was reliable. Enforce a floor here rather
+# than trusting each caller to pick a survivable number.
+MIN_COMPLETION_TOKENS = 500
+
+
+def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:
+    """Single-shot prompt used for query expansion and rewriting.
+
+    This previously imported a `prompt_llm` from llm_service that has never
+    existed in this codebase, so the ImportError fallback was always taken and
+    both callers received an apology string instead of a completion. Expansion
+    produced nonsense terms and rewriting silently returned the apology as the
+    search query, meaning retrieval has only ever run on the raw question.
+
+    Both uses are short and disposable, so failures degrade to the original
+    query rather than propagating: a bad expansion must never be able to make
+    retrieval worse than not expanding at all.
+    """
+    try:
+        return gradient_chat(text, max_tokens=max(max_tokens, MIN_COMPLETION_TOKENS)) or ""
+    except Exception as e:
+        logger.warning(f"Query-processing prompt failed, continuing without it: {e}")
+        return ""
 
 
 class DefaultQueryProcessor(QueryProcessorInterface):
@@ -66,7 +88,15 @@ class DefaultQueryProcessor(QueryProcessorInterface):
         
         try:
             expanded_terms_text = prompt_llm(expansion_prompt)
-            return [term.strip() for term in expanded_terms_text.split(',') if term.strip()]
+            if not expanded_terms_text.strip():
+                return []
+            terms = [t.strip() for t in expanded_terms_text.split(',') if t.strip()]
+            # Keep them short and few. A model that ignores the format and
+            # returns a sentence would otherwise become a search term, and each
+            # extra term costs another retrieval round trip.
+            terms = [t for t in terms if 0 < len(t.split()) <= 6][:5]
+            logger.info(f"Query expansion produced {len(terms)} terms")
+            return terms
         except Exception as e:
             logger.error(f"Query expansion failed: {e}", exc_info=True)
             return []
@@ -84,7 +114,14 @@ class DefaultQueryProcessor(QueryProcessorInterface):
         Rewritten search query:"""
         
         try:
-            return prompt_llm(reformulation_prompt).strip()
+            rewritten = prompt_llm(reformulation_prompt).strip()
+            # Only accept a plausible search query. An empty response, or a
+            # model that answers the question or explains itself instead of
+            # rewriting, must not become the thing we search for.
+            if not rewritten or len(rewritten) > 300:
+                return query
+            logger.info(f"Rewrote query: {query!r} -> {rewritten!r}")
+            return rewritten
         except Exception as e:
             logger.error(f"Query reformulation failed: {e}", exc_info=True)
             return query  # Fallback to original query
