@@ -29,16 +29,60 @@ class User(Base):
     workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
 
 
+class Organization(Base):
+    """The tenant: the billing entity and the security boundary.
+
+    Everything a company owns hangs off this. Subscriptions attach here rather
+    than to a person, so an invited colleague is a member of the organization
+    instead of reading as a separate customer.
+    """
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    members = relationship("OrganizationMember", back_populates="organization", cascade="all, delete-orphan")
+    workspaces = relationship("Workspace", back_populates="organization")
+    subscriptions = relationship("Subscription", back_populates="organization")
+
+
+class OrganizationMember(Base):
+    """Recorded membership of a user in an organization.
+
+    This replaces guessing whether someone is a mere invitee by counting the
+    workspaces they own. Membership is a fact stored here, with an explicit role.
+    """
+    __tablename__ = "organization_members"
+    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_organization_member"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # owner: billing plus everything. admin: manage members, no billing.
+    # member: use it.
+    role = Column(String, nullable=False, default="member")
+    joined_at = Column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization", back_populates="members")
+    user = relationship("User")
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
+    # Retained as "who created it". Authorization comes from the organization,
+    # not from this column.
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="workspaces")
+    organization = relationship("Organization", back_populates="workspaces")
     files = relationship("File", back_populates="workspace", cascade="all, delete-orphan")
     members = relationship("WorkspaceMember", back_populates="workspace", cascade="all, delete-orphan")
     invites = relationship("WorkspaceInvite", back_populates="workspace", cascade="all, delete-orphan")
@@ -84,7 +128,15 @@ class Subscription(Base):
     trial_end = Column(DateTime, nullable=True)
     
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    # The organization is what actually pays. user_id is retained so existing
+    # Stripe-customer lookups keep working during the transition.
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
+    # Seat allowance for the plan. NULL means unlimited, which is how the
+    # Business tier is sold.
+    seats = Column(Integer, nullable=True)
+
     user = relationship("User", back_populates="subscriptions")
+    organization = relationship("Organization", back_populates="subscriptions")
     
     # Link to CardDetails
     card_details = relationship("CardDetails", back_populates="subscription", cascade="all, delete-orphan")

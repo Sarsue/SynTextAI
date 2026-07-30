@@ -11,6 +11,7 @@ from .async_user_repository import AsyncUserRepository
 from .async_chat_repository import AsyncChatRepository
 from .async_file_repository import AsyncFileRepository
 from .async_workspace_repository import AsyncWorkspaceRepository
+from .async_organization_repository import AsyncOrganizationRepository
 from .async_agent_run_repository import AsyncAgentRunRepository
 
 logger = logging.getLogger(__name__)
@@ -41,4 +42,5 @@ class RepositoryManager:
         self.file_repo = AsyncFileRepository(database_url)
         self.agent_run_repo = AsyncAgentRunRepository(database_url)
         self.workspace_repo = AsyncWorkspaceRepository(database_url)
+        self.org_repo = AsyncOrganizationRepository(database_url)
         logger.info("All async repositories initialized successfully")

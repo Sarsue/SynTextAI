@@ -5,7 +5,6 @@ from typing import Dict
 from ..core.utils import decode_firebase_token
 from api.workflows.tasks import delete_user_task
 from api.repositories.repository_manager import RepositoryManager
-from api.models import Workspace
 import logging
 
 from api.core.limits import FREE_DOC_LIMIT, FREE_STORAGE_LIMIT_BYTES, FREE_WORKSPACE_LIMIT
@@ -91,23 +90,46 @@ async def create_user( # Function name remains 'create_user'
         logger.info(f"POST /users: Creating new user with email {email} and name {name}.")
         # Ensure add_user can handle potential missing fields or has defaults
         # Also, consider if your store.add_user needs/accepts firebase_uid
-        new_user = await store.user_repo.add_user(email, name) # Pass firebase_uid if your add_user and DB schema support it
-        logger.info(f"POST /users: Successfully created new user: {new_user.email if hasattr(new_user, 'email') else 'unknown'}")
-        
-        # Create default workspace for new user
-        try:
-            logger.info(f"POST /users: Creating default workspace for user {new_user.id}")
-            default_workspace = Workspace(
-                name="My Workspace",
-                user_id=new_user.id
-            )
-            await store.workspace_repo.create_workspace(default_workspace)
-            logger.info(f"POST /users: Successfully created default workspace for user {new_user.id}")
-        except Exception as ws_error:
-            logger.error(f"POST /users: Failed to create default workspace for user {new_user.id}: {str(ws_error)}")
-            # Don't fail user creation if workspace creation fails
-        
-        return new_user # FastAPI will serialize this (hopefully Pydantic model) to JSON with 201 status
+        # add_user returns the new user's id, not an object. The previous code
+        # read new_user.id and new_user.email, which raised AttributeError and
+        # was swallowed, so no new account ever got its default workspace.
+        new_user_id = await store.user_repo.add_user(email, name)
+        if not new_user_id:
+            raise HTTPException(status_code=500, detail="Could not create user.")
+        logger.info(f"POST /users: Created user {new_user_id} ({email})")
+
+        # Signing up creates an organization. It is the tenant that owns
+        # workspaces and holds the subscription, so it has to exist before
+        # anything else can hang off it.
+        org_label = (email.split("@")[0] or "My").strip()
+        organization_id = await store.org_repo.create_organization(
+            name=f"{org_label}'s Organization",
+            owner_user_id=new_user_id,
+        )
+        if not organization_id:
+            logger.error(f"POST /users: Failed to create organization for user {new_user_id}")
+        else:
+            try:
+                await store.workspace_repo.create_workspace(
+                    user_id=new_user_id,
+                    name="My Workspace",
+                    organization_id=organization_id,
+                )
+                logger.info(
+                    f"POST /users: Created organization {organization_id} and default workspace "
+                    f"for user {new_user_id}"
+                )
+            except Exception as ws_error:
+                # A missing default workspace is recoverable; a missing account is not.
+                logger.error(
+                    f"POST /users: Failed to create default workspace for user {new_user_id}: {ws_error}",
+                    exc_info=True,
+                )
+
+        return JSONResponse(
+            content={"message": "User registered", "email": email, "user_id": new_user_id},
+            status_code=201,
+        )
     except IntegrityError: 
         # This case should ideally be caught by the explicit check above.
         # If it happens, it means there's a race condition or get_user_id_from_email didn't find it but add_user did.

@@ -45,8 +45,9 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
         entitled        True if premium features are available
         source          'own' when the user pays, 'workspace' when inherited,
                         None when not entitled
-        billing_user_id the user whose plan and usage govern, i.e. the account
-                        that should be charged and counted against
+        organization_id the tenant whose plan governs, i.e. the account that is
+                        charged and counted against
+        role            the user's role in that organization
         status          the governing subscription status string
         is_org_owner    True if they own at least one workspace, i.e. they are
                         an administrator of an organization and billing is
@@ -55,68 +56,55 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
                         invitee. They must never be shown billing, and must
                         never be asked to fix somebody else's lapsed plan.
     """
-    try:
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-    except Exception:
-        workspaces = []
+    memberships = await store.org_repo.get_memberships(user_id)
 
-    owned = [ws for ws in workspaces if ws.get("user_id") == user_id]
-    joined = [ws for ws in workspaces if ws.get("user_id") != user_id]
-    is_org_owner = len(owned) > 0
-    is_member_only = not is_org_owner and len(joined) > 0
+    # Read straight off organization_members. This used to be inferred from
+    # "owns zero workspaces", which was a guess that broke as soon as an invitee
+    # created a workspace of their own.
+    administers = [m for m in memberships if m["role"] in ("owner", "admin")]
+    is_org_owner = any(m["role"] == "owner" for m in memberships)
+    is_member_only = bool(memberships) and not administers
 
-    own_status = await _get_subscription_status(store, user_id)
-    if _is_premium_plan(own_status):
-        return {
-            "entitled": True,
-            "source": "own",
-            "billing_user_id": user_id,
-            "status": own_status,
-            "is_org_owner": is_org_owner,
-            "is_member_only": is_member_only,
-        }
-
-    # Not paying personally. If they are staff in someone else's workspace, the
-    # owner's plan covers them.
-    for ws in joined:
-        owner_id = ws.get("user_id")
-        if not owner_id:
-            continue
-        owner_status = await _get_subscription_status(store, owner_id)
-        if _is_premium_plan(owner_status):
+    # Prefer an organization the user administers, so an owner sees their own
+    # plan rather than one inherited from a company they merely belong to.
+    ordered = administers + [m for m in memberships if m not in administers]
+    for m in ordered:
+        org_id = m["organization_id"]
+        org_status = await store.org_repo.get_subscription_status(org_id)
+        if _is_premium_plan(org_status):
             return {
                 "entitled": True,
-                "source": "workspace",
-                "billing_user_id": owner_id,
-                "status": owner_status,
+                "source": "own" if m["role"] == "owner" else "organization",
+                "organization_id": org_id,
+                "role": m["role"],
+                "status": org_status,
                 "is_org_owner": is_org_owner,
                 "is_member_only": is_member_only,
             }
 
+    primary = ordered[0] if ordered else None
     return {
         "entitled": False,
         "source": None,
-        "billing_user_id": user_id,
-        "status": own_status,
+        "organization_id": primary["organization_id"] if primary else None,
+        "role": primary["role"] if primary else None,
+        "status": (
+            await store.org_repo.get_subscription_status(primary["organization_id"])
+            if primary
+            else "none"
+        ),
         "is_org_owner": is_org_owner,
         "is_member_only": is_member_only,
     }
 
 
-async def _billing_owner_for_workspace(
-    store: RepositoryManager, user_id: int, workspace_id: Optional[int]
-) -> int:
-    """Return the account whose plan and usage govern this workspace."""
+async def _organization_for_workspace(
+    store: RepositoryManager, workspace_id: Optional[int]
+) -> Optional[int]:
+    """Return the organization whose plan and usage govern this workspace."""
     if workspace_id is None:
-        return user_id
-    try:
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-        for ws in workspaces:
-            if ws.get("id") == workspace_id:
-                return ws.get("user_id") or user_id
-    except Exception:
-        pass
-    return user_id
+        return None
+    return await store.org_repo.get_organization_for_workspace(workspace_id)
 
 
 async def assert_can_create_doc(
@@ -128,15 +116,18 @@ async def assert_can_create_doc(
     """Enforce free-plan limits for document creation.
 
     Limits belong to the organization, so when uploading into a workspace the
-    governing plan and the usage counted are the *owner's*, not the uploader's.
+    governing plan is the workspace's organization, not the uploader's.
     Without this, a staff member in a paid workspace would be measured against
     their own non-existent free plan and blocked after five documents.
 
     Raises HTTPException with 402 status code when limits are exceeded.
     """
-    billing_user_id = await _billing_owner_for_workspace(store, user_id, workspace_id)
+    org_id = await _organization_for_workspace(store, workspace_id)
 
-    status_str = await _get_subscription_status(store, billing_user_id)
+    if org_id is not None:
+        status_str = await store.org_repo.get_subscription_status(org_id)
+    else:
+        status_str = await _get_subscription_status(store, user_id)
     if _is_premium_plan(status_str):
         # Premium/trial organizations are not restricted by these limits.
         return
@@ -147,8 +138,8 @@ async def assert_can_create_doc(
         doc_count = await store.file_repo.count_files_for_workspace(workspace_id)
         total_bytes = await store.file_repo.total_storage_bytes_for_workspace(workspace_id)
     else:
-        doc_count = await store.file_repo.count_files_for_user(billing_user_id)
-        total_bytes = await store.file_repo.total_storage_bytes_for_user(billing_user_id)
+        doc_count = await store.file_repo.count_files_for_user(user_id)
+        total_bytes = await store.file_repo.total_storage_bytes_for_user(user_id)
 
     if doc_count >= FREE_DOC_LIMIT:
         raise HTTPException(

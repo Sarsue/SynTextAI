@@ -21,11 +21,26 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
     def __init__(self, database_url: str = None):
         super().__init__(database_url)
 
-    async def create_workspace(self, user_id: int, name: str) -> Optional[int]:
-        """Create a new workspace for a user."""
+    async def create_workspace(
+        self, user_id: int, name: str, organization_id: Optional[int] = None
+    ) -> Optional[int]:
+        """Create a new workspace inside an organization.
+
+        Every workspace belongs to a tenant. When no organization is given, the
+        creator's own is used, and one is created if they somehow have none, so
+        a workspace can never exist outside an organization.
+        """
+        if organization_id is None:
+            organization_id = await self._default_organization_for(user_id)
+            if organization_id is None:
+                logger.error(f"Cannot create workspace: no organization for user {user_id}")
+                return None
+
         async with self.get_async_session() as session:
             try:
-                workspace = WorkspaceORM(user_id=user_id, name=name)
+                workspace = WorkspaceORM(
+                    user_id=user_id, name=name, organization_id=organization_id
+                )
                 session.add(workspace)
                 await session.flush()
                 workspace_id = workspace.id
@@ -35,6 +50,47 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Error creating workspace for user {user_id}: {e}", exc_info=True)
+                return None
+
+    async def _default_organization_for(self, user_id: int) -> Optional[int]:
+        """The organization this user administers, creating one if they have none.
+
+        Signup creates an organization, so this is a safety net for accounts that
+        predate that, not the normal path.
+        """
+        from ..models.orm_models import Organization, OrganizationMember, User as UserORM
+
+        async with self.get_async_session() as session:
+            try:
+                stmt = (
+                    select(OrganizationMember.organization_id)
+                    .where(
+                        OrganizationMember.user_id == user_id,
+                        OrganizationMember.role.in_(("owner", "admin")),
+                    )
+                    .order_by(OrganizationMember.organization_id)
+                    .limit(1)
+                )
+                existing = (await session.execute(stmt)).scalar_one_or_none()
+                if existing:
+                    return existing
+
+                email = (
+                    await session.execute(select(UserORM.email).where(UserORM.id == user_id))
+                ).scalar_one_or_none()
+                label = (email or "").split("@")[0] or "My"
+                org = Organization(name=f"{label}'s Organization")
+                session.add(org)
+                await session.flush()
+                session.add(
+                    OrganizationMember(organization_id=org.id, user_id=user_id, role="owner")
+                )
+                await session.commit()
+                logger.info(f"Created default organization {org.id} for user {user_id}")
+                return org.id
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error resolving organization for user {user_id}: {e}", exc_info=True)
                 return None
 
     async def count_workspaces_for_user(self, user_id: int) -> int:
@@ -100,13 +156,26 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
-                owned = select(WorkspaceORM.id).where(WorkspaceORM.user_id == user_id)
-                joined = select(WorkspaceMember.workspace_id).where(
+                from ..models.orm_models import OrganizationMember
+
+                # Access follows the tenant: belonging to an organization grants
+                # access to that organization's workspaces.
+                via_org = (
+                    select(WorkspaceORM.id)
+                    .join(
+                        OrganizationMember,
+                        OrganizationMember.organization_id == WorkspaceORM.organization_id,
+                    )
+                    .where(OrganizationMember.user_id == user_id)
+                )
+                # Legacy workspace_members rows are still honoured so nothing is
+                # lost for anyone not yet migrated onto an organization.
+                legacy = select(WorkspaceMember.workspace_id).where(
                     WorkspaceMember.user_id == user_id
                 )
-                owned_ids = [r for r in (await session.execute(owned)).scalars().all()]
-                joined_ids = [r for r in (await session.execute(joined)).scalars().all()]
-                return sorted(set(owned_ids) | set(joined_ids))
+                org_ids = [r for r in (await session.execute(via_org)).scalars().all()]
+                legacy_ids = [r for r in (await session.execute(legacy)).scalars().all()]
+                return sorted(set(org_ids) | set(legacy_ids))
             except Exception as e:
                 logger.error(f"Error listing accessible workspaces for user {user_id}: {e}", exc_info=True)
                 return []
@@ -127,7 +196,27 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                     WorkspaceMember.user_id == user_id
                 )
                 member = (await session.execute(mem_stmt)).scalar_one_or_none()
-                return member.role if member else None
+                if member:
+                    return member.role
+
+                # Fall back to organization membership, which is the real
+                # source of truth now that a workspace belongs to a tenant.
+                from ..models.orm_models import OrganizationMember
+
+                org_role = (await session.execute(
+                    select(OrganizationMember.role)
+                    .join(
+                        WorkspaceORM,
+                        WorkspaceORM.organization_id == OrganizationMember.organization_id,
+                    )
+                    .where(
+                        WorkspaceORM.id == workspace_id,
+                        OrganizationMember.user_id == user_id,
+                    )
+                )).scalar_one_or_none()
+                if org_role in ("owner", "admin"):
+                    return "owner"
+                return "staff" if org_role else None
             except Exception as e:
                 logger.error(f"Error getting role for user {user_id} in workspace {workspace_id}: {e}", exc_info=True)
                 return None
@@ -344,6 +433,29 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                         user_id=user_id,
                         role="staff",
                     ))
+
+                # Joining a workspace means joining its organization. This is the
+                # record that makes them a member of the tenant, rather than it
+                # being inferred later from how many workspaces they own.
+                from ..models.orm_models import OrganizationMember
+                org_id = (await session.execute(
+                    select(WorkspaceORM.organization_id).where(WorkspaceORM.id == invite.workspace_id)
+                )).scalar_one_or_none()
+
+                if org_id:
+                    already = (await session.execute(
+                        select(OrganizationMember).where(
+                            OrganizationMember.organization_id == org_id,
+                            OrganizationMember.user_id == user_id,
+                        )
+                    )).scalar_one_or_none()
+                    if not already:
+                        session.add(OrganizationMember(
+                            organization_id=org_id,
+                            user_id=user_id,
+                            role="member",
+                        ))
+                        logger.info(f"User {user_id} joined organization {org_id} via invite")
 
                 await session.commit()
                 return invite.workspace_id
