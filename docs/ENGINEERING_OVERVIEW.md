@@ -343,12 +343,43 @@ to `{INFERENCE_BASE_URL}/chat/completions`, and embeddings to
 was accidental and is now deliberate. Never let provider-specific calls leak past
 `llm_service.py`.
 
-Validate before committing: benchmark answer quality and citation fidelity
-against the current hosted model on real customer questions. Citation accuracy is
-the product, and it degrades first on a weaker model. Model choice is the hard
-part, not the plumbing; very large mixture-of-experts models need hundreds of GB
-of VRAM even quantised, so a mid-sized quantised open model on one serious GPU is
-the realistic starting point.
+This is three models, not one, and that drives the hardware:
+
+| Role | Used by | Today |
+|---|---|---|
+| Text generation | answers, concept compilation | DigitalOcean endpoint |
+| **Vision** | phase 2 page extraction | none yet, new requirement |
+| Embeddings | chunk and query vectors | Voyage AI |
+
+Text and vision are separate weights held in VRAM simultaneously, so size the box
+for both rather than for the chat model alone. Embeddings are cheap and Voyage is
+good, so keeping them hosted is reasonable until the on-prem edition, which by
+definition forces all three local. A hosted-hybrid is a legitimate intermediate
+state; do not treat self-hosting as all-or-nothing.
+
+**The benchmark is the gate on the whole initiative, not a formality.** A weaker
+model degrades three things at once: answer quality in phase 1, transcription
+fidelity in phase 2, where hallucinated digits are the worst failure available,
+and contradiction detection in phase 3, where being wrong is worse than being
+absent. Citation accuracy is the product and it degrades first.
+
+Make it concrete rather than impressionistic:
+
+1. Take roughly 20 real questions against a document already ingested, with known
+   correct answers and known correct source pages.
+2. Record the current hosted model's answer and cited page for each. This is the
+   baseline, and it should be captured **before** any migration work begins.
+3. Re-run against the self-hosted model and compare on citation correctness
+   first, answer quality second. A prettier answer citing the wrong page is a
+   regression.
+4. For phase 2, additionally diff the extracted text against the PDF text layer
+   on numeric-dense pages.
+
+Model sizing advice dates quickly, so verify current options rather than trusting
+a figure written here: as of this writing, very large mixture-of-experts models
+need hundreds of GB of VRAM even quantised, which is not a single cheap GPU, and a
+mid-sized quantised open model is the realistic starting point. Check what is
+current when the work actually starts.
 
 **Phase 2 — Vision extraction for every PDF.** Replace the text-layer, OCR-
 fallback escalation with a single vision pass over each rendered page. Removes the
