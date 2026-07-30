@@ -50,19 +50,10 @@ const SelectOrganization: React.FC = () => {
                     return;
                 }
                 if (items.length === 0) {
-                    // Normal now that signup creates only the person. It means
-                    // one of two different things.
-                    if (data.has_pending_invite) {
-                        // Invited, but arrived here instead of via the link.
-                        // Never push these people towards paying: their team's
-                        // plan already covers them.
-                        setError(
-                            "You have an invitation waiting. Open the invite link your colleague sent you to join their team."
-                        );
-                        return;
-                    }
-                    // A new customer: the company is created when the trial starts.
-                    navigate('/settings', { replace: true });
+                    // Signing up either starts a company or joins one, so having
+                    // neither means something went wrong rather than a state the
+                    // product produces.
+                    setError('No organization found for your account. Please contact support.');
                     return;
                 }
                 setOrgs(items);

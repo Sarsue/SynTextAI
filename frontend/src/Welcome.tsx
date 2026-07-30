@@ -23,36 +23,45 @@ const Welcome: React.FC = () => {
      * means skipping simply leaves the generated name in place.
      */
     /**
-     * Hold the company name until the trial creates the organization.
+     * Name the organization created at signup.
      *
-     * Signup creates only the person now, so at this point there is nothing to
-     * rename: the company comes into existence when the trial starts, and this
-     * is the name it will be given. Stored rather than sent, because an
-     * organization without a subscription is entitled to nothing and should not
-     * exist at all.
+     * Signing up starts a company, so the organization already exists by the
+     * time onboarding runs. This renames it rather than creating anything,
+     * which means abandoning onboarding just leaves the generated name in place.
      */
     const saveCompanyName = async () => {
         const name = companyName.trim();
-        if (!name) return;
+        if (!name || !user) return;
         setIsSaving(true);
         try {
-            if (activeOrganizationId) {
-                // Returning through onboarding with a company already set up.
-                const idToken = await user!.getIdToken();
-                await fetch(`/api/v1/organizations/${activeOrganizationId}`, {
-                    method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${idToken}`,
-                    },
-                    body: JSON.stringify({ name }),
+            const idToken = await user.getIdToken();
+
+            // Onboarding runs before the organization chooser has set an active
+            // one, so resolve it rather than assuming it is populated.
+            let orgId = activeOrganizationId;
+            if (!orgId) {
+                const listed = await fetch('/api/v1/organizations', {
+                    headers: { Authorization: `Bearer ${idToken}` },
                 });
-                await setActiveOrganization(activeOrganizationId);
-            } else {
-                localStorage.setItem('pending_organization_name', name);
+                if (listed.ok) {
+                    const data = await listed.json();
+                    const owned = (data.items || []).find((o: any) => o.role === 'owner');
+                    if (owned) orgId = owned.organization_id;
+                }
             }
+            if (!orgId) return;
+
+            const res = await fetch(`/api/v1/organizations/${orgId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ name }),
+            });
+            if (res.ok) await setActiveOrganization(orgId);
         } catch (e) {
-            // Never block onboarding on this; a fallback name is always applied.
+            // Never block onboarding on this; the generated name stands.
             console.error('Error saving company name', e);
         } finally {
             setIsSaving(false);

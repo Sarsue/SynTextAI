@@ -130,21 +130,14 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         setError(null);
         try {
             console.log("Starting free trial...");
-            // The trial is what brings the organization into existence, so the
-            // name collected during onboarding is applied here rather than
-            // creating a company earlier that nobody is paying for yet.
-            const pendingOrgName = localStorage.getItem('pending_organization_name');
             const response = await fetch('/api/v1/subscriptions/start-trial', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${await user?.getIdToken()}`,
                 },
-                body: JSON.stringify(
-                    pendingOrgName ? { organization_name: pendingOrgName } : {}
-                ),
+                body: JSON.stringify({}),
             });
-            if (response.ok) localStorage.removeItem('pending_organization_name');
 
             if (!response.ok) {
                 const errorResponse = await response.json();

@@ -98,16 +98,33 @@ async def create_user( # Function name remains 'create_user'
             raise HTTPException(status_code=500, detail="Could not create user.")
         logger.info(f"POST /users: Created user {new_user_id} ({email})")
 
-        # Signup creates the person, nothing else.
+        # One decision, made once: is this person joining a company or starting
+        # one?
         #
-        # An organization is a billing entity, and one without a subscription is
-        # entitled to nothing, so creating it here produced an account locked out
-        # of the product from the moment it existed. Worse, it raced with invites:
-        # somebody who signed in before their invite arrived ended up owning a
-        # company they never asked for and being shown an organization chooser on
-        # their first visit. The company is now created when the trial starts,
-        # and an invitee joins an existing one, so neither path can invent a
-        # tenant nobody wanted.
+        # Signing up with an address that was invited means joining, so the
+        # invite is accepted here rather than depending on them clicking the
+        # link at the right moment. The link is how somebody discovers they were
+        # invited, not a step the join hinges on. Anyone else is starting their
+        # own company and owns it.
+        joined = await store.workspace_repo.accept_pending_invites_for_email(new_user_id, email)
+
+        if joined:
+            logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
+        else:
+            org_label = (email.split("@")[0] or "My").strip()
+            organization_id = await store.org_repo.create_organization(
+                name=f"{org_label}'s Organization",
+                owner_user_id=new_user_id,
+            )
+            if not organization_id:
+                logger.error(f"POST /users: Failed to create organization for user {new_user_id}")
+            else:
+                await store.workspace_repo.create_workspace(
+                    user_id=new_user_id, name="My Workspace", organization_id=organization_id
+                )
+                logger.info(
+                    f"POST /users: {email} started organization {organization_id} as owner"
+                )
 
         return JSONResponse(
             content={"message": "User registered", "email": email, "user_id": new_user_id},

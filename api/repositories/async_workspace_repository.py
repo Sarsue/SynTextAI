@@ -420,6 +420,67 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error fetching invite by token: {e}", exc_info=True)
                 return None
 
+    async def accept_pending_invites_for_email(self, user_id: int, email: str) -> List[int]:
+        """Accept every unexpired invite waiting for this address.
+
+        Called at signup so that being invited and signing up are one act. The
+        invite link is how somebody discovers they were invited, not a step the
+        join depends on: whether they click it, or simply sign up with the
+        address that was invited, they land in the same place. Returns the
+        organizations joined.
+        """
+        if not email:
+            return []
+        joined: List[int] = []
+        async with self.get_async_session() as session:
+            try:
+                from ..models.orm_models import OrganizationMember
+
+                stmt = (
+                    select(WorkspaceInvite, WorkspaceORM.organization_id)
+                    .join(WorkspaceORM, WorkspaceORM.id == WorkspaceInvite.workspace_id)
+                    .where(
+                        func.lower(WorkspaceInvite.email) == email.strip().lower(),
+                        WorkspaceInvite.status == "pending",
+                        WorkspaceInvite.expires_at > datetime.utcnow(),
+                    )
+                )
+                for invite, org_id in (await session.execute(stmt)).all():
+                    invite.status = "accepted"
+
+                    existing_ws = (await session.execute(
+                        select(WorkspaceMember).where(
+                            WorkspaceMember.workspace_id == invite.workspace_id,
+                            WorkspaceMember.user_id == user_id,
+                        )
+                    )).scalar_one_or_none()
+                    if not existing_ws:
+                        session.add(WorkspaceMember(
+                            workspace_id=invite.workspace_id, user_id=user_id, role="staff"
+                        ))
+
+                    if org_id:
+                        existing_org = (await session.execute(
+                            select(OrganizationMember).where(
+                                OrganizationMember.organization_id == org_id,
+                                OrganizationMember.user_id == user_id,
+                            )
+                        )).scalar_one_or_none()
+                        if not existing_org:
+                            session.add(OrganizationMember(
+                                organization_id=org_id, user_id=user_id, role="member"
+                            ))
+                        joined.append(org_id)
+
+                await session.commit()
+                if joined:
+                    logger.info(f"User {user_id} joined organizations {joined} via invites at signup")
+                return joined
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error accepting invites for {email}: {e}", exc_info=True)
+                return []
+
     async def accept_invite(self, token: str, user_id: int) -> Optional[int]:
         """Accept an invite. Returns workspace_id on success, None on failure."""
         async with self.get_async_session() as session:
