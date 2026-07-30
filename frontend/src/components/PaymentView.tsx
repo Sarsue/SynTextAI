@@ -101,7 +101,11 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             });
 
             setSubscriptionData(data);
-            setSubscriptionStatus(data.subscription_status); // Update context with the new subscription status
+            setSubscriptionStatus(data.subscription_status);
+            // Entitlement lives on the organization, and /chat is gated on it.
+            // Setting local state alone left the organization looking unpaid, so
+            // navigating bounced straight back here. Re-resolve before leaving.
+            await fetchSubscriptionStatus();
             navigate('/chat');
         } catch (error) {
             console.error("Error during subscription:", error);
@@ -153,7 +157,10 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             });
             
             setSubscriptionData(data);
-            setSubscriptionStatus('trialing'); // Update context with new subscription status
+            setSubscriptionStatus('trialing');
+            // Same reason: the organization must be re-read before /chat will
+            // let us in, otherwise the trial appears not to have started.
+            await fetchSubscriptionStatus();
             navigate('/chat');
         } catch (error) {
             console.error("Error starting trial:", error);
@@ -221,7 +228,8 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             });
             
             setSubscriptionData(data);
-            setSubscriptionStatus(data.subscription_status); // Update context with new subscription status
+            setSubscriptionStatus(data.subscription_status);
+            await fetchSubscriptionStatus();
         } catch (error) {
             console.error("Error updating payment method:", error);
             
@@ -270,7 +278,8 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             });
             
             setSubscriptionData({ ...subscriptionData, subscription_status: data.subscription_status });
-            setSubscriptionStatus(data.subscription_status); // Update context with new subscription status
+            setSubscriptionStatus(data.subscription_status);
+            await fetchSubscriptionStatus();
         } catch (error) {
             console.error("Error canceling subscription:", error);
             

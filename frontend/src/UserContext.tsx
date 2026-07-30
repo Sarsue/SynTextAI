@@ -404,6 +404,18 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setIsOrgOwner(data.is_org_owner ?? true);
             setIsMemberOnly(data.is_member_only ?? false);
             setSubscriptionData(data);
+
+            // Entitlement is a property of the organization, so a subscription
+            // change makes the cached organization context stale. Nothing
+            // refreshed it, which meant that after starting a trial the app
+            // still believed the organization was unentitled: chat stayed
+            // locked and the settings close button stayed hidden until some
+            // unrelated action happened to re-resolve it, such as renaming the
+            // organization. Refresh it here so every caller is covered rather
+            // than each one remembering.
+            if (activeOrganizationId) {
+                await setActiveOrganization(activeOrganizationId);
+            }
         } else {
             // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
             // fires instead of leaving the user stuck on the auth page indefinitely.
@@ -413,7 +425,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setIsOrgOwner(true);
             setIsMemberOnly(false);
         }
-    }, [user, _callApiWithTokenInternal]);
+    }, [user, _callApiWithTokenInternal, activeOrganizationId, setActiveOrganization]);
 
     const registerUserInBackend = useCallback(async (fbUser: FirebaseUser) => {
         const idToken = await fbUser.getIdToken();
