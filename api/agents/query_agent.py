@@ -119,6 +119,13 @@ class QueryAgent:
 
         query_embedding = get_text_embedding(rewritten_query)
 
+        # Retrieval is scoped by workspace, not by uploader. Without this an
+        # invited staff member matched zero chunks, because the documents belong
+        # to the owner who uploaded them, and so got no answers at all.
+        accessible_ids = None
+        if workspace_id is None:
+            accessible_ids = await self._store.workspace_repo.accessible_workspace_ids(user_id)
+
         vector_results = await self._store.file_repo.hybrid_search(
             user_id=user_id,
             query=rewritten_query,
@@ -126,6 +133,7 @@ class QueryAgent:
             workspace_id=workspace_id,
             file_id=file_id,
             top_k=15,
+            accessible_workspace_ids=accessible_ids,
         )
 
         additional_results: List[Dict[str, Any]] = []
@@ -139,6 +147,7 @@ class QueryAgent:
                     workspace_id=workspace_id,
                     file_id=file_id,
                     top_k=5,
+                    accessible_workspace_ids=accessible_ids,
                 )
                 additional_results.extend(term_results)
             except Exception as term_error:

@@ -108,6 +108,22 @@ async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: 
             detail="Only the workspace owner can upload documents."
         )
 
+async def check_can_read_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
+    """Raise 403 unless user_id can read workspace_id, as owner or as staff.
+
+    Reads are scoped by workspace rather than by uploader, so this check is what
+    keeps one organization's documents out of another's. Without it, passing an
+    arbitrary workspace_id would return that workspace's files, because the
+    query no longer filters on files.user_id.
+    """
+    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
+    if role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this workspace."
+        )
+
+
 # Route to save file
 @files_router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=UploadResponse)
 @limiter.limit(UPLOAD_RATE_LIMIT)
@@ -167,7 +183,14 @@ async def save_file(
                 logger.info(f"File {file.filename} validated: {file_size / 1024 / 1024:.2f}MB")
 
                 # Enforce per-user document count and storage limits for free plans
-                await assert_can_create_doc(store, user_id, new_doc_size_bytes=file_size)
+                # Pass the workspace so limits resolve against its owner's plan,
+                # not the uploader's. Staff in a paid workspace are covered.
+                await assert_can_create_doc(
+                    store,
+                    user_id,
+                    new_doc_size_bytes=file_size,
+                    workspace_id=actual_workspace_id,
+                )
 
                 # Reset file pointer after reading
                 await file.seek(0)
@@ -242,7 +265,23 @@ async def retrieve_files(
     try:
         user_id = user_data['user_id']
         offset = (page - 1) * page_size
-        paginated_result = await store.file_repo.get_files_for_user(user_id, skip=offset, limit=page_size, workspace_id=workspace_id)
+
+        # Files are visible by workspace, not by who uploaded them, so a
+        # requested workspace must be authorized and an unscoped listing must be
+        # limited to the workspaces this user can actually read.
+        accessible_ids = None
+        if workspace_id is not None:
+            await check_can_read_workspace(workspace_id, user_id, store)
+        else:
+            accessible_ids = await store.workspace_repo.accessible_workspace_ids(user_id)
+
+        paginated_result = await store.file_repo.get_files_for_user(
+            user_id,
+            skip=offset,
+            limit=page_size,
+            workspace_id=workspace_id,
+            accessible_workspace_ids=accessible_ids,
+        )
         
         db_files = paginated_result.get('items', [])
         total_files = paginated_result.get('total', 0)

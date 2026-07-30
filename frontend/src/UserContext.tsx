@@ -47,6 +47,10 @@ interface UserContextType {
     setIsPollingMessages: (isPollingMsg: boolean) => void;
     subscriptionStatus: string | null;
     setSubscriptionStatus: (status: string | null) => void;
+    // True when premium access applies, whether the user pays personally or
+    // inherits it as staff of a paid workspace. Route on this, not on
+    // subscriptionStatus, which is only ever about this user's own billing.
+    isEntitled: boolean;
     fetchSubscriptionStatus: () => void;
     subscriptionData: SubscriptionData | null;
     setSubscriptionData: (data: SubscriptionData | null) => void;
@@ -84,6 +88,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [userSettings, setUserSettings] = useState<UserSettings>({ comprehensionLevel: 'Beginner', selectedLanguage: 'English' });
     const [isPollingMessages, setIsPollingMessages] = useState<boolean>(false);
     const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
+    const [isEntitled, setIsEntitled] = useState<boolean>(false);
     const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
     const [socket, setSocket] = useState<WebSocket | null>(null);
     const [webSocketStatus, setWebSocketStatus] = useState<WebSocketStatus>('disconnected');
@@ -303,12 +308,18 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (response?.ok) {
             const data = await response.json();
             setSubscriptionStatus(data.subscription_status ?? 'none');
+            // Fall back to the personal status if an older backend omits the
+            // field, so this cannot regress into locking everyone out.
+            setIsEntitled(
+                data.entitled ?? ['active', 'trialing'].includes(data.subscription_status)
+            );
             setSubscriptionData(data);
         } else {
             // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
             // fires instead of leaving the user stuck on the auth page indefinitely.
             console.error('Failed to fetch subscription status');
             setSubscriptionStatus('none');
+            setIsEntitled(false);
         }
     }, [user, _callApiWithTokenInternal]);
 
@@ -379,6 +390,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsPollingMessages,
         subscriptionStatus,
         setSubscriptionStatus,
+        isEntitled,
         fetchSubscriptionStatus,
         subscriptionData,
         setSubscriptionData,

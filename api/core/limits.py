@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 
@@ -32,18 +32,107 @@ def _is_premium_plan(status: str) -> bool:
     return normalized in {"active", "trialing"}
 
 
-async def assert_can_create_doc(store: RepositoryManager, user_id: int, new_doc_size_bytes: int) -> None:
+async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[str, Any]:
+    """Work out what plan actually applies to this user.
+
+    Entitlement is a property of the *organization*, not the individual. The
+    public pricing is "one price per company, add unlimited staff", so an
+    invited staff member is covered by whoever owns the workspace they were
+    invited into. They never need their own subscription and must never be sent
+    through billing onboarding.
+
+    Returns a dict with:
+        entitled        True if premium features are available
+        source          'own' when the user pays, 'workspace' when inherited,
+                        None when not entitled
+        billing_user_id the user whose plan and usage govern, i.e. the account
+                        that should be charged and counted against
+        status          the governing subscription status string
+    """
+    own_status = await _get_subscription_status(store, user_id)
+    if _is_premium_plan(own_status):
+        return {
+            "entitled": True,
+            "source": "own",
+            "billing_user_id": user_id,
+            "status": own_status,
+        }
+
+    # Not paying personally. If they are staff in someone else's workspace, the
+    # owner's plan covers them.
+    try:
+        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+    except Exception:
+        workspaces = []
+
+    for ws in workspaces:
+        owner_id = ws.get("user_id")
+        if not owner_id or owner_id == user_id:
+            continue  # their own workspace, already covered by own_status
+        owner_status = await _get_subscription_status(store, owner_id)
+        if _is_premium_plan(owner_status):
+            return {
+                "entitled": True,
+                "source": "workspace",
+                "billing_user_id": owner_id,
+                "status": owner_status,
+            }
+
+    return {
+        "entitled": False,
+        "source": None,
+        "billing_user_id": user_id,
+        "status": own_status,
+    }
+
+
+async def _billing_owner_for_workspace(
+    store: RepositoryManager, user_id: int, workspace_id: Optional[int]
+) -> int:
+    """Return the account whose plan and usage govern this workspace."""
+    if workspace_id is None:
+        return user_id
+    try:
+        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+        for ws in workspaces:
+            if ws.get("id") == workspace_id:
+                return ws.get("user_id") or user_id
+    except Exception:
+        pass
+    return user_id
+
+
+async def assert_can_create_doc(
+    store: RepositoryManager,
+    user_id: int,
+    new_doc_size_bytes: int,
+    workspace_id: Optional[int] = None,
+) -> None:
     """Enforce free-plan limits for document creation.
+
+    Limits belong to the organization, so when uploading into a workspace the
+    governing plan and the usage counted are the *owner's*, not the uploader's.
+    Without this, a staff member in a paid workspace would be measured against
+    their own non-existent free plan and blocked after five documents.
 
     Raises HTTPException with 402 status code when limits are exceeded.
     """
-    status_str = await _get_subscription_status(store, user_id)
+    billing_user_id = await _billing_owner_for_workspace(store, user_id, workspace_id)
+
+    status_str = await _get_subscription_status(store, billing_user_id)
     if _is_premium_plan(status_str):
-        # Premium/trial users are not restricted by these limits.
+        # Premium/trial organizations are not restricted by these limits.
         return
 
-    # Enforce document count limit
-    doc_count = await store.file_repo.count_files_for_user(user_id)
+    # Free plan. Count against the workspace when there is one, so two staff
+    # sharing a free workspace share its allowance rather than getting one each.
+    if workspace_id is not None:
+        doc_count = await store.file_repo.count_files_for_workspace(workspace_id)
+        total_bytes = await store.file_repo.total_storage_bytes_for_workspace(workspace_id)
+    else:
+        doc_count = await store.file_repo.count_files_for_user(billing_user_id)
+        total_bytes = await store.file_repo.total_storage_bytes_for_user(billing_user_id)
+
     if doc_count >= FREE_DOC_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -53,8 +142,6 @@ async def assert_can_create_doc(store: RepositoryManager, user_id: int, new_doc_
             },
         )
 
-    # Enforce total storage limit
-    total_bytes = await store.file_repo.total_storage_bytes_for_user(user_id)
     if total_bytes + max(new_doc_size_bytes, 0) > FREE_STORAGE_LIMIT_BYTES:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

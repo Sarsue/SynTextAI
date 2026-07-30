@@ -82,8 +82,16 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // - premium: active | trialing
     // - free: none (or missing)
     const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
+    // Keyed to this user's OWN subscription on purpose. Creating a workspace
+    // makes you its owner and therefore the account billed for it, so inherited
+    // entitlement from someone else's workspace must not unlock it.
     const isFreeUser = normalizedStatus === 'none';
     const isOwner = currentWorkspace?.role === 'owner';
+
+    // The free workspace limit applies to workspaces you *own*. The backend's
+    // count_workspaces_for_user counts only owned rows, so counting every
+    // workspace here told staff to upgrade for something the backend allows.
+    const ownedWorkspaceCount = workspaces.filter(w => w.role === 'owner').length;
 
     // Fetch workspaces on mount
     useEffect(() => {
@@ -152,7 +160,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         }
 
         // Check free tier limit
-        if (isFreeUser && workspaces.length >= 1) {
+        if (isFreeUser && ownedWorkspaceCount >= 1) {
             addToast('Free users are limited to 1 workspace. Upgrade to create more!', 'error');
             setShowCreateModal(false);
             return;
@@ -500,13 +508,13 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         variant="outline"
                         size="sm"
                         onClick={() => setShowCreateModal(true)}
-                        title={isFreeUser && workspaces.length >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
+                        title={isFreeUser && ownedWorkspaceCount >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
                     >
                         <Plus className="size-4" /> New
                     </Button>
                 </div>
 
-                {isFreeUser && workspaces.length >= 1 && (
+                {isFreeUser && ownedWorkspaceCount >= 1 && (
                     <div className="workspace-limit-banner">
                         <Package className="size-4 shrink-0" />
                         <span>Free plan: 1 workspace. <a href="/settings">Upgrade</a> for more!</span>
@@ -540,7 +548,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
                     {error && <div className="error-message">{error}</div>}
 
-                    {isFreeUser && workspaces.length >= 1 && (
+                    {isFreeUser && ownedWorkspaceCount >= 1 && (
                         <div className="upgrade-prompt">
                             <p><strong>Free Tier Limit Reached</strong></p>
                             <p>Upgrade to premium to create unlimited workspaces and unlock more features!</p>
@@ -554,7 +562,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         </Button>
                         <Button
                             onClick={handleCreateWorkspace}
-                            disabled={isCreating || !newWorkspaceName.trim() || (isFreeUser && workspaces.length >= 1)}
+                            disabled={isCreating || !newWorkspaceName.trim() || (isFreeUser && ownedWorkspaceCount >= 1)}
                         >
                             {isCreating ? 'Creating...' : 'Create Workspace'}
                         </Button>

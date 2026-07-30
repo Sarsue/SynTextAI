@@ -13,7 +13,7 @@ from ..models import Segment as SegmentORM
 
 # Import SQLAlchemy async components
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, text
+from sqlalchemy import select, and_, or_, func, text
 from sqlalchemy.exc import IntegrityError
 
 import os
@@ -164,19 +164,36 @@ class AsyncFileRepository(AsyncBaseRepository):
                     await session.commit()
                 return False
 
-    async def get_files_for_user(self, user_id: int, skip: int = 0, limit: int = 10, workspace_id: int = None) -> Dict[str, Any]:
-        """Get paginated files for a user.
+    async def get_files_for_user(
+        self,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 10,
+        workspace_id: int = None,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated files visible to a user.
+
+        Visibility follows the *workspace*, not the uploader. This previously
+        filtered on files.user_id, so an invited staff member saw none of the
+        workspace's documents: the rows belong to whoever uploaded them, which
+        is normally the owner. Files with no workspace stay private to their
+        uploader, which is how pre-workspace uploads behave.
 
         Args:
-            user_id: ID of the user
+            user_id: ID of the requesting user
             skip: Number of records to skip (for pagination)
             limit: Maximum number of records to return (for pagination)
-            workspace_id: Optional workspace ID to filter files
+            workspace_id: Restrict to a single workspace. The caller must have
+                already authorized access to it.
+            accessible_workspace_ids: Every workspace the user may read. Required
+                to see workspaces owned by someone else when workspace_id is not
+                given.
 
         Returns:
             Dict: {
                 'items': List[Dict],  # List of file records with metadata
-                'total': int,         # Total number of files for the user
+                'total': int,         # Total number of visible files
                 'page': int,          # Current page number (1-based)
                 'page_size': int      # Number of items per page
             }
@@ -184,9 +201,20 @@ class AsyncFileRepository(AsyncBaseRepository):
         async with self.get_async_session() as session:
             try:
                 # Build base query conditions
-                conditions = [FileORM.user_id == user_id]
                 if workspace_id is not None:
-                    conditions.append(FileORM.workspace_id == workspace_id)
+                    # Caller authorized this workspace, so scope purely to it.
+                    conditions = [FileORM.workspace_id == workspace_id]
+                elif accessible_workspace_ids:
+                    # Everything in the user's workspaces, plus their own
+                    # workspace-less files.
+                    conditions = [
+                        or_(
+                            FileORM.workspace_id.in_(accessible_workspace_ids),
+                            and_(FileORM.workspace_id.is_(None), FileORM.user_id == user_id),
+                        )
+                    ]
+                else:
+                    conditions = [FileORM.user_id == user_id]
                 
                 # Get total count
                 stmt = select(func.count(FileORM.id)).where(*conditions)
@@ -253,6 +281,34 @@ class AsyncFileRepository(AsyncBaseRepository):
                 return int(total or 0)
             except Exception as e:
                 logger.error(f"Error summing storage bytes for user {user_id}: {e}", exc_info=True)
+                return 0
+
+    async def count_files_for_workspace(self, workspace_id: int) -> int:
+        """Return the total number of files in a workspace, across all members.
+
+        Free-plan limits apply to the organization, so a shared workspace has one
+        allowance rather than one per member.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(func.count(FileORM.id)).where(FileORM.workspace_id == workspace_id)
+                result = await session.execute(stmt)
+                return int(result.scalar() or 0)
+            except Exception as e:
+                logger.error(f"Error counting files for workspace {workspace_id}: {e}", exc_info=True)
+                return 0
+
+    async def total_storage_bytes_for_workspace(self, workspace_id: int) -> int:
+        """Return total recorded storage usage in bytes for a workspace."""
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(func.coalesce(func.sum(FileORM.file_size_bytes), 0)).where(
+                    FileORM.workspace_id == workspace_id
+                )
+                result = await session.execute(stmt)
+                return int(result.scalar() or 0)
+            except Exception as e:
+                logger.error(f"Error summing storage bytes for workspace {workspace_id}: {e}", exc_info=True)
                 return 0
 
     async def delete_file_entry(self, user_id: int, file_id: int) -> bool:
@@ -387,8 +443,14 @@ class AsyncFileRepository(AsyncBaseRepository):
         vector_weight: float = None,
         bm25_weight: float = None,
         top_k: int = None,
+        accessible_workspace_ids: Optional[List[int]] = None,
     ) -> List[Dict[str, Any]]:
         """Hybrid search combining vector similarity and BM25 in Postgres.
+
+        Retrieval is scoped by *workspace*, not by who uploaded the documents.
+        The previous `f.user_id = :user_id` clause meant an invited staff member
+        retrieved zero chunks and therefore got no answers at all, because the
+        rows belong to the owner who uploaded them.
 
         Returns a list of { chunk_id, file_id, content, hybrid_score }.
         """
@@ -398,9 +460,19 @@ class AsyncFileRepository(AsyncBaseRepository):
 
         async with self.get_async_session() as session:
             try:
-                where_clauses = ["f.user_id = :user_id"]
                 if workspace_id is not None:
-                    where_clauses.append("f.workspace_id = :workspace_id")
+                    # Caller authorized this workspace, so scope purely to it.
+                    where_clauses = ["f.workspace_id = :workspace_id"]
+                elif accessible_workspace_ids:
+                    # Everything in the user's workspaces, plus their own
+                    # workspace-less files.
+                    where_clauses = [
+                        "(f.workspace_id = ANY(:accessible_workspace_ids)"
+                        " OR (f.workspace_id IS NULL AND f.user_id = :user_id))"
+                    ]
+                else:
+                    where_clauses = ["f.user_id = :user_id"]
+
                 if file_id is not None:
                     where_clauses.append("f.id = :file_id")
 
@@ -444,6 +516,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                     "user_id": user_id,
                     "workspace_id": workspace_id,
                     "file_id": file_id,
+                    "accessible_workspace_ids": list(accessible_workspace_ids or []),
                 }
 
                 result = await session.execute(sql, params)

@@ -14,7 +14,7 @@ import AnalyticsProvider from './components/AnalyticsProvider';
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_API_KEY || "");
 
 const App: React.FC = () => {
-    const { user, subscriptionStatus } = useUserContext();
+    const { user, isEntitled } = useUserContext();
     const authRef = React.useRef<AuthRef>(null);
 
     return (
@@ -36,7 +36,12 @@ const App: React.FC = () => {
                             path="/chat"
                             element={
                                 user ? (
-                                    subscriptionStatus === 'active' || subscriptionStatus === 'trialing' ? (
+                                    // Gate on entitlement, not on this user's own
+                                    // subscription. Staff of a paid workspace have no
+                                    // subscription of their own and were bounced to
+                                    // /settings, which is what forced them through trial
+                                    // signup for an organization that already pays.
+                                    isEntitled ? (
                                         <ChatApp
                                             user={user}
                                             onLogout={() => authRef.current?.logOut()}

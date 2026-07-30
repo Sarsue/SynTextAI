@@ -38,7 +38,7 @@ interface AuthProps {}
 
 const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const navigate = useNavigate();
-  const { user, subscriptionStatus, authLoading } = useUserContext();
+  const { user, subscriptionStatus, isEntitled, authLoading } = useUserContext();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const isLoggingOut = useRef(false);
   const { capture, reset: resetAnalytics } = useAnalytics();
@@ -67,9 +67,12 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
         return;
       }
 
-      const targetPath = subscriptionStatus === 'active' || subscriptionStatus === 'trialing'
-        ? '/chat'
-        : '/settings';
+      // Route on entitlement, not on this user's own subscription. Staff
+      // invited into a paid workspace have no subscription of their own, and
+      // sending them to /settings pushed them through trial signup for an
+      // organization that already pays. Pricing is one price per company with
+      // unlimited staff, so a member of a paid workspace goes straight to chat.
+      const targetPath = isEntitled ? '/chat' : '/settings';
       navigate(targetPath, { replace: true });
     }
   }, [user, subscriptionStatus, authLoading, navigate]);

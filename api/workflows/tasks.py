@@ -316,6 +316,11 @@ async def run_query_pipeline(
         )
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="fallback") as ctx:
             query_embedding = get_text_embedding(message)
+            # Same workspace-first scoping as the agent path, so the fallback
+            # does not silently return nothing for invited staff.
+            accessible_ids = None
+            if workspace_id is None:
+                accessible_ids = await store.workspace_repo.accessible_workspace_ids(user_id)
             topK_chunks = await store.file_repo.hybrid_search(
                 user_id=user_id,
                 query=message,
@@ -323,6 +328,7 @@ async def run_query_pipeline(
                 workspace_id=workspace_id,
                 file_id=file_id,
                 top_k=10,
+                accessible_workspace_ids=accessible_ids,
             )
             ctx["chunks"] = len(topK_chunks or [])
             response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)

@@ -90,6 +90,27 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error listing workspaces for user {user_id}: {e}", exc_info=True)
                 return []
 
+    async def accessible_workspace_ids(self, user_id: int) -> List[int]:
+        """Return every workspace id this user may read, owned or joined as staff.
+
+        Document visibility is a property of the workspace, not of whoever
+        uploaded the file. Callers use this to scope queries by workspace rather
+        than by files.user_id, which previously meant an invited staff member
+        saw none of the workspace's documents at all.
+        """
+        async with self.get_async_session() as session:
+            try:
+                owned = select(WorkspaceORM.id).where(WorkspaceORM.user_id == user_id)
+                joined = select(WorkspaceMember.workspace_id).where(
+                    WorkspaceMember.user_id == user_id
+                )
+                owned_ids = [r for r in (await session.execute(owned)).scalars().all()]
+                joined_ids = [r for r in (await session.execute(joined)).scalars().all()]
+                return sorted(set(owned_ids) | set(joined_ids))
+            except Exception as e:
+                logger.error(f"Error listing accessible workspaces for user {user_id}: {e}", exc_info=True)
+                return []
+
     async def get_user_role_in_workspace(self, workspace_id: int, user_id: int) -> Optional[str]:
         """Return the user's role in a workspace ('owner', 'staff') or None if no access."""
         async with self.get_async_session() as session:

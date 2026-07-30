@@ -7,6 +7,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from ..core.utils import get_user_id
+from ..core.limits import resolve_entitlement
 from api.repositories.repository_manager import RepositoryManager
 import asyncio
 # Load environment variables
@@ -57,6 +58,12 @@ async def subscription_status(
         user_id = user_data["user_id"]
         subscription_data = await store.user_repo.get_subscription(user_id)
 
+        # Entitlement is an organization property, not a personal one. A staff
+        # member invited into a paid workspace has no subscription of their own
+        # and must still be treated as entitled, otherwise the frontend sends
+        # them through billing onboarding for an account that already pays.
+        entitlement = await resolve_entitlement(store, user_id)
+
         if not subscription_data:
             return {
                 'subscription_status': 'none',
@@ -67,6 +74,8 @@ async def subscription_status(
                 'trial_end': None,
                 'current_period_end': None,
                 'has_active_payment_method': False,
+                'entitled': entitlement['entitled'],
+                'entitlement_source': entitlement['source'],
             }
 
         # Unpack the tuple (subscription_dict, card_details_dict)
@@ -89,6 +98,8 @@ async def subscription_status(
             'trial_end': trial_end.isoformat() if isinstance(trial_end, datetime) else trial_end,
             'current_period_end': current_period_end.isoformat() if isinstance(current_period_end, datetime) else current_period_end,
             'has_active_payment_method': bool(card_last4 and card_brand),
+            'entitled': entitlement['entitled'],
+            'entitlement_source': entitlement['source'],
         }
 
         return response

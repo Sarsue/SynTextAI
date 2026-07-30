@@ -207,13 +207,22 @@ async def update_workspace(
         # Verify workspace exists and belongs to user
         workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
         workspace = next((ws for ws in workspaces if ws["id"] == workspace_id), None)
-        
+
         if not workspace:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workspace not found or you don't have permission to update it"
             )
-        
+
+        # list_workspaces_for_user returns workspaces this user is a *member* of
+        # as well as ones they own, so membership alone was passing this check
+        # and any invited staff member could rename the owner's workspace.
+        if workspace.get("role") != "owner":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the workspace owner can rename it."
+            )
+
         # Update the workspace
         success = await store.workspace_repo.update_workspace(
             workspace_id=workspace_id,
@@ -276,14 +285,27 @@ async def delete_workspace(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workspace not found or you don't have permission to delete it"
             )
-        
-        # Prevent deleting the last workspace
-        if len(workspaces) <= 1:
+
+        # list_workspaces_for_user includes workspaces this user merely belongs
+        # to, so membership alone was passing this check and an invited staff
+        # member could permanently delete the owner's workspace and, by cascade,
+        # every document in it.
+        if workspace.get("role") != "owner":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the workspace owner can delete it."
+            )
+
+        # Prevent deleting your last *owned* workspace. Counting every workspace
+        # here meant one owned plus one joined looked like two, so an owner could
+        # delete the only workspace they actually have.
+        owned_count = sum(1 for ws in workspaces if ws.get("role") == "owner")
+        if owned_count <= 1:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete your last workspace. Users must have at least one workspace."
             )
-        
+
         # Delete the workspace (files will cascade delete)
         success = await store.workspace_repo.delete_workspace(workspace_id)
         

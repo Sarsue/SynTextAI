@@ -27,6 +27,11 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
     // - premium: active | trialing
     // - free: none (or missing)
     // - restricted: anything else (past_due, unpaid, canceled, etc.)
+    // Deliberately keyed to this user's OWN subscription, not to inherited
+    // entitlement. Quota is a property of the paying account, and a person can
+    // be premium inside someone else's workspace while on the free plan in
+    // their own, so a single global "am I premium" flag cannot answer this.
+    // Once organizations exist this becomes the active org's plan.
     const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
     const isPremium = normalizedStatus === 'active' || normalizedStatus === 'trialing';
     const isFreeUser = normalizedStatus === 'none';
