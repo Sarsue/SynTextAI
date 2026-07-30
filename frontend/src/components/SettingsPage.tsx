@@ -8,6 +8,7 @@ import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
 import { Stripe } from '@stripe/stripe-js';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface SettingsPageProps {
     stripePromise: Promise<Stripe | null>;
@@ -16,7 +17,42 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, setUser, orgContext } = useUserContext();
+    const { darkMode, setDarkMode, setUser, orgContext, activeOrganizationId, setActiveOrganization } = useUserContext();
+    const [orgName, setOrgName] = React.useState('');
+    const [isRenaming, setIsRenaming] = React.useState(false);
+
+    // Seed the field once the organization context arrives.
+    React.useEffect(() => {
+        if (orgContext?.name) setOrgName(orgContext.name);
+    }, [orgContext?.name]);
+
+    const handleRenameOrganization = async () => {
+        const name = orgName.trim();
+        if (!name || !user || !activeOrganizationId) return;
+        setIsRenaming(true);
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/organizations/${activeOrganizationId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ name }),
+            });
+            if (res.ok) {
+                // Re-read the context so the new name is reflected everywhere.
+                await setActiveOrganization(activeOrganizationId);
+            } else {
+                alert('Could not rename the organization. Please try again.');
+            }
+        } catch (e) {
+            console.error('Error renaming organization', e);
+            alert('Could not rename the organization. Please try again.');
+        } finally {
+            setIsRenaming(false);
+        }
+    };
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(
@@ -117,6 +153,52 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                                 user={user}
                                 darkMode={darkMode}
                             />
+                        </div>
+                    </div>
+                )}
+
+                {/* Organization, for owners and admins.
+
+                    Organizations are created with a name derived from the signup
+                    email, so they start out reading as "drsmith's Organization".
+                    That is what teammates see in the chooser and what invite
+                    emails announce, so it needs to be editable here and not only
+                    during onboarding, which is easy to skip. */}
+                {orgContext?.can_rename_organization && (
+                    <div className="settings-section">
+                        <h2 className="section-title">Organization</h2>
+                        <div className="section-content">
+                            <label className="settings-label" htmlFor="org-name-input">
+                                Company name
+                            </label>
+                            <div className="settings-inline-form">
+                                <Input
+                                    id="org-name-input"
+                                    value={orgName}
+                                    onChange={(e) => setOrgName(e.target.value)}
+                                    placeholder="Bayview Dental"
+                                />
+                                <Button
+                                    onClick={handleRenameOrganization}
+                                    disabled={
+                                        isRenaming ||
+                                        !orgName.trim() ||
+                                        orgName.trim() === (orgContext.name || '')
+                                    }
+                                >
+                                    {isRenaming ? 'Saving...' : 'Save'}
+                                </Button>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                                Your team sees this name when you invite them.
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                                {orgContext.seats_used}{' '}
+                                {orgContext.seats_used === 1 ? 'member' : 'members'}
+                                {orgContext.seat_limit
+                                    ? ` of ${orgContext.seat_limit} seats`
+                                    : ''}
+                            </p>
                         </div>
                     </div>
                 )}

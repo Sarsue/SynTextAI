@@ -16,12 +16,14 @@ import { KnownWebSocketMessage, FileStatusUpdatePayload } from './types/websocke
 
 export interface OrgContext {
     organization_id: number;
+    name: string | null;
     role: string;
     subscription_status: string | null;
     entitled: boolean;
     can_manage_billing: boolean;
     can_manage_members: boolean;
     can_manage_documents: boolean;
+    can_rename_organization: boolean;
     seats_used: number;
     seat_limit: number | null;
 }

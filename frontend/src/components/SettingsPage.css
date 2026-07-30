@@ -59,3 +59,24 @@
         max-width: 100%;
     }
 }
+
+/* Company-name control in the Organization section. */
+.settings-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.settings-inline-form {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.settings-inline-form input {
+    flex: 1 1 12rem;
+    min-width: 0;
+}

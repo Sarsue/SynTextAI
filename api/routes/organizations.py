@@ -192,8 +192,14 @@ async def organization_context(
     entitled = (org_status or "none").lower() in {"active", "trialing"}
     is_admin = role in ("owner", "admin")
 
+    memberships = await store.org_repo.get_memberships(user_id)
+    name = next(
+        (m["name"] for m in memberships if m["organization_id"] == organization_id), None
+    )
+
     return {
         "organization_id": organization_id,
+        "name": name,
         "role": role,
         "subscription_status": org_status,
         "entitled": entitled,
@@ -202,6 +208,7 @@ async def organization_context(
         "can_manage_billing": role == "owner",
         "can_manage_members": is_admin,
         "can_manage_documents": is_admin,
+        "can_rename_organization": is_admin,
         "seats_used": await store.org_repo.count_members(organization_id),
         "seat_limit": await store.org_repo.get_seat_limit(organization_id),
     }
