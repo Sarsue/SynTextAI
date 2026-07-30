@@ -115,3 +115,19 @@
 .complete-button {
     margin-left: auto;
 }
+
+/* Company-name question in onboarding step 1. */
+.welcome-label {
+    display: block;
+    margin-top: 20px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    text-align: left;
+}
+
+.welcome-hint {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    opacity: 0.7;
+    text-align: left;
+}

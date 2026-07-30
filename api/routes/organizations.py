@@ -128,6 +128,46 @@ async def create_organization(
     }
 
 
+class RenameOrganizationRequest(BaseModel):
+    name: str
+
+
+@organizations_router.patch("/{organization_id}")
+async def rename_organization(
+    body: RenameOrganizationRequest,
+    organization_id: int = Path(...),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Rename an organization. Owners and admins only.
+
+    Organizations are created with a name derived from the signup email, which
+    reads as "drsmith's Organization". That name is what members see in the
+    chooser and what invite emails announce, so it should be the company's
+    actual name. Onboarding asks for it and calls this.
+    """
+    user_id = user_data["user_id"]
+    role = await store.org_repo.get_role(organization_id, user_id)
+    if role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an owner or admin can rename the organization.",
+        )
+
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Organization name is required."
+        )
+
+    if not await store.org_repo.rename_organization(organization_id, name):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not rename organization.",
+        )
+    return {"organization_id": organization_id, "name": name}
+
+
 @organizations_router.get("/{organization_id}/context")
 async def organization_context(
     organization_id: int = Path(...),

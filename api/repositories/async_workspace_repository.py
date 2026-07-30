@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from .async_base_repository import AsyncBaseRepository
 from ..models import Workspace as WorkspaceORM
-from ..models.orm_models import WorkspaceMember, WorkspaceInvite, User as UserORM
+from ..models.orm_models import WorkspaceMember, WorkspaceInvite, Organization, User as UserORM
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -395,18 +395,22 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
         async with self.get_async_session() as session:
             try:
                 stmt = (
-                    select(WorkspaceInvite, WorkspaceORM)
+                    select(WorkspaceInvite, WorkspaceORM, Organization.name)
                     .join(WorkspaceORM, WorkspaceORM.id == WorkspaceInvite.workspace_id)
+                    .outerjoin(Organization, Organization.id == WorkspaceORM.organization_id)
                     .where(WorkspaceInvite.token == token)
                 )
                 row = (await session.execute(stmt)).one_or_none()
                 if not row:
                     return None
-                invite, workspace = row
+                invite, workspace, organization_name = row
                 return {
                     "id": invite.id,
                     "workspace_id": invite.workspace_id,
                     "workspace_name": workspace.name,
+                    # People are joining a company, not a folder, so the invite
+                    # should say the organization's name.
+                    "organization_name": organization_name,
                     "email": invite.email,
                     "token": invite.token,
                     "status": invite.status,

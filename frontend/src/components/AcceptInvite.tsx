@@ -9,6 +9,7 @@ type InviteStatus = 'loading' | 'ready' | 'invalid' | 'accepting' | 'done' | 'er
 interface InviteInfo {
     workspace_id: number;
     workspace_name: string;
+    organization_name?: string | null;
     email: string;
     status: string;
 }
@@ -93,7 +94,7 @@ const AcceptInvite: React.FC = () => {
             <div className="auth-page">
                 <div className="invite-card">
                     <h2 className="invite-title">You're in</h2>
-                    <p className="invite-sub">You've joined <strong>{inviteInfo?.workspace_name}</strong>. Redirecting...</p>
+                    <p className="invite-sub">You've joined <strong>{inviteInfo?.organization_name || inviteInfo?.workspace_name}</strong>. Redirecting...</p>
                 </div>
             </div>
         );
@@ -104,10 +105,10 @@ const AcceptInvite: React.FC = () => {
             <div className="invite-card">
                 <h2 className="invite-title">You've been invited</h2>
                 <p className="invite-sub">
-                    Join <strong>{inviteInfo?.workspace_name}</strong> on Syntext
+                    Join <strong>{inviteInfo?.organization_name || inviteInfo?.workspace_name}</strong> on Syntext
                 </p>
                 {!user && (
-                    <p className="invite-hint">You'll be asked to sign in first.</p>
+                    <p className="invite-hint">You'll be asked to sign in first. No account needed, and nothing to pay: your team's plan covers you.</p>
                 )}
                 <Button
                     variant="outline"

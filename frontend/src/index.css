@@ -266,6 +266,27 @@ header, footer {
     margin-top: 16px;
 }
 
+/* Inline "Sign up" / "Sign in" toggle inside the hint line. */
+.auth-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.auth-link:hover {
+    opacity: 0.75;
+}
+
+/* The invite-link note: present but not competing with the primary action. */
+.auth-hint-quiet {
+    margin-top: 6px;
+    opacity: 0.7;
+}
+
 /* ─── Invite page ──────────────────────────────────────────────────────── */
 .invite-card {
     width: 100%;

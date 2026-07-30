@@ -86,6 +86,8 @@ class PendingInviteResponse(BaseModel):
 class InviteInfoResponse(BaseModel):
     workspace_id: int
     workspace_name: str
+    # People join a company, not a folder, so the landing page names this.
+    organization_name: Optional[str] = None
     email: str
     status: str
 
@@ -445,6 +447,7 @@ async def get_invite_info(
     return {
         "workspace_id": invite["workspace_id"],
         "workspace_name": invite["workspace_name"],
+        "organization_name": invite.get("organization_name"),
         "email": invite["email"],
         "status": invite["status"],
     }

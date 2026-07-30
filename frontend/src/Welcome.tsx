@@ -4,13 +4,46 @@ import { useUserContext } from './UserContext';
 import { usePostHog } from './components/AnalyticsProvider';
 import './Welcome.css';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 const Welcome: React.FC = () => {
     const navigate = useNavigate();
-    const { user, darkMode } = useUserContext();
+    const { user, darkMode, activeOrganizationId } = useUserContext();
     const [step, setStep] = useState(1);
+    const [companyName, setCompanyName] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
     const posthog = usePostHog();
     const totalSteps = 3;
+
+    /**
+     * Save the company name onto the organization created at signup.
+     *
+     * The organization already exists, so this renames rather than creates:
+     * that avoids a half-made account if someone abandons onboarding, and it
+     * means skipping simply leaves the generated name in place.
+     */
+    const saveCompanyName = async () => {
+        const name = companyName.trim();
+        if (!name || !user || !activeOrganizationId) return;
+        setIsSaving(true);
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/organizations/${activeOrganizationId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ name }),
+            });
+            if (!res.ok) console.warn('Could not save company name');
+        } catch (e) {
+            // Onboarding should never be blocked by this; the generated name stands.
+            console.error('Error saving company name', e);
+        } finally {
+            setIsSaving(false);
+        }
+    };
     
     useEffect(() => {
         // If no user is authenticated, redirect to home
@@ -22,7 +55,10 @@ const Welcome: React.FC = () => {
         posthog.capture('onboarding_started');
     }, [user, navigate, posthog]);
     
-    const handleNext = () => {
+    const handleNext = async () => {
+        if (step === 1) {
+            await saveCompanyName();
+        }
         if (step < totalSteps) {
             setStep(step + 1);
             posthog.capture('onboarding_step', { step: step + 1 });
@@ -61,7 +97,23 @@ const Welcome: React.FC = () => {
                             <p>
                                 Syntext AI turns your company documents into an instant knowledge base your whole team can use.
                             </p>
-                            <p>Let's get you set up in two quick steps.</p>
+                            {/* Organizations are created with a name derived from the
+                                signup email, which reads as "drsmith's Organization".
+                                That is what teammates see in invite emails and in the
+                                organization chooser, so ask for the real one now. */}
+                            <label className="welcome-label" htmlFor="org-name">
+                                What's your company called?
+                            </label>
+                            <Input
+                                id="org-name"
+                                value={companyName}
+                                onChange={(e) => setCompanyName(e.target.value)}
+                                placeholder="Bayview Dental"
+                                autoFocus
+                            />
+                            <p className="welcome-hint">
+                                Your team will see this name when you invite them. You can change it later.
+                            </p>
                         </div>
                     )}
 
@@ -98,8 +150,8 @@ const Welcome: React.FC = () => {
                             <Button variant="ghost" className="skip-button" onClick={handleSkip}>
                                 Skip Tour
                             </Button>
-                            <Button onClick={handleNext}>
-                                Next
+                            <Button onClick={handleNext} disabled={isSaving}>
+                                {isSaving ? 'Saving...' : 'Next'}
                             </Button>
                         </>
                     ) : (

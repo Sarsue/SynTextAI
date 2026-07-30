@@ -40,6 +40,12 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const navigate = useNavigate();
   const { user, subscriptionStatus, authLoading } = useUserContext();
   const [isSigningIn, setIsSigningIn] = useState(false);
+  // Sign up and sign in are the same Google call underneath. The distinction is
+  // about intent and about having somewhere to explain what is going to happen,
+  // not about enforcement: whether an account is new is decided by Firebase, and
+  // whether an organization gets created is decided on the backend by looking
+  // for a pending invite. So these are honest labels, not gates.
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const isLoggingOut = useRef(false);
   const { capture, reset: resetAnalytics } = useAnalytics();
 
@@ -182,14 +188,18 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
       {!user ? (
         <div className="auth-card">
           <h1 className="auth-title">Syntext</h1>
-          <p className="auth-sub">Sign in to your workspace</p>
+          <p className="auth-sub">
+            {mode === 'signup'
+              ? 'Create an account for your company'
+              : 'Sign in to your workspace'}
+          </p>
           <Button
             variant="outline"
             className="auth-google-btn w-full"
             onClick={signInWithGoogle}
             disabled={isSigningIn}
           >
-            {isSigningIn ? 'Signing in...' : (
+            {isSigningIn ? (mode === 'signup' ? 'Creating account...' : 'Signing in...') : (
               <>
                 <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
                   <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
@@ -197,11 +207,30 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
                   <path d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707 0-.593.102-1.17.282-1.709V4.958H.957C.347 6.173 0 7.548 0 9c0 1.452.348 2.827.957 4.042l3.007-2.335z" fill="#FBBC05"/>
                   <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.462.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
                 </svg>
-                Continue with Google
+                {mode === 'signup' ? 'Sign up with Google' : 'Continue with Google'}
               </>
             )}
           </Button>
-          <p className="auth-hint">New users are automatically signed up</p>
+          <p className="auth-hint">
+            {mode === 'signup' ? (
+              <>
+                Already have an account?{' '}
+                <button type="button" className="auth-link" onClick={() => setMode('signin')}>
+                  Sign in
+                </button>
+              </>
+            ) : (
+              <>
+                Starting a new company?{' '}
+                <button type="button" className="auth-link" onClick={() => setMode('signup')}>
+                  Sign up
+                </button>
+              </>
+            )}
+          </p>
+          <p className="auth-hint auth-hint-quiet">
+            Joining a team? Use the invite link your colleague sent you.
+          </p>
         </div>
       ) : (
         <Button onClick={logOut} disabled={isLoggingOut.current}>

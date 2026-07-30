@@ -49,6 +49,22 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 logger.error(f"Error creating organization '{name}': {e}", exc_info=True)
                 return None
 
+    async def rename_organization(self, organization_id: int, name: str) -> bool:
+        """Rename an organization. Authorization is the caller's responsibility."""
+        async with self.get_async_session() as session:
+            try:
+                org = await session.get(Organization, organization_id)
+                if not org:
+                    return False
+                org.name = name
+                await session.commit()
+                logger.info(f"Renamed organization {organization_id} to '{name}'")
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error renaming organization {organization_id}: {e}", exc_info=True)
+                return False
+
     async def get_memberships(self, user_id: int) -> List[Dict[str, Any]]:
         """Every organization this user belongs to, with their role in each."""
         async with self.get_async_session() as session:
