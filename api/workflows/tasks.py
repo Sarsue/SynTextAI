@@ -409,6 +409,30 @@ async def delete_user_task(user_id: str, user_gc_id: str):
             return_exceptions=True
         )
 
+        # Organizations this user solely owns would otherwise survive as
+        # zombies: organization_members cascades away with the user, but the
+        # organization row itself does not, leaving a tenant with no owner and,
+        # if the id is still cached client-side, one that a later signup can
+        # resolve back to.
+        try:
+            for m in await store.org_repo.get_memberships(int(user_id)):
+                if m["role"] != "owner":
+                    continue
+                org_id = m["organization_id"]
+                others = [
+                    x for x in await store.org_repo.list_members(org_id)
+                    if x["user_id"] != int(user_id)
+                ]
+                if not others:
+                    await store.org_repo.delete_organization(org_id)
+                    logger.info(f"Deleted organization {org_id}, its last owner is gone")
+                else:
+                    logger.info(
+                        f"Organization {org_id} kept: {len(others)} other member(s) remain"
+                    )
+        except Exception as org_error:
+            logger.error(f"Error cleaning up organizations for user {user_id}: {org_error}", exc_info=True)
+
         success = await store.user_repo.delete_user_account(user_id)
         if success:
             logger.info(f"User account {user_id} deleted successfully")

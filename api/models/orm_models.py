@@ -43,9 +43,28 @@ class Organization(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    members = relationship("OrganizationMember", back_populates="organization", cascade="all, delete-orphan")
-    workspaces = relationship("Workspace", back_populates="organization")
-    subscriptions = relationship("Subscription", back_populates="organization")
+    # passive_deletes lets Postgres' ON DELETE CASCADE do the work. Without it
+    # SQLAlchemy tries to NULL the child foreign keys first, which fails against
+    # the NOT NULL constraint on workspaces.organization_id and silently aborts
+    # the whole delete.
+    members = relationship(
+        "OrganizationMember",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    workspaces = relationship(
+        "Workspace",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    subscriptions = relationship(
+        "Subscription",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class OrganizationMember(Base):

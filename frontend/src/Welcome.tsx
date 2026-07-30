@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 
 const Welcome: React.FC = () => {
     const navigate = useNavigate();
-    const { user, darkMode, activeOrganizationId } = useUserContext();
+    const { user, darkMode, activeOrganizationId, setActiveOrganization } = useUserContext();
     const [step, setStep] = useState(1);
     const [companyName, setCompanyName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -24,11 +24,35 @@ const Welcome: React.FC = () => {
      */
     const saveCompanyName = async () => {
         const name = companyName.trim();
-        if (!name || !user || !activeOrganizationId) return;
+        if (!name || !user) return;
         setIsSaving(true);
         try {
             const idToken = await user.getIdToken();
-            const res = await fetch(`/api/v1/organizations/${activeOrganizationId}`, {
+
+            // Onboarding runs straight after signup, before the organization
+            // chooser has had a chance to set an active one, so this cannot
+            // assume activeOrganizationId is populated. It previously did, and
+            // silently returned early, which is why the name never saved.
+            let orgId = activeOrganizationId;
+            if (!orgId) {
+                const listed = await fetch('/api/v1/organizations', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (listed.ok) {
+                    const data = await listed.json();
+                    const owned = (data.items || []).find((o: any) => o.role === 'owner');
+                    if (owned) {
+                        orgId = owned.organization_id;
+                        await setActiveOrganization(orgId!);
+                    }
+                }
+            }
+            if (!orgId) {
+                console.warn('No organization to name yet');
+                return;
+            }
+
+            const res = await fetch(`/api/v1/organizations/${orgId}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',

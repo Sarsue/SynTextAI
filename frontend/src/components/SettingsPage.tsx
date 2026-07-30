@@ -17,9 +17,13 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, setUser, orgContext, activeOrganizationId, setActiveOrganization } = useUserContext();
+    const { darkMode, setDarkMode, setUser, orgContext, activeOrganizationId, setActiveOrganization, clearActiveOrganization } = useUserContext();
     const [orgName, setOrgName] = React.useState('');
     const [isRenaming, setIsRenaming] = React.useState(false);
+
+    // /chat is gated on the organization being entitled, so closing settings is
+    // only meaningful once it is.
+    const canLeaveSettings = Boolean(orgContext?.entitled);
 
     // Seed the field once the organization context arrives.
     React.useEffect(() => {
@@ -91,6 +95,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
 
             if (response.ok) {
                 alert("✅ Your account has been successfully deleted.");
+                // The active organization is persisted, so without clearing it
+                // a fresh signup would resolve back to the deleted account's
+                // organization.
+                clearActiveOrganization();
                 setUser(null);  // Assuming setUser is available from your UserContext
                 navigate('/');
             } else {
@@ -107,18 +115,34 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
 
     return (
         <div className={`settings-container ${darkMode ? 'dark-mode' : ''}`}>
-            {/* Close Button */}
-            <Button
-                variant="ghost"
-                size="icon-sm"
-                className="close-button"
-                onClick={() => navigate('/chat')}
-            >
-                <X className="size-4" />
-            </Button>
+            {/* Close, only when there is somewhere to go.
+
+                /chat requires the organization to be entitled, so before a trial
+                exists this button navigated to /chat and was bounced straight
+                back here. It read as an unresponsive button when it was really a
+                redirect loop. Hide it until closing actually leads somewhere, and
+                say why below. */}
+            {canLeaveSettings && (
+                <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="close-button"
+                    onClick={() => navigate('/chat')}
+                >
+                    <X className="size-4" />
+                </Button>
+            )}
 
             {/* Settings Content */}
             <div className="settings-content">
+                {!canLeaveSettings && (
+                    <div className="settings-section">
+                        <p className="text-sm text-muted-foreground">
+                            Start your trial below to open your workspace. Nothing is
+                            charged today.
+                        </p>
+                    </div>
+                )}
                 {/* Payment, owners only.
 
                     An invited member has no subscription of their own: their

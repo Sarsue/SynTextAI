@@ -65,6 +65,22 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 logger.error(f"Error renaming organization {organization_id}: {e}", exc_info=True)
                 return False
 
+    async def delete_organization(self, organization_id: int) -> bool:
+        """Delete an organization and everything cascading from it."""
+        async with self.get_async_session() as session:
+            try:
+                org = await session.get(Organization, organization_id)
+                if not org:
+                    return False
+                await session.delete(org)
+                await session.commit()
+                logger.info(f"Deleted organization {organization_id}")
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error deleting organization {organization_id}: {e}", exc_info=True)
+                return False
+
     async def get_memberships(self, user_id: int) -> List[Dict[str, Any]]:
         """Every organization this user belongs to, with their role in each."""
         async with self.get_async_session() as session:

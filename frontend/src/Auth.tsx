@@ -143,8 +143,12 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
     isLoggingOut.current = true;
     
     try {
-      // Clear storage
+      // Clear storage. localStorage matters too: the active organization is
+      // persisted there so a refresh does not re-ask, and leaving it behind
+      // meant a deleted or switched account signed back in still pointing at
+      // the previous account's organization.
       sessionStorage.clear();
+      localStorage.removeItem('active_organization_id');
       
       // Clear cookies
       document.cookie.split(';').forEach(cookie => {
