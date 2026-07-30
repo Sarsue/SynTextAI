@@ -328,6 +328,96 @@ Genuinely still open, roughly in value order:
 Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
 
 **Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
+
+**2a. Compiled knowledge layer (agreed 2026-07-30, first Tier 2 item).**
+
+A distilled, entity-centric layer between raw chunks and the query. Adapted from
+the "LLM wiki" pattern circulating publicly, with the token-savings argument
+discarded and the citation model inverted.
+
+*Why the usual pitch does not apply here:* that pattern sells a 70-90% token
+reduction, measured against re-uploading whole documents every session. We
+already retrieve at a 3000-token budget through hybrid search and reranking, so
+that saving is mostly already banked. Adopting this for cost reasons would be
+cargo-culting.
+
+*Why it is worth doing anyway,* and why it leads Tier 2:
+
+- **Contradiction detection.** A 2023 handbook and a 2025 memo disagree about a
+  sterilization setting. Chunk retrieval returns whichever ranks higher and
+  answers with confidence. It has no notion that two sources conflict or that
+  one is newer. For dental, legal and accounting, "your documents disagree about
+  X, here is both, dated" is a compliance finding and is often worth more than
+  the answer. No competitor in [[competitive-landscape]] markets this.
+- **Cross-document synthesis.** "What is our onboarding process" may span an SOP,
+  a checklist and a policy email. Chunks are extractive; a concept layer merges.
+
+*The critical modification.* In the original pattern, answers cite wiki pages.
+For our customers that is a downgrade: an audited dental practice needs the
+citation to resolve to page 14 of the real protocol, not to a summary an AI
+wrote. So concepts are a **routing and reasoning layer and never the citation
+target**. Retrieval consults concepts to decide what is relevant and whether
+sources conflict, then pulls the underlying segments so citations still point at
+source documents. The citation guarantee is the product; do not trade it for
+elegance.
+
+Shape, tenant-scoped from the start:
+
+```
+concepts         id, organization_id, title, summary, embedding
+concept_sources  concept_id -> segment_id      (provenance, many-to-one)
+concept_links    concept_id <-> concept_id     (relation, incl. contradiction)
+```
+
+*Prior art in our own history.* `generate_key_concepts` did most of this already:
+concept extraction with source references, deduplication, reference validation.
+It fed flashcards and quizzes and was never wired to retrieval, so it was removed
+as dead EdTech code in `f0a45b2` on 2026-07-29. Recover the extraction and dedup
+logic from there rather than writing it fresh.
+
+*Cost, honestly.* Compilation costs LLM calls at ingest, roughly 30-50 concepts
+for a 50-page document. That is real money per upload against an ingestion path
+we just made cheap. Make it opt-in per workspace, or compile lazily for documents
+that actually get queried. It is not a free layer.
+
+**2b. Self-hosted inference and the on-prem edition (agreed 2026-07-30).**
+
+`gradient_chat` posts OpenAI-shaped payloads to `{INFERENCE_BASE_URL}/chat/completions`
+and embeddings to `{DO_EMBEDDINGS_URL}/embeddings`. vLLM serves exactly those
+endpoints, so **switching to self-hosted models is a config change, not a code
+change**: point `INFERENCE_BASE_URL` and `MODEL_CHAT_ID` at a vLLM server. This
+was accidental good design and is worth preserving deliberately: never let
+provider-specific calls leak past `llm_service.py`.
+
+Why it matters commercially: dental (HIPAA), legal (privilege) and accounting all
+have customers for whom "your documents never leave your building" closes deals
+that hosted inference cannot. An on-prem edition is a genuine differentiator and
+supports premium pricing.
+
+Constraints to size honestly before committing:
+
+- **Model choice is the hard part, not the plumbing.** Very large mixture-of-
+  experts models are not "cheapest GPU available" even heavily quantized; they
+  need hundreds of GB of VRAM. A mid-sized quantized open model on a single
+  serious GPU is the realistic starting point. Benchmark answer quality against
+  the current hosted model on real customer questions before switching, because
+  citation fidelity is the product.
+- **On-prem multiplies support burden** for a one-person company: every customer
+  runs a different box. Price it accordingly, and consider it a later-stage
+  offering sold to a small number of larger accounts.
+- **Audio transcription is a separate decision.** Whisper would run well on the
+  same GPU, but video and audio ingestion was deliberately removed on 2026-07-29
+  and the efficiency review named it the largest cost sink. Re-adding it is a
+  product call, not a consequence of self-hosting.
+
+*What not to do:* moving orchestration into a general agent harness. The worker's
+tenant scoping, per-user fairness, lease reclaim and separated query/ingest
+budgets were built on 2026-07-29 precisely because a naive loop got all of them
+wrong. Swapping the model provider is nearly free; rewriting the orchestration
+would discard that work and reintroduce those bugs. Keep the harness idea for
+the concept-compilation step, which is genuinely agentic, and leave the job queue
+alone.
+
 10. Google Drive / SharePoint sync
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
