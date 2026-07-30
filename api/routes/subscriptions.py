@@ -48,6 +48,21 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
     logger.info(f"Authenticated user_id: {user_id}")
     return {"user_id": user_id, "user_info": user_info}
 
+async def _billing_organization_id(store: RepositoryManager, user_id: int) -> Optional[int]:
+    """The organization this subscription belongs to.
+
+    Subscriptions are read back by organization, so anything written without
+    one leaves the tenant looking unpaid: the customer starts a trial and is
+    immediately locked out of the app they just subscribed to. Owners and admins
+    are the only roles that can be billing for a tenant.
+    """
+    memberships = await store.org_repo.get_memberships(user_id)
+    for m in memberships:
+        if m["role"] in ("owner", "admin"):
+            return m["organization_id"]
+    return None
+
+
 # Route to get subscription status
 @subscriptions_router.get("/status")
 async def subscription_status(
@@ -160,6 +175,7 @@ async def start_trial(
             # Store the subscription in the database with the 'trial' status
             await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
+                organization_id=await _billing_organization_id(store, user_id),
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription["status"],
@@ -291,6 +307,7 @@ async def create_subscription(
             # Store the subscription in the database
             await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
+                organization_id=await _billing_organization_id(store, user_id),
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription.status,
@@ -320,6 +337,7 @@ async def create_subscription(
             logger.info(f"Card declined for user {user_id}: {e.user_message or e}")
             await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
+                organization_id=await _billing_organization_id(store, user_id),
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=None,
                 status="none",
@@ -330,6 +348,7 @@ async def create_subscription(
             logger.error(f"Error creating subscription for user {user_id}: {e}", exc_info=True)
             await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
+                organization_id=await _billing_organization_id(store, user_id),
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=None,
                 status="none",

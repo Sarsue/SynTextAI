@@ -117,7 +117,8 @@ class AsyncUserRepository(AsyncBaseRepository):
         card_last4=None,
         card_type=None,
         exp_month=None,
-        exp_year=None
+        exp_year=None,
+        organization_id: Optional[int] = None,
     ) -> bool:
         """Add or update a user subscription.
 
@@ -156,6 +157,10 @@ class AsyncUserRepository(AsyncBaseRepository):
                     existing_sub.stripe_customer_id = stripe_customer_id
                     existing_sub.stripe_subscription_id = stripe_subscription_id
                     existing_sub.status = status
+                    # Repair the link on rows written before subscriptions moved
+                    # to organizations.
+                    if organization_id and not existing_sub.organization_id:
+                        existing_sub.organization_id = organization_id
                     if current_period_end:
                         existing_sub.current_period_end = current_period_end
                     if trial_end:
@@ -191,6 +196,11 @@ class AsyncUserRepository(AsyncBaseRepository):
                     # Create new subscription
                     new_sub = SubscriptionORM(
                         user_id=user_id,
+                        # The organization is what pays. Entitlement is read by
+                        # organization, so a subscription without one leaves the
+                        # tenant looking unpaid and locks the customer out of the
+                        # app they just subscribed to.
+                        organization_id=organization_id,
                         stripe_customer_id=stripe_customer_id,
                         stripe_subscription_id=stripe_subscription_id,
                         status=status,
