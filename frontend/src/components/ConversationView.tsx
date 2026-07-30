@@ -12,10 +12,12 @@ import { Button } from '@/components/ui/button';
 interface ConversationViewProps {
     files: UploadedFile[];
     history: History | null;
+    /** A question has been queued and its answer has not arrived yet. */
+    awaitingReply?: boolean;
     onCopy: (message: Message) => void;
 }
 
-const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onCopy }) => {
+const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awaitingReply = false, onCopy }) => {
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     // The whole value of a citation is landing on the cited page. The click
     // handler parsed the URL but kept only the matched file record, whose
@@ -23,12 +25,37 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
     // ever saw it and every citation opened the document at page 1.
     const [selectedFragment, setSelectedFragment] = useState<string>('');
     const [fileError, setFileError] = useState<string | null>(null);
-    const { darkMode } = useUserContext();
+    const [isOpeningFile, setIsOpeningFile] = useState(false);
+    const { darkMode, user } = useUserContext();
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
+    // Documents are private in storage, so file_url identifies a document but
+    // does not grant access to it. Ask the API for a short-lived URL at the
+    // moment of opening: authorization is then checked per view against the
+    // document's workspace, and a citation copied out of an answer stays a
+    // stable reference rather than becoming a working link to a private file.
+    const resolveAccessUrl = async (fileId: number): Promise<string | null> => {
+        if (!user) return null;
+        try {
+            const token = await user.getIdToken();
+            const response = await fetch(`api/v1/files/${fileId}/access-url`, {
+                headers: { Authorization: `Bearer ${token}` },
+                mode: 'cors',
+                credentials: 'include',
+            });
+            if (!response.ok) return null;
+            const data = await response.json();
+            return typeof data?.url === 'string' ? data.url : null;
+        } catch {
+            return null;
+        }
+    };
+
     useEffect(() => {
+        // Also on awaitingReply, or the indicator appears below the fold and the
+        // wait looks exactly as silent as it did before.
         scrollToBottom();
-    }, [history]);
+    }, [history, awaitingReply]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -55,11 +82,19 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
                 );
 
                 if (matchingFile) {
-                    // Found the file in our system
-                    setSelectedFile(matchingFile);
-                    setSelectedFragment(fragment);
+                    // Found the file in our system. Its stored URL is an
+                    // identity, not a readable link, so swap in a freshly
+                    // signed one before handing it to the viewer.
                     setFileError(null);
-                    console.log(`Found file: ${matchingFile.file_name} (${matchingFile.id})`);
+                    setIsOpeningFile(true);
+                    const accessUrl = await resolveAccessUrl(matchingFile.id);
+                    setIsOpeningFile(false);
+                    if (!accessUrl) {
+                        setFileError(`Could not open ${matchingFile.file_name}. You may no longer have access to it.`);
+                        return;
+                    }
+                    setSelectedFile({ ...matchingFile, file_url: accessUrl });
+                    setSelectedFragment(fragment);
                 } else {
                     // Determine the file type based on extension
                     let fileType: "audio" | "video" | "image" | "text" | "pdf" = "text"; // Default to text
@@ -189,6 +224,21 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
                     </div>
                 );
             })}
+
+            {isOpeningFile && (
+                <div className="opening-file-notice" aria-live="polite">Opening document…</div>
+            )}
+
+            {awaitingReply && (
+                <div className="chat-message received thinking-message" aria-live="polite">
+                    <div className="thinking-indicator">
+                        <span className="thinking-dots" aria-hidden="true">
+                            <i /><i /><i />
+                        </span>
+                        <span className="thinking-label">Reading your documents…</span>
+                    </div>
+                </div>
+            )}
 
             {fileError && <div className="error-message">{fileError}</div>}
             {selectedFile && (

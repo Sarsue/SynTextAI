@@ -7,6 +7,8 @@ from llama_index.core.node_parser import SentenceSplitter as RecursiveTextSplitt
 from tiktoken import get_encoding
 import json
 from typing import Dict, List, Any, Optional, Tuple
+from datetime import timedelta
+from urllib.parse import urlparse, unquote
 
 
 
@@ -15,6 +17,69 @@ logger = logging.getLogger(__name__)
 
 
 bucket_name = 'docsynth-fbb02.appspot.com'
+
+# Uploaded documents are private. The canonical URL below is the stable identity
+# stored in files.file_url and baked into the citations of saved answers; it is
+# deliberately NOT fetchable. Access goes through a short-lived signed URL minted
+# per request, after the caller's workspace access has been checked.
+GCS_PUBLIC_HOST = 'https://storage.googleapis.com'
+CREDENTIALS_PATH = '/app/api/config/credentials.json'
+
+# Long enough to read a document, short enough that a leaked link is a
+# non-event. Refreshed every time the viewer opens a file.
+SIGNED_URL_TTL = timedelta(minutes=30)
+
+
+def _gcs_client():
+    return storage.Client.from_service_account_json(CREDENTIALS_PATH)
+
+
+def canonical_gcs_url(object_path: str) -> str:
+    """Stable, unauthenticated-but-unreadable identity for a stored object."""
+    return f"{GCS_PUBLIC_HOST}/{bucket_name}/{object_path}"
+
+
+def object_path_from_url(file_url: str) -> Optional[str]:
+    """Recover the bucket-relative object path from a stored file_url.
+
+    Tolerates the historical shapes: the storage.googleapis.com form written
+    today and the appspot.com virtual-host form some older rows carry.
+    """
+    if not file_url:
+        return None
+    for prefix in (
+        f"{GCS_PUBLIC_HOST}/{bucket_name}/",
+        f"https://{bucket_name}.storage.googleapis.com/",
+        f"https://storage.cloud.google.com/{bucket_name}/",
+    ):
+        if file_url.startswith(prefix):
+            return unquote(urlparse(file_url[len(prefix):]).path)
+    return None
+
+
+def generate_signed_url(file_url: str, ttl: timedelta = SIGNED_URL_TTL) -> Optional[str]:
+    """Mint a short-lived read URL for a stored object.
+
+    Returns None rather than raising: a file whose URL cannot be signed should
+    surface as "can't open this" in the viewer, not a 500 on the whole request.
+    """
+    object_path = object_path_from_url(file_url)
+    if not object_path:
+        logger.warning("Cannot sign unrecognised file_url: %s", file_url)
+        return None
+    try:
+        blob = _gcs_client().bucket(bucket_name).blob(object_path)
+        return blob.generate_signed_url(
+            version="v4",
+            expiration=ttl,
+            method="GET",
+            # Without this the browser downloads instead of rendering, which
+            # breaks the #page=N citation anchor.
+            response_disposition="inline",
+        )
+    except Exception as e:
+        logger.error(f"Error signing URL for {object_path}: {e}")
+        return None
 
 def decode_firebase_token(token):
     try:
@@ -111,17 +176,28 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
             while chunk := await file.read(1024 * 1024):  # Read in 1MB chunks
                 gcs_file.write(chunk)
                 
-        # Set the content type and other metadata
+        # Set the content type and other metadata.
+        #
+        # This used to be blob.metadata = {'Content-Disposition': 'inline'},
+        # which writes the *custom metadata* key x-goog-meta-Content-Disposition
+        # and has no effect on how a browser treats the response. The real
+        # header is content_disposition.
         blob.content_type = content_type
-        blob.metadata = {'Content-Disposition': 'inline'}
+        blob.content_disposition = 'inline'
         blob.patch()
 
-        # Optionally make the file public
-        blob.make_public()
-
-        public_url = blob.public_url
-        logger.info(f"Successfully uploaded {filename} to GCS with content type {content_type}: {public_url}")
-        return public_url  
+        # Deliberately NOT public.
+        #
+        # blob.make_public() used to run here, so every uploaded document was
+        # world-readable to anyone holding the URL — no session, no credentials.
+        # The URL leaks through copied citations, browser history, referrer
+        # headers and forwarded answers, and the customers this is sold to
+        # upload patient records, privileged files and tax documents. Reads now
+        # go through generate_signed_url() after an access check.
+        object_path = f"{user_gc_id}/{filename}"
+        url = canonical_gcs_url(object_path)
+        logger.info(f"Successfully uploaded {filename} to GCS with content type {content_type}: {url}")
+        return url
 
     except Exception as e:
         logger.error(f"Error uploading {filename} to GCS: {e}")

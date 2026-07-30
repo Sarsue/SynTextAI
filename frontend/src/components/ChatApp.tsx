@@ -101,6 +101,37 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const [activeTab, setActiveTab] = useState("chat"); 
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [isSending, setIsSending] = useState(false);
+    // isSending only covers the POST, which returns as soon as the question is
+    // queued. The answer arrives later over the websocket, so between those two
+    // moments the UI had nothing to say and the app looked like it had simply
+    // eaten the question. This tracks the wait itself, per conversation, so the
+    // indicator appears in the thread the answer belongs to.
+    const [awaitingReplyFor, setAwaitingReplyFor] = useState<number | null>(null);
+    const awaitingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // A websocket that drops leaves the browser waiting on an event that will
+    // never come, which is how "Sending..." got stuck forever. Give the wait a
+    // deadline and say so, rather than spinning indefinitely.
+    const startAwaitingReply = useCallback((historyId: number) => {
+        if (awaitingTimeoutRef.current) clearTimeout(awaitingTimeoutRef.current);
+        setAwaitingReplyFor(historyId);
+        awaitingTimeoutRef.current = setTimeout(() => {
+            setAwaitingReplyFor(null);
+            addToast('Still working on that answer. Refresh to see it once it lands.', 'error');
+        }, 180000);
+    }, [addToast]);
+
+    const stopAwaitingReply = useCallback(() => {
+        if (awaitingTimeoutRef.current) {
+            clearTimeout(awaitingTimeoutRef.current);
+            awaitingTimeoutRef.current = null;
+        }
+        setAwaitingReplyFor(null);
+    }, []);
+
+    useEffect(() => () => {
+        if (awaitingTimeoutRef.current) clearTimeout(awaitingTimeoutRef.current);
+    }, []);
 
     // Placeholder chat handlers - implement actual logic as needed
     const handleSendMessage = async (messageContent: string, historyId: number | null, attachments?: File[]) => {
@@ -161,8 +192,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             },
         }));
         setIsSending(false);
+        stopAwaitingReply();
         clearIncomingChatMessage();
-    }, [incomingChatMessage, currentHistory, clearIncomingChatMessage]);
+    }, [incomingChatMessage, currentHistory, clearIncomingChatMessage, stopAwaitingReply]);
 
     // Load the conversation list.
     //
@@ -564,6 +596,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             const existing = prev[target] || { id: target, title: message, messages: [] };
             return { ...prev, [target]: { ...existing, messages: [...existing.messages, ...toAppend] } };
         });
+
+        // The question is queued; the answer is on its way over the websocket.
+        startAwaitingReply(target);
     };
 
     const handleNewChat = async () => {
@@ -742,10 +777,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }
     }, [deleteFileFromContext, addToast]);
 
-    const handleFileClick = useCallback((file: UploadedFile) => {
+    const handleFileClick = useCallback(async (file: UploadedFile) => {
         trackAction(AnalyticsEvents.FILE_VIEW_CLICKED, 'file_management', `file_id: ${file.id}, name: ${file.file_name}, type: ${file.file_type}`);
-        setSelectedFile(file);
-    }, [setSelectedFile]);
+        // file_url identifies the document but does not grant access to it, so
+        // the viewer needs a URL minted for this user, for this view.
+        const response = await callApiWithToken(`api/v1/files/${file.id}/access-url`, 'GET');
+        const data = response?.ok ? await response.json().catch(() => null) : null;
+        if (!data?.url) {
+            addToast(`Could not open ${file.file_name}.`, 'error');
+            return;
+        }
+        setSelectedFile({ ...file, file_url: data.url });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [setSelectedFile, addToast]);
 
     const handleCloseFileViewer = () => {
                 if (selectedFile) {
@@ -775,7 +819,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             <div className="layout-container">
                 <aside className={`sidebar-left knowledge-column ${activeTab === 'knowledge' ? 'active' : ''}`}>
                     <KnowledgeBaseComponent
-                        onFileClick={setSelectedFile}
+                        // handleFileClick was defined and never passed: the list
+                        // set the raw record straight into state, so its
+                        // analytics never fired and, now, its URL would not be
+                        // readable.
+                        onFileClick={handleFileClick}
                         darkMode={darkMode}
                         onWorkspaceChange={setCurrentWorkspaceId}
                     />
@@ -802,6 +850,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     <ConversationView
                         files={userFiles}
                         history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
+                        awaitingReply={awaitingReplyFor !== null && awaitingReplyFor === currentHistory}
                         onCopy={handleCopy}
                     />
                     <InputArea

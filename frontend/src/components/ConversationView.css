@@ -49,6 +49,64 @@
     color: #1c1f23;
 }
 
+/* Waiting on an answer.
+   The question is queued the moment the POST returns, but the answer comes back
+   over the websocket seconds later. Without something here the app looked like
+   it had swallowed the question. Sized to sit in the message flow so the wait
+   reads as "the next message is coming", not as a detached spinner. */
+.thinking-message {
+    max-width: max-content;
+}
+
+.thinking-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.thinking-label {
+    font-size: 0.9rem;
+    opacity: 0.75;
+}
+
+.thinking-dots {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.thinking-dots i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: thinkingPulse 1.2s ease-in-out infinite;
+}
+
+.thinking-dots i:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinkingPulse {
+    0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+    30%           { opacity: 0.9;  transform: translateY(-3px); }
+}
+
+/* Respect the OS setting: a looping animation is a migraine trigger for some
+   people, and the label alone still communicates the wait. */
+@media (prefers-reduced-motion: reduce) {
+    .thinking-dots i { animation: none; opacity: 0.6; }
+    .chat-message { animation: none; }
+}
+
+/* Signing a URL is a round trip, so a citation click is not instant. */
+.opening-file-notice {
+    align-self: center;
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    opacity: 0.7;
+}
+
 /* Dark mode message styles */
 .dark-mode .sent {
     background: linear-gradient(135deg, #00538f, #073d6f);

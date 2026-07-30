@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastA
 from typing import List, Dict, Optional, Any
 from sqlalchemy.orm import Session
 from redis.exceptions import RedisError
-from ..core.utils import get_user_id, upload_to_gcs, delete_from_gcs
+from ..core.utils import (
+    get_user_id,
+    upload_to_gcs,
+    delete_from_gcs,
+    generate_signed_url,
+    SIGNED_URL_TTL,
+)
 import logging
 import asyncio
 
@@ -347,6 +353,39 @@ async def get_file_status(
     except Exception as e:
         logger.error(f"Error getting file status for {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not get file status")
+
+@files_router.get("/{file_id}/access-url", response_class=JSONResponse)
+async def get_file_access_url(
+    file_id: int,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Mint a short-lived URL for reading one document.
+
+    Documents are private in storage. files.file_url is a stable identity, not a
+    fetchable link, which is what lets a saved answer's citations keep pointing
+    at the right page years later without the link itself granting access to
+    anyone who copies it. Authorization happens here, per request, against the
+    document's workspace — so losing workspace access immediately stops working,
+    rather than being enforced only by nobody knowing the URL.
+    """
+    file_record = await store.file_repo.get_file_by_id(file_id)
+    if not file_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    workspace_id = file_record.get("workspace_id")
+    if workspace_id is not None:
+        await check_can_read_workspace(workspace_id, user_data["user_id"], store)
+    elif file_record.get("user_id") != user_data["user_id"]:
+        # Pre-workspace rows fall back to the uploader.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    signed = generate_signed_url(file_record.get("file_url") or "")
+    if not signed:
+        raise HTTPException(status_code=502, detail="Could not open this document")
+
+    return {"url": signed, "expires_in": int(SIGNED_URL_TTL.total_seconds())}
+
 
 @files_router.get("/status", response_class=JSONResponse)
 async def get_files_status(

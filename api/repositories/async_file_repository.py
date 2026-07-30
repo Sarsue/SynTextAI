@@ -688,6 +688,10 @@ class AsyncFileRepository(AsyncBaseRepository):
                         'file_name': file_orm.file_name,
                         'file_url': file_orm.file_url,
                         'file_type': file_orm.file_type,
+                        # Access to a document is decided by its workspace,
+                        # not by who uploaded it, so callers that authorize a
+                        # read need this here.
+                        'workspace_id': file_orm.workspace_id,
                         'processing_status': file_orm.processing_status,
                         'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None
                     }
@@ -750,6 +754,10 @@ class AsyncFileRepository(AsyncBaseRepository):
                         'file_name': file_orm.file_name,
                         'file_url': file_orm.file_url,
                         'file_type': file_orm.file_type,
+                        # Access to a document is decided by its workspace,
+                        # not by who uploaded it, so callers that authorize a
+                        # read need this here.
+                        'workspace_id': file_orm.workspace_id,
                         'processing_status': file_orm.processing_status,
                         'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None
                     }

@@ -2,7 +2,6 @@ import logging
 import os
 import asyncio
 import time
-import requests
 from api.core.timing import emit, stage
 from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
@@ -170,25 +169,20 @@ async def _process_file_data_impl(
             file_data = None
             download_started = time.perf_counter()
 
-            if file_url:
-                try:
-                    logger.info(f"Downloading file {filename} from file_url")
-                    resp = await asyncio.to_thread(requests.get, file_url, timeout=30)
-                    if resp.ok and resp.content:
-                        file_data = resp.content
-                    else:
-                        logger.warning(f"Failed to download file from file_url (status={resp.status_code})")
-                except Exception as e:
-                    logger.warning(f"Error downloading file from file_url: {e}")
-
-            if file_data is None:
-                logger.info(f"Downloading file {filename} from GCS")
-                if not user_gc_id:
-                    inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
-                    if inferred_gc_id:
-                        logger.info("user_gc_id missing; inferred from file_url for GCS download")
-                        user_gc_id = inferred_gc_id
-                file_data = download_from_gcs(user_gc_id, filename)
+            # Fetch with the service account, never over the public URL.
+            #
+            # This used to try requests.get(file_url) first, which only ever
+            # worked because uploads were made world-readable. Documents are
+            # private now, so that path is a guaranteed 403 preceded by a 30s
+            # timeout window; the credentialed download below is the real one
+            # and always was.
+            logger.info(f"Downloading file {filename} from GCS")
+            if not user_gc_id:
+                inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
+                if inferred_gc_id:
+                    logger.info("user_gc_id missing; inferred from file_url for GCS download")
+                    user_gc_id = inferred_gc_id
+            file_data = await asyncio.to_thread(download_from_gcs, user_gc_id, filename)
             if file_data is None:
                 return await handle_processing_error(
                     file_id_int, f"Failed to download file {filename} from GCS"
