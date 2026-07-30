@@ -6,26 +6,33 @@ import { Button } from '@/components/ui/button';
 
 interface FileViewerComponentProps {
     file: UploadedFile;
+    /**
+     * Location fragment to open the file at, e.g. "#page=36" from a citation or
+     * "#t=12.5" for media. Chrome's built-in PDF viewer honours #page=N on the
+     * iframe src, which is what makes a citation land on the cited page instead
+     * of page 1.
+     */
+    fragment?: string;
     onClose: () => void;
     onError: (error: string) => void;
     darkMode: boolean;
 }
 
-const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, onClose, onError, darkMode }) => {
+const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragment = '', onClose, onError, darkMode }) => {
     const [fileType, setFileType] = useState<string>('unknown');
-    const [pdfIframeSrc, setPdfIframeSrc] = useState<string>(file.file_url);
 
     const pdfViewerRef = useRef<HTMLIFrameElement>(null);
     const videoPlayerRef = useRef<HTMLVideoElement>(null);
 
     const fileUrl = file.file_url;
-
-    useEffect(() => {
-        setPdfIframeSrc(fileUrl);
-    }, [fileUrl]);
+    const pdfIframeSrc = fragment ? `${fileUrl}${fragment}` : fileUrl;
 
     const getFileType = (urlOrName: string): string | null => {
-        const extension = urlOrName.split('.').pop()?.toLowerCase();
+        // Strip any query/fragment first: "p15.pdf#page=36".split('.').pop()
+        // is "pdf#page=36", which matches no known type and sends the viewer
+        // down the "unsupported file type" path.
+        const bare = urlOrName.split(/[?#]/)[0];
+        const extension = bare.split('.').pop()?.toLowerCase();
         if (!extension) {
             return null;
         }

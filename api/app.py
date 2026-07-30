@@ -48,7 +48,10 @@ _CSP_POLICY = "; ".join([
     "img-src 'self' data: https://storage.googleapis.com",
     "connect-src 'self' https://app.posthog.com https://identitytoolkit.googleapis.com "
     "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com",
-    "frame-src https://js.stripe.com",
+    # Cited documents open in an iframe pointed at their GCS URL, so leaving
+    # storage.googleapis.com out here would break every citation the moment
+    # this policy stops being Report-Only.
+    "frame-src https://js.stripe.com https://storage.googleapis.com",
     "object-src 'none'",
     "base-uri 'self'",
 ])

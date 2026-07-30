@@ -11,6 +11,24 @@ logger = logging.getLogger(__name__)
 
 rag_pipeline = RAGPipeline(config={"search_engine": {"default_alpha": 0.7}})
 
+# The prompt permits [Segment 2], [Segment 2, 3] and [Segment 2, timestamp 3:45],
+# but only the first form was ever matched: a combined marker passed validation
+# as "no citations at all" and survived into the answer as literal text. The
+# leading run of comma-separated numbers is the citation; the trailing `[^\]]*`
+# absorbs a timestamp without mistaking "3:45" for segments 3 and 45.
+_CITATION_RE = re.compile(r"\[Segments?\s*(\d+(?:\s*,\s*\d+)*)[^\]]*\]", re.IGNORECASE)
+
+
+def _cited_segments(text: str) -> List[int]:
+    """Segment numbers referenced by the answer, in order of first appearance."""
+    seen: List[int] = []
+    for match in _CITATION_RE.finditer(text or ""):
+        for raw in match.group(1).split(","):
+            idx = int(raw.strip())
+            if idx not in seen:
+                seen.append(idx)
+    return seen
+
 
 class SyntextAgent:
     """Interface for conversing with document content using large context LLMs."""
@@ -18,10 +36,16 @@ class SyntextAgent:
     def __init__(self):
         pass 
 
-    def _format_context_and_sources(self, top_k_results: List[Dict]) -> Tuple[str, str, Dict[int, tuple]]:
-        """Formats retrieved segments for the LLM prompt and creates a source map."""
+    def _format_context_and_sources(self, top_k_results: List[Dict]) -> Tuple[str, Dict[int, tuple]]:
+        """Formats retrieved segments for the LLM prompt and maps each segment to
+        the label and link a reader would use to check it.
+
+        Deliberately does not build the visible source list: which segments the
+        answer actually cites isn't known until the answer exists, and listing
+        everything retrieved is what produced four entries for a one-page
+        citation.
+        """
         context_parts = []
-        source_map_parts = ["\n\n**Sources**"]
         source_targets: Dict[int, tuple] = {}
         
         for i, result in enumerate(top_k_results):
@@ -54,13 +78,11 @@ class SyntextAgent:
             
             # "Segment 3" is internal plumbing. A customer reading a cited
             # answer needs the document and page, which is the thing they can
-            # actually go and check, so the visible list is numbered and named.
-            source_map_parts.append(f"{segment_id}. [{source_text}]({source_target})")
+            # actually go and check.
             source_targets[segment_id] = (source_text, source_target)
 
         formatted_context = "\n\n".join(context_parts)
-        source_map = "\n".join(source_map_parts)
-        return formatted_context, source_map, source_targets
+        return formatted_context, source_targets
     
     def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
         """
@@ -70,7 +92,7 @@ class SyntextAgent:
         try:
             if top_k_results:
                 # Step 1: Format context and generate the source map string with enhanced details
-                formatted_context, source_map, source_targets = self._format_context_and_sources(top_k_results)
+                formatted_context, source_targets = self._format_context_and_sources(top_k_results)
                 
                 # Step 2: Create a conversational summary if history is too long
                 if convo_history and len(convo_history) > 1500:  # If history is long
@@ -140,7 +162,7 @@ class SyntextAgent:
                         query,
                         token_budget=available_context_tokens,
                     )
-                    formatted_context, source_map, source_targets = self._format_context_and_sources(reduced_chunks)
+                    formatted_context, source_targets = self._format_context_and_sources(reduced_chunks)
                     
                     # Rebuild prompt with reduced context
                     full_prompt = (
@@ -175,7 +197,7 @@ class SyntextAgent:
                 # Step 7.5: Validate citation format. If we provided context, we require at least
                 # one valid [Segment N] citation, and N must refer to an existing segment.
                 num_segments = len(top_k_results)
-                cited = re.findall(r"\[Segment\s*([0-9]+)\]", llm_answer_with_citations)
+                cited = _cited_segments(llm_answer_with_citations)
                 if num_segments > 0:
                     if not cited:
                         # The model answered but omitted the citation markers. That
@@ -198,7 +220,7 @@ class SyntextAgent:
                             comprehension_level=comprehension_level,
                             max_context_length=MAX_TOKENS_CONTEXT,
                         ) or ""
-                        cited = re.findall(r"\[Segment\s*([0-9]+)\]", retry)
+                        cited = _cited_segments(retry)
                         if cited and "INSUFFICIENT" not in retry.upper():
                             llm_answer_with_citations = retry
                         else:
@@ -208,15 +230,7 @@ class SyntextAgent:
                                 "Please rephrase your question or ask about a more specific section."
                             )
 
-                    invalid = []
-                    for c in cited:
-                        try:
-                            idx = int(c)
-                        except Exception:
-                            invalid.append(c)
-                            continue
-                        if idx < 1 or idx > num_segments:
-                            invalid.append(c)
+                    invalid = [idx for idx in cited if idx < 1 or idx > num_segments]
 
                     if invalid:
                         logger.info(f"LLM response has invalid citations (out of range): {invalid}")
@@ -230,16 +244,55 @@ class SyntextAgent:
                 # a link to page 36 of their own handbook is the product. The
                 # marker format stays as-is for validation above, so accuracy is
                 # unchanged and only what reaches the customer differs.
-                def _linkify(match):
-                    idx = int(match.group(1))
+                #
+                # The list must describe the answer, not the retrieval. Numbering
+                # it by segment index published every chunk the search returned,
+                # so an answer that cited one page still showed "1..4" — four
+                # entries for a single document, three of which appear nowhere in
+                # the text, and a lone [2] in the body with no [1] above it.
+                # Renumber by order of first appearance and keep only what the
+                # answer actually leans on. Two segments from the same page are
+                # one citation to a reader, so they collapse by target.
+                display_number: Dict[int, int] = {}
+                target_number: Dict[str, int] = {}
+                ordered_sources: List[Tuple[int, str, str]] = []
+
+                for idx in cited:
                     entry = source_targets.get(idx)
                     if not entry:
-                        return ""
+                        continue
                     text, target = entry
-                    return f"[[{idx}]]({target})"
+                    if target in target_number:
+                        # Same page, already cited under an earlier number.
+                        display_number[idx] = target_number[target]
+                        continue
+                    number = len(ordered_sources) + 1
+                    display_number[idx] = number
+                    target_number[target] = number
+                    ordered_sources.append((number, text, target))
 
-                llm_answer_with_citations = re.sub(
-                    r"\[Segment\s*([0-9]+)\]", _linkify, llm_answer_with_citations
+                def _linkify(match):
+                    # A combined [Segment 2, 3] becomes the links it stands for,
+                    # deduplicated: two segments off one page read as one citation.
+                    links = []
+                    for raw in match.group(1).split(","):
+                        number = display_number.get(int(raw.strip()))
+                        if number is None or number in links:
+                            continue
+                        links.append(number)
+                    return "".join(
+                        f"[[{n}]]({ordered_sources[n - 1][2]})" for n in links
+                    )
+
+                llm_answer_with_citations = _CITATION_RE.sub(
+                    _linkify, llm_answer_with_citations
+                )
+
+                # The frontend splits the answer on this exact marker to lift the
+                # citations into their own styled box and render its own heading.
+                source_map = "\n".join(
+                    ["\n\n**Sources:**"]
+                    + [f"{n}. [{text}]({target})" for n, text, target in ordered_sources]
                 )
 
                 final_response = llm_answer_with_citations + "\n\n" + source_map

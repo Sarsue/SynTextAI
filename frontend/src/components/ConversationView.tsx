@@ -17,6 +17,11 @@ interface ConversationViewProps {
 
 const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onCopy }) => {
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
+    // The whole value of a citation is landing on the cited page. The click
+    // handler parsed the URL but kept only the matched file record, whose
+    // file_url has no fragment, so #page=36 was discarded before the viewer
+    // ever saw it and every citation opened the document at page 1.
+    const [selectedFragment, setSelectedFragment] = useState<string>('');
     const [fileError, setFileError] = useState<string | null>(null);
     const { darkMode } = useUserContext();
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -33,6 +38,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
         // Create a new URL object to parse the link
         const parsedUrl = new URL(url);
         const pathname = parsedUrl.pathname;
+        // #page=36 / #t=12.5 — the part that makes the citation worth clicking.
+        const fragment = parsedUrl.hash;
 
         // Regular expression to check if the pathname ends with a valid file extension
         const fileExtensionPattern = /\.(pdf|jpg|jpeg|png|txt|doc|docx|html|ppt|xls|xlsx|csv|zip|mp4|mov)$/i;
@@ -50,6 +57,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
                 if (matchingFile) {
                     // Found the file in our system
                     setSelectedFile(matchingFile);
+                    setSelectedFragment(fragment);
                     setFileError(null);
                     console.log(`Found file: ${matchingFile.file_name} (${matchingFile.id})`);
                 } else {
@@ -66,13 +74,17 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
                     }
 
                     // If we can't find the file but it's still a valid URL, create a minimal file object
+                    // Keep the fragment out of file_url and carry it separately:
+                    // the viewer derives the file type from the URL's extension,
+                    // and a trailing "#page=36" makes that read as "pdf#page=36".
                     setSelectedFile({
                         id: -1, // Use negative ID for external files
-                        file_name: (url as string).split('/').pop() || 'File',
-                        file_url: url || '',
+                        file_name: pathname.split('/').pop() || 'File',
+                        file_url: `${parsedUrl.origin}${pathname}${parsedUrl.search}`,
                         status: 'processed',
                         file_type: fileType // Use determined fileType
                     });
+                    setSelectedFragment(fragment);
                     console.log(`External file link: ${url}`);
                 }
             } else {
@@ -180,16 +192,19 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
 
             {fileError && <div className="error-message">{fileError}</div>}
             {selectedFile && (
-                <div className="file-viewer-modal">
-                    <div className="file-viewer-content">
-                        <FileViewerComponent
-                            file={selectedFile}
-                            onClose={() => setSelectedFile(null)}
-                            onError={handleFileError}
-                            darkMode={darkMode}
-                        />
-                    </div>
-                </div>
+                // FileViewerComponent renders its own .file-viewer-modal /
+                // .file-viewer-content shell, so wrapping it in a second copy
+                // nested one fixed-position overlay inside another.
+                <FileViewerComponent
+                    file={selectedFile}
+                    fragment={selectedFragment}
+                    onClose={() => {
+                        setSelectedFile(null);
+                        setSelectedFragment('');
+                    }}
+                    onError={handleFileError}
+                    darkMode={darkMode}
+                />
             )}
             <div ref={messagesEndRef} />
         </div>
