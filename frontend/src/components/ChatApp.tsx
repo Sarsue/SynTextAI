@@ -483,61 +483,84 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     };
 
     const sendMessage = async (message: string) => {
-        if (currentHistory !== null && !isNaN(currentHistory)) {
-            const history = histories[currentHistory];
-            if (history) {
-                const workspaceIdParam = currentWorkspaceId != null ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}` : '';
-                const linkDataResponse = await callApiWithToken(
-                    `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(history.id)}&language=english${workspaceIdParam}`,
-                    'POST'
-                );
-                if (linkDataResponse) {
-                    const linkData = await linkDataResponse.json();
-                    const newMessages = Array.isArray(linkData) ? linkData.map((messageData: any) => ({
-                        id: messageData.id,
-                        content: messageData.content,
-                        sender: messageData.sender,
-                        timestamp: new Date(messageData.timestamp).toISOString(),
-                        liked: messageData.is_liked === 1,
-                        disliked: messageData.is_disliked === 1,
-                    })) : [];
-                    const updatedMessages = [...history.messages, ...newMessages];
-                    const updatedHistory: History = { ...history, messages: updatedMessages };
-                    setHistories((prevHistories) => ({ ...prevHistories, [currentHistory]: updatedHistory }));
-                }
-            }
-        } else {
+        // One path, no silent dead ends.
+        //
+        // This used to branch on currentHistory, look the conversation up in
+        // state, and only send if it was found, with no else. When an id was set
+        // but its entry was missing from state, sending did nothing at all: no
+        // request, no error, no state change, which is indistinguishable from
+        // the feature being broken. The id is all that is needed to send, so the
+        // lookup no longer gates anything.
+        let historyId: number | null =
+            currentHistory !== null && !isNaN(currentHistory) ? currentHistory : null;
+
+        if (historyId === null) {
             const createHistoryResponse = await callApiWithToken(
                 `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
                 'POST'
             );
-            if (createHistoryResponse) {
-                const createHistoryData = await createHistoryResponse.json();
-                if (createHistoryData?.id) {
-                    const newHistory: History = { id: createHistoryData.id, title: createHistoryData.title, messages: [] };
-                    setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: newHistory }));
-                    setCurrentHistory(newHistory.id);
-                    const workspaceIdParam = currentWorkspaceId != null ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}` : '';
-                    const linkDataResponse = await callApiWithToken(
-                        `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(newHistory.id)}&language=english${workspaceIdParam}`,
-                        'POST'
-                    );
-                    if (linkDataResponse) {
-                        const linkData = await linkDataResponse.json();
-                        const newMessages = Array.isArray(linkData) ? linkData.map((messageData: any) => ({
-                            id: messageData.id,
-                            content: messageData.content,
-                            sender: messageData.sender,
-                            timestamp: new Date(messageData.timestamp).toISOString(),
-                            liked: messageData.is_liked === 1,
-                            disliked: messageData.is_disliked === 1,
-                        })) : [];
-                        const updatedMessages = [...newHistory.messages, ...newMessages];
-                        setHistories((prevHistories) => ({ ...prevHistories, [newHistory.id]: { ...newHistory, messages: updatedMessages } }));
-                    }
-                }
+            const createHistoryData = createHistoryResponse?.ok
+                ? await createHistoryResponse.json().catch(() => null)
+                : null;
+            if (!createHistoryData?.id) {
+                addToast('Could not start a new conversation.', 'error');
+                return;
             }
+            historyId = createHistoryData.id as number;
+            const created = historyId as number;
+            setHistories(prev => ({
+                ...prev,
+                [created]: { id: created, title: createHistoryData.title || message, messages: [] },
+            }));
+            setCurrentHistory(created);
         }
+
+        const target = historyId as number;
+        const workspaceIdParam = currentWorkspaceId != null
+            ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}`
+            : '';
+        const response = await callApiWithToken(
+            `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(target)}&language=english${workspaceIdParam}`,
+            'POST'
+        );
+
+        if (!response?.ok) {
+            addToast('Could not send your message.', 'error');
+            return;
+        }
+
+        const payload = await response.json().catch(() => null);
+        const returned: Message[] = Array.isArray(payload)
+            ? payload
+                // Tolerate entries that are not message objects instead of
+                // throwing on them, which is how a response of bare ids used to
+                // abort the entire send.
+                .filter((m: any) => m && typeof m === 'object' && m.content != null)
+                .map((m: any) => ({
+                    id: m.id ?? Date.now(),
+                    content: m.content,
+                    sender: m.sender === 'bot' ? 'bot' : 'user',
+                    timestamp: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString(),
+                    liked: m.is_liked === 1,
+                    disliked: m.is_disliked === 1,
+                }))
+            : [];
+
+        // Show the sent message even if the server echoed nothing usable, so the
+        // conversation never looks like it swallowed the input.
+        const toAppend: Message[] = returned.length > 0 ? returned : [{
+            id: Date.now(),
+            content: message,
+            sender: 'user',
+            timestamp: new Date().toISOString(),
+            liked: false,
+            disliked: false,
+        }];
+
+        setHistories(prev => {
+            const existing = prev[target] || { id: target, title: message, messages: [] };
+            return { ...prev, [target]: { ...existing, messages: [...existing.messages, ...toAppend] } };
+        });
     };
 
     const handleNewChat = async () => {
