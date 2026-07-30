@@ -122,30 +122,71 @@ class AsyncFileRepository(AsyncBaseRepository):
                     file.file_type = file_type
                     file.processing_status = "processed"
 
-                # Process segments and chunks
-                for segment_data in extracted_data:
+                # Every processor emits a flat list of retrieval units:
+                #   {'text': str, 'page_num': int, 'embedding': list[float], ...}
+                #
+                # This previously read them as segments carrying nested chunks,
+                # a shape nothing produces. The result was silent and total: each
+                # unit became a segment whose content was '' because the text is
+                # under 'text' not 'content', the real text and the embedding
+                # were swept into meta_data, and because no item had a 'chunks'
+                # key, zero chunks were written. Files were marked processed with
+                # nothing searchable behind them, so retrieval matched nothing
+                # and chat could not answer from any document ever uploaded.
+                #
+                # Retrieval joins chunks to segments, taking the vector from the
+                # chunk and the text from the segment, so each unit must produce
+                # exactly one of each.
+                expected = 0
+                for unit in extracted_data:
+                    content = unit.get('text') or unit.get('content') or ''
+                    if not content.strip():
+                        continue
+
+                    meta = {
+                        k: v for k, v in unit.items()
+                        if k not in ('text', 'content', 'page_num', 'page_number', 'embedding', 'chunks')
+                    }
                     segment = SegmentORM(
                         file_id=file.id,
-                        content=segment_data.get('content', ''),
-                        page_number=segment_data.get('page_number')
+                        content=content,
+                        page_number=unit.get('page_num') or unit.get('page_number'),
                     )
-                    meta_data = {k: v for k, v in segment_data.items() if k not in ['content', 'page_number', 'chunks']}
-                    if meta_data:
-                        segment.meta_data = meta_data
+                    if meta:
+                        segment.meta_data = meta
                     session.add(segment)
                     await session.flush()
 
-                    if 'chunks' in segment_data:
-                        for chunk_data in segment_data['chunks']:
-                            chunk = ChunkORM(
-                                file_id=file.id,
-                                segment_id=segment.id,
-                                embedding=chunk_data.get('embedding')
-                            )
-                            session.add(chunk)
+                    embedding = unit.get('embedding')
+                    if embedding is None:
+                        # A segment with no vector can never be retrieved, so it
+                        # is not a silent partial success.
+                        logger.error(f"Chunk for {filename} has no embedding; aborting store")
+                        await session.rollback()
+                        return False
+
+                    session.add(ChunkORM(
+                        file_id=file.id,
+                        segment_id=segment.id,
+                        embedding=embedding,
+                    ))
+                    expected += 1
 
                 await session.commit()
-                logger.info(f"Updated file {filename} (ID: {file.id}) with chunks")
+
+                # Assert the rows actually landed. The original failure reported
+                # success while writing nothing retrievable, so trust the
+                # database rather than the absence of an exception.
+                stored = (await session.execute(
+                    select(func.count(ChunkORM.id)).where(ChunkORM.file_id == file.id)
+                )).scalar() or 0
+                if stored < expected:
+                    logger.error(
+                        f"Stored {stored} chunks for {filename} but expected {expected}"
+                    )
+                    return False
+
+                logger.info(f"Stored {stored} chunks and segments for {filename} (ID: {file.id})")
                 return True
             except IntegrityError as e:
                 await session.rollback()
@@ -507,8 +548,14 @@ class AsyncFileRepository(AsyncBaseRepository):
                     """
                 )
 
+                # pgvector's text input format, not a Python list. asyncpg binds
+                # this parameter as text for CAST(... AS vector), so a list is
+                # rejected outright with "expected str, got list" and every
+                # search raised before touching the index.
+                embedding_literal = "[" + ",".join(str(float(x)) for x in (query_embedding or [])) + "]"
+
                 params = {
-                    "embedding": query_embedding,
+                    "embedding": embedding_literal,
                     "keywords": query,
                     "vector_weight": vw,
                     "bm25_weight": bw,
