@@ -16,7 +16,7 @@ interface InviteInfo {
 
 const AcceptInvite: React.FC = () => {
     const { token } = useParams<{ token: string }>();
-    const { user, darkMode } = useUserContext();
+    const { user, darkMode, setActiveOrganization } = useUserContext();
     const navigate = useNavigate();
 
     const [pageStatus, setPageStatus] = useState<InviteStatus>('loading');
@@ -56,6 +56,12 @@ const AcceptInvite: React.FC = () => {
                 headers: { Authorization: `Bearer ${idToken}` },
             });
             if (res.ok) {
+                // Enter the organization we just joined, rather than bouncing
+                // through the chooser to rediscover it.
+                const data = await res.json().catch(() => ({}));
+                if (data.organization_id) {
+                    await setActiveOrganization(data.organization_id);
+                }
                 setPageStatus('done');
                 setTimeout(() => navigate('/chat'), 1800);
             } else {

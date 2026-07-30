@@ -191,6 +191,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         let url = `/api/v1/files?page=${page}&page_size=${pageSize}`;
         if (workspaceId !== null && workspaceId !== undefined) {
             url += `&workspace_id=${workspaceId}`;
+        } else if (activeOrganizationId) {
+            // Without a workspace filter, keep results inside the organization
+            // the user chose, so somebody in two companies never gets both
+            // companies' documents in one list.
+            url += `&organization_id=${activeOrganizationId}`;
         }
         try {
             const response = await _callApiWithTokenInternal(url, 'GET');
@@ -207,7 +212,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } finally {
             setIsLoadingFiles(false);
         }
-    }, [_callApiWithTokenInternal]);
+    }, [_callApiWithTokenInternal, activeOrganizationId]);
 
     // keep files ref in sync to avoid effect retriggers
     useEffect(() => { filesRef.current = files; }, [files]);

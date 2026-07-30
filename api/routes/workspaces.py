@@ -484,4 +484,12 @@ async def accept_invite(
     if not workspace_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is invalid, expired, or already used")
 
-    return {"workspace_id": workspace_id, "message": "You have joined the workspace"}
+    # Return the organization too, so the client can enter it directly instead
+    # of bouncing through the chooser to work out where it just landed.
+    organization_id = await store.org_repo.get_organization_for_workspace(workspace_id)
+
+    return {
+        "workspace_id": workspace_id,
+        "organization_id": organization_id,
+        "message": "You have joined the workspace",
+    }

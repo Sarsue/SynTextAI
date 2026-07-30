@@ -81,51 +81,13 @@ async def list_my_organizations(
     return {"items": items}
 
 
-class CreateOrganizationRequest(BaseModel):
-    name: str
-
-
-@organizations_router.post("", status_code=status.HTTP_201_CREATED)
-async def create_organization(
-    body: CreateOrganizationRequest,
-    user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store),
-):
-    """Start a new organization, with the caller as its owner.
-
-    Being invited into someone else's company must never be a dead end. A
-    member can start their own organization at any time and becomes its owner,
-    with its own subscription, while keeping their membership elsewhere. The
-    two are independent: being staff at one company neither pays for nor
-    restricts a company of your own.
-    """
-    user_id = user_data["user_id"]
-    name = (body.name or "").strip()
-    if not name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Organization name is required."
-        )
-
-    organization_id = await store.org_repo.create_organization(name=name, owner_user_id=user_id)
-    if not organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create organization.",
-        )
-
-    # A new organization with nowhere to put documents is not usable, so give it
-    # a workspace the same way signup does.
-    workspace_id = await store.workspace_repo.create_workspace(
-        user_id=user_id, name="My Workspace", organization_id=organization_id
-    )
-
-    logger.info(f"User {user_id} created organization {organization_id} ('{name}')")
-    return {
-        "organization_id": organization_id,
-        "name": name,
-        "role": "owner",
-        "workspace_id": workspace_id,
-    }
+# Deliberately no POST /organizations.
+#
+# Creating an organization and paying for it are the same act: a tenant with no
+# subscription is entitled to nothing, so a bare "create organization" call
+# produces an account that is locked out of the product the moment it exists.
+# Organizations are therefore born in the signup funnel, where the trial starts
+# alongside them. Sign in and invites never create one.
 
 
 class RenameOrganizationRequest(BaseModel):

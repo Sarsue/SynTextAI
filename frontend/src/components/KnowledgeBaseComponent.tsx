@@ -65,7 +65,7 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const [workspaces, setWorkspaces] = useState<Array<{id: number; name: string}>>([]);
     const { addToast } = useToast();
-    const { user, orgContext } = useUserContext();
+    const { user, orgContext, activeOrganizationId } = useUserContext();
     // Managing documents is an organization permission. Members read and ask
     // questions; owners and admins curate what is in the knowledge base.
     const canManageDocuments = orgContext ? orgContext.can_manage_documents : true;
@@ -103,7 +103,10 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
         if (!user) return;
         try {
             const idToken = await user.getIdToken();
-            const response = await fetch('/api/v1/workspaces', {
+            const url = activeOrganizationId
+                ? `/api/v1/workspaces?organization_id=${activeOrganizationId}`
+                : '/api/v1/workspaces';
+            const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${idToken}` },
             });
             if (response.ok) {

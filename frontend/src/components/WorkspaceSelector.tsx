@@ -53,7 +53,7 @@ interface WorkspaceSelectorProps {
 }
 
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
-    const { user, subscriptionStatus, setCurrentWorkspaceRole } = useUserContext();
+    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId } = useUserContext();
     const { addToast } = useToast();
 
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -105,7 +105,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
         try {
             const idToken = await user.getIdToken();
-            const response = await fetch('/api/v1/workspaces', {
+            // Scope to the organization the user chose, so two companies'
+            // workspaces never appear side by side with no boundary.
+            const url = activeOrganizationId
+                ? `/api/v1/workspaces?organization_id=${activeOrganizationId}`
+                : '/api/v1/workspaces';
+            const response = await fetch(url, {
                 headers: {
                     'Authorization': `Bearer ${idToken}`,
                 },
