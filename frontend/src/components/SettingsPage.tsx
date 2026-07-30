@@ -16,7 +16,7 @@ interface SettingsPageProps {
 
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
-    const { darkMode, setDarkMode, setUser, isMemberOnly, isEntitled } = useUserContext();
+    const { darkMode, setDarkMode, setUser, orgContext } = useUserContext();
 
     const handleDeleteAccount = async () => {
         const confirmed = window.confirm(
@@ -91,11 +91,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                     duplicate trial for an organization that already pays. If
                     the owner's plan lapses they are told who to talk to, and
                     are never asked to fix somebody else's billing. */}
-                {isMemberOnly ? (
+                {orgContext && !orgContext.can_manage_billing ? (
                     <div className="settings-section">
                         <h2 className="section-title">Plan</h2>
                         <div className="section-content">
-                            {isEntitled ? (
+                            {orgContext.entitled ? (
                                 <p className="text-sm text-muted-foreground">
                                     Your access is included in your team's plan. The workspace
                                     owner manages billing, so there's nothing for you to set up.

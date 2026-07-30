@@ -38,7 +38,7 @@ interface AuthProps {}
 
 const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const navigate = useNavigate();
-  const { user, subscriptionStatus, isEntitled, authLoading } = useUserContext();
+  const { user, subscriptionStatus, authLoading } = useUserContext();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const isLoggingOut = useRef(false);
   const { capture, reset: resetAnalytics } = useAnalytics();
@@ -67,13 +67,11 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
         return;
       }
 
-      // Route on entitlement, not on this user's own subscription. Staff
-      // invited into a paid workspace have no subscription of their own, and
-      // sending them to /settings pushed them through trial signup for an
-      // organization that already pays. Pricing is one price per company with
-      // unlimited staff, so a member of a paid workspace goes straight to chat.
-      const targetPath = isEntitled ? '/chat' : '/settings';
-      navigate(targetPath, { replace: true });
+      // Always resolve the organization first. That screen selects silently
+      // and forwards to chat when there is only one, which is the common case,
+      // and it is what decides entitlement: a member of a paying company must
+      // never be sent to /settings to start a duplicate trial.
+      navigate('/select-organization', { replace: true });
     }
   }, [user, subscriptionStatus, authLoading, navigate]);
 

@@ -17,10 +17,10 @@ interface InputAreaProps {
 const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
-    const { darkMode, currentWorkspaceRole } = useUserContext();
-    // No workspace selected yet means a personal, pre-workspace context, where
-    // uploading is still the user's own.
-    const canUpload = currentWorkspaceRole === null || currentWorkspaceRole === 'owner';
+    const { darkMode, orgContext } = useUserContext();
+    // Managing documents is an organization permission. Default to allowed
+    // while the context loads so an owner never sees the control flicker away.
+    const canUpload = orgContext ? orgContext.can_manage_documents : true;
     const { addToast } = useToast();
 
     const isFileSupported = (file: File): boolean => {

@@ -93,6 +93,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const idTokenRef = useRef<string | null>(null); 
     const navigate = useNavigate();
+    // Only offer the organization switcher to people who actually have a
+    // choice, which is a small minority.
+    const [hasMultipleOrganizations, setHasMultipleOrganizations] = useState(false);
     const [activeTab, setActiveTab] = useState("chat"); 
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [isSending, setIsSending] = useState(false);
@@ -198,6 +201,25 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             }
         };
         fetchToken();
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const idToken = await user.getIdToken();
+                const res = await fetch('/api/v1/organizations', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled) setHasMultipleOrganizations((data.items || []).length > 1);
+            } catch {
+                // Not being able to tell just means the control stays hidden.
+            }
+        })();
+        return () => { cancelled = true; };
     }, [user]);
 
     const handleSettingsClick = () => {
@@ -631,6 +653,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         <Button onClick={handleSettingsClick} variant="outline" className="w-full">
                             ⚙️ Settings
                         </Button>
+                        {/* Escape hatch for the rare person who belongs to more
+                            than one company, so switching does not require
+                            signing out. Hidden for everyone else. */}
+                        {hasMultipleOrganizations && (
+                            <Button
+                                onClick={() => navigate('/select-organization')}
+                                variant="ghost"
+                                className="w-full"
+                            >
+                                Switch organization
+                            </Button>
+                        )}
                     </div>
                 </aside>
 

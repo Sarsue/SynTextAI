@@ -14,6 +14,18 @@ import { useToast } from './contexts/ToastContext';
 import { User as FirebaseUser, getAuth, onAuthStateChanged } from 'firebase/auth';
 import { KnownWebSocketMessage, FileStatusUpdatePayload } from './types/websocketTypes';
 
+export interface OrgContext {
+    organization_id: number;
+    role: string;
+    subscription_status: string | null;
+    entitled: boolean;
+    can_manage_billing: boolean;
+    can_manage_members: boolean;
+    can_manage_documents: boolean;
+    seats_used: number;
+    seat_limit: number | null;
+}
+
 export type WebSocketStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 // Define the type for UserSettings
@@ -61,6 +73,13 @@ interface UserContextType {
     // any account-level flag.
     currentWorkspaceRole: string | null;
     setCurrentWorkspaceRole: (role: string | null) => void;
+    // The tenant the user chose at sign-in. Everything is scoped to it, so
+    // entitlement and role can never be blended across two organizations the
+    // user happens to belong to.
+    activeOrganizationId: number | null;
+    orgContext: OrgContext | null;
+    setActiveOrganization: (organizationId: number) => Promise<void>;
+    clearActiveOrganization: () => void;
     fetchSubscriptionStatus: () => void;
     subscriptionData: SubscriptionData | null;
     setSubscriptionData: (data: SubscriptionData | null) => void;
@@ -102,6 +121,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isOrgOwner, setIsOrgOwner] = useState<boolean>(false);
     const [isMemberOnly, setIsMemberOnly] = useState<boolean>(false);
     const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<string | null>(null);
+    const [activeOrganizationId, setActiveOrganizationId] = useState<number | null>(() => {
+        const stored = localStorage.getItem('active_organization_id');
+        return stored ? Number(stored) : null;
+    });
+    const [orgContext, setOrgContext] = useState<OrgContext | null>(null);
     const [subscriptionData, setSubscriptionData] = useState<SubscriptionData | null>(null);
     const [socket, setSocket] = useState<WebSocket | null>(null);
     const [webSocketStatus, setWebSocketStatus] = useState<WebSocketStatus>('disconnected');
@@ -315,6 +339,48 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
     }, [user, addToast]);
 
+    const clearActiveOrganization = useCallback(() => {
+        localStorage.removeItem('active_organization_id');
+        setActiveOrganizationId(null);
+        setOrgContext(null);
+    }, []);
+
+    /**
+     * Enter an organization. Loads what the user may do inside that one tenant,
+     * so role, entitlement and billing visibility are answered per organization
+     * rather than blended across every organization they belong to.
+     */
+    const setActiveOrganization = useCallback(async (organizationId: number) => {
+        if (!user) return;
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/organizations/${organizationId}/context`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+            });
+            if (!res.ok) {
+                // Membership may have been revoked while they were away.
+                console.warn('Could not enter organization', organizationId);
+                clearActiveOrganization();
+                return;
+            }
+            const ctx: OrgContext = await res.json();
+            localStorage.setItem('active_organization_id', String(organizationId));
+            setActiveOrganizationId(organizationId);
+            setOrgContext(ctx);
+        } catch (e) {
+            console.error('Error entering organization', e);
+            clearActiveOrganization();
+        }
+    }, [user, clearActiveOrganization]);
+
+    // Re-resolve the stored organization on load, so a refresh keeps the user
+    // in the same tenant without asking again.
+    useEffect(() => {
+        if (user && activeOrganizationId !== null && orgContext === null) {
+            setActiveOrganization(activeOrganizationId);
+        }
+    }, [user, activeOrganizationId, orgContext, setActiveOrganization]);
+
     const fetchSubscriptionStatus = useCallback(async () => {
         if (!user) return;
         const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
@@ -414,6 +480,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isMemberOnly,
         currentWorkspaceRole,
         setCurrentWorkspaceRole,
+        activeOrganizationId,
+        orgContext,
+        setActiveOrganization,
+        clearActiveOrganization,
         fetchSubscriptionStatus,
         subscriptionData,
         setSubscriptionData,

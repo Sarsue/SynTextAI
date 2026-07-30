@@ -65,9 +65,10 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const [workspaces, setWorkspaces] = useState<Array<{id: number; name: string}>>([]);
     const { addToast } = useToast();
-    const { user, currentWorkspaceRole } = useUserContext();
-    // Managing documents is owner-only. Staff read and ask questions.
-    const canManageDocuments = currentWorkspaceRole === null || currentWorkspaceRole === 'owner';
+    const { user, orgContext } = useUserContext();
+    // Managing documents is an organization permission. Members read and ask
+    // questions; owners and admins curate what is in the knowledge base.
+    const canManageDocuments = orgContext ? orgContext.can_manage_documents : true;
 
 
     useEffect(() => {
