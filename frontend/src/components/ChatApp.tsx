@@ -201,10 +201,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     // fetchHistories was defined and never called: no effect, no invocation
     // anywhere. GET /histories was therefore never requested, and the History
     // tab was permanently empty no matter how many conversations existed.
+    // Refetches on workspace change too: conversations belong to a workspace,
+    // so switching workspace has to switch the thread list the same way it
+    // switches the document list, or the sidebar offers threads whose citations
+    // point at files this workspace cannot open.
     useEffect(() => {
-        if (user) fetchHistories();
+        if (!user) return;
+        fetchHistories();
+        // The open conversation belongs to the workspace being left.
+        setCurrentHistory(null);
+        stopAwaitingReply();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user]);
+    }, [user, currentWorkspaceId]);
 
     // Load a conversation's messages when it is opened.
     //
@@ -530,8 +538,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             currentHistory !== null && !isNaN(currentHistory) ? currentHistory : null;
 
         if (historyId === null) {
+            // File the new conversation in the workspace it is being answered
+            // from, so it appears here and only here.
+            const workspaceParam = currentWorkspaceId != null
+                ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}`
+                : '';
             const createHistoryResponse = await callApiWithToken(
-                `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}`,
+                `api/v1/histories?title=${encodeURIComponent(message || 'New Chat')}${workspaceParam}`,
                 'POST'
             );
             const createHistoryData = createHistoryResponse?.ok
@@ -685,7 +698,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     const fetchHistories = async () => {
         try {
-            const historiesResponse = await callApiWithToken(`api/v1/histories`, 'GET');
+            const scope = currentWorkspaceId != null
+                ? `?workspace_id=${encodeURIComponent(currentWorkspaceId)}`
+                : '';
+            const historiesResponse = await callApiWithToken(`api/v1/histories${scope}`, 'GET');
             if (!historiesResponse?.ok) {
                 console.error('Failed to fetch chat histories:', historiesResponse?.status, historiesResponse?.statusText);
                 return;

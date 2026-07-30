@@ -38,21 +38,31 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
 @histories_router.post("", status_code=201)
 async def create_history(
     title: str = Query(..., description="Title of the chat history"),
+    workspace_id: Optional[int] = Query(None, description="Workspace this conversation belongs to"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
+        # A conversation is answered from one workspace's documents, so it
+        # belongs to that workspace. Verify membership rather than trusting the
+        # caller's id, or a conversation could be filed into someone else's.
+        if workspace_id is not None:
+            role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
+            if role is None:
+                raise HTTPException(status_code=403, detail="You do not have access to this workspace.")
         # add_chat_history returns the new id, so returning it unchanged made the
         # endpoint respond with a bare integer. The client reads
         # `createHistoryData?.id` before posting the message, which is undefined
         # on a number, so it silently skipped sending, never cleared its sending
         # state, and the composer sat on "Sending..." forever with no error
         # anywhere: the request that would have failed loudly was never made.
-        history_id = await store.chat_repo.add_chat_history(title, user_id)
+        history_id = await store.chat_repo.add_chat_history(title, user_id, workspace_id)
         if not history_id:
             raise HTTPException(status_code=500, detail="Could not create chat history")
-        return {"id": history_id, "title": title}
+        return {"id": history_id, "title": title, "workspace_id": workspace_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating chat history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not create chat history")
@@ -60,12 +70,13 @@ async def create_history(
 # Route to get all chat histories for a user
 @histories_router.get("")
 async def get_history_messages(
+    workspace_id: Optional[int] = Query(None, description="Only conversations in this workspace"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = await store.chat_repo.get_all_user_chat_histories(user_id)
+        message_list = await store.chat_repo.get_all_user_chat_histories(user_id, workspace_id)
         return message_list
     except Exception as e:
         logger.error(f"Error retrieving chat histories: {e}", exc_info=True)

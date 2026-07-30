@@ -2,7 +2,7 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, UniqueConstraint, TIMESTAMP, text, Enum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, UniqueConstraint, TIMESTAMP, text, Enum, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -238,11 +238,25 @@ class Chunk(Base):
 
 class ChatHistory(Base):
     __tablename__ = "chat_histories"
-    
+    # Declared here as well as in the migration, or autogenerate sees an index
+    # the model does not know about and proposes dropping it.
+    __table_args__ = (
+        Index("ix_chat_histories_user_workspace", "user_id", "workspace_id"),
+    )
+
     id = Column(Integer, primary_key=True)
     title = Column(String, default="Untitled")
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    
+    # A conversation belongs to the workspace whose documents it was answered
+    # from. Without this, switching workspace changed the documents but not the
+    # thread list, and continuing an old thread silently answered from a
+    # different set of files.
+    # No index=True: the composite ix_chat_histories_user_workspace created by
+    # the migration already serves the (user_id, workspace_id) filter this is
+    # read by, and declaring one here just makes the model disagree with the
+    # schema.
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+
     # Relationships
     user = relationship("User", back_populates="chat_histories")
     messages = relationship("Message", back_populates="chat_history", cascade="all, delete-orphan")

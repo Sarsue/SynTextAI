@@ -24,12 +24,15 @@ logger = logging.getLogger(__name__)
 class AsyncChatRepository(AsyncBaseRepository):
     """Async repository for chat operations."""
 
-    async def add_chat_history(self, title: str, user_id: int) -> Optional[int]:
-        """Add a new chat history for a user.
+    async def add_chat_history(self, title: str, user_id: int, workspace_id: Optional[int] = None) -> Optional[int]:
+        """Add a new chat history for a user, in a workspace.
 
         Args:
             title: Title of the chat history
             user_id: ID of the user who owns this chat history
+            workspace_id: Workspace the conversation belongs to. Answers are
+                retrieved from this workspace's documents, so the conversation
+                is only meaningful alongside them.
 
         Returns:
             int: The ID of the newly created chat history, or None if creation failed
@@ -38,7 +41,8 @@ class AsyncChatRepository(AsyncBaseRepository):
             try:
                 new_chat_history = ChatHistoryORM(
                     title=title,
-                    user_id=user_id
+                    user_id=user_id,
+                    workspace_id=workspace_id
                 )
                 session.add(new_chat_history)
                 await session.flush()
@@ -128,11 +132,15 @@ class AsyncChatRepository(AsyncBaseRepository):
                 logger.error(f"Error adding message: {e}", exc_info=True)
                 return None
 
-    async def get_all_user_chat_histories(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get all chat histories for a user with latest messages.
+    async def get_all_user_chat_histories(self, user_id: int, workspace_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get a user's chat histories, optionally scoped to one workspace.
 
         Args:
             user_id: ID of the user
+            workspace_id: When given, only conversations belonging to this
+                workspace. Documents are workspace-scoped, so an unscoped list
+                mixes threads whose citations point at files the current
+                workspace cannot open.
 
         Returns:
             List[Dict]: List of chat histories with metadata
@@ -140,8 +148,11 @@ class AsyncChatRepository(AsyncBaseRepository):
         async with self.get_async_session() as session:
             try:
                 # Query chat histories with their messages
+                conditions = [ChatHistoryORM.user_id == user_id]
+                if workspace_id is not None:
+                    conditions.append(ChatHistoryORM.workspace_id == workspace_id)
                 stmt = select(ChatHistoryORM).where(
-                    ChatHistoryORM.user_id == user_id
+                    *conditions
                 ).options(selectinload(ChatHistoryORM.messages))
                 result = await session.execute(stmt)
                 chat_histories_orm = result.scalars().all()
