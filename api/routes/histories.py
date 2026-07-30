@@ -80,7 +80,12 @@ async def get_specific_history_messages(
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = await store.chat_repo.get_messages_for_chat_history(user_id, history_id)
+        # Signature is (chat_history_id, user_id). These were passed the other
+        # way round, so the ownership check compared a history id against a user
+        # id, always failed, and every conversation came back empty while
+        # logging "User N attempted to access unauthorized chat history M" with
+        # the two values transposed.
+        message_list = await store.chat_repo.get_messages_for_chat_history(history_id, user_id)
         return message_list
     except Exception as e:
         logger.error(f"Error retrieving messages for history {history_id}: {e}", exc_info=True)
