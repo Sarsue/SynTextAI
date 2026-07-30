@@ -361,13 +361,23 @@ sources conflict, then pulls the underlying segments so citations still point at
 source documents. The citation guarantee is the product; do not trade it for
 elegance.
 
-Shape, tenant-scoped from the start:
+Shape, tenant-scoped from the start. Concept bodies are **markdown, not a rigid
+schema**: a model writes markdown far more naturally than it fills columns, an
+office manager can actually read and correct their own knowledge base, and a new
+section does not need a migration. Index what must be queried, store the rest as
+text.
 
 ```
-concepts         id, organization_id, title, summary, embedding
+concepts         id, organization_id, title, body_markdown, summary, embedding
 concept_sources  concept_id -> segment_id      (provenance, many-to-one)
 concept_links    concept_id <-> concept_id     (relation, incl. contradiction)
 ```
+
+**Per-workspace compilation rules are a product feature, not a config file.** A
+dental practice and a law firm want different extraction emphasis, vocabulary and
+contradiction sensitivity. Storing those rules per workspace and feeding them to
+the compiler turns "your knowledge base follows your firm's rules" into something
+sellable, and costs almost nothing to build.
 
 *Prior art in our own history.* `generate_key_concepts` did most of this already:
 concept extraction with source references, deduplication, reference validation.
@@ -378,7 +388,23 @@ logic from there rather than writing it fresh.
 *Cost, honestly.* Compilation costs LLM calls at ingest, roughly 30-50 concepts
 for a 50-page document. That is real money per upload against an ingestion path
 we just made cheap. Make it opt-in per workspace, or compile lazily for documents
-that actually get queried. It is not a free layer.
+that actually get queried. On self-hosted inference (2b) this cost largely
+disappears once the hardware is paid for, which is the strongest argument for
+doing 2a and 2b together.
+
+*Compile from stored chunks, never by re-reading the raw file.* Extraction is the
+fragile part, as the 2026-07-30 ingestion failure showed. Compiling from the same
+chunks retrieval uses means a concept can always resolve back to the exact segment
+it came from, so provenance holds by construction.
+
+*On the single-user version of this pattern.* The setup it comes from is one
+person, one laptop, an agent with filesystem access, and citations that point at
+the agent's own notes. That is fine when the operator, the user and the trust
+boundary are the same person. Ours is a multi-tenant service holding other
+people's regulated documents, so the same pattern needs deterministic extraction,
+provenance to source pages, and no developer agent in the customer path. The
+pattern is not the differentiator; making it usable by somebody who will never
+open a terminal is.
 
 **2b. Self-hosted inference and the on-prem edition (agreed 2026-07-30).**
 
