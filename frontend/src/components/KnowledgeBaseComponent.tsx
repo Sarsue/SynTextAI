@@ -79,18 +79,19 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
         }
     }, [contextFileError]);
 
-    // Initial load and load on page/pageSize/workspace change
+    // Initial load, and reload whenever the selected workspace changes.
+    //
+    // Scoping used to be gated on `workspaces.length > 1`, using a list this
+    // component fetches once on mount. Creating a second workspace left that
+    // copy stale at one, so the filter silently resolved to null and switching
+    // workspaces never changed the files shown. How many workspaces exist is
+    // not a reason to ignore which one is selected.
+    //
+    // A null workspace means "everything I can see", which loadUserFiles scopes
+    // to the active organization rather than leaking across tenants.
     useEffect(() => {
-        // Only filter by workspace if user has multiple workspaces AND currentWorkspaceId is set
-        // If multiple workspaces but no currentWorkspaceId yet, don't load files (wait for workspace selection)
-        if (workspaces.length > 1 && currentWorkspaceId === null) {
-            // Don't load files yet, waiting for workspace to be selected
-            return;
-        }
-        
-        const filterWorkspaceId = workspaces.length > 1 ? currentWorkspaceId : null;
-        loadUserFiles(filePagination.page, filePagination.pageSize, filterWorkspaceId);
-    }, [loadUserFiles, filePagination.page, filePagination.pageSize, currentWorkspaceId, workspaces.length]);
+        loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId);
+    }, [loadUserFiles, filePagination.page, filePagination.pageSize, currentWorkspaceId]);
 
     // Fetch workspaces for move menu
     useEffect(() => {

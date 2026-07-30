@@ -385,7 +385,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            setIsSending(false); // Re-enable input on error
+        } finally {
+            // Always clear the sending state. It used to be cleared only on the
+            // success and error paths, so a branch that silently did nothing,
+            // such as a response missing the field the code guarded on, left the
+            // composer stuck on "Sending..." with no error to show for it.
+            setIsSending(false);
         }
     };
 

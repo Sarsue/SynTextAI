@@ -43,8 +43,16 @@ async def create_history(
 ):
     try:
         user_id = user_data["user_id"]
-        history = await store.chat_repo.add_chat_history(title, user_id)
-        return history
+        # add_chat_history returns the new id, so returning it unchanged made the
+        # endpoint respond with a bare integer. The client reads
+        # `createHistoryData?.id` before posting the message, which is undefined
+        # on a number, so it silently skipped sending, never cleared its sending
+        # state, and the composer sat on "Sending..." forever with no error
+        # anywhere: the request that would have failed loudly was never made.
+        history_id = await store.chat_repo.add_chat_history(title, user_id)
+        if not history_id:
+            raise HTTPException(status_code=500, detail="Could not create chat history")
+        return {"id": history_id, "title": title}
     except Exception as e:
         logger.error(f"Error creating chat history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not create chat history")
