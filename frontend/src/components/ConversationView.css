@@ -41,8 +41,8 @@
 
 .received {
     align-self: flex-start;
-    background: #e5e5ea;
-    color: #333;
+    background: #eef0f3;
+    color: #1c1f23;
 }
 
 /* Dark mode message styles */
@@ -53,6 +53,140 @@
 .dark-mode .received {
     background-color: #333;
     color: #ccc;
+}
+
+/* Message body typography.
+ *
+ * Answers are markdown: paragraphs, bold labels, bullet lists, inline figures
+ * and citation markers. No rule existed for .message-content at all, so all of
+ * that rendered at browser defaults inside a chat bubble, where stock heading
+ * sizes and paragraph margins are far too large and list indentation runs into
+ * the bubble edge. The result was dense and hard to read even though the font
+ * itself was fine.
+ */
+.message-content {
+    font-size: 0.95rem;
+    line-height: 1.65;
+    letter-spacing: 0.005em;
+}
+
+.message-content > *:first-child { margin-top: 0; }
+.message-content > *:last-child { margin-bottom: 0; }
+
+.message-content p {
+    margin: 0 0 0.7em;
+}
+
+.message-content ul,
+.message-content ol {
+    margin: 0.5em 0 0.7em;
+    padding-left: 1.35em;
+}
+
+.message-content li {
+    margin-bottom: 0.35em;
+}
+
+.message-content li::marker {
+    color: currentColor;
+    opacity: 0.55;
+}
+
+/* Markdown headings inside a chat bubble should read as emphasis, not as
+   page titles. */
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 1em 0 0.4em;
+}
+
+.message-content strong {
+    font-weight: 600;
+}
+
+.message-content code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.87em;
+    padding: 0.12em 0.35em;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.07);
+}
+
+.message-content pre {
+    margin: 0.6em 0;
+    padding: 0.7em 0.85em;
+    border-radius: 8px;
+    overflow-x: auto;
+    background: rgba(0, 0, 0, 0.07);
+}
+
+.message-content pre code {
+    padding: 0;
+    background: none;
+}
+
+.message-content a {
+    color: #0b5fb0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.message-content blockquote {
+    margin: 0.6em 0;
+    padding-left: 0.8em;
+    border-left: 3px solid rgba(0, 0, 0, 0.15);
+    opacity: 0.85;
+}
+
+.message-content table {
+    border-collapse: collapse;
+    margin: 0.6em 0;
+    font-size: 0.9em;
+    display: block;
+    overflow-x: auto;
+}
+
+.message-content th,
+.message-content td {
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    padding: 0.35em 0.6em;
+    text-align: left;
+}
+
+/* Sent messages sit on a saturated blue, so borrowed dark tints disappear. */
+.sent .message-content code,
+.sent .message-content pre {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.sent .message-content a {
+    color: #fff;
+}
+
+.sent .message-content blockquote {
+    border-left-color: rgba(255, 255, 255, 0.4);
+}
+
+.dark-mode .message-content code,
+.dark-mode .message-content pre {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.dark-mode .message-content a {
+    color: #7fb4ee;
+}
+
+.dark-mode .message-content blockquote {
+    border-left-color: rgba(255, 255, 255, 0.25);
+}
+
+.dark-mode .message-content th,
+.dark-mode .message-content td {
+    border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Timestamp styling */

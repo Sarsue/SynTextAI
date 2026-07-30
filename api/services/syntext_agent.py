@@ -173,11 +173,35 @@ class SyntextAgent:
                 cited = re.findall(r"\[Segment\s*([0-9]+)\]", llm_answer_with_citations)
                 if num_segments > 0:
                     if not cited:
-                        logger.info("LLM response missing citations; refusing to answer without evidence")
-                        return (
-                            "I couldn't find enough evidence in your documents to answer that confidently. "
-                            "Please rephrase your question or ask about a more specific section."
+                        # The model answered but omitted the citation markers. That
+                        # is a formatting lapse, not absent evidence, and refusing
+                        # outright told the user their documents lacked an answer
+                        # that had in fact been found. Ask once more, with the
+                        # requirement stated plainly, before giving up.
+                        logger.info("LLM response missing citations; retrying once with an explicit reminder")
+                        retry_prompt = (
+                            full_prompt
+                            + "\n\nIMPORTANT: your previous answer omitted citations and was rejected. "
+                            "Rewrite it so that every factual claim is followed by the marker of the "
+                            "segment it came from, written exactly as [Segment N]. Use only the segments "
+                            "provided above. If none of them support an answer, reply with the single "
+                            "word: INSUFFICIENT."
                         )
+                        retry = generate_explanation(
+                            retry_prompt,
+                            language=language,
+                            comprehension_level=comprehension_level,
+                            max_context_length=MAX_TOKENS_CONTEXT,
+                        ) or ""
+                        cited = re.findall(r"\[Segment\s*([0-9]+)\]", retry)
+                        if cited and "INSUFFICIENT" not in retry.upper():
+                            llm_answer_with_citations = retry
+                        else:
+                            logger.info("Still no citations after retry; refusing to answer without evidence")
+                            return (
+                                "I couldn't find enough evidence in your documents to answer that confidently. "
+                                "Please rephrase your question or ask about a more specific section."
+                            )
 
                     invalid = []
                     for c in cited:

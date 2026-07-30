@@ -103,22 +103,35 @@ class DefaultQueryProcessor(QueryProcessorInterface):
             
     def _rewrite_query(self, query: str, conversation_history: str) -> str:
         """Rewrite query using conversation context."""
-        reformulation_prompt = f"""
-        Based on this conversation history and the latest query, generate a standalone search query that would retrieve the most relevant information to answer the user's question. Make the query comprehensive but focused on retrieving relevant information.
-        
-        Conversation history: 
-        {conversation_history}
-        
-        Latest query: {query}
-        
-        Rewritten search query:"""
+        # "Comprehensive" invited keyword stuffing: a follow-up about a late
+        # filing penalty was rewritten into thirty words of loosely related
+        # terms, which diffuses retrieval instead of sharpening it. What is
+        # wanted is the user's question with its pronouns resolved, not an
+        # expansion of it.
+        reformulation_prompt = f"""Rewrite the latest question as a short, standalone search query by resolving pronouns and references using the conversation history.
+
+Rules:
+- Keep it under 12 words.
+- Do not add topics the user did not ask about.
+- Reply with the query only, no explanation.
+
+Conversation history:
+{conversation_history}
+
+Latest question: {query}
+
+Standalone search query:"""
         
         try:
             rewritten = prompt_llm(reformulation_prompt).strip()
             # Only accept a plausible search query. An empty response, or a
             # model that answers the question or explains itself instead of
             # rewriting, must not become the thing we search for.
-            if not rewritten or len(rewritten) > 300:
+            # Reject anything that looks like an expansion rather than a
+            # rewrite. A search query longer than the question it came from by a
+            # wide margin is keyword soup, and retrieves worse than the original.
+            if not rewritten or len(rewritten.split()) > 16:
+                logger.info(f"Discarding implausible rewrite ({len(rewritten.split())} words), keeping original")
                 return query
             logger.info(f"Rewrote query: {query!r} -> {rewritten!r}")
             return rewritten
