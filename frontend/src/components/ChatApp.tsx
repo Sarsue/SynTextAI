@@ -321,11 +321,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             addToast('Authentication session expired. Please refresh.', 'error');
             return Promise.reject(new Error('User not available'));
         }
-        if (!idTokenRef.current) {
-            console.error('User token not available for callApiWithToken');
-            addToast('Authentication session expired. Please refresh.', 'error');
-            return Promise.reject(new Error('User token not available'));
-        }
+        // No guard on idTokenRef here. It is a cache, populated by an effect
+        // that runs later in this component and resolves asynchronously, so
+        // anything calling this on mount was rejected before a request was ever
+        // made. That is what stopped the conversation list from loading: the
+        // effect ran, this rejected, and no GET /histories appeared in the
+        // network log at all. The next line fetches a token regardless, so
+        // requiring the cache to be warm rejected a call it was about to
+        // satisfy anyway.
         const tokenForCall = await user.getIdToken();
         idTokenRef.current = tokenForCall;
         let headers: HeadersInit = { 'Authorization': `Bearer ${tokenForCall}` };
