@@ -98,45 +98,16 @@ async def create_user( # Function name remains 'create_user'
             raise HTTPException(status_code=500, detail="Could not create user.")
         logger.info(f"POST /users: Created user {new_user_id} ({email})")
 
-        # Someone arriving on an invite is joining a company, not starting one.
-        # Creating an organization for them anyway would leave them owning a
-        # phantom company they never asked for, and would pop the "choose an
-        # organization" screen on their very first sign-in. Accepting the invite
-        # is what places them in the inviting organization. They can start their
-        # own later via POST /organizations, so this is a default, not a ceiling.
-        joining_existing_org = await store.workspace_repo.has_pending_invite_for_email(email)
-
-        organization_id = None
-        if joining_existing_org:
-            logger.info(
-                f"POST /users: {email} has a pending invite, so no organization is created for them"
-            )
-        else:
-            org_label = (email.split("@")[0] or "My").strip()
-            organization_id = await store.org_repo.create_organization(
-                name=f"{org_label}'s Organization",
-                owner_user_id=new_user_id,
-            )
-            if not organization_id:
-                logger.error(f"POST /users: Failed to create organization for user {new_user_id}")
-
-        if organization_id:
-            try:
-                await store.workspace_repo.create_workspace(
-                    user_id=new_user_id,
-                    name="My Workspace",
-                    organization_id=organization_id,
-                )
-                logger.info(
-                    f"POST /users: Created organization {organization_id} and default workspace "
-                    f"for user {new_user_id}"
-                )
-            except Exception as ws_error:
-                # A missing default workspace is recoverable; a missing account is not.
-                logger.error(
-                    f"POST /users: Failed to create default workspace for user {new_user_id}: {ws_error}",
-                    exc_info=True,
-                )
+        # Signup creates the person, nothing else.
+        #
+        # An organization is a billing entity, and one without a subscription is
+        # entitled to nothing, so creating it here produced an account locked out
+        # of the product from the moment it existed. Worse, it raced with invites:
+        # somebody who signed in before their invite arrived ended up owning a
+        # company they never asked for and being shown an organization chooser on
+        # their first visit. The company is now created when the trial starts,
+        # and an invitee joins an existing one, so neither path can invent a
+        # tenant nobody wanted.
 
         return JSONResponse(
             content={"message": "User registered", "email": email, "user_id": new_user_id},

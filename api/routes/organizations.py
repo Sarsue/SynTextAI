@@ -52,7 +52,7 @@ class MemberSummary(BaseModel):
     role: str
 
 
-@organizations_router.get("", response_model=Dict[str, List[OrganizationSummary]])
+@organizations_router.get("")
 async def list_my_organizations(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
@@ -61,8 +61,14 @@ async def list_my_organizations(
 
     A single entry means the client should select it silently and go straight to
     chat; the chooser only appears when there is a genuine choice to make.
+
+    An empty list is normal now that signup creates only the person. It means one
+    of two very different things, so `has_pending_invite` distinguishes them: a
+    new customer who should start a trial, or somebody who has been invited and
+    should follow their link rather than be asked to pay for anything.
     """
     user_id = user_data["user_id"]
+    email = (user_data["user_info"].get("email") or "")
     memberships = await store.org_repo.get_memberships(user_id)
 
     items = []

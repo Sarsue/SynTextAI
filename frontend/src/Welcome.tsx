@@ -22,63 +22,43 @@ const Welcome: React.FC = () => {
      * that avoids a half-made account if someone abandons onboarding, and it
      * means skipping simply leaves the generated name in place.
      */
+    /**
+     * Hold the company name until the trial creates the organization.
+     *
+     * Signup creates only the person now, so at this point there is nothing to
+     * rename: the company comes into existence when the trial starts, and this
+     * is the name it will be given. Stored rather than sent, because an
+     * organization without a subscription is entitled to nothing and should not
+     * exist at all.
+     */
     const saveCompanyName = async () => {
         const name = companyName.trim();
-        if (!name || !user) return;
+        if (!name) return;
         setIsSaving(true);
         try {
-            const idToken = await user.getIdToken();
-
-            // Onboarding runs straight after signup, before the organization
-            // chooser has had a chance to set an active one, so this cannot
-            // assume activeOrganizationId is populated. It previously did, and
-            // silently returned early, which is why the name never saved.
-            let orgId = activeOrganizationId;
-            if (!orgId) {
-                const listed = await fetch('/api/v1/organizations', {
-                    headers: { Authorization: `Bearer ${idToken}` },
+            if (activeOrganizationId) {
+                // Returning through onboarding with a company already set up.
+                const idToken = await user!.getIdToken();
+                await fetch(`/api/v1/organizations/${activeOrganizationId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${idToken}`,
+                    },
+                    body: JSON.stringify({ name }),
                 });
-                if (listed.ok) {
-                    const data = await listed.json();
-                    const owned = (data.items || []).find((o: any) => o.role === 'owner');
-                    if (owned) {
-                        orgId = owned.organization_id;
-                        await setActiveOrganization(orgId!);
-                    }
-                }
+                await setActiveOrganization(activeOrganizationId);
+            } else {
+                localStorage.setItem('pending_organization_name', name);
             }
-            if (!orgId) {
-                console.warn('No organization to name yet');
-                return;
-            }
-
-            const res = await fetch(`/api/v1/organizations/${orgId}`, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${idToken}`,
-                },
-                body: JSON.stringify({ name }),
-            });
-            if (!res.ok) console.warn('Could not save company name');
         } catch (e) {
-            // Onboarding should never be blocked by this; the generated name stands.
+            // Never block onboarding on this; a fallback name is always applied.
             console.error('Error saving company name', e);
         } finally {
             setIsSaving(false);
         }
     };
-    
-    useEffect(() => {
-        // If no user is authenticated, redirect to home
-        if (!user) {
-            navigate('/');
-        }
-        
-        // Track onboarding start
-        posthog.capture('onboarding_started');
-    }, [user, navigate, posthog]);
-    
+
     const handleNext = async () => {
         if (step === 1) {
             await saveCompanyName();

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body
 from fastapi.responses import JSONResponse
 from datetime import datetime
 from typing import Dict, Optional
+from pydantic import BaseModel
 import stripe
 import logging
 import os
@@ -126,15 +127,46 @@ async def subscription_status(
         logger.error(f"Error in subscription_status: {str(e)}")
         raise HTTPException(status_code=500, detail="An internal error occurred")
 
+class StartTrialRequest(BaseModel):
+    # Collected during onboarding. Used only when the caller has no organization
+    # yet, which is the normal case: signup creates the person, the trial creates
+    # the company.
+    organization_name: Optional[str] = None
+
+
 # Route to start a trial
 @subscriptions_router.post("/start-trial", status_code=201)
 async def start_trial(
+    body: Optional[StartTrialRequest] = None,
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
+    """Start a trial, creating the organization if this is a new customer.
+
+    Creating an organization and paying for it are the same act: a tenant with
+    no subscription is entitled to nothing. Signup therefore creates only the
+    person, and the company comes into existence here, alongside the trial that
+    makes it usable. An invited colleague never reaches this endpoint, so they
+    never acquire an organization they did not ask for.
+    """
     try:
         user_id = user_data["user_id"]
         user_info = user_data["user_info"]
+
+        # First trial for this person means they are starting a company.
+        organization_id = await _billing_organization_id(store, user_id)
+        if organization_id is None:
+            requested = (body.organization_name if body else None) or ""
+            name = requested.strip() or f"{(user_info.get('email') or 'My').split('@')[0]}'s Organization"
+            organization_id = await store.org_repo.create_organization(
+                name=name, owner_user_id=user_id
+            )
+            if not organization_id:
+                raise HTTPException(status_code=500, detail="Could not create your organization.")
+            await store.workspace_repo.create_workspace(
+                user_id=user_id, name="My Workspace", organization_id=organization_id
+            )
+            logger.info(f"Created organization {organization_id} ('{name}') as user {user_id} starts a trial")
 
         # Check if the user already has a subscription
         subscription = await store.user_repo.get_subscription(user_id)
