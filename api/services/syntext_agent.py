@@ -18,10 +18,11 @@ class SyntextAgent:
     def __init__(self):
         pass 
 
-    def _format_context_and_sources(self, top_k_results: List[Dict]) -> Tuple[str, str]:
+    def _format_context_and_sources(self, top_k_results: List[Dict]) -> Tuple[str, str, Dict[int, tuple]]:
         """Formats retrieved segments for the LLM prompt and creates a source map."""
         context_parts = []
-        source_map_parts = ["\n\n**Sources:**"]
+        source_map_parts = ["\n\n**Sources**"]
+        source_targets: Dict[int, tuple] = {}
         
         for i, result in enumerate(top_k_results):
             segment_id = i + 1
@@ -51,11 +52,15 @@ class SyntextAgent:
                 if file_url_base:
                      source_target += f"#page={page_num}"
             
-            source_map_parts.append(f"- **[Segment {segment_id}]**: [{source_text}]({source_target})")
-            
+            # "Segment 3" is internal plumbing. A customer reading a cited
+            # answer needs the document and page, which is the thing they can
+            # actually go and check, so the visible list is numbered and named.
+            source_map_parts.append(f"{segment_id}. [{source_text}]({source_target})")
+            source_targets[segment_id] = (source_text, source_target)
+
         formatted_context = "\n\n".join(context_parts)
         source_map = "\n".join(source_map_parts)
-        return formatted_context, source_map
+        return formatted_context, source_map, source_targets
     
     def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
         """
@@ -65,7 +70,7 @@ class SyntextAgent:
         try:
             if top_k_results:
                 # Step 1: Format context and generate the source map string with enhanced details
-                formatted_context, source_map = self._format_context_and_sources(top_k_results)
+                formatted_context, source_map, source_targets = self._format_context_and_sources(top_k_results)
                 
                 # Step 2: Create a conversational summary if history is too long
                 if convo_history and len(convo_history) > 1500:  # If history is long
@@ -135,7 +140,7 @@ class SyntextAgent:
                         query,
                         token_budget=available_context_tokens,
                     )
-                    formatted_context, source_map = self._format_context_and_sources(reduced_chunks)
+                    formatted_context, source_map, source_targets = self._format_context_and_sources(reduced_chunks)
                     
                     # Rebuild prompt with reduced context
                     full_prompt = (
@@ -220,7 +225,23 @@ class SyntextAgent:
                             "Please rephrase your question or ask for a direct quote from the document."
                         )
 
-                # Step 8: Combine LLM answer with improved source map
+                # Step 8: Replace the internal markers with citations a reader
+                # can act on. [Segment 2] means nothing to a dental practice;
+                # a link to page 36 of their own handbook is the product. The
+                # marker format stays as-is for validation above, so accuracy is
+                # unchanged and only what reaches the customer differs.
+                def _linkify(match):
+                    idx = int(match.group(1))
+                    entry = source_targets.get(idx)
+                    if not entry:
+                        return ""
+                    text, target = entry
+                    return f"[[{idx}]]({target})"
+
+                llm_answer_with_citations = re.sub(
+                    r"\[Segment\s*([0-9]+)\]", _linkify, llm_answer_with_citations
+                )
+
                 final_response = llm_answer_with_citations + "\n\n" + source_map
                 
                 return final_response

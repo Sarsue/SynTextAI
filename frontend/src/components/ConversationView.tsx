@@ -109,9 +109,26 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, onC
             children={markdown}
             components={{
                 a: ({ href, children }) => {
+                    // Citations carry a #page=N fragment and are the whole point
+                    // of the product, so they must behave like real links.
+                    // Rewriting href to "#" and relying on a handler meant the
+                    // browser showed localhost/# and, when no handler was
+                    // wired, clicking did nothing at all.
                     if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
                         return (
-                            <a href="#" onClick={(e) => { e.preventDefault(); linkHandler && linkHandler(href); }}>
+                            <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                    // Let an in-app viewer take over when one is
+                                    // available, but never swallow the click.
+                                    if (linkHandler) {
+                                        e.preventDefault();
+                                        linkHandler(href);
+                                    }
+                                }}
+                            >
                                 {children}
                             </a>
                         );

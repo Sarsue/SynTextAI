@@ -570,7 +570,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         try {
             trackAction('new_chat', 'navigation');
             
-            const response = await callApiWithToken('/api/chat/history', 'POST');
+            // The route is POST /api/v1/histories?title=... There is no
+            // /api/chat/history endpoint and there never has been, so this
+            // always 404'd and starting a chat from the button silently failed.
+            const response = await callApiWithToken(
+                `api/v1/histories?title=${encodeURIComponent('New Chat')}`,
+                'POST'
+            );
             if (response && response.ok) {
                 const newHistory = await response.json();
                 
@@ -609,7 +615,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         trackAction('delete_chat', 'history', historyId.toString());
         
         try {
-            const response = await callApiWithToken(`/api/chat/history/${historyId}`, 'DELETE');
+            // The route is DELETE /api/v1/histories?history_id=N. This called a
+            // path that does not exist, so deleting a conversation always failed.
+            const response = await callApiWithToken(
+                `api/v1/histories?history_id=${encodeURIComponent(historyId)}`,
+                'DELETE'
+            );
             if (response && response.ok) {
                 // Track successful deletion
                 capture(AnalyticsEvents.BUTTON_CLICK, {
