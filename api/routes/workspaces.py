@@ -106,18 +106,12 @@ async def list_workspaces(
     """
     try:
         user_id = user_data["user_id"]
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-
-        # Keep the list inside the tenant the user is working in, so somebody
-        # who belongs to two companies never sees both companies' workspaces
-        # side by side with no boundary between them.
-        if organization_id is not None:
-            allowed = set(
-                await store.workspace_repo.accessible_workspace_ids(
-                    user_id, organization_id=organization_id
-                )
-            )
-            workspaces = [ws for ws in workspaces if ws["id"] in allowed]
+        # Driven by what the user may see, scoped to the tenant they are
+        # working in, so somebody who belongs to two companies never sees both
+        # companies' workspaces side by side with no boundary between them.
+        workspaces = await store.workspace_repo.list_accessible_workspaces(
+            user_id, organization_id=organization_id
+        )
 
         # Convert datetime objects to ISO strings
         items = [

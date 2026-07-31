@@ -835,28 +835,62 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                         </div>
 
                                         {m.can_edit_access ? (
-                                            <div style={{ marginTop: 6 }}>
-                                                <Select
-                                                    value={value}
-                                                    disabled={isSaving}
-                                                    onValueChange={(v) =>
-                                                        v === 'organization'
-                                                            ? updateMemberAccess(m.user_id, 'organization', [])
-                                                            : updateMemberAccess(m.user_id, 'workspace', [Number(v)])
-                                                    }
-                                                >
-                                                    <SelectTrigger className="w-full h-8 text-xs">
-                                                        <SelectValue placeholder="No workspace assigned" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="organization">Can see every workspace</SelectItem>
-                                                        {workspaces.map(ws => (
-                                                            <SelectItem key={ws.id} value={String(ws.id)}>
-                                                                Can see {ws.name} only
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                            <div style={{ marginTop: 8 }}>
+                                                {/* Checkboxes, not one-of-many: access is a
+                                                    set. Somebody can belong to three of five
+                                                    workspaces, which a single select cannot
+                                                    express. "Every workspace" is the state
+                                                    where all are ticked, and it keeps
+                                                    including workspaces created later. */}
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginBottom: 4 }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={m.scope === 'organization'}
+                                                        disabled={isSaving}
+                                                        onChange={(e) =>
+                                                            e.target.checked
+                                                                ? updateMemberAccess(m.user_id, 'organization', [])
+                                                                : updateMemberAccess(m.user_id, 'workspace', workspaces.map(w => w.id))
+                                                        }
+                                                    />
+                                                    <span style={{ fontWeight: 500 }}>
+                                                        Every workspace, including new ones
+                                                    </span>
+                                                </label>
+
+                                                {m.scope !== 'organization' && (
+                                                    <div style={{ paddingLeft: 22 }}>
+                                                        {workspaces.map(ws => {
+                                                            const checked = m.workspace_ids.includes(ws.id);
+                                                            return (
+                                                                <label
+                                                                    key={ws.id}
+                                                                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '2px 0' }}
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={checked}
+                                                                        disabled={isSaving}
+                                                                        onChange={() => {
+                                                                            const next = checked
+                                                                                ? m.workspace_ids.filter(id => id !== ws.id)
+                                                                                : [...m.workspace_ids, ws.id];
+                                                                            if (next.length === 0) {
+                                                                                addToast(
+                                                                                    'Keep at least one workspace, or remove them from the organization.',
+                                                                                    'warning',
+                                                                                );
+                                                                                return;
+                                                                            }
+                                                                            updateMemberAccess(m.user_id, 'workspace', next);
+                                                                        }}
+                                                                    />
+                                                                    <span>{ws.name}</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
                                             </div>
                                         ) : (
                                             <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>

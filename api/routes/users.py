@@ -7,7 +7,12 @@ from api.workflows.tasks import delete_user_task
 from api.repositories.repository_manager import RepositoryManager
 import logging
 
-from api.core.limits import FREE_DOC_LIMIT, FREE_STORAGE_LIMIT_BYTES, FREE_WORKSPACE_LIMIT
+from api.core.limits import (
+    FREE_DOC_LIMIT,
+    FREE_STORAGE_LIMIT_BYTES,
+    FREE_WORKSPACE_LIMIT,
+    resolve_entitlement,
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -189,13 +194,22 @@ async def get_user_quota(
         storage_used_bytes = await store.file_repo.total_storage_bytes_for_user(user_id)
         workspaces_used = await store.workspace_repo.count_workspaces_for_user(user_id)
 
+        # Report the limits that are actually enforced. The free-plan numbers
+        # were returned unconditionally, so a paying customer — and every staff
+        # member covered by that customer's plan — saw "0 / 5 documents" and a
+        # free-plan banner while nothing was in fact limiting them. Entitlement
+        # belongs to the organization, so a member inherits it.
+        entitlement = await resolve_entitlement(store, user_id)
+
         return {
+            "entitled": entitlement["entitled"],
+            "plan": entitlement["status"],
             "files_used": files_used,
-            "files_limit": FREE_DOC_LIMIT,
+            "files_limit": None if entitlement["entitled"] else FREE_DOC_LIMIT,
             "storage_used_bytes": storage_used_bytes,
-            "storage_limit_bytes": FREE_STORAGE_LIMIT_BYTES,
+            "storage_limit_bytes": None if entitlement["entitled"] else FREE_STORAGE_LIMIT_BYTES,
             "workspaces_used": workspaces_used,
-            "workspaces_limit": FREE_WORKSPACE_LIMIT,
+            "workspaces_limit": None if entitlement["entitled"] else FREE_WORKSPACE_LIMIT,
         }
     except HTTPException:
         # A 403 or 404 is this endpoint's answer, not a failure.

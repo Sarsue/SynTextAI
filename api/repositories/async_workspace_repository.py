@@ -104,8 +104,53 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error counting workspaces for user {user_id}: {e}", exc_info=True)
                 return 0
 
+    async def list_accessible_workspaces(
+        self, user_id: int, organization_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Every workspace this user may open, with their role in each.
+
+        Built from accessible_workspace_ids, which is the single answer to
+        "what may this person see". list_workspaces_for_user is a different
+        question — what they own or were explicitly assigned — and using it to
+        build the picker meant a member with organization-wide reach saw
+        nothing at all: they hold no assignment rows by design, so the list
+        started empty and filtering it could not add anything back.
+        """
+        ids = await self.accessible_workspace_ids(user_id, organization_id=organization_id)
+        if not ids:
+            return []
+
+        async with self.get_async_session() as session:
+            try:
+                rows = (await session.execute(
+                    select(WorkspaceORM).where(WorkspaceORM.id.in_(ids))
+                )).scalars().all()
+                result = []
+                for ws in rows:
+                    result.append({
+                        "id": ws.id,
+                        "name": ws.name,
+                        "user_id": ws.user_id,
+                        "role": await self.get_user_role_in_workspace(ws.id, user_id),
+                        "created_at": ws.created_at,
+                        "updated_at": ws.updated_at,
+                    })
+                result.sort(key=lambda x: x["created_at"] or datetime.min)
+                return result
+            except Exception as e:
+                logger.error(
+                    f"Error listing accessible workspaces for user {user_id}: {e}", exc_info=True
+                )
+                return []
+
     async def list_workspaces_for_user(self, user_id: int) -> List[Dict[str, Any]]:
-        """List all workspaces a user owns or is a member of."""
+        """List all workspaces a user owns or is a member of.
+
+        Note this is NOT the same as what they may see: somebody with
+        organization-wide reach owns nothing and is assigned to nothing, yet
+        may open every workspace in the tenant. Use list_accessible_workspaces
+        to answer that.
+        """
         async with self.get_async_session() as session:
             try:
                 # Owned workspaces

@@ -193,3 +193,57 @@ async def test_accepting_an_invite_makes_you_a_company_member_seeing_everything(
     assert await store.workspace_repo.accessible_workspace_ids(
         joiner, organization_id=tenant.org
     ) == [ws1]
+
+
+async def test_member_can_hold_a_subset_of_workspaces(store, tenant):
+    """Access is a set, not one-of-many.
+
+    Somebody can belong to three of five workspaces. The control was a single
+    select, which could only express one, so the data model's ability to hold
+    several was unreachable from the product.
+    """
+    made = [await tenant.workspace(f"WS{i}") for i in range(5)]
+    chosen = [made[0], made[2], made[4]]
+    member = await tenant.member(scope="workspace", workspaces=chosen)
+
+    got = await store.workspace_repo.accessible_workspace_ids(member, organization_id=tenant.org)
+    assert got == sorted(chosen)
+    for ws in chosen:
+        assert await store.workspace_repo.get_user_role_in_workspace(ws, member) == "staff"
+    for ws in (made[1], made[3]):
+        assert await store.workspace_repo.get_user_role_in_workspace(ws, member) is None
+
+
+async def test_workspaces_can_be_added_to_and_removed_from_a_member(store, tenant):
+    a = await tenant.workspace("A")
+    b = await tenant.workspace("B")
+    c = await tenant.workspace("C")
+    member = await tenant.member(scope="workspace", workspaces=[a])
+
+    await store.org_repo.set_member_access(tenant.org, member, "workspace", [a, b])
+    assert await store.workspace_repo.accessible_workspace_ids(
+        member, organization_id=tenant.org
+    ) == sorted([a, b])
+
+    await store.org_repo.set_member_access(tenant.org, member, "workspace", [b, c])
+    assert await store.workspace_repo.accessible_workspace_ids(
+        member, organization_id=tenant.org
+    ) == sorted([b, c])
+
+
+async def test_organization_scope_member_appears_in_the_workspace_picker(store, tenant):
+    """The bug an invited member actually hit: an empty app.
+
+    The picker was built from workspaces owned or explicitly assigned, and
+    somebody with organization-wide reach has neither, so they signed in to
+    nothing while every check said they had access.
+    """
+    ws1 = await tenant.workspace("Finance")
+    ws2 = await tenant.workspace("Dentist")
+    member = await tenant.member(scope="organization")
+
+    listed = await store.workspace_repo.list_accessible_workspaces(
+        member, organization_id=tenant.org
+    )
+    assert sorted(w["id"] for w in listed) == sorted([ws1, ws2])
+    assert {w["role"] for w in listed} == {"staff"}
