@@ -16,8 +16,34 @@ import AnalyticsProvider from './components/AnalyticsProvider';
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_API_KEY || "");
 
 const App: React.FC = () => {
-    const { user, orgContext } = useUserContext();
+    const { user, orgContext, authLoading, activeOrganizationId } = useUserContext();
     const authRef = React.useRef<AuthRef>(null);
+
+    // Guards must not decide while the answer is still arriving.
+    //
+    // They read `user` and `orgContext` directly, both of which are null for the
+    // first moments after a sign-in or sign-up: Firebase reports the account,
+    // then the backend registers it, then the organization resolves. In that
+    // window every guarded route redirected somewhere, and the redirect target
+    // redirected back as the next value landed — the bounce. Two states are
+    // "still loading", not "no":
+    //
+    //   authLoading                         Firebase and registration in flight
+    //   activeOrganizationId && !orgContext an organization is chosen, its
+    //                                       context has not arrived yet
+    const resolving = authLoading || (activeOrganizationId != null && !orgContext);
+
+    const waiting = (
+        <div className="auth-page">
+            <span className="auth-loading">Loading...</span>
+        </div>
+    );
+
+    /** Render `element` once we know who the user is, rather than guessing. */
+    const requireUser = (element: React.ReactNode) => {
+        if (resolving) return waiting;
+        return user ? <>{element}</> : <Navigate to="/login" replace />;
+    };
 
     return (
         <Elements stripe={stripePromise}>
@@ -40,16 +66,13 @@ const App: React.FC = () => {
                             when the user belongs to exactly one organization. */}
                         <Route
                             path="/select-organization"
-                            element={user ? <SelectOrganization /> : <Navigate to="/login" replace />}
+                            element={requireUser(<SelectOrganization />)}
                         />
-                        <Route 
-                            path="/welcome" 
-                            element={user ? <Welcome /> : <Navigate to="/login" replace />} 
-                        />
+                        <Route path="/welcome" element={requireUser(<Welcome />)} />
                         <Route
                             path="/chat"
                             element={
-                                user ? (
+                                resolving ? waiting : user ? (
                                     // Entitlement belongs to the active organization,
                                     // never to the individual. Staff have no subscription
                                     // of their own and were previously bounced to
@@ -73,7 +96,13 @@ const App: React.FC = () => {
                         />
                         <Route
                             path="/settings"
-                            element={user ? <SettingsPage stripePromise={stripePromise} user={user} /> : <Navigate to="/login" replace />}
+                            element={
+                                resolving
+                                    ? waiting
+                                    : user
+                                        ? <SettingsPage stripePromise={stripePromise} user={user} />
+                                        : <Navigate to="/login" replace />
+                            }
                         />
 
                         <Route path="/invite/:token" element={<AcceptInvite />} />
