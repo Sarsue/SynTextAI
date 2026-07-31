@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getAuth, signOut } from 'firebase/auth';
 import { X } from 'lucide-react';
 import PaymentView from './PaymentView';
 import DarkModeToggle from './DarkModeToggle';
@@ -94,12 +95,39 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 // a fresh signup would resolve back to the deleted account's
                 // organization.
                 clearActiveOrganization();
-                setUser(null);  // Assuming setUser is available from your UserContext
-                navigate('/');
+                // Same clean slate the normal sign-out gives, so nothing
+                // outlives the account: the parked auth intent, cached ids,
+                // anything else stashed for the session.
+                sessionStorage.clear();
+
+                // End the Firebase session, not just the React state.
+                //
+                // setUser(null) alone left the session live, so
+                // onAuthStateChanged fired again and signed the deleted account
+                // straight back in — against a user row that no longer exists.
+                // Every subsequent request then failed, and the organization
+                // chooser had nothing to show.
+                try {
+                    await signOut(getAuth());
+                } catch (signOutError) {
+                    // Already gone, or offline. The account is deleted either
+                    // way, so leaving is still the right outcome.
+                    console.error('Sign out after deletion failed:', signOutError);
+                }
+                setUser(null);
+                // replace, so Back cannot return to a settings page belonging
+                // to an account that no longer exists.
+                navigate('/', { replace: true });
             } else {
-                const errorData = await response.json();
+                const errorData = await response.json().catch(() => ({}));
                 console.error("Delete error:", errorData);
-                addToast(`Failed to delete account: ${errorData.error || 'Unknown error'}`, 'error');
+                // FastAPI returns {"detail": ...}, never {"error": ...}, so
+                // reading .error showed 'Unknown error' for every real message.
+                const detail = errorData?.detail ?? errorData?.error;
+                addToast(
+                    `Failed to delete account: ${typeof detail === 'string' ? detail : 'Unknown error'}`,
+                    'error',
+                );
             }
         } catch (error) {
             console.error("Error deleting account:", error);
