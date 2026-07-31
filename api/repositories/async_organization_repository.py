@@ -148,7 +148,14 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 return False
 
     async def remove_member(self, organization_id: int, user_id: int) -> bool:
-        """Remove a member. Refuses to remove the last owner."""
+        """Remove somebody from an organization entirely. Refuses the last owner.
+
+        Also clears their workspace assignments inside this organization.
+        Deleting only the organization_members row left the workspace_members
+        rows behind, and access is granted by either, so a "removed" member
+        kept every workspace they had been assigned to — and got them back
+        silently if they were ever re-added.
+        """
         async with self.get_async_session() as session:
             try:
                 member = (
@@ -177,8 +184,25 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                         )
                         return False
 
+                from ..models.orm_models import WorkspaceMember
+
+                assignments = (await session.execute(
+                    select(WorkspaceMember)
+                    .join(WorkspaceORM, WorkspaceORM.id == WorkspaceMember.workspace_id)
+                    .where(
+                        WorkspaceMember.user_id == user_id,
+                        WorkspaceORM.organization_id == organization_id,
+                    )
+                )).scalars().all()
+                for assignment in assignments:
+                    await session.delete(assignment)
+
                 await session.delete(member)
                 await session.commit()
+                logger.info(
+                    f"Removed user {user_id} from org {organization_id} "
+                    f"and {len(assignments)} workspace assignment(s)"
+                )
                 return True
             except Exception as e:
                 await session.rollback()

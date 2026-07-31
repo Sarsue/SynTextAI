@@ -96,6 +96,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // from the organization endpoint rather than the workspace's member list.
     const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
     const [savingAccessFor, setSavingAccessFor] = useState<number | null>(null);
+    const [memberToRemove, setMemberToRemove] = useState<OrgMember | null>(null);
     const [inviteEmail, setInviteEmail] = useState('');
     const [isSendingInvite, setIsSendingInvite] = useState(false);
     // How far the invite reaches. 'workspace' adds them to this workspace only;
@@ -412,6 +413,29 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         }
     };
 
+    /** Remove somebody from the company, not just from one workspace. */
+    const removeFromOrganization = async (memberUserId: number, email: string) => {
+        if (!user || !activeOrganizationId) return;
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(
+                `/api/v1/organizations/${activeOrganizationId}/members/${memberUserId}`,
+                { method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` } },
+            );
+            if (res.ok) {
+                addToast(`${email} removed`, 'success');
+                await fetchOrgMembers();
+                if (currentWorkspace) await fetchMembers(currentWorkspace.id);
+            } else {
+                const data = await res.json().catch(() => ({}));
+                addToast(data.detail || 'Could not remove member', 'error');
+            }
+        } catch {
+            addToast('Could not remove member', 'error');
+        }
+        setMemberToRemove(null);
+    };
+
     const fetchOrgMembers = async () => {
         if (!user || !activeOrganizationId) return;
         try {
@@ -720,6 +744,29 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 </DialogContent>
             </Dialog>
 
+            {/* Removing somebody ends their access and stops their seat being
+                charged, so it asks first and says what it actually does. */}
+            <AlertDialog open={!!memberToRemove} onOpenChange={(open) => { if (!open) setMemberToRemove(null); }}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Remove {memberToRemove?.email}?</AlertDialogTitle>
+                    </AlertDialogHeader>
+                    <div className="warning-message">
+                        <p>They lose access to every workspace in this organization straight away.</p>
+                        <p>Their seat stops being charged from today. Nothing they uploaded is deleted.</p>
+                    </div>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <Button
+                            variant="destructive"
+                            onClick={() => memberToRemove && removeFromOrganization(memberToRemove.user_id, memberToRemove.email)}
+                        >
+                            Remove
+                        </Button>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
             {/* Members / Invite Modal */}
             <Dialog open={showMembersModal} onOpenChange={setShowMembersModal}>
                 <DialogContent className="sm:max-w-md">
@@ -797,8 +844,8 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                                     <Button
                                                         variant="ghost"
                                                         size="icon-sm"
-                                                        onClick={() => handleRemoveMember(m.user_id)}
-                                                        title="Remove from this workspace"
+                                                        onClick={() => setMemberToRemove(m)}
+                                                        title="Remove from the organization"
                                                     >
                                                         <X className="size-3.5" />
                                                     </Button>

@@ -51,3 +51,8 @@ slowapi>=0.1.9
 # Email
 sendgrid>=6.11.0
 email-validator>=2.1.0
+
+# Tests. Integration only: the access rules being tested are SQL, so mocking
+# the database would test the mock rather than the boundary.
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

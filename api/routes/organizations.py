@@ -13,7 +13,7 @@ from pydantic import BaseModel, EmailStr
 
 from ..core.utils import get_user_id
 from ..core.limits import resolve_entitlement
-from ..core.seats import seat_summary
+from ..core.seats import seat_summary, sync_seats_to_stripe
 from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
 from api.repositories.repository_manager import RepositoryManager
 
@@ -344,3 +344,43 @@ async def set_member_access(
     # Stripe sync here on purpose, so moving somebody between workspaces never
     # produces an invoice.
     return {"message": "Access updated", "scope": body.scope, "workspace_ids": body.workspace_ids}
+
+
+@organizations_router.delete("/{organization_id}/members/{member_user_id}")
+async def remove_organization_member(
+    organization_id: int = Path(...),
+    member_user_id: int = Path(...),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Remove somebody from the organization entirely.
+
+    The workspace-level removal only detaches them from one workspace, which
+    does nothing visible for a member whose access is organization-wide. This
+    is the one that ends their access and stops their seat being charged.
+    """
+    user_id = user_data["user_id"]
+    role = await store.org_repo.get_role(organization_id, user_id)
+    if role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an owner or admin can remove members.",
+        )
+
+    if member_user_id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove yourself. Delete the account instead.",
+        )
+
+    removed = await store.org_repo.remove_member(organization_id, member_user_id)
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not remove this member. An organization must keep at least one owner.",
+        )
+
+    # Their seat stops being charged immediately rather than at renewal.
+    await sync_seats_to_stripe(store, organization_id, reason="member removed from organization")
+
+    return {"message": "Member removed", "user_id": member_user_id}

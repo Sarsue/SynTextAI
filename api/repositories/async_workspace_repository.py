@@ -211,10 +211,22 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 ids |= set((await session.execute(owned)).scalars().all())
 
                 # Workspaces they were explicitly added to.
+                #
+                # Joined to organization_members as well, so an assignment can
+                # never outlive membership of the tenant. Removal clears these
+                # rows too, but relying on that alone means any row left behind
+                # by a partial failure silently grants access.
                 explicit = (
                     select(WorkspaceMember.workspace_id)
                     .join(WorkspaceORM, WorkspaceORM.id == WorkspaceMember.workspace_id)
-                    .where(WorkspaceMember.user_id == user_id)
+                    .join(
+                        OrganizationMember,
+                        OrganizationMember.organization_id == WorkspaceORM.organization_id,
+                    )
+                    .where(
+                        WorkspaceMember.user_id == user_id,
+                        OrganizationMember.user_id == user_id,
+                    )
                 )
                 if organization_id is not None:
                     explicit = explicit.where(WorkspaceORM.organization_id == organization_id)
