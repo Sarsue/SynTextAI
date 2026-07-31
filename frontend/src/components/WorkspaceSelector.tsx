@@ -25,6 +25,13 @@ import {
     DropdownMenuTrigger,
     DropdownMenuContent,
 } from '@/components/ui/dropdown-menu';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 interface Workspace {
     id: number;
@@ -77,6 +84,11 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
     const [inviteEmail, setInviteEmail] = useState('');
     const [isSendingInvite, setIsSendingInvite] = useState(false);
+    // How far the invite reaches. 'workspace' adds them to this workspace only;
+    // 'organization' gives them every workspace in the company, including ones
+    // created later.
+    const [inviteScope, setInviteScope] = useState<'workspace' | 'organization'>('workspace');
+    const [nextSeatCents, setNextSeatCents] = useState<number | null>(null);
 
     // Backend entitlement rules:
     // - premium: active | trialing
@@ -386,28 +398,59 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         }
     };
 
-    const handleOpenMembers = () => {
+    const handleOpenMembers = async () => {
         if (currentWorkspace) {
             fetchMembers(currentWorkspace.id);
             setShowMembersModal(true);
             setShowDropdown(false);
+            // What the next seat costs, so the price of adding somebody is on
+            // screen before the invite goes out rather than on the next invoice.
+            try {
+                const idToken = await user!.getIdToken();
+                const seatRes = await fetch('/api/v1/subscriptions/seats', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (seatRes.ok) {
+                    const seatData = await seatRes.json();
+                    setNextSeatCents(
+                        typeof seatData?.next_seat_cents === 'number' ? seatData.next_seat_cents : null
+                    );
+                }
+            } catch {
+                // Leaves the line off. Better silent than a wrong price.
+                setNextSeatCents(null);
+            }
         }
     };
 
     const handleSendInvite = async () => {
-        if (!inviteEmail.trim() || !currentWorkspace || !user) return;
+        if (!inviteEmail.trim() || !user) return;
+        const toOrganization = inviteScope === 'organization';
+        if (toOrganization ? !activeOrganizationId : !currentWorkspace) return;
         setIsSendingInvite(true);
         try {
             const idToken = await user.getIdToken();
-            const res = await fetch(`/api/v1/workspaces/${currentWorkspace.id}/invites`, {
+            const url = toOrganization
+                ? `/api/v1/organizations/${activeOrganizationId}/invites`
+                : `/api/v1/workspaces/${currentWorkspace!.id}/invites`;
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
                 body: JSON.stringify({ email: inviteEmail.trim() }),
             });
             if (res.ok) {
-                addToast(`Invite sent to ${inviteEmail}`, 'success');
+                const data = await res.json().catch(() => ({}));
+                // The backend reports whether the mail actually went out. It
+                // used to always claim success, so a refused send still read as
+                // 'Invite sent' and the invite sat there unmentioned.
+                if (data.email_sent === false && data.invite_url) {
+                    addToast('Invite created, but the email could not be sent. Link copied below.', 'warning');
+                    console.info('Invite link:', data.invite_url);
+                } else {
+                    addToast(`Invite sent to ${inviteEmail}`, 'success');
+                }
                 setInviteEmail('');
-                await fetchMembers(currentWorkspace.id);
+                if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Failed to send invite', 'error');
@@ -634,6 +677,34 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                             {isSendingInvite ? 'Sending...' : 'Invite'}
                         </Button>
                     </div>
+
+                    {/* Reach. Stated in terms of what the person will see,
+                        because 'organization scope' means nothing to a dental
+                        practice deciding who gets the payroll folder. */}
+                    <Select
+                        value={inviteScope}
+                        onValueChange={(v) => setInviteScope(v as 'workspace' | 'organization')}
+                    >
+                        <SelectTrigger className="w-full">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="workspace">
+                                Can see {currentWorkspace?.name ?? 'this workspace'} only
+                            </SelectItem>
+                            <SelectItem value="organization">
+                                Can see every workspace, including new ones
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+
+                    {nextSeatCents !== null && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                            {nextSeatCents > 0
+                                ? `Adding this person costs $${(nextSeatCents / 100).toFixed(0)}/month.`
+                                : 'This person fits within your included seats, at no extra cost.'}
+                        </p>
+                    )}
 
                     {/* Current members */}
                     {members.length > 0 && (
