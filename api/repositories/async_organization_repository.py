@@ -194,20 +194,138 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
         async with self.get_async_session() as session:
             try:
                 stmt = (
-                    select(User.id, User.email, OrganizationMember.role, OrganizationMember.joined_at)
+                    select(
+                        User.id,
+                        User.email,
+                        OrganizationMember.role,
+                        OrganizationMember.joined_at,
+                        OrganizationMember.scope,
+                    )
                     .join(OrganizationMember, OrganizationMember.user_id == User.id)
                     .where(OrganizationMember.organization_id == organization_id)
                 )
                 rows = (await session.execute(stmt)).all()
+
+                # Which workspaces each member is explicitly assigned to. Needed
+                # to render, and to edit, the reach of somebody already in the
+                # organization: without it the UI can only set access at invite
+                # time and never change it afterwards.
+                from ..models.orm_models import WorkspaceMember
+                assignment_rows = (await session.execute(
+                    select(WorkspaceMember.user_id, WorkspaceMember.workspace_id)
+                    .join(WorkspaceORM, WorkspaceORM.id == WorkspaceMember.workspace_id)
+                    .where(WorkspaceORM.organization_id == organization_id)
+                )).all()
+                assigned: Dict[int, List[int]] = {}
+                for uid, wid in assignment_rows:
+                    assigned.setdefault(uid, []).append(wid)
+
                 members = [
-                    {"user_id": uid, "email": email, "role": role, "joined_at": joined}
-                    for uid, email, role, joined in rows
+                    {
+                        "user_id": uid,
+                        "email": email,
+                        "role": role,
+                        "joined_at": joined,
+                        # Owners and admins administer the tenant, so their
+                        # reach is the whole organization regardless of what
+                        # the column says.
+                        "scope": "organization" if role in ("owner", "admin") else scope,
+                        "workspace_ids": sorted(assigned.get(uid, [])),
+                        "can_edit_access": role not in ("owner", "admin"),
+                    }
+                    for uid, email, role, joined, scope in rows
                 ]
                 members.sort(key=lambda m: (-_ROLE_RANK.get(m["role"], 0), m["email"] or ""))
                 return members
             except Exception as e:
                 logger.error(f"Error listing members of org {organization_id}: {e}", exc_info=True)
                 return []
+
+    async def set_member_access(
+        self,
+        organization_id: int,
+        user_id: int,
+        scope: str,
+        workspace_ids: Optional[List[int]] = None,
+    ) -> bool:
+        """Change how far an existing member's access reaches.
+
+        scope='organization' gives them every workspace in the tenant, now and
+        later. scope='workspace' limits them to workspace_ids, replacing
+        whatever they had.
+
+        Refuses to touch an owner or admin: their reach comes from
+        administering the tenant, and narrowing it here would produce a member
+        who can manage the organization but not see it.
+        """
+        from ..models.orm_models import WorkspaceMember
+
+        if scope not in ("organization", "workspace"):
+            logger.error(f"Invalid scope {scope!r}")
+            return False
+
+        async with self.get_async_session() as session:
+            try:
+                member = (await session.execute(
+                    select(OrganizationMember).where(
+                        OrganizationMember.organization_id == organization_id,
+                        OrganizationMember.user_id == user_id,
+                    )
+                )).scalar_one_or_none()
+                if not member:
+                    return False
+                if member.role in ("owner", "admin"):
+                    logger.warning(
+                        f"Refusing to scope user {user_id}, who is {member.role} of org {organization_id}"
+                    )
+                    return False
+
+                member.scope = scope
+
+                # Only workspaces in this organization may be assigned, so a
+                # crafted request cannot grant access to another tenant's.
+                allowed = set((await session.execute(
+                    select(WorkspaceORM.id).where(WorkspaceORM.organization_id == organization_id)
+                )).scalars().all())
+                requested = {int(w) for w in (workspace_ids or [])} & allowed
+
+                existing = (await session.execute(
+                    select(WorkspaceMember)
+                    .join(WorkspaceORM, WorkspaceORM.id == WorkspaceMember.workspace_id)
+                    .where(
+                        WorkspaceMember.user_id == user_id,
+                        WorkspaceORM.organization_id == organization_id,
+                    )
+                )).scalars().all()
+                have = {row.workspace_id: row for row in existing}
+
+                if scope == "organization":
+                    # Reach no longer comes from assignments. Clear them so
+                    # narrowing later starts from a blank slate rather than
+                    # silently restoring an old set.
+                    for row in existing:
+                        await session.delete(row)
+                else:
+                    for wid in have.keys() - requested:
+                        await session.delete(have[wid])
+                    for wid in requested - have.keys():
+                        session.add(WorkspaceMember(
+                            workspace_id=wid, user_id=user_id, role="staff"
+                        ))
+
+                await session.commit()
+                logger.info(
+                    f"Set user {user_id} in org {organization_id} to {scope} "
+                    f"({sorted(requested) if scope == 'workspace' else 'all workspaces'})"
+                )
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(
+                    f"Error setting access for user {user_id} in org {organization_id}: {e}",
+                    exc_info=True,
+                )
+                return False
 
     async def count_members(self, organization_id: int) -> int:
         """Seats consumed by this organization."""

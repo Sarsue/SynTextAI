@@ -52,6 +52,12 @@ class MemberSummary(BaseModel):
     user_id: int
     email: Optional[str] = None
     role: str
+    # 'organization' sees every workspace; 'workspace' sees only workspace_ids.
+    scope: str = "workspace"
+    workspace_ids: List[int] = []
+    # False for owners and admins, whose reach follows from administering the
+    # tenant and must not be narrowed here.
+    can_edit_access: bool = True
 
 
 @organizations_router.get("")
@@ -199,7 +205,15 @@ async def list_organization_members(
             detail="You are not a member of this organization.",
         )
     members = await store.org_repo.list_members(organization_id)
-    return {"items": [MemberSummary(**{k: m[k] for k in ("user_id", "email", "role")}) for m in members]}
+    return {
+        "items": [
+            MemberSummary(**{
+                k: m[k]
+                for k in ("user_id", "email", "role", "scope", "workspace_ids", "can_edit_access")
+            })
+            for m in members
+        ]
+    }
 
 
 class OrganizationInviteRequest(BaseModel):
@@ -275,3 +289,58 @@ async def invite_to_organization(
         "invite_url": f"{app_url()}/#/invite/{token}",
         "next_seat_cents": seats.get("next_seat_cents", 0),
     }
+
+
+class MemberAccessRequest(BaseModel):
+    # 'organization' for every workspace, 'workspace' for a chosen set.
+    scope: str
+    workspace_ids: List[int] = []
+
+
+@organizations_router.patch("/{organization_id}/members/{member_user_id}/access")
+async def set_member_access(
+    organization_id: int = Path(...),
+    member_user_id: int = Path(...),
+    body: MemberAccessRequest = ...,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Change how far an existing member's access reaches.
+
+    Reach used to be fixed at invite time, so moving somebody from one
+    workspace to another, or from a single workspace to the whole
+    organization, meant deleting them and inviting again — which also churned
+    the seat count. This changes it in place.
+
+    Owners and admins only, since it hands out access.
+    """
+    user_id = user_data["user_id"]
+    role = await store.org_repo.get_role(organization_id, user_id)
+    if role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an owner or admin can change who sees what.",
+        )
+
+    if body.scope not in ("organization", "workspace"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown access scope.")
+
+    if body.scope == "workspace" and not body.workspace_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Choose at least one workspace, or give them access to every workspace.",
+        )
+
+    ok = await store.org_repo.set_member_access(
+        organization_id, member_user_id, body.scope, body.workspace_ids
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not change access for this member.",
+        )
+
+    # Seats are unchanged: they are still one member of the organization. No
+    # Stripe sync here on purpose, so moving somebody between workspaces never
+    # produces an invoice.
+    return {"message": "Access updated", "scope": body.scope, "workspace_ids": body.workspace_ids}

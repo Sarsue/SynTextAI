@@ -48,6 +48,16 @@ interface Member {
     role: string;
 }
 
+/** A member of the organization, with how far their access reaches. */
+interface OrgMember {
+    user_id: number;
+    email: string;
+    role: string;
+    scope: 'organization' | 'workspace';
+    workspace_ids: number[];
+    can_edit_access: boolean;
+}
+
 interface PendingInvite {
     id: number;
     email: string;
@@ -82,6 +92,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [showMembersModal, setShowMembersModal] = useState(false);
     const [members, setMembers] = useState<Member[]>([]);
     const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+    // Reach belongs to the organization, not to one workspace, so it is read
+    // from the organization endpoint rather than the workspace's member list.
+    const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
+    const [savingAccessFor, setSavingAccessFor] = useState<number | null>(null);
     const [inviteEmail, setInviteEmail] = useState('');
     const [isSendingInvite, setIsSendingInvite] = useState(false);
     // How far the invite reaches. 'workspace' adds them to this workspace only;
@@ -398,9 +412,59 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         }
     };
 
+    const fetchOrgMembers = async () => {
+        if (!user || !activeOrganizationId) return;
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/organizations/${activeOrganizationId}/members`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setOrgMembers(data.items || []);
+            }
+        } catch (err) {
+            console.error('Error fetching organization members:', err);
+        }
+    };
+
+    /** Move somebody between "every workspace" and a chosen set. */
+    const updateMemberAccess = async (
+        memberUserId: number,
+        scope: 'organization' | 'workspace',
+        workspaceIds: number[],
+    ) => {
+        if (!user || !activeOrganizationId) return;
+        setSavingAccessFor(memberUserId);
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(
+                `/api/v1/organizations/${activeOrganizationId}/members/${memberUserId}/access`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+                    body: JSON.stringify({ scope, workspace_ids: workspaceIds }),
+                },
+            );
+            if (res.ok) {
+                addToast('Access updated', 'success');
+                await fetchOrgMembers();
+                if (currentWorkspace) await fetchMembers(currentWorkspace.id);
+            } else {
+                const data = await res.json().catch(() => ({}));
+                addToast(data.detail || 'Could not change access', 'error');
+            }
+        } catch {
+            addToast('Could not change access', 'error');
+        } finally {
+            setSavingAccessFor(null);
+        }
+    };
+
     const handleOpenMembers = async () => {
         if (currentWorkspace) {
             fetchMembers(currentWorkspace.id);
+            fetchOrgMembers();
             setShowMembersModal(true);
             setShowDropdown(false);
             // What the next seat costs, so the price of adding somebody is on
@@ -706,28 +770,74 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         </p>
                     )}
 
-                    {/* Current members */}
-                    {members.length > 0 && (
+                    {/* Current members, with what each of them can see.
+                        Reach used to be fixed at invite time, so moving
+                        somebody between workspaces meant removing and
+                        re-inviting them, which churned the seat count for a
+                        change that costs nothing. */}
+                    {orgMembers.length > 0 && (
                         <div style={{ marginTop: 20 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>Members</div>
-                            {members.map(m => (
-                                <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(128,128,128,0.15)' }}>
-                                    <span style={{ fontSize: 14 }}>{m.email}</span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                        <span style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{m.role}</span>
-                                        {m.role !== 'owner' && (
-                                            <Button
-                                                variant="ghost"
-                                                size="icon-sm"
-                                                onClick={() => handleRemoveMember(m.user_id)}
-                                                title="Remove member"
-                                            >
-                                                <X className="size-3.5" />
-                                            </Button>
+                            {orgMembers.map(m => {
+                                const isSaving = savingAccessFor === m.user_id;
+                                // One workspace selected, or every workspace.
+                                // A multi-select belongs here eventually; until
+                                // then this covers the two reaches the backend
+                                // actually distinguishes.
+                                const value = m.scope === 'organization'
+                                    ? 'organization'
+                                    : (m.workspace_ids[0] != null ? String(m.workspace_ids[0]) : 'none');
+                                return (
+                                    <div key={m.user_id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(128,128,128,0.15)' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                                            <span style={{ fontSize: 14 }}>{m.email}</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                <span style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{m.role}</span>
+                                                {m.role !== 'owner' && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        onClick={() => handleRemoveMember(m.user_id)}
+                                                        title="Remove from this workspace"
+                                                    >
+                                                        <X className="size-3.5" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {m.can_edit_access ? (
+                                            <div style={{ marginTop: 6 }}>
+                                                <Select
+                                                    value={value}
+                                                    disabled={isSaving}
+                                                    onValueChange={(v) =>
+                                                        v === 'organization'
+                                                            ? updateMemberAccess(m.user_id, 'organization', [])
+                                                            : updateMemberAccess(m.user_id, 'workspace', [Number(v)])
+                                                    }
+                                                >
+                                                    <SelectTrigger className="w-full h-8 text-xs">
+                                                        <SelectValue placeholder="No workspace assigned" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="organization">Can see every workspace</SelectItem>
+                                                        {workspaces.map(ws => (
+                                                            <SelectItem key={ws.id} value={String(ws.id)}>
+                                                                Can see {ws.name} only
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        ) : (
+                                            <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
+                                                Sees every workspace, as {m.role}.
+                                            </div>
                                         )}
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
 
