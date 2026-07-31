@@ -1,4 +1,14 @@
 
+# Local stack. MUST be run with --env-file .env.dev:
+#
+#     docker compose --env-file .env.dev -f docker-compose.local.yml up -d --build
+#
+# `env_file:` below only sets each container's runtime environment. The
+# ${VAR} build args are interpolated by Compose itself, which reads the
+# project's default .env — the production file — unless told otherwise. Without
+# the flag the frontend is built with the LIVE Stripe publishable key while the
+# backend runs on the test secret, and every test card is refused with "your
+# request was in live mode, but used a known test card".
 services:
   # Throwaway local Postgres so migrations and features can be tested without
   # touching the managed production database. pgvector image, because the
