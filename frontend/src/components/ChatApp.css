@@ -161,3 +161,33 @@
         }
     }
 }
+
+/* Who is signed in, and into which company. Sits above Settings so it reads as
+   account context rather than as part of the document list. */
+.signed-in-as {
+    padding: 8px 4px 10px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.signed-in-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.signed-in-org {
+    font-size: 0.78rem;
+    color: var(--secondary-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.signed-in-role {
+    text-transform: capitalize;
+}

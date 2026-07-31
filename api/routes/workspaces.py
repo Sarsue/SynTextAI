@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from ..repositories.repository_manager import RepositoryManager
 from ..core.limits import assert_can_create_workspace
+from ..core.permissions import Capability, assert_workspace_capability
 from ..core.seats import sync_seats_to_stripe
 
 logger = logging.getLogger(__name__)
@@ -353,11 +354,9 @@ async def list_members(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
 ):
-    """List members and pending invites. Owner only."""
+    """List members and pending invites. Requires permission to manage people."""
     user_id = user_data["user_id"]
-    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
-    if role != "owner":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can view members")
+    await assert_workspace_capability(store, user_id, workspace_id, Capability.INVITE_MEMBER)
 
     members = await store.workspace_repo.list_members(workspace_id)
     invites = await store.workspace_repo.list_pending_invites(workspace_id)
@@ -381,11 +380,9 @@ async def remove_member(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
 ):
-    """Remove a staff member. Owner only."""
+    """Remove a staff member from one workspace."""
     user_id = user_data["user_id"]
-    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
-    if role != "owner":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can remove members")
+    await assert_workspace_capability(store, user_id, workspace_id, Capability.REMOVE_MEMBER)
     if target_user_id == user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner cannot remove themselves")
 

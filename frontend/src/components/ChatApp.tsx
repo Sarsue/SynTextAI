@@ -61,7 +61,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         authLoading,
         incomingChatMessage,
         clearIncomingChatMessage,
-        activeOrganizationId
+        activeOrganizationId,
+        orgContext
     } = useUserContext();
     const { addToast } = useToast();
     const { webSocketStatus } = useUserContext();
@@ -853,6 +854,25 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         onWorkspaceChange={setCurrentWorkspaceId}
                     />
                     <div className="settings-button-container">
+                        {/* Who am I, and where am I? Both matter once somebody
+                            can belong to a company they do not own: an invited
+                            member and the owner see the same screen otherwise,
+                            and a shared machine makes it worse. */}
+                        {user && (
+                            <div className="signed-in-as">
+                                <div className="signed-in-name" title={user.email || undefined}>
+                                    {user.displayName || user.email}
+                                </div>
+                                {orgContext?.name && (
+                                    <div className="signed-in-org">
+                                        {orgContext.name}
+                                        {orgContext.role && orgContext.role !== 'owner' && (
+                                            <span className="signed-in-role"> · {orgContext.role}</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         <Button onClick={handleSettingsClick} variant="outline" className="w-full">
                             ⚙️ Settings
                         </Button>

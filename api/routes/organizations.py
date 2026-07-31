@@ -14,6 +14,11 @@ from pydantic import BaseModel, EmailStr
 from ..core.utils import get_user_id
 from ..core.limits import resolve_entitlement
 from ..core.seats import seat_summary, sync_seats_to_stripe
+from ..core.permissions import (
+    Capability,
+    assert_organization_capability,
+    capabilities_for,
+)
 from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
 from api.repositories.repository_manager import RepositoryManager
 
@@ -123,12 +128,9 @@ async def rename_organization(
     actual name. Onboarding asks for it and calls this.
     """
     user_id = user_data["user_id"]
-    role = await store.org_repo.get_role(organization_id, user_id)
-    if role not in ("owner", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only an owner or admin can rename the organization.",
-        )
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.RENAME_ORGANIZATION
+    )
 
     name = (body.name or "").strip()
     if not name:
@@ -166,7 +168,7 @@ async def organization_context(
 
     org_status = await store.org_repo.get_subscription_status(organization_id)
     entitled = (org_status or "none").lower() in {"active", "trialing"}
-    is_admin = role in ("owner", "admin")
+    caps = capabilities_for(role)
 
     memberships = await store.org_repo.get_memberships(user_id)
     name = next(
@@ -179,12 +181,15 @@ async def organization_context(
         "role": role,
         "subscription_status": org_status,
         "entitled": entitled,
-        # Billing belongs to the owner. A member never sees it, and is never
-        # asked to fix somebody else's lapsed plan.
-        "can_manage_billing": role == "owner",
-        "can_manage_members": is_admin,
-        "can_manage_documents": is_admin,
-        "can_rename_organization": is_admin,
+        # Derived from the capability table rather than re-deriving the role
+        # rules here, so the UI hides exactly what the backend would refuse.
+        "can_manage_billing": Capability.MANAGE_BILLING in caps,
+        "can_manage_members": Capability.INVITE_MEMBER in caps,
+        "can_manage_documents": Capability.UPLOAD_DOCUMENT in caps,
+        "can_rename_organization": Capability.RENAME_ORGANIZATION in caps,
+        "can_create_workspace": Capability.CREATE_WORKSPACE in caps,
+        # Everything this role may do, so a new capability needs no new field.
+        "capabilities": sorted(c.value for c in caps),
         "seats_used": await store.org_repo.count_members(organization_id),
         "seat_limit": await store.org_repo.get_seat_limit(organization_id),
     }
@@ -238,12 +243,9 @@ async def invite_to_organization(
     short of administering the tenant.
     """
     user_id = user_data["user_id"]
-    role = await store.org_repo.get_role(organization_id, user_id)
-    if role not in ("owner", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only an owner or admin can invite people to the organization.",
-        )
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.INVITE_MEMBER
+    )
 
     token = await store.workspace_repo.create_invite(
         body.email, organization_id=organization_id
@@ -315,12 +317,9 @@ async def set_member_access(
     Owners and admins only, since it hands out access.
     """
     user_id = user_data["user_id"]
-    role = await store.org_repo.get_role(organization_id, user_id)
-    if role not in ("owner", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only an owner or admin can change who sees what.",
-        )
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.CHANGE_MEMBER_ACCESS
+    )
 
     if body.scope not in ("organization", "workspace"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown access scope.")
@@ -360,12 +359,9 @@ async def remove_organization_member(
     is the one that ends their access and stops their seat being charged.
     """
     user_id = user_data["user_id"]
-    role = await store.org_repo.get_role(organization_id, user_id)
-    if role not in ("owner", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only an owner or admin can remove members.",
-        )
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.REMOVE_MEMBER
+    )
 
     if member_user_id == user_id:
         raise HTTPException(

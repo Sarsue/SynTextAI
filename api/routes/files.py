@@ -22,6 +22,7 @@ from ..repositories.repository_manager import RepositoryManager
 from fastapi.responses import JSONResponse
 from ..core.dependencies import get_store, authenticate_user
 from ..core.limits import assert_can_create_doc
+from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from pydantic import BaseModel, Field
 from ..models import File
@@ -98,37 +99,23 @@ async def check_ownership(file_id: int, user_id: int, store: RepositoryManager) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
 async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
-    """Raise 403 unless user_id is the owner of workspace_id.
+    """Raise 403 unless the caller may add documents to this workspace.
 
-    Uploading was previously unauthorized entirely: any authenticated user could
-    pass an arbitrary workspace_id and upload into a workspace they weren't even
-    a member of, since only file-level ownership was ever checked, never workspace
-    membership. "Owners manage documents, staff ask questions and read answers" is
-    the product's own stated model (see syntextai.com's feature list) but nothing
-    on the backend enforced it. This closes both gaps at once: not a member -> 403,
-    member but not owner -> 403.
+    Uploading was once unauthorized entirely: any authenticated user could pass
+    an arbitrary workspace_id and upload into a workspace they were not a member
+    of, since only file-level ownership was ever checked. Who may upload is now
+    a row in the capability table rather than a role string compared here.
     """
-    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
-    if role != "owner":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the workspace owner can upload documents."
-        )
+    await assert_workspace_capability(store, user_id, workspace_id, Capability.UPLOAD_DOCUMENT)
 
 async def check_can_read_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
-    """Raise 403 unless user_id can read workspace_id, as owner or as staff.
+    """Raise 403 unless the caller may read this workspace.
 
-    Reads are scoped by workspace rather than by uploader, so this check is what
-    keeps one organization's documents out of another's. Without it, passing an
-    arbitrary workspace_id would return that workspace's files, because the
-    query no longer filters on files.user_id.
+    Reads are scoped by workspace rather than by uploader, so this is what keeps
+    one organization's documents out of another's. Without it, passing an
+    arbitrary workspace_id would return that workspace's files.
     """
-    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
-    if role is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this workspace."
-        )
+    await assert_workspace_capability(store, user_id, workspace_id, Capability.READ)
 
 
 # Route to save file

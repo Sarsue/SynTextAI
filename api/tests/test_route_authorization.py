@@ -227,3 +227,26 @@ async def test_member_can_send_a_message_in_a_workspace_they_can_see(store, tena
         f"/api/v1/messages?message=hi&history_id={history}&language=english&workspace_id={ws}"
     )
     assert res.status_code != 404, res.text
+
+
+async def test_context_reports_capabilities_not_role_guesses(store, tenant, client):
+    """The UI hides exactly what the backend would refuse.
+
+    Both used to derive the answer separately from a role string, so they could
+    disagree — a button shown that then 403s, or hidden when it would have
+    worked.
+    """
+    member = await tenant.member(scope="organization")
+
+    res = await client.as_(member).get(f"/api/v1/organizations/{tenant.org}/context")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["can_manage_billing"] is False
+    assert body["can_manage_members"] is False
+    assert body["can_manage_documents"] is False
+    assert body["capabilities"] == ["read"]
+
+    res = await client.as_(tenant.owner).get(f"/api/v1/organizations/{tenant.org}/context")
+    body = res.json()
+    assert body["can_manage_billing"] is True
+    assert "manage_billing" in body["capabilities"]

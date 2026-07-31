@@ -32,12 +32,17 @@ logger = logging.getLogger(__name__)
 _engine: Optional[AsyncEngine] = None
 _async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
-# Production-ready default configuration
-# Conservative defaults suitable for small Postgres instances and local Docker.
-# IMPORTANT: each process (api + worker) will maintain its own pool, so keep defaults small.
-# For production with higher limits, override via environment variables.
-DEFAULT_POOL_SIZE = 2
-DEFAULT_MAX_OVERFLOW = 0
+# Each process (api + worker) keeps its own pool, so the ceiling per process is
+# pool_size + max_overflow and the total is roughly twice that.
+#
+# These were 2 and 0, which meant two concurrent requests exhausted the pool and
+# the third waited thirty seconds before failing with a QueuePool timeout. That
+# is not a load problem: one person opening a page that resolves a couple of
+# things in parallel could hit it. Five plus ten bursts to fifteen per process,
+# thirty in total, which fits comfortably inside a small managed Postgres.
+# Override with DB_POOL_SIZE and DB_MAX_OVERFLOW.
+DEFAULT_POOL_SIZE = 5
+DEFAULT_MAX_OVERFLOW = 10
 DEFAULT_POOL_RECYCLE = 3600  # 1 hour
 DEFAULT_POOL_TIMEOUT = 30
 DEFAULT_POOL_PRE_PING = True

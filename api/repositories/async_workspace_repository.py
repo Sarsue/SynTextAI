@@ -122,16 +122,36 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
 
         async with self.get_async_session() as session:
             try:
+                from ..models.orm_models import OrganizationMember
+
                 rows = (await session.execute(
                     select(WorkspaceORM).where(WorkspaceORM.id.in_(ids))
                 )).scalars().all()
+
+                # Roles are resolved inside this one session.
+                #
+                # Calling get_user_role_in_workspace per workspace opened a new
+                # session for each while this one was still held, which
+                # exhausted a pool of two on the second workspace and produced
+                # QueuePool timeouts under nothing more than normal use.
+                admin_orgs = set((await session.execute(
+                    select(OrganizationMember.organization_id).where(
+                        OrganizationMember.user_id == user_id,
+                        OrganizationMember.role.in_(("owner", "admin")),
+                    )
+                )).scalars().all())
+
                 result = []
                 for ws in rows:
+                    if ws.user_id == user_id or ws.organization_id in admin_orgs:
+                        role = "owner"
+                    else:
+                        role = "staff"
                     result.append({
                         "id": ws.id,
                         "name": ws.name,
                         "user_id": ws.user_id,
-                        "role": await self.get_user_role_in_workspace(ws.id, user_id),
+                        "role": role,
                         "created_at": ws.created_at,
                         "updated_at": ws.updated_at,
                     })
