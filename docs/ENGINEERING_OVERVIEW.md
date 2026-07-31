@@ -590,10 +590,26 @@ outliers rather than nickel-and-diming the median.
 Also agreed: annual prepay at two months free, and seat removal must be instant
 and self-serve so customers trust the overage.
 
-Implementation notes: needs Stripe quantity-based subscription items with
-quantity synced on member add/remove, and **four** price IDs (two base, two
-per-seat) against the single `STRIPE_PRICE_ID` configured today. Seats are an
-org property, so this depends on the tenant migration.
+Shipped. Two graduated tiered prices, not the four originally sketched: one
+price per plan whose first tier is a flat amount covering the included seats and
+whose second charges per seat beyond them. A base item plus a separate per-seat
+item would have meant two quantities to keep in step; this way the subscription
+item's quantity is simply the headcount and Stripe does the arithmetic, which
+also produces an invoice a customer can read.
+
+`api/core/plans.py` is the single definition of the amounts, and the Stripe
+prices were built to match it. A Stripe price is immutable, so changing an
+amount means creating a new price and repointing `STRIPE_PRICE_ID_<PLAN>`.
+Quantity is synced on invite accept and member removal, both invoiced
+immediately so an added seat is not free until renewal and a removed one stops
+costing money at once. The sync never raises: the membership change has already
+happened, and drift is corrected by the next sync or the webhook.
+
+The trial was dropped rather than built. Access is bought with a card, or
+granted by being invited into an organization that already pays. Demo access is
+an organization flagged `billing_exempt` — entitled without a subscription,
+never charged for seats, ended by clearing the flag, which leaves the data and
+stops the access.
 
 Not doing yet: usage-based query pricing. It tracks cost best but makes bills
 unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
