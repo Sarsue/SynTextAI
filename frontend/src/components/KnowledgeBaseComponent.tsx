@@ -59,8 +59,10 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
         filePagination,
         isLoadingFiles,
         fileError: contextFileError,
+        accessChangedAt,
     } = useUserContext();
-interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
+    interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
+
     const [fileStatus, setFileStatus] = useState<{[key: number]: FileStatusEntry}>({});
     const [pendingDelete, setPendingDelete] = useState<UploadedFile | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -91,9 +93,11 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     //
     // A null workspace means "everything I can see", which loadUserFiles scopes
     // to the active organization rather than leaking across tenants.
+    // accessChangedAt is bumped when an owner changes what this person may
+    // see, so documents in a revoked workspace disappear without a reload.
     useEffect(() => {
         loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId);
-    }, [loadUserFiles, filePagination.page, filePagination.pageSize, currentWorkspaceId]);
+    }, [loadUserFiles, filePagination.page, filePagination.pageSize, currentWorkspaceId, accessChangedAt]);
 
     // Fetch workspaces for move menu
     useEffect(() => {

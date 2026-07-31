@@ -62,7 +62,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         incomingChatMessage,
         clearIncomingChatMessage,
         activeOrganizationId,
-        orgContext
+        orgContext,
+        accessChangedAt
     } = useUserContext();
     const { addToast } = useToast();
     const { webSocketStatus } = useUserContext();
@@ -214,7 +215,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         setCurrentHistory(null);
         stopAwaitingReply();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user, currentWorkspaceId]);
+    }, [user, currentWorkspaceId, accessChangedAt]);
 
     // Load a conversation's messages when it is opened.
     //

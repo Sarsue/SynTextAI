@@ -226,9 +226,32 @@ build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../fronten
 
 
 
+class SPAStaticFiles(StaticFiles):
+    """Static files with cache headers that match how the build works.
+
+    Vite fingerprints every asset, so index.html is the only file whose *name*
+    stays the same while its contents change. Without a Cache-Control header the
+    browser caches it heuristically off Last-Modified and keeps serving an HTML
+    file pointing at the previous build's bundle — so a deploy lands and nobody
+    sees it until they hard-refresh, which no ordinary user will think to do.
+
+    index.html therefore always revalidates, and the fingerprinted assets it
+    names are cached for a year: their names change whenever their contents do,
+    so they can never be stale.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if path in ("", ".", "index.html") or path.endswith("/index.html"):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        elif "/assets/" in f"/{path}":
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 # Mount static files LAST - this ensures the above routes take precedence
 # Note: StaticFiles will only handle requests for files that exist
-app.mount("/", StaticFiles(directory=build_path, html=True), name="static")
+app.mount("/", SPAStaticFiles(directory=build_path, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr
 from ..core.utils import get_user_id
 from ..core.limits import resolve_entitlement
 from ..core.seats import seat_summary, sync_seats_to_stripe
+from ..core.websocket_manager import websocket_manager
 from ..core.permissions import (
     Capability,
     assert_organization_capability,
@@ -367,6 +368,24 @@ async def set_member_access(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Could not change access for this member.",
             )
+
+    # Tell them, rather than waiting for a refresh they have no reason to make.
+    #
+    # Their browser holds the workspace list, the document list and the
+    # conversation list in memory, fetched when they signed in. Changing their
+    # access changed none of that, so a member kept seeing a workspace they had
+    # just lost until they happened to reload — which for a revocation is the
+    # wrong way round.
+    try:
+        await websocket_manager.send_message(
+            str(member_user_id),
+            "access_changed",
+            {"organization_id": organization_id},
+        )
+    except Exception as e:
+        # They will pick it up on their next load. Not a reason to fail a
+        # change that has already been made.
+        logger.warning(f"Could not notify user {member_user_id} of access change: {e}")
 
     # Seats are unchanged: they are still one member of the organization. No
     # Stripe sync here on purpose, so moving somebody between workspaces never

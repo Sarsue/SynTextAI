@@ -87,6 +87,8 @@ interface UserContextType {
     // Answers arrive over the websocket, but the conversation lives in ChatApp,
     // so the socket handler parks the latest one here for it to consume.
     incomingChatMessage: IncomingChatMessage | null;
+    // Timestamp of the last access change pushed from the server.
+    accessChangedAt: number;
     clearIncomingChatMessage: () => void;
     // The tenant the user chose at sign-in. Everything is scoped to it, so
     // entitlement and role can never be blended across two organizations the
@@ -137,6 +139,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isMemberOnly, setIsMemberOnly] = useState<boolean>(false);
     const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<string | null>(null);
     const [incomingChatMessage, setIncomingChatMessage] = useState<IncomingChatMessage | null>(null);
+    // Bumped whenever access changes, so views holding workspace-scoped lists
+    // can refetch without each of them subscribing to the socket.
+    const [accessChangedAt, setAccessChangedAt] = useState<number>(0);
     const clearIncomingChatMessage = useCallback(() => setIncomingChatMessage(null), []);
     const [activeOrganizationId, setActiveOrganizationId] = useState<number | null>(() => {
         const stored = localStorage.getItem('active_organization_id');
@@ -326,6 +331,23 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     // events, so every answer was delivered and dropped. The
                     // request succeeded, the worker succeeded, the socket
                     // delivered, and the conversation stayed empty.
+                    // Access was changed by an owner while this tab was open.
+                    //
+                    // The workspace, document and conversation lists were all
+                    // fetched at sign-in and never revisited, so somebody who
+                    // lost a workspace kept seeing it until they happened to
+                    // reload — which for a revocation is exactly the wrong way
+                    // round. Re-resolving the organization refreshes what they
+                    // may do, and the workspace picker reloads from it.
+                    case 'access_changed': {
+                        const orgId = (parsedMessage.data as any)?.organization_id;
+                        if (orgId != null) {
+                            setActiveOrganization(orgId).catch(() => {});
+                        }
+                        setAccessChangedAt(Date.now());
+                        break;
+                    }
+
                     case 'message_received': {
                         const data: any = parsedMessage.data || {};
                         setIncomingChatMessage({
@@ -546,6 +568,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setCurrentWorkspaceRole,
         incomingChatMessage,
         clearIncomingChatMessage,
+        accessChangedAt,
         activeOrganizationId,
         orgContext,
         setActiveOrganization,

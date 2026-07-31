@@ -70,7 +70,7 @@ interface WorkspaceSelectorProps {
 }
 
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
-    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId, orgContext, isEntitled } = useUserContext();
+    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId, orgContext, isEntitled, accessChangedAt } = useUserContext();
     const { addToast } = useToast();
 
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -126,12 +126,18 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // workspace here told staff to upgrade for something the backend allows.
     const ownedWorkspaceCount = workspaces.filter(w => w.role === 'owner').length;
 
-    // Fetch workspaces on mount
+    // Fetch workspaces on mount, and again whenever access changes.
+    //
+    // accessChangedAt is bumped by the socket event an owner's change sends, so
+    // a workspace granted or revoked appears or disappears here without the
+    // person having to reload — which they had no reason to do, and which for a
+    // revocation left them looking at something they no longer had.
     useEffect(() => {
         if (user) {
             fetchWorkspaces();
         }
-    }, [user]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user, accessChangedAt]);
 
     const fetchWorkspaces = async (preferredWorkspaceId?: number) => {
         if (!user) return;
