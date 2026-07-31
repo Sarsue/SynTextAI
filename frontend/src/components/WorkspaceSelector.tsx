@@ -881,7 +881,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                                        see, because an owner deciding one is
                                                        usually deciding both. */
                                                     <Select
-                                                        value={m.role}
+                                                        // Anything that is not admin reads as staff,
+                                                        // so a row still carrying the old word does
+                                                        // not render an empty control.
+                                                        value={m.role === 'admin' ? 'admin' : 'staff'}
                                                         disabled={isSaving}
                                                         onValueChange={(v) =>
                                                             updateMemberAccess(
@@ -896,7 +899,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="member">Can read only</SelectItem>
+                                                            <SelectItem value="staff">Can read only</SelectItem>
                                                             <SelectItem value="admin">Can manage</SelectItem>
                                                         </SelectContent>
                                                     </Select>
@@ -975,8 +978,8 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                         ) : (
                                             <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
                                                 {m.role === 'owner'
-                                                    ? 'Sees every workspace and manages billing.'
-                                                    : 'Sees every workspace, and can upload, edit and invite.'}
+                                                    ? 'Sees every workspace, manages billing.'
+                                                    : 'Sees every workspace. Can upload and delete documents, and manage people.'}
                                             </div>
                                         )}
                                     </div>

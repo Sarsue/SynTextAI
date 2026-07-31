@@ -20,7 +20,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 async def test_a_member_can_read_and_nothing_else():
     """The product's own promise: staff ask questions, owners manage."""
-    caps = capabilities_for("member")
+    caps = capabilities_for("staff")
     assert caps == frozenset({Capability.READ})
 
     for mutation in (
@@ -35,7 +35,7 @@ async def test_a_member_can_read_and_nothing_else():
         Capability.RENAME_ORGANIZATION,
         Capability.MANAGE_BILLING,
     ):
-        assert not can("member", mutation), mutation
+        assert not can("staff", mutation), mutation
 
 
 async def test_staff_matches_member():
@@ -68,13 +68,13 @@ async def test_role_names_are_case_insensitive():
 
 async def test_admin_roles_is_the_single_definition():
     assert is_admin("owner") and is_admin("admin")
-    assert not is_admin("member") and not is_admin("staff") and not is_admin(None)
+    assert not is_admin("staff") and not is_admin("staff") and not is_admin(None)
     assert ADMIN_ROLES == frozenset({"owner", "admin"})
 
 
 async def test_every_capability_is_held_by_someone():
     """A capability no role holds is dead code that reads as a working rule."""
     held = set()
-    for caps in (capabilities_for(r) for r in ("owner", "admin", "member", "staff")):
+    for caps in (capabilities_for(r) for r in ("owner", "admin", "staff", "staff")):
         held |= caps
     assert held == set(Capability)

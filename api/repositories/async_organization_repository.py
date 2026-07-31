@@ -21,7 +21,7 @@ from ..models.orm_models import (
 logger = logging.getLogger(__name__)
 
 # Ranked so the strongest role wins when a user somehow holds several.
-_ROLE_RANK = {"owner": 3, "admin": 2, "member": 1}
+_ROLE_RANK = {"owner": 3, "admin": 2, "staff": 1, "member": 1}
 
 
 class AsyncOrganizationRepository(AsyncBaseRepository):
@@ -116,7 +116,7 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )
                 return None
 
-    async def add_member(self, organization_id: int, user_id: int, role: str = "member") -> bool:
+    async def add_member(self, organization_id: int, user_id: int, role: str = "staff") -> bool:
         """Add a member, leaving an existing membership untouched."""
         async with self.get_async_session() as session:
             try:
@@ -362,7 +362,7 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
         Refuses to change an owner's role at all, which also means the last
         owner cannot demote themselves and leave a tenant nobody can bill for.
         """
-        if role not in ("member", "admin"):
+        if role not in ("staff", "admin"):
             logger.error(f"Refusing to set unsupported role {role!r}")
             return False
 

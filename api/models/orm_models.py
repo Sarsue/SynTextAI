@@ -88,7 +88,7 @@ class OrganizationMember(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     # owner: billing plus everything. admin: manage members, no billing.
     # member: use it.
-    role = Column(String, nullable=False, default="member")
+    role = Column(String, nullable=False, default="staff")
     # How far that membership reaches. 'organization' sees every workspace in
     # the tenant; 'workspace' sees only the ones they were added to. Owners and
     # admins administer the tenant, so this does not narrow them.

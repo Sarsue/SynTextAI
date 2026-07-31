@@ -308,7 +308,7 @@ async def test_ownership_cannot_be_granted_through_this_path(store, tenant, clie
         json={"role": "owner"},
     )
     assert res.status_code == 400
-    assert await store.org_repo.get_role(tenant.org, member) == "member"
+    assert await store.org_repo.get_role(tenant.org, member) == "staff"
 
 
 async def test_an_owner_s_role_cannot_be_changed(store, tenant, client):
@@ -318,7 +318,7 @@ async def test_an_owner_s_role_cannot_be_changed(store, tenant, client):
 
     res = await client.as_(admin).patch(
         f"/api/v1/organizations/{tenant.org}/members/{tenant.owner}/access",
-        json={"role": "member"},
+        json={"role": "staff"},
     )
     assert res.status_code == 400
     assert await store.org_repo.get_role(tenant.org, tenant.owner) == "owner"
@@ -436,7 +436,7 @@ async def test_an_existing_member_can_sign_up_and_own_a_company(store, tenant, c
             for m in await store.org_repo.get_memberships(member)
         }
         # Still staff where they were invited, owner of what they just started.
-        assert roles[tenant.org] == "member"
+        assert roles[tenant.org] == "staff"
         assert roles[own_org] == "owner"
         await store.org_repo.delete_organization(own_org)
     finally:

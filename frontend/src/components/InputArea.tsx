@@ -18,9 +18,14 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
     const { darkMode, orgContext } = useUserContext();
-    // Managing documents is an organization permission. Default to allowed
-    // while the context loads so an owner never sees the control flicker away.
-    const canUpload = orgContext ? orgContext.can_manage_documents : true;
+    // Managing documents is an organization permission.
+    //
+    // Defaults to *not* allowed while the context loads. It defaulted to
+    // allowed, to spare an owner a flicker, which meant a read-only member was
+    // offered the attach control in that window, picked a file, and got a 403
+    // — an action the product had shown them and then refused. An owner seeing
+    // the control appear a moment late is the cheaper mistake.
+    const canUpload = orgContext?.can_manage_documents ?? false;
     const { addToast } = useToast();
 
     const isFileSupported = (file: File): boolean => {

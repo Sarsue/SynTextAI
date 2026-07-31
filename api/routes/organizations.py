@@ -331,10 +331,10 @@ async def set_member_access(
     )
 
     if body.role is not None:
-        if body.role not in ("member", "admin"):
+        if body.role not in ("staff", "admin"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A member can be a member or an admin. Ownership is transferred separately.",
+                detail="A person can be staff or an admin. Ownership is transferred separately.",
             )
         # Promoting yourself is how an admin would become an owner by degrees.
         if member_user_id == user_id:

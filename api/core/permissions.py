@@ -11,8 +11,9 @@ of Capability plus the roles that hold it. Neither requires touching a route.
 The rule the product actually sells:
 
     owner    everything, including billing
-    admin    everything except billing
-    member   read and ask questions; cannot change anything
+    admin    can manage: upload and delete documents, manage workspaces and
+             the people in them
+    staff    can read: ask questions and read answers, change nothing
 
 Read access is a separate question with a separate answer — see
 accessible_workspace_ids, which decides *which workspaces* you may see. This
@@ -66,11 +67,15 @@ ROLE_CAPABILITIES: Dict[str, FrozenSet[Capability]] = {
     # Everything except billing: an administrator runs the workspace, the owner
     # pays for it. Somebody has to be unable to cancel the subscription.
     "admin": frozenset(Capability) - {Capability.MANAGE_BILLING},
-    # Read and ask. A member cannot change anything, which is the whole point
-    # of inviting somebody into a knowledge base: they consume it.
-    "member": frozenset({Capability.READ}),
-    # The role recorded on workspace_members. Same reach as member.
+    # Read and ask, change nothing. Somebody who should be able to add
+    # documents is an admin: managing and contributing are the same permission
+    # here, because a knowledge base nobody may add to is not one worth having
+    # a separate role for.
+    #
+    # 'member' is accepted as a synonym only so a row written before the
+    # vocabulary was unified still resolves; the migration rewrites them.
     "staff": frozenset({Capability.READ}),
+    "member": frozenset({Capability.READ}),
 }
 
 # Roles that administer the tenant. Kept here so "is this person an admin" has

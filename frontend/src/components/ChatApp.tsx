@@ -475,14 +475,36 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         // Load files list; status updates will stream via WebSocket
                         await loadUserFiles(1, filePagination.pageSize);
                     } else {
+                        // Read the body once. A Response can only be consumed
+                        // once, so taking .text() here for analytics and then
+                        // .json() for the message left the second read throwing
+                        // and the reason permanently lost.
+                        const rawBody = fileDataResponse
+                            ? await fileDataResponse.text().catch(() => '')
+                            : '';
+
                         capture(AnalyticsEvents.FILE_UPLOAD, {
                             success: false,
                             file_count: files.length,
-                            error: fileDataResponse ? await fileDataResponse.text() : 'No response',
+                            error: rawBody || 'No response',
                             status: fileDataResponse?.status,
                         });
-                        
-                        addToast('File upload failed. Please try again.', 'error'); 
+
+                        // Say why. A 403 here means they are not allowed to
+                        // upload, which 'please try again' invites them to do
+                        // forever.
+                        let detail: unknown = null;
+                        try {
+                            detail = JSON.parse(rawBody)?.detail;
+                        } catch {
+                            // Not JSON. The generic message below covers it.
+                        }
+                        addToast(
+                            typeof detail === 'string'
+                                ? detail
+                                : 'File upload failed. Please try again.',
+                            'error',
+                        );
                     }
                 } catch (error) {
                     // Track file upload error
@@ -868,7 +890,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                                     <div className="signed-in-org">
                                         {orgContext.name}
                                         {orgContext.role && orgContext.role !== 'owner' && (
-                                            <span className="signed-in-role"> · {orgContext.role}</span>
+                                            /* What they can do, not the word the
+                                               database happens to store. */
+                                            <span className="signed-in-role">
+                                                {' · '}
+                                                {orgContext.role === 'admin' ? 'can manage' : 'read only'}
+                                            </span>
                                         )}
                                     </div>
                                 )}

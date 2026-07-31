@@ -61,9 +61,9 @@ async def tenant(store):
             return await store.workspace_repo.create_workspace(user_id=owner_id, name=name)
 
         @staticmethod
-        async def member(name: str = "member", scope: str = "workspace", workspaces=None) -> int:
+        async def member(name: str = "staff", scope: str = "workspace", workspaces=None) -> int:
             uid = await make_user(name)
-            await store.org_repo.add_member(org_id, uid, role="member")
+            await store.org_repo.add_member(org_id, uid, role="staff")
             await store.org_repo.set_member_access(org_id, uid, scope, workspaces or [])
             return uid
 

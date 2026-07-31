@@ -642,7 +642,7 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                         else:
                             session.add(OrganizationMember(
                                 organization_id=org_id, user_id=user_id,
-                                role="member", scope=scope,
+                                role="staff", scope=scope,
                             ))
                         if org_id not in joined:
                             joined.append(org_id)
@@ -732,7 +732,7 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                         session.add(OrganizationMember(
                             organization_id=org_id,
                             user_id=user_id,
-                            role="member",
+                            role="staff",
                             scope=scope,
                         ))
                         logger.info(f"User {user_id} joined organization {org_id} with {scope} scope")
