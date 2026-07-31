@@ -160,3 +160,36 @@ async def test_retrieval_scope_matches_document_scope(store, tenant):
     ids = await store.workspace_repo.accessible_workspace_ids(member, organization_id=tenant.org)
     assert ids == [ws1]
     assert ws2 not in ids
+
+
+async def test_accepting_an_invite_makes_you_a_company_member_seeing_everything(store, tenant):
+    """One invite, one meaning.
+
+    Invites used to carry a reach, which froze what somebody could see at the
+    moment they were invited and conflated how they joined with what they are
+    allowed to see. Joining now means joining the company; narrowing is a
+    separate, deliberate act by the owner afterwards.
+    """
+    ws1 = await tenant.workspace("Finance")
+    ws2 = await tenant.workspace("Dentist")
+
+    joiner = await tenant.new_user("joiner")
+    token = await store.workspace_repo.create_invite(
+        f"joiner-{joiner}@acme.co", organization_id=tenant.org
+    )
+    assert token
+
+    result = await store.workspace_repo.accept_invite(token, joiner)
+    assert result is not None
+    assert result["organization_id"] == tenant.org
+
+    # Sees everything on arrival, including a workspace made later.
+    later = await tenant.workspace("Created Afterwards")
+    got = await store.workspace_repo.accessible_workspace_ids(joiner, organization_id=tenant.org)
+    assert got == sorted([ws1, ws2, later])
+
+    # And the owner can then narrow them.
+    await store.org_repo.set_member_access(tenant.org, joiner, "workspace", [ws1])
+    assert await store.workspace_repo.accessible_workspace_ids(
+        joiner, organization_id=tenant.org
+    ) == [ws1]

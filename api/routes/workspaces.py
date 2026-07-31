@@ -8,7 +8,6 @@ from pydantic import BaseModel, EmailStr, Field
 
 from ..repositories.repository_manager import RepositoryManager
 from ..core.limits import assert_can_create_workspace
-from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
 from ..core.seats import sync_seats_to_stripe
 
 logger = logging.getLogger(__name__)
@@ -410,54 +409,13 @@ async def remove_member(
 # Invites
 # ---------------------------------------------------------------------------
 
-@workspaces_router.post("/{workspace_id}/invites", status_code=status.HTTP_201_CREATED)
-async def send_invite(
-    workspace_id: int = Path(...),
-    body: InviteRequest = ...,
-    user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store),
-):
-    """Send an invite email. Owner only."""
-    user_id = user_data["user_id"]
-    role = await store.workspace_repo.get_user_role_in_workspace(workspace_id, user_id)
-    if role != "owner":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the workspace owner can invite members")
-
-    workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-    workspace = next((ws for ws in workspaces if ws["id"] == workspace_id), None)
-    if not workspace:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
-
-    token = await store.workspace_repo.create_invite(body.email, workspace_id=workspace_id)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create invite")
-
-    inviter_name = user_data["user_info"].get("name") or user_data["user_info"].get("email", "Your team")
-
-    # Report what actually happened. The return value used to be discarded, so
-    # a refused send still answered "Invite sent" and the invite sat in the
-    # database as a row the recipient was never told about. The invite is still
-    # valid when the mail fails, so hand back the link rather than 500-ing:
-    # the owner can pass it on directly, which is exactly what had to be done
-    # by hand while email was unconfigured.
-    try:
-        invite_url = send_workspace_invite(
-            to_email=body.email,
-            workspace_name=workspace["name"],
-            token=token,
-            inviter_name=inviter_name,
-        )
-        return {"message": f"Invite sent to {body.email}", "email_sent": True, "invite_url": invite_url}
-    except EmailNotConfigured as e:
-        logger.warning(f"Invite created for {body.email} but email is not configured: {e}")
-    except Exception as e:
-        logger.error(f"Invite created for {body.email} but sending failed: {e}", exc_info=True)
-
-    return {
-        "message": f"Invite created for {body.email}, but the email could not be sent. Share this link with them.",
-        "email_sent": False,
-        "invite_url": f"{app_url()}/#/invite/{token}",
-    }
+# Deliberately no per-workspace invite.
+#
+# There is one kind of invite: it makes somebody a member of the organization,
+# able to see every workspace. What they see after that is set per member, by
+# the owner, and can be changed at any time. Two invite types froze the answer
+# at the moment of invitation and conflated how somebody joined with what they
+# are allowed to see. See POST /api/v1/organizations/{id}/invites.
 
 
 @workspaces_router.get("/invites/{token}", response_model=InviteInfoResponse)

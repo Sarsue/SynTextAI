@@ -99,10 +99,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [memberToRemove, setMemberToRemove] = useState<OrgMember | null>(null);
     const [inviteEmail, setInviteEmail] = useState('');
     const [isSendingInvite, setIsSendingInvite] = useState(false);
-    // How far the invite reaches. 'workspace' adds them to this workspace only;
-    // 'organization' gives them every workspace in the company, including ones
-    // created later.
-    const [inviteScope, setInviteScope] = useState<'workspace' | 'organization'>('workspace');
     const [nextSeatCents, setNextSeatCents] = useState<number | null>(null);
 
     // Backend entitlement rules:
@@ -512,15 +508,15 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     };
 
     const handleSendInvite = async () => {
-        if (!inviteEmail.trim() || !user) return;
-        const toOrganization = inviteScope === 'organization';
-        if (toOrganization ? !activeOrganizationId : !currentWorkspace) return;
+        if (!inviteEmail.trim() || !user || !activeOrganizationId) return;
         setIsSendingInvite(true);
         try {
             const idToken = await user.getIdToken();
-            const url = toOrganization
-                ? `/api/v1/organizations/${activeOrganizationId}/invites`
-                : `/api/v1/workspaces/${currentWorkspace!.id}/invites`;
+            // One kind of invite: it makes somebody a member of the company.
+            // What they can see is set afterwards, per member, in the list
+            // below. Asking at invite time conflated how they joined with what
+            // they see, and froze the answer at the moment of invitation.
+            const url = `/api/v1/organizations/${activeOrganizationId}/invites`;
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -789,25 +785,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         </Button>
                     </div>
 
-                    {/* Reach. Stated in terms of what the person will see,
-                        because 'organization scope' means nothing to a dental
-                        practice deciding who gets the payroll folder. */}
-                    <Select
-                        value={inviteScope}
-                        onValueChange={(v) => setInviteScope(v as 'workspace' | 'organization')}
-                    >
-                        <SelectTrigger className="w-full">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="workspace">
-                                Can see {currentWorkspace?.name ?? 'this workspace'} only
-                            </SelectItem>
-                            <SelectItem value="organization">
-                                Can see every workspace, including new ones
-                            </SelectItem>
-                        </SelectContent>
-                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                        They join your organization and can see every workspace.
+                        Change what they see from the list below once they accept.
+                    </p>
 
                     {nextSeatCents !== null && (
                         <p className="text-xs text-muted-foreground mt-2">

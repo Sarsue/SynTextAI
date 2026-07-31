@@ -68,14 +68,17 @@ async def test_access_url_refused_for_a_workspace_the_caller_cannot_read(store, 
 
 # --- inviting ----------------------------------------------------------------
 
-async def test_only_owner_can_invite_to_a_workspace(store, tenant, client):
-    ws = await tenant.workspace("Finance")
-    member = await tenant.member(scope="workspace", workspaces=[ws])
+async def test_there_is_no_per_workspace_invite(store, tenant, client):
+    """One kind of invite only.
 
-    res = await client.as_(member).post(
+    A per-workspace invite froze what somebody could see at the moment they
+    were invited. Joining and being granted access are separate acts now.
+    """
+    ws = await tenant.workspace("Finance")
+    res = await client.as_(tenant.owner).post(
         f"/api/v1/workspaces/{ws}/invites", json={"email": "colleague@acme.co"}
     )
-    assert res.status_code == 403
+    assert res.status_code == 405 or res.status_code == 404
 
 
 async def test_only_admin_can_invite_to_the_organization(store, tenant, client):

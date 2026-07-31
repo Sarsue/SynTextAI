@@ -545,7 +545,10 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 )
                 for invite, org_id in (await session.execute(stmt)).all():
                     invite.status = "accepted"
-                    scope = "workspace" if invite.workspace_id is not None else "organization"
+                    # Joining always means joining the company, with every
+                    # workspace visible. What they see after that is the owner's
+                    # to set, so an invite no longer carries a reach of its own.
+                    scope = "organization"
 
                     if invite.workspace_id is not None:
                         existing_ws = (await session.execute(
@@ -640,7 +643,10 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                         select(WorkspaceORM.organization_id).where(WorkspaceORM.id == invite.workspace_id)
                     )).scalar_one_or_none()
 
-                scope = "workspace" if invite.workspace_id is not None else "organization"
+                # One kind of invite: it makes you a member of the
+                # organization, seeing every workspace. Narrowing is a separate,
+                # deliberate act by the owner.
+                scope = "organization"
 
                 if org_id:
                     already = (await session.execute(
