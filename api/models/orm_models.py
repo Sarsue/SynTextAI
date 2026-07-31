@@ -10,7 +10,7 @@ from pgvector.sqlalchemy import Vector
 from datetime import datetime
 from typing import List, Optional
 import uuid
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 Base = declarative_base()
 
@@ -40,8 +40,8 @@ class Organization(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=datetime.utcnow)
 
     # passive_deletes lets Postgres' ON DELETE CASCADE do the work. Without it
     # SQLAlchemy tries to NULL the child foreign keys first, which fails against
@@ -74,15 +74,20 @@ class OrganizationMember(Base):
     workspaces they own. Membership is a fact stored here, with an explicit role.
     """
     __tablename__ = "organization_members"
-    __table_args__ = (UniqueConstraint("organization_id", "user_id", name="uq_organization_member"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_organization_member"),
+        # Named as the migration created it: index=True would have generated
+        # ix_organization_members_organization_id and proposed swapping them.
+        Index("ix_organization_members_org_id", "organization_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     # owner: billing plus everything. admin: manage members, no billing.
     # member: use it.
     role = Column(String, nullable=False, default="member")
-    joined_at = Column(DateTime, default=datetime.utcnow)
+    joined_at = Column(DateTime, nullable=False, server_default=func.now())
 
     organization = relationship("Organization", back_populates="members")
     user = relationship("User")
@@ -109,7 +114,11 @@ class Workspace(Base):
 
 class WorkspaceMember(Base):
     __tablename__ = "workspace_members"
-    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member"),)
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member"),
+        Index("ix_workspace_members_workspace_id", "workspace_id"),
+        Index("ix_workspace_members_user_id", "user_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
@@ -123,11 +132,21 @@ class WorkspaceMember(Base):
 
 class WorkspaceInvite(Base):
     __tablename__ = "workspace_invites"
+    # Uniqueness on token is enforced by a named constraint plus a separate
+    # non-unique index, which is what the migration built. Declaring
+    # unique=True, index=True on the column instead collapses both into one
+    # unique index, so autogenerate proposed dropping the constraint and
+    # rebuilding the index.
+    __table_args__ = (
+        UniqueConstraint("token", name="workspace_invites_token_key"),
+        Index("ix_workspace_invites_token", "token"),
+        Index("ix_workspace_invites_workspace_id", "workspace_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     email = Column(String, nullable=False)
-    token = Column(String, nullable=False, unique=True, index=True)
+    token = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")  # "pending" | "accepted" | "expired"
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
@@ -278,6 +297,21 @@ class Message(Base):
 
 class AgentRun(Base):
     __tablename__ = "agent_runs"
+    # Named to match what the migration actually created. Declaring these as
+    # index=True on the columns instead produced ix_agent_runs_* in the model
+    # against idx_agent_runs_* in the database, so autogenerate proposed
+    # dropping four live indexes and recreating identical ones under new names.
+    #
+    # idx_agent_runs_queue is the one that matters: the worker's poll filters
+    # and orders on exactly these four columns and runs continuously, so losing
+    # it turns every poll into a sequential scan. It was invisible to the model
+    # entirely, which meant autogenerate wanted it gone with no replacement.
+    __table_args__ = (
+        Index("idx_agent_runs_queue", "status", "priority", "run_after", "created_at"),
+        Index("idx_agent_runs_user_id", "user_id"),
+        Index("idx_agent_runs_file_id", "file_id"),
+        Index("idx_agent_runs_chat_history_id", "chat_history_id"),
+    )
 
     id = Column(
         UUID(as_uuid=True),
@@ -290,16 +324,16 @@ class AgentRun(Base):
     agent_name = Column(String, nullable=False)
     agent_version = Column(String, nullable=True)
 
-    status = Column(String, nullable=False, default="queued", index=True)
+    status = Column(String, nullable=False, default="queued")
     priority = Column(Integer, nullable=False, default=100)
 
-    payload = Column(JSON, nullable=False)
-    result = Column(JSON, nullable=True)
+    payload = Column(JSONB, nullable=False)
+    result = Column(JSONB, nullable=True)
 
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=True, index=True)
-    chat_history_id = Column(Integer, ForeignKey("chat_histories.id", ondelete="CASCADE"), nullable=True, index=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=True)
+    chat_history_id = Column(Integer, ForeignKey("chat_histories.id", ondelete="CASCADE"), nullable=True)
 
     attempts = Column(Integer, nullable=False, default=0)
     max_attempts = Column(Integer, nullable=False, default=3)
