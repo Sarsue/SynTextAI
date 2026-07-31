@@ -315,6 +315,13 @@ async def retrieve_files(
             "page_size": page_size,
             "total": total_files,
         }
+    except HTTPException:
+        # A 403 from the workspace check is the answer, not a failure. Letting
+        # the broad handler below swallow it turned "you do not have access to
+        # this workspace" into "internal server error", which reads as the app
+        # being broken rather than the request being refused — and hides a
+        # denial from anyone reading logs or status codes.
+        raise
     except Exception as e:
         logger.error(f"Error retrieving files for user {user_data.get('user_id')}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve files.")
@@ -413,6 +420,12 @@ async def get_files_status(
                 "progress": _status_to_progress(status_str),
             })
         return {"items": results}
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error getting files status for ids={ids}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not get files status")
@@ -440,6 +453,12 @@ async def delete_file(
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error deleting file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not delete file.")

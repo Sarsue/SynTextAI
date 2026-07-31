@@ -78,6 +78,12 @@ async def get_history_messages(
         user_id = user_data["user_id"]
         message_list = await store.chat_repo.get_all_user_chat_histories(user_id, workspace_id)
         return message_list
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error retrieving chat histories: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve chat histories")
@@ -98,6 +104,12 @@ async def get_specific_history_messages(
         # the two values transposed.
         message_list = await store.chat_repo.get_messages_for_chat_history(history_id, user_id)
         return message_list
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error retrieving messages for history {history_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve messages for this history")
@@ -113,6 +125,12 @@ async def delete_specific_history_messages(
         user_id = user_data["user_id"]
         await store.chat_repo.delete_chat_history(user_id, history_id)
         return {"message": "History deleted successfully", "deletedHistoryId": history_id}
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error deleting history {history_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not delete this history")
@@ -127,6 +145,12 @@ async def delete_all_user_histories(
         user_id = user_data["user_id"]
         await store.chat_repo.delete_all_user_histories(user_id)
         return {"message": "All histories deleted successfully"}
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error deleting all histories for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not delete histories")

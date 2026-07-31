@@ -96,6 +96,12 @@ async def notify_client_endpoint(
             data=notification.data
         )
         return {"message": "Notification relayed"}
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         # Log the error appropriately in a real application
         print(f"Error in /notify-client: {e}") # Basic logging for now

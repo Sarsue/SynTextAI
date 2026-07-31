@@ -72,3 +72,58 @@ async def tenant(store):
     await store.org_repo.delete_organization(org_id)
     for uid in created_users:
         await store.user_repo.delete_user_account(uid)
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def client(store):
+    """An HTTP client for the real app, with authentication stubbed.
+
+    Every router declares its own authenticate_user, so each is overridden
+    separately. What is being tested is what the routes do *after* deciding who
+    you are — the role checks, the workspace checks, the 403s. Firebase token
+    verification is a separate concern and is not exercised here.
+
+    app.state.store is set directly because ASGITransport does not run the
+    startup event that normally populates it.
+    """
+    import httpx
+    from api.app import app
+    from api.routes import files, histories, messages, organizations, subscriptions, users, workspaces
+
+    app.state.store = store
+
+    # The shape each router hands its endpoints differs, so the stubs match.
+    def as_user(user_id: int, module):
+        async def _override():
+            return {
+                "user_id": user_id,
+                "user_info": {"email": f"user{user_id}@test.invalid", "user_id": f"gc-{user_id}"},
+                "user_gc_id": f"gc-{user_id}",
+            }
+        return _override
+
+    current = {"user_id": None}
+
+    for module in (files, histories, messages, organizations, subscriptions, users, workspaces):
+        def make(mod):
+            async def _override():
+                uid = current["user_id"]
+                return {
+                    "user_id": uid,
+                    "user_info": {"email": f"user{uid}@test.invalid", "user_id": f"gc-{uid}"},
+                    "user_gc_id": f"gc-{uid}",
+                }
+            return _override
+        app.dependency_overrides[module.authenticate_user] = make(module)
+        app.dependency_overrides[module.get_store] = lambda: store
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        class Client:
+            """Wraps the HTTP client so a test can say who is calling."""
+            def as_(self, user_id: int):
+                current["user_id"] = user_id
+                return http
+        yield Client()
+
+    app.dependency_overrides.clear()

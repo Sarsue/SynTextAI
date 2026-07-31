@@ -135,6 +135,12 @@ async def list_workspaces(
         
         return {"items": items}
     
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error listing workspaces for user {user_data.get('user_id')}: {e}", exc_info=True)
         raise HTTPException(

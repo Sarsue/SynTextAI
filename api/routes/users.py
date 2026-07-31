@@ -136,6 +136,12 @@ async def create_user( # Function name remains 'create_user'
         logger.error(f"POST /users: IntegrityError while creating user {email}. This implies a race condition or inconsistent check.")
         # Returning 409 Conflict is more appropriate here than 400.
         raise HTTPException(status_code=409, detail=f"User with email {email} already exists (IntegrityError).")
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"POST /users: Unexpected error creating user {email}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during user creation.")
@@ -158,6 +164,12 @@ async def delete_user(
     except IntegrityError:
         logger.error(f"Database error while deleting user {user_info['email']}")
         raise HTTPException(status_code=500, detail="Failed to delete user due to database constraints")
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred")
@@ -185,6 +197,12 @@ async def get_user_quota(
             "workspaces_used": workspaces_used,
             "workspaces_limit": FREE_WORKSPACE_LIMIT,
         }
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error fetching quota for user {user_data.get('user_id')}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not fetch quota")

@@ -160,6 +160,12 @@ async def subscription_status(
         }
 
         return response
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error in subscription_status: {str(e)}")
         raise HTTPException(status_code=500, detail="An internal error occurred")
@@ -435,6 +441,12 @@ async def update_payment(
     except stripe.error.CardError as e:
         logger.info(f"Card declined updating payment method for user {user_id}: {e.user_message or e}")
         raise HTTPException(status_code=400, detail=e.user_message or "Your card was declined.")
+    except HTTPException:
+        # A 403 or 404 is this endpoint's answer, not a failure.
+        # The broad handler below would turn a refusal into an
+        # internal error, which reads as the app being broken and
+        # hides the denial from logs and status codes alike.
+        raise
     except Exception as e:
         logger.error(f"Error updating payment method for user {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not update payment method")
