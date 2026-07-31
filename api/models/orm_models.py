@@ -90,6 +90,10 @@ class OrganizationMember(Base):
     # owner: billing plus everything. admin: manage members, no billing.
     # member: use it.
     role = Column(String, nullable=False, default="member")
+    # How far that membership reaches. 'organization' sees every workspace in
+    # the tenant; 'workspace' sees only the ones they were added to. Owners and
+    # admins administer the tenant, so this does not narrow them.
+    scope = Column(String, nullable=False, server_default=text("'workspace'"))
     joined_at = Column(DateTime, nullable=False, server_default=func.now())
 
     organization = relationship("Organization", back_populates="members")
@@ -147,7 +151,9 @@ class WorkspaceInvite(Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    # NULL for an organization-wide invite, which names no single workspace.
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True)
     email = Column(String, nullable=False)
     token = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")  # "pending" | "accepted" | "expired"

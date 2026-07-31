@@ -9,10 +9,12 @@ from typing import Dict, List, Optional
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from ..core.utils import get_user_id
 from ..core.limits import resolve_entitlement
+from ..core.seats import seat_summary
+from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
 from api.repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
@@ -198,3 +200,78 @@ async def list_organization_members(
         )
     members = await store.org_repo.list_members(organization_id)
     return {"items": [MemberSummary(**{k: m[k] for k in ("user_id", "email", "role")}) for m in members]}
+
+
+class OrganizationInviteRequest(BaseModel):
+    email: EmailStr
+
+
+@organizations_router.post("/{organization_id}/invites", status_code=status.HTTP_201_CREATED)
+async def invite_to_organization(
+    organization_id: int = Path(...),
+    body: OrganizationInviteRequest = ...,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Invite somebody to the whole organization, not to one workspace.
+
+    They see every workspace in the tenant, including ones created after they
+    joined. Use the workspace invite instead when access should be limited to a
+    single workspace: a practice that keeps payroll separate from the front-desk
+    handbook wants that one, not this.
+
+    Owners and admins only, since this hands out the widest access there is
+    short of administering the tenant.
+    """
+    user_id = user_data["user_id"]
+    role = await store.org_repo.get_role(organization_id, user_id)
+    if role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an owner or admin can invite people to the organization.",
+        )
+
+    token = await store.workspace_repo.create_invite(
+        body.email, organization_id=organization_id
+    )
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create invite",
+        )
+
+    organizations = await store.org_repo.get_memberships(user_id)
+    org_name = next(
+        (o["name"] for o in organizations if o["organization_id"] == organization_id),
+        "your team",
+    )
+    inviter_name = user_data["user_info"].get("name") or user_data["user_info"].get("email", "Your team")
+
+    # Seats are charged per member, so tell the inviter what this one costs
+    # rather than letting it surface on the next invoice.
+    seats = await seat_summary(store, organization_id)
+
+    try:
+        invite_url = send_workspace_invite(
+            to_email=body.email,
+            workspace_name=org_name,
+            token=token,
+            inviter_name=inviter_name,
+        )
+        return {
+            "message": f"Invite sent to {body.email}",
+            "email_sent": True,
+            "invite_url": invite_url,
+            "next_seat_cents": seats.get("next_seat_cents", 0),
+        }
+    except EmailNotConfigured as e:
+        logger.warning(f"Invite created for {body.email} but email is not configured: {e}")
+    except Exception as e:
+        logger.error(f"Invite created for {body.email} but sending failed: {e}", exc_info=True)
+
+    return {
+        "message": f"Invite created for {body.email}, but the email could not be sent. Share this link with them.",
+        "email_sent": False,
+        "invite_url": f"{app_url()}/#/invite/{token}",
+        "next_seat_cents": seats.get("next_seat_cents", 0),
+    }

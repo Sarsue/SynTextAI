@@ -85,8 +85,9 @@ class PendingInviteResponse(BaseModel):
 
 
 class InviteInfoResponse(BaseModel):
-    workspace_id: int
-    workspace_name: str
+    # Both None for an organization-wide invite, which names no workspace.
+    workspace_id: Optional[int] = None
+    workspace_name: Optional[str] = None
     # People join a company, not a folder, so the landing page names this.
     organization_name: Optional[str] = None
     email: str
@@ -421,7 +422,7 @@ async def send_invite(
     if not workspace:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
 
-    token = await store.workspace_repo.create_invite(workspace_id, body.email)
+    token = await store.workspace_repo.create_invite(body.email, workspace_id=workspace_id)
     if not token:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create invite")
 
@@ -504,13 +505,16 @@ async def accept_invite(
             detail=f"This invite was sent to {invite['email']}. Sign in with that email to accept it."
         )
 
-    workspace_id = await store.workspace_repo.accept_invite(token, user_id)
-    if not workspace_id:
+    result = await store.workspace_repo.accept_invite(token, user_id)
+    if not result:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is invalid, expired, or already used")
 
+    workspace_id = result.get("workspace_id")
     # Return the organization too, so the client can enter it directly instead
     # of bouncing through the chooser to work out where it just landed.
-    organization_id = await store.org_repo.get_organization_for_workspace(workspace_id)
+    organization_id = result.get("organization_id")
+    if organization_id is None and workspace_id is not None:
+        organization_id = await store.org_repo.get_organization_for_workspace(workspace_id)
 
     # Headcount just changed, so the Stripe quantity has to follow it. Seats
     # beyond the plan's included allowance are charged, which is the whole
@@ -523,5 +527,8 @@ async def accept_invite(
     return {
         "workspace_id": workspace_id,
         "organization_id": organization_id,
-        "message": "You have joined the workspace",
+        "message": (
+            "You have joined the workspace" if workspace_id is not None
+            else "You have joined the organization"
+        ),
     }
