@@ -119,6 +119,7 @@ class AsyncUserRepository(AsyncBaseRepository):
         exp_month=None,
         exp_year=None,
         organization_id: Optional[int] = None,
+        seats: Optional[int] = None,
     ) -> bool:
         """Add or update a user subscription.
 
@@ -133,6 +134,9 @@ class AsyncUserRepository(AsyncBaseRepository):
             card_type: Type of payment card
             exp_month: Card expiration month
             exp_year: Card expiration year
+            seats: Seats the plan includes before overage applies. Written here
+                so seat limits survive without a Stripe round trip on every
+                page load.
 
         Returns:
             bool: True if successful, False otherwise
@@ -165,6 +169,8 @@ class AsyncUserRepository(AsyncBaseRepository):
                         existing_sub.current_period_end = current_period_end
                     if trial_end:
                         existing_sub.trial_end = trial_end
+                    if seats is not None:
+                        existing_sub.seats = seats
 
                     # Update card details if provided
                     if all([card_last4, card_type, exp_month, exp_year]):
@@ -205,7 +211,8 @@ class AsyncUserRepository(AsyncBaseRepository):
                         stripe_subscription_id=stripe_subscription_id,
                         status=status,
                         current_period_end=current_period_end,
-                        trial_end=trial_end
+                        trial_end=trial_end,
+                        seats=seats,
                     )
                     session.add(new_sub)
                     await session.flush()  # To get the ID of the new subscription
@@ -238,7 +245,9 @@ class AsyncUserRepository(AsyncBaseRepository):
         card_last4=None,
         card_type=None,
         exp_month=None,
-        exp_year=None
+        exp_year=None,
+        seats=None,
+        plan_key=None,
     ) -> bool:
         """Update a subscription by Stripe customer ID.
 
@@ -269,6 +278,12 @@ class AsyncUserRepository(AsyncBaseRepository):
                 subscription.status = status
                 if current_period_end:
                     subscription.current_period_end = current_period_end
+                # Written from the webhook so a plan changed in the Stripe
+                # dashboard reaches the seat accounting here.
+                if seats is not None:
+                    subscription.seats = seats
+                if plan_key is not None:
+                    subscription.plan_key = plan_key
 
                 # Update card details if provided
                 if all([card_last4, card_type, exp_month, exp_year]):

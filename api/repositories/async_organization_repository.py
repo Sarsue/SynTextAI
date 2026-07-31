@@ -271,6 +271,57 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )
                 return "none"
 
+    async def is_billing_exempt(self, organization_id: Optional[int]) -> bool:
+        """Whether this organization uses the product without paying.
+
+        Demo and evaluation accounts. Entitled without a subscription, and
+        never charged for seats. Clearing the flag ends the demo: the data
+        stays, the access stops.
+        """
+        if organization_id is None:
+            return False
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(Organization.billing_exempt).where(Organization.id == organization_id)
+                return bool((await session.execute(stmt)).scalar_one_or_none())
+            except Exception as e:
+                logger.error(f"Error reading billing_exempt for org {organization_id}: {e}", exc_info=True)
+                # Fail closed: an unreadable flag must not hand out free access.
+                return False
+
+    async def get_subscription_row(self, organization_id: int) -> Optional[Dict[str, Any]]:
+        """The organization's current subscription, as a plain dict.
+
+        Seat accounting needs the Stripe subscription id and the plan together;
+        fetching them through two separate status/limit calls meant two queries
+        and no way to tell "no subscription" from "subscription with no plan".
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = (
+                    select(Subscription)
+                    .where(Subscription.organization_id == organization_id)
+                    .order_by(Subscription.updated_at.desc())
+                    .limit(1)
+                )
+                row = (await session.execute(stmt)).scalar_one_or_none()
+                if not row:
+                    return None
+                return {
+                    "id": row.id,
+                    "status": row.status,
+                    "plan_key": row.plan_key,
+                    "seats": row.seats,
+                    "stripe_customer_id": row.stripe_customer_id,
+                    "stripe_subscription_id": row.stripe_subscription_id,
+                    "current_period_end": row.current_period_end,
+                }
+            except Exception as e:
+                logger.error(
+                    f"Error getting subscription row for org {organization_id}: {e}", exc_info=True
+                )
+                return None
+
     async def get_seat_limit(self, organization_id: int) -> Optional[int]:
         """Seat allowance for an organization. None means unlimited."""
         async with self.get_async_session() as session:

@@ -9,6 +9,8 @@ import os
 from dotenv import load_dotenv
 from ..core.utils import get_user_id
 from ..core.limits import resolve_entitlement
+from ..core.plans import PLANS, get_plan, plan_for_price_id
+from ..core.seats import seat_summary, sync_seats_to_stripe
 from api.repositories.repository_manager import RepositoryManager
 import asyncio
 # Load environment variables
@@ -21,8 +23,9 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI router
 subscriptions_router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscriptions"])
 
-# Stripe configuration
-price_id = os.getenv('STRIPE_PRICE_ID')
+# Stripe configuration. Price ids live on the plans, not here: there is no
+# longer a single price, and each plan's graduated tiers encode its own
+# included seats and overage rate.
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
 
@@ -127,107 +130,49 @@ async def subscription_status(
         logger.error(f"Error in subscription_status: {str(e)}")
         raise HTTPException(status_code=500, detail="An internal error occurred")
 
-class StartTrialRequest(BaseModel):
-    # Kept for compatibility; the organization is named during onboarding.
-    organization_name: Optional[str] = None
+@subscriptions_router.get("/plans")
+async def list_plans():
+    """The plans a customer can buy, priced for the UI to render directly.
 
-
-# Route to start a trial
-@subscriptions_router.post("/start-trial", status_code=201)
-async def start_trial(
-    body: Optional[StartTrialRequest] = None,
-    user_data: Dict = Depends(authenticate_user),
-    store: RepositoryManager = Depends(get_store)
-):
-    """Start a trial for the caller's organization.
-
-    Only an owner or admin has a billing organization, so a member cannot start
-    a subscription against a tenant that is not theirs.
+    Amounts come from core/plans.py, the same definition the Stripe prices were
+    generated from, so the page cannot advertise a price the customer will not
+    be charged.
     """
-    try:
-        user_id = user_data["user_id"]
-        user_info = user_data["user_info"]
-
-        # The organization already exists: signup created it for an owner, or
-        # an invitation placed them in someone else's, and a member has none of
-        # their own so cannot reach this at all.
-        organization_id = await _billing_organization_id(store, user_id)
-        if organization_id is None:
-            raise HTTPException(
-                status_code=403,
-                detail="Your access is provided by your team's plan. Contact your workspace owner about billing.",
-            )
-
-        # Check if the user already has a subscription
-        subscription = await store.user_repo.get_subscription(user_id)
-        if subscription:
-            # If subscription exists, check its status
-            if subscription[0].get('status') == 'active':
-                logger.error(f"Request came from an already active subscription: {user_id}")
-                raise HTTPException(status_code=400, detail="Active subscription already exists")
-            else:
-                # If subscription exists but is not active, handle the logic for reactivating or restarting the trial
-                pass
-        else:
-            # No subscription found, start a trial
-            stripe_customer_id = None
-
-            # Create a new Stripe customer if needed
-            existing_customers = await stripe.Customer.list_async(email=user_info.get('email'))
-            if existing_customers.data:
-                stripe_customer_id = existing_customers.data[0].id
-                logger.info(f"Found existing Stripe customer: {stripe_customer_id}")
-            else:
-                # Create a new Stripe customer if no existing customer is found
-                customer = await stripe.Customer.create_async(
-                    description=f"Customer for user_id {user_id}",
-                    email=user_info.get('email'),
-                    name=user_info.get('name')
-                )
-                stripe_customer_id = customer.id
-                logger.info(f"Created new Stripe customer: {stripe_customer_id}")
-
-            # Create a trial subscription for the user
-            created_subscription = await stripe.Subscription.create_async(
-                customer=stripe_customer_id,
-                items=[{'price': price_id}],
-                trial_period_days=30,  # Adjust to your trial period duration
-            )
-
-            # Store the subscription in the database with the 'trial' status
-            await store.user_repo.add_or_update_subscription(
-                user_id=user_id,
-                organization_id=await _billing_organization_id(store, user_id),
-                stripe_customer_id=stripe_customer_id,
-                stripe_subscription_id=created_subscription.id,
-                status=created_subscription["status"],
-                current_period_end=datetime.utcfromtimestamp(created_subscription.trial_end),
-                trial_end=datetime.utcfromtimestamp(created_subscription.trial_end),  # Pass trial_end
-                card_last4=None,  # No card details at the start of the trial
-                card_type=None,
-                exp_month=None,
-                exp_year=None
-            )
-
-            trial_end_dt = datetime.utcfromtimestamp(created_subscription.trial_end)
-
-            return {
-                'message': 'Trial started successfully',
-                'subscription_status': created_subscription["status"],
-                'trial_end': trial_end_dt.isoformat(),
-                'current_period_end': trial_end_dt.isoformat(),
-                'card_last4': None,
-                'card_brand': None,
-                'card_exp_month': None,
-                'card_exp_year': None,
-                'has_active_payment_method': False,
+    return {
+        "plans": [
+            {
+                "key": plan.key,
+                "name": plan.name,
+                "description": plan.description,
+                "base_cents": plan.base_cents,
+                "included_seats": plan.included_seats,
+                "overage_cents": plan.overage_cents,
+                "available": bool(plan.price_id()),
             }
+            for plan in PLANS.values()
+        ]
+    }
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting trial: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not start trial")
+
+@subscriptions_router.get("/seats")
+async def get_seats(
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Seats used, seats included, and what the next one costs.
+
+    The next-seat price is here so the invite dialog can say what adding
+    somebody will cost before it happens. A seat charge discovered on the next
+    invoice is a support ticket.
+    """
+    organization_id = await _billing_organization_id(store, user_data["user_id"])
+    if organization_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Your access is provided by your team's plan. Contact your workspace owner about billing.",
+        )
+    return await seat_summary(store, organization_id)
+
 
 # Route to cancel a subscription
 @subscriptions_router.post("/cancel", status_code=200)
@@ -266,12 +211,40 @@ async def cancel_sub(
 @subscriptions_router.post("/subscribe", status_code=201)
 async def create_subscription(
     payment_method: str = Body(..., embed=True),
+    plan: str = Body("starter", embed=True),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
+    """Subscribe the caller's organization, with quantity set to its headcount.
+
+    There is no trial. Access is bought with a card, or granted by being
+    invited into an organization that has already bought it — which is how
+    demos work: a prospect joins Osas Inc rather than starting a trial of
+    their own.
+    """
     try:
         user_id = user_data["user_id"]
         user_info = user_data["user_info"]
+        selected_plan = get_plan(plan)
+        if selected_plan.key != (plan or "").lower():
+            logger.warning("Unknown plan %r requested by user %s; using %s", plan, user_id, selected_plan.key)
+        price_id = selected_plan.price_id()
+        if not price_id:
+            logger.error("No Stripe price configured for plan %s (%s)", selected_plan.key, selected_plan.env_var)
+            raise HTTPException(status_code=503, detail="Billing is not configured for that plan yet.")
+
+        organization_id = await _billing_organization_id(store, user_id)
+        if organization_id is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Your access is provided by your team's plan. Contact your workspace owner about billing.",
+            )
+        if await store.org_repo.is_billing_exempt(organization_id):
+            raise HTTPException(status_code=400, detail="This organization does not require a subscription.")
+
+        # Quantity is headcount. Stripe's graduated tiers do the rest: the base
+        # amount covers the included seats and only the excess is charged.
+        member_count = max(1, await store.org_repo.count_members(organization_id))
 
         subscription_data = await store.user_repo.get_subscription(user_id)
         stripe_customer_id = None
@@ -322,14 +295,14 @@ async def create_subscription(
             # Create a new Stripe subscription
             created_subscription = await stripe.Subscription.create_async(
                 customer=stripe_customer_id,
-                items=[{'price': price_id}],
+                items=[{'price': price_id, 'quantity': member_count}],
                 default_payment_method=payment_method_id
             )
-            
+
             # Store the subscription in the database
             await store.user_repo.add_or_update_subscription(
                 user_id=user_id,
-                organization_id=await _billing_organization_id(store, user_id),
+                organization_id=organization_id,
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription.status,
@@ -337,12 +310,18 @@ async def create_subscription(
                 card_last4=payment_method.card.last4,
                 card_type=payment_method.card.brand,
                 exp_month=payment_method.card.exp_month,
-                exp_year=payment_method.card.exp_year
+                exp_year=payment_method.card.exp_year,
+                seats=selected_plan.included_seats,
+                plan_key=selected_plan.key,
             )
 
             return {
                 'message': 'Subscription created successfully',
                 "subscription_status": created_subscription.status,
+                'plan': selected_plan.key,
+                'plan_name': selected_plan.name,
+                'seats_included': selected_plan.included_seats,
+                'seats_used': member_count,
                 'card_last4': payment_method.card.last4,
                 'card_brand': payment_method.card.brand,
                 'card_exp_month': payment_method.card.exp_month,
@@ -468,29 +447,35 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
                 status=current_status,
                 current_period_end=current_period_end_dt
             )
-            # --- Logic to handle trial end --- 
+            # Keep the recorded plan and seat allowance in step with Stripe.
+            #
+            # A plan change made in the Stripe dashboard, or a quantity Stripe
+            # itself adjusted, would otherwise never reach the database: the
+            # webhook only ever wrote status, so an organization upgraded to
+            # Business kept being measured against Starter's ten included
+            # seats.
             try:
-                # Using the repository methods to get subscription info
-                # We need to find the user ID from the stripe customer ID first
-               
-                subscription_data = await store.user_repo.get_subscription_by_stripe_customer_id(stripe_customer_id)
-                if subscription_data:
-                    subscription, _ = subscription_data
-                    user_id = subscription.get('user_id')
-                    
-                    if subscription.get('status') == 'trialing' and current_status != 'trialing':
-                        logger.info(f"Trial ended for stripe_customer_id: {stripe_customer_id}. New status: {current_status}")
-                       
-            except Exception as db_exc:
-                logger.error(f"Database error checking/handling trial end for {stripe_customer_id}: {db_exc}")
-                # Decide if this should prevent the main subscription update - likely not, 
-                # but log it thoroughly.
-            finally:
-                # No session to close as we're using repositories now
-                pass
-            # --- End trial handling logic --- 
+                items = (data_object.get('items') or {}).get('data') or []
+                stripe_price_id = items[0]['price']['id'] if items else None
+                plan = plan_for_price_id(stripe_price_id)
+                if plan:
+                    await store.user_repo.update_subscription(
+                        stripe_customer_id=stripe_customer_id,
+                        status=current_status,
+                        current_period_end=current_period_end_dt,
+                        seats=plan.included_seats,
+                        plan_key=plan.key,
+                    )
+                elif stripe_price_id:
+                    logger.warning(
+                        "Subscription %s uses price %s, which matches no configured plan",
+                        data_object.get('id'), stripe_price_id,
+                    )
+            except Exception as e:
+                # Never fail the webhook over this: Stripe retries on a non-2xx
+                # and the status update above has already landed.
+                logger.error(f"Could not sync plan for {stripe_customer_id}: {e}", exc_info=True)
 
-            # Always update the subscription record with the latest status from Stripe
         elif event_type == 'customer.subscription.deleted':
             await store.user_repo.update_subscription_status(stripe_customer_id, "canceled")
 

@@ -9,6 +9,7 @@ from pydantic import BaseModel, EmailStr, Field
 from ..repositories.repository_manager import RepositoryManager
 from ..core.limits import assert_can_create_workspace
 from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
+from ..core.seats import sync_seats_to_stripe
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +390,12 @@ async def remove_member(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner cannot remove themselves")
 
     await store.workspace_repo.remove_member(workspace_id, target_user_id)
+
+    # Seat removal must be immediate, not deferred to renewal: a customer who
+    # removes someone should stop paying for them straight away.
+    organization_id = await store.org_repo.get_organization_for_workspace(workspace_id)
+    if organization_id is not None:
+        await sync_seats_to_stripe(store, organization_id, reason="member removed")
     return None
 
 
@@ -504,6 +511,14 @@ async def accept_invite(
     # Return the organization too, so the client can enter it directly instead
     # of bouncing through the chooser to work out where it just landed.
     organization_id = await store.org_repo.get_organization_for_workspace(workspace_id)
+
+    # Headcount just changed, so the Stripe quantity has to follow it. Seats
+    # beyond the plan's included allowance are charged, which is the whole
+    # point of seat pricing. This never raises: the person has already joined,
+    # and undoing that because Stripe was briefly unreachable would be worse
+    # than a quantity that the next sync corrects.
+    if organization_id is not None:
+        await sync_seats_to_stripe(store, organization_id, reason="invite accepted")
 
     return {
         "workspace_id": workspace_id,

@@ -40,6 +40,9 @@ class Organization(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
+    # Uses the product without paying: demo and evaluation accounts. Entitled
+    # without a subscription, and never charged for seats.
+    billing_exempt = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=datetime.utcnow)
 
@@ -169,9 +172,11 @@ class Subscription(Base):
     # The organization is what actually pays. user_id is retained so existing
     # Stripe-customer lookups keep working during the transition.
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
-    # Seat allowance for the plan. NULL means unlimited, which is how the
-    # Business tier is sold.
+    # Seat allowance included in the plan before overage applies.
     seats = Column(Integer, nullable=True)
+    # Which plan: seat pricing differs per plan, so "what would one more member
+    # cost?" is unanswerable without it.
+    plan_key = Column(String, nullable=True)
 
     user = relationship("User", back_populates="subscriptions")
     organization = relationship("Organization", back_populates="subscriptions")

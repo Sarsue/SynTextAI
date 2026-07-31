@@ -70,6 +70,19 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
     ordered = administers + [m for m in memberships if m not in administers]
     for m in ordered:
         org_id = m["organization_id"]
+        # An exempt organization is entitled without a subscription. This is
+        # what carries demo access: prospects are invited into Osas Inc rather
+        # than given a trial of their own.
+        if await store.org_repo.is_billing_exempt(org_id):
+            return {
+                "entitled": True,
+                "source": "exempt",
+                "organization_id": org_id,
+                "role": m["role"],
+                "status": "exempt",
+                "is_org_owner": is_org_owner,
+                "is_member_only": is_member_only,
+            }
         org_status = await store.org_repo.get_subscription_status(org_id)
         if _is_premium_plan(org_status):
             return {
