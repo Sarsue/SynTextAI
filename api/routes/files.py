@@ -146,10 +146,22 @@ async def save_file(
             # touching any file, instead of re-resolving and re-checking per file.
             actual_workspace_id = workspace_id
             if not actual_workspace_id:
-                workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-                if workspaces:
-                    actual_workspace_id = workspaces[0]["id"]
+                # Fall back to a workspace they can actually see, not one they
+                # own. An admin owns nothing, so the ownership list was empty
+                # and the file was stored with no workspace at all — invisible
+                # to everyone, including the owner of the organization it was
+                # uploaded into, because visibility follows the workspace.
+                accessible = await store.workspace_repo.list_accessible_workspaces(user_id)
+                if accessible:
+                    actual_workspace_id = accessible[0]["id"]
                     logger.info(f"Using default workspace {actual_workspace_id} for user {user_id}")
+
+            if not actual_workspace_id:
+                # Better to refuse than to store a document nobody can reach.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Choose a workspace to upload into.",
+                )
 
             if actual_workspace_id:
                 await check_can_upload_to_workspace(actual_workspace_id, user_id, store)

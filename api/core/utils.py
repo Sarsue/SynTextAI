@@ -34,6 +34,28 @@ def _gcs_client():
     return storage.Client.from_service_account_json(CREDENTIALS_PATH)
 
 
+def sanitize_extracted_text(text: Optional[str]) -> str:
+    """Strip bytes Postgres will not store from extracted document text.
+
+    PDF text extraction happily returns NUL bytes, which a Postgres text column
+    rejects outright: "invalid byte sequence for encoding UTF8: 0x00". The
+    insert fails, the whole ingestion transaction rolls back, and a document
+    that extracted perfectly well is marked failed with nothing in the UI to say
+    why.
+
+    Other C0 control characters are dropped for the same reason they are
+    useless here: they are not content, they survive into chunks, and they end
+    up in the text an answer is grounded in. Tab, newline and carriage return
+    are kept because they carry layout.
+    """
+    if not text:
+        return ""
+    return "".join(
+        ch for ch in text
+        if ch in ("\t", "\n", "\r") or ord(ch) >= 32
+    )
+
+
 def canonical_gcs_url(object_path: str) -> str:
     """Stable, unauthenticated-but-unreadable identity for a stored object."""
     return f"{GCS_PUBLIC_HOST}/{bucket_name}/{object_path}"

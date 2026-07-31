@@ -3,6 +3,7 @@ Async File repository for managing file-related database operations.
 """
 from typing import Optional, List, Dict, Any
 import logging
+from ..core.utils import sanitize_extracted_text
 import asyncio
 import numpy as np
 from scipy.spatial.distance import cosine, euclidean
@@ -139,7 +140,13 @@ class AsyncFileRepository(AsyncBaseRepository):
                 # exactly one of each.
                 expected = 0
                 for unit in extracted_data:
-                    content = unit.get('text') or unit.get('content') or ''
+                    # Sanitized here as well as at extraction: any processor
+                    # can produce a byte Postgres will not take, and one such
+                    # byte fails the whole transaction and marks a perfectly
+                    # good document as failed.
+                    content = sanitize_extracted_text(
+                        unit.get('text') or unit.get('content') or ''
+                    )
                     if not content.strip():
                         continue
 

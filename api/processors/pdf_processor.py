@@ -2,6 +2,7 @@
 PDF processor module - Handles extraction and processing of PDF documents.
 """
 import logging
+from ..core.utils import sanitize_extracted_text
 import os
 import asyncio
 import gc
@@ -225,7 +226,7 @@ class PDFProcessor(FileProcessor):
         try:
             with fitz.open(stream=pdf_data, filetype="pdf") as doc:
                 for page_num, page in enumerate(doc, 1):
-                    text = page.get_text("text")
+                    text = sanitize_extracted_text(page.get_text("text"))
                     if not text.strip():
                         # No extractable text -> use OCR
                         pix = page.get_pixmap(dpi=300)
