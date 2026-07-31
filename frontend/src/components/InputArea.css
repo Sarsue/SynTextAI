@@ -41,8 +41,16 @@
 }
 
 /* Text input layout only -- border/padding/focus ring come from shadcn's
-   Textarea itself, see InputArea.tsx. */
-.text-input {
+   Textarea itself, see InputArea.tsx.
+
+   Named composer-input. The previous name was the text-colour utility prefix
+   followed by the name of shadcn's input colour token, so Tailwind generated a
+   colour rule for it alongside this one, and typed text rendered in the input
+   *border* grey: #e8e8e8 on white, a contrast ratio of 1.2:1. Any class name
+   here that reads as a Tailwind utility risks the same silent collision.
+   (Spelled out rather than quoted, because Tailwind scans comments too and
+   would keep emitting the dead rule.) */
+.composer-input {
     margin-bottom: clamp(6px, 1vw, 8px);
     width: 100%;
 }

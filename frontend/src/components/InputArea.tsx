@@ -97,7 +97,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
     return (
         <div className={`input-area ${darkMode ? 'dark-mode' : ''}`}>
             <Textarea
-                className="text-input"
+                className="composer-input"
                 placeholder="Ask a question about your documents..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
