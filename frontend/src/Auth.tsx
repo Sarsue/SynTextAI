@@ -12,7 +12,7 @@ import {
   signInWithPopup,
   User
 } from 'firebase/auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useToast } from './contexts/ToastContext';
 import { auth } from './firebase';
 import { useUserContext } from './UserContext';
@@ -48,7 +48,13 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   // pending invite, which meant an invited member could never start a company
   // of their own — every way in led back to the one that invited them. The
   // intent now travels with the request.
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  // The landing page's Get started and pricing buttons carry ?mode=signup.
+  // Without reading it every route in opened on sign in, so there was no way
+  // to reach sign up at all short of clicking the small toggle at the bottom.
+  const [searchParams] = useSearchParams();
+  const [mode, setMode] = useState<'signin' | 'signup'>(
+    searchParams.get('mode') === 'signup' ? 'signup' : 'signin'
+  );
   const isLoggingOut = useRef(false);
   const { capture, reset: resetAnalytics } = useAnalytics();
 
@@ -199,10 +205,14 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
       {!user ? (
         <div className="auth-card">
           <h1 className="auth-title">Syntext</h1>
+          {/* The two now do different things, so they say so. Signing up
+              starts a company you own and pay for; signing in enters ones you
+              already belong to. Somebody invited into a company can do both,
+              and the wording has to make that make sense. */}
           <p className="auth-sub">
             {mode === 'signup'
-              ? 'Create an account for your company'
-              : 'Sign in to your workspace'}
+              ? 'Start a company account. You will pick a plan and add a card.'
+              : 'Sign in to a company you belong to.'}
           </p>
           <Button
             variant="outline"
@@ -232,7 +242,7 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
               </>
             ) : (
               <>
-                Starting a new company?{' '}
+                Want your own company account?{' '}
                 <button type="button" className="auth-link" onClick={() => setMode('signup')}>
                   Sign up
                 </button>
