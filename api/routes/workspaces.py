@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from ..repositories.repository_manager import RepositoryManager
 from ..core.limits import assert_can_create_workspace
-from ..services.email_service import send_workspace_invite
+from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
 
 logger = logging.getLogger(__name__)
 
@@ -419,14 +419,31 @@ async def send_invite(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create invite")
 
     inviter_name = user_data["user_info"].get("name") or user_data["user_info"].get("email", "Your team")
-    send_workspace_invite(
-        to_email=body.email,
-        workspace_name=workspace["name"],
-        token=token,
-        inviter_name=inviter_name,
-    )
 
-    return {"message": f"Invite sent to {body.email}"}
+    # Report what actually happened. The return value used to be discarded, so
+    # a refused send still answered "Invite sent" and the invite sat in the
+    # database as a row the recipient was never told about. The invite is still
+    # valid when the mail fails, so hand back the link rather than 500-ing:
+    # the owner can pass it on directly, which is exactly what had to be done
+    # by hand while email was unconfigured.
+    try:
+        invite_url = send_workspace_invite(
+            to_email=body.email,
+            workspace_name=workspace["name"],
+            token=token,
+            inviter_name=inviter_name,
+        )
+        return {"message": f"Invite sent to {body.email}", "email_sent": True, "invite_url": invite_url}
+    except EmailNotConfigured as e:
+        logger.warning(f"Invite created for {body.email} but email is not configured: {e}")
+    except Exception as e:
+        logger.error(f"Invite created for {body.email} but sending failed: {e}", exc_info=True)
+
+    return {
+        "message": f"Invite created for {body.email}, but the email could not be sent. Share this link with them.",
+        "email_sent": False,
+        "invite_url": f"{app_url()}/#/invite/{token}",
+    }
 
 
 @workspaces_router.get("/invites/{token}", response_model=InviteInfoResponse)
