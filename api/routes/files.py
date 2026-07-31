@@ -87,10 +87,11 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
 async def check_ownership(file_id: int, user_id: int, store: RepositoryManager) -> None:
     """Raise 404 unless file_id exists and belongs to user_id.
 
-    Learning-content endpoints (flashcards/quiz-questions/key-concepts) are keyed
-    off file_id in the URL, so this is the gate that stops one user from reading
-    or writing another user's derived document content by guessing/incrementing
-    file_id.
+    Endpoints keyed off file_id in the URL rely on this to stop one user from
+    reading or writing another user's document by guessing or incrementing the
+    id. Note that reads scoped to a workspace should authorize against the
+    workspace instead, since access follows the tenant rather than the
+    uploader.
     """
     file_record = await store.file_repo.get_file_by_id(file_id)
     if not file_record or file_record.get("user_id") != user_id:

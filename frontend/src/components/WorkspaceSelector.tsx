@@ -693,7 +693,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         <p>This will permanently delete:</p>
                         <ul>
                             <li>All files in this workspace</li>
-                            <li>All associated key concepts, flashcards, and quizzes</li>
+                            <li>Everything extracted from those files for search</li>
                             <li>All chat history related to these files</li>
                         </ul>
                         <p><strong>This action cannot be undone.</strong></p>

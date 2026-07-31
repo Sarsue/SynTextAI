@@ -236,3 +236,7 @@ do_github_actions*
 # Local backups of env files (may contain live secrets)
 *.bak
 .env.*.bak
+
+# Copies of env files made while editing. These hold live secrets.
+.env.backup-*
+.env.bak

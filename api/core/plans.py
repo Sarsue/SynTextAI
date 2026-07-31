@@ -1,9 +1,13 @@
 """Plan definitions: the one place pricing is described.
 
-Both the Stripe price objects and the app's seat accounting are generated from
-this, so the two cannot drift. Changing a number here is not enough on its own —
-Stripe prices are immutable once created, so a price change means creating a new
-price and pointing the env var at it (see scripts/create_stripe_prices.py).
+The app's seat accounting reads these, and the Stripe prices were generated to
+match: graduated tiers where the first tier is a flat amount covering the
+included seats and the second charges per seat beyond them.
+
+Changing a number here is not enough on its own. A Stripe price is immutable
+once created, so a price change means creating a new price in Stripe with the
+matching tiers and pointing STRIPE_PRICE_ID_<PLAN> at it. Edit one without the
+other and the app quotes a figure the customer is not charged.
 """
 import os
 from dataclasses import dataclass

@@ -68,28 +68,6 @@ export interface Persona {
     name: string;
 }
 
-export interface Flashcard {
-    id: number;
-    file_id: number;
-    key_concept_id: number | null;
-    question: string;
-    answer: string;
-    is_custom: boolean;
-    created_at?: string;
-}
-
-export interface QuizQuestion {
-    id: number;
-    file_id: number;
-    key_concept_id: number | null;
-    question: string;
-    question_type: 'MCQ' | 'TF';
-    correct_answer: string;
-    distractors: string[];
-    is_custom: boolean;
-    created_at?: string;
-}
-
 export interface PaginationState {
     page: number;
     pageSize: number;
