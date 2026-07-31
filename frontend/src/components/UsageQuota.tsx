@@ -18,7 +18,7 @@ interface QuotaData {
 }
 
 const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
-    const { user, subscriptionStatus } = useUserContext();
+    const { user, subscriptionStatus, orgContext } = useUserContext();
     const [quotaData, setQuotaData] = useState<QuotaData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showDetails, setShowDetails] = useState(false);
@@ -27,14 +27,17 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
     // - premium: active | trialing
     // - free: none (or missing)
     // - restricted: anything else (past_due, unpaid, canceled, etc.)
-    // Deliberately keyed to this user's OWN subscription, not to inherited
-    // entitlement. Quota is a property of the paying account, and a person can
-    // be premium inside someone else's workspace while on the free plan in
-    // their own, so a single global "am I premium" flag cannot answer this.
-    // Once organizations exist this becomes the active org's plan.
-    const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
-    const isPremium = normalizedStatus === 'active' || normalizedStatus === 'trialing';
-    const isFreeUser = normalizedStatus === 'none';
+    // Keyed to the active organization, not to this user's own subscription.
+    //
+    // It used to read the personal status, with a note saying it should become
+    // the organization's plan once organizations existed. They do now, and an
+    // invited member has no subscription of their own, so their status is
+    // 'none' and they were shown a free-plan banner and a 0/5 document counter
+    // inside a company that pays — while nothing was in fact limiting them.
+    // Entitlement is a property of the tenant; everyone in it inherits it.
+    const normalizedStatus = (orgContext?.subscription_status || subscriptionStatus || 'none').toLowerCase();
+    const isPremium = (orgContext?.entitled ?? false) || normalizedStatus === 'active' || normalizedStatus === 'trialing';
+    const isFreeUser = !isPremium && normalizedStatus === 'none';
     const isRestricted = !isPremium && !isFreeUser;
 
     useEffect(() => {

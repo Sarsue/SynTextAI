@@ -70,7 +70,7 @@ interface WorkspaceSelectorProps {
 }
 
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
-    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId } = useUserContext();
+    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId, orgContext } = useUserContext();
     const { addToast } = useToast();
 
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -97,6 +97,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
     const [savingAccessFor, setSavingAccessFor] = useState<number | null>(null);
     const [memberToRemove, setMemberToRemove] = useState<OrgMember | null>(null);
+    const [membersError, setMembersError] = useState<string | null>(null);
     const [inviteEmail, setInviteEmail] = useState('');
     const [isSendingInvite, setIsSendingInvite] = useState(false);
     const [nextSeatCents, setNextSeatCents] = useState<number | null>(null);
@@ -411,11 +412,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
     /** Remove somebody from the company, not just from one workspace. */
     const removeFromOrganization = async (memberUserId: number, email: string) => {
-        if (!user || !activeOrganizationId) return;
+        const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
+        if (!user || !orgId) return;
         try {
             const idToken = await user.getIdToken();
             const res = await fetch(
-                `/api/v1/organizations/${activeOrganizationId}/members/${memberUserId}`,
+                `/api/v1/organizations/${orgId}/members/${memberUserId}`,
                 { method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` } },
             );
             if (res.ok) {
@@ -433,18 +435,31 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     };
 
     const fetchOrgMembers = async () => {
-        if (!user || !activeOrganizationId) return;
+        // activeOrganizationId is set when a tenant is chosen at sign-in, but a
+        // reload can reach this before that resolves. orgContext carries the
+        // same id and is fetched on its own schedule, so either will do rather
+        // than silently returning and leaving the panel blank.
+        const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
+        if (!user || !orgId) {
+            setMembersError('Could not work out which organization you are in. Reload and try again.');
+            return;
+        }
+        setMembersError(null);
         try {
             const idToken = await user.getIdToken();
-            const res = await fetch(`/api/v1/organizations/${activeOrganizationId}/members`, {
+            const res = await fetch(`/api/v1/organizations/${orgId}/members`, {
                 headers: { Authorization: `Bearer ${idToken}` },
             });
             if (res.ok) {
                 const data = await res.json();
                 setOrgMembers(data.items || []);
+            } else {
+                const data = await res.json().catch(() => ({}));
+                setMembersError(data.detail || 'Could not load the team.');
             }
         } catch (err) {
             console.error('Error fetching organization members:', err);
+            setMembersError('Could not load the team.');
         }
     };
 
@@ -454,12 +469,13 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         scope: 'organization' | 'workspace',
         workspaceIds: number[],
     ) => {
-        if (!user || !activeOrganizationId) return;
+        const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
+        if (!user || !orgId) return;
         setSavingAccessFor(memberUserId);
         try {
             const idToken = await user.getIdToken();
             const res = await fetch(
-                `/api/v1/organizations/${activeOrganizationId}/members/${memberUserId}/access`,
+                `/api/v1/organizations/${orgId}/members/${memberUserId}/access`,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -516,7 +532,8 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             // What they can see is set afterwards, per member, in the list
             // below. Asking at invite time conflated how they joined with what
             // they see, and froze the answer at the moment of invitation.
-            const url = `/api/v1/organizations/${activeOrganizationId}/invites`;
+            const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
+            const url = `/api/v1/organizations/${orgId}/invites`;
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -803,9 +820,17 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         somebody between workspaces meant removing and
                         re-inviting them, which churned the seat count for a
                         change that costs nothing. */}
-                    {orgMembers.length > 0 && (
+                    {(
                         <div style={{ marginTop: 20 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>Members</div>
+                            {membersError && (
+                                <div className="error-message" style={{ fontSize: 13, marginBottom: 8 }}>{membersError}</div>
+                            )}
+                            {!membersError && orgMembers.length === 0 && (
+                                <div style={{ fontSize: 13, color: '#888' }}>
+                                    Nobody else yet. Invite someone above.
+                                </div>
+                            )}
                             {orgMembers.map(m => {
                                 const isSaving = savingAccessFor === m.user_id;
                                 // One workspace selected, or every workspace.
