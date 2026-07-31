@@ -115,6 +115,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // makes you its owner and therefore the account billed for it, so inherited
     // entitlement from someone else's workspace must not unlock it.
     const isFreeUser = !isEntitled && normalizedStatus === 'none';
+    // Default true so a missing field cannot lock an owner out of their own
+    // product; the backend refuses regardless, so the worst case is a button
+    // that explains itself when pressed.
+    const canCreateWorkspace = orgContext?.can_create_workspace ?? true;
     const isOwner = currentWorkspace?.role === 'owner';
 
     // The free workspace limit applies to workspaces you *own*. The backend's
@@ -670,14 +674,20 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                             <Users className="size-4" /> Team
                         </Button>
                     )}
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowCreateModal(true)}
-                        title={isFreeUser && ownedWorkspaceCount >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
-                    >
-                        <Plus className="size-4" /> New
-                    </Button>
+                    {/* Hidden for a read-only member, who the backend refuses.
+                        Shown from the capability the backend reports, rather
+                        than re-deriving the role rules here, so the button and
+                        the refusal cannot disagree. */}
+                    {canCreateWorkspace && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowCreateModal(true)}
+                            title={isFreeUser && ownedWorkspaceCount >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
+                        >
+                            <Plus className="size-4" /> New
+                        </Button>
+                    )}
                 </div>
 
                 {isFreeUser && ownedWorkspaceCount >= 1 && (

@@ -8,7 +8,12 @@ from pydantic import BaseModel, EmailStr, Field
 
 from ..repositories.repository_manager import RepositoryManager
 from ..core.limits import assert_can_create_workspace
-from ..core.permissions import Capability, assert_workspace_capability
+from ..core.permissions import (
+    Capability,
+    assert_organization_capability,
+    assert_workspace_capability,
+    is_admin,
+)
 from ..core.seats import sync_seats_to_stripe
 
 logger = logging.getLogger(__name__)
@@ -146,20 +151,38 @@ async def list_workspaces(
 @workspaces_router.post("", status_code=status.HTTP_201_CREATED, response_model=WorkspaceResponse)
 async def create_workspace(
     workspace_data: WorkspaceCreate,
+    organization_id: Optional[int] = Query(None, description="Organization to create it in"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     """
-    Create a new workspace for the authenticated user.
-    
-    Free plan users are limited to 1 workspace.
-    Trial/premium users can create multiple workspaces.
-    
-    Returns the created workspace object.
+    Create a new workspace in the caller's organization.
+
+    Requires permission to create workspaces, which a read-only member does not
+    have. This check was missing entirely: only the plan's workspace limit was
+    enforced, so any member of a paying organization could create workspaces in
+    it — and became owner of what they created.
     """
     try:
         user_id = user_data["user_id"]
-        
+
+        org_id = organization_id
+        if org_id is None:
+            # Fall back to an organization they administer, so a caller who
+            # omits it cannot land in one where they are only a member.
+            memberships = await store.org_repo.get_memberships(user_id)
+            org_id = next(
+                (m["organization_id"] for m in memberships if is_admin(m["role"])),
+                memberships[0]["organization_id"] if memberships else None,
+            )
+        if org_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of an organization.",
+            )
+
+        await assert_organization_capability(store, user_id, org_id, Capability.CREATE_WORKSPACE)
+
         # Enforce workspace creation limits based on subscription plan
         await assert_can_create_workspace(store, user_id)
         
@@ -219,25 +242,12 @@ async def update_workspace(
     """
     try:
         user_id = user_data["user_id"]
-        
-        # Verify workspace exists and belongs to user
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-        workspace = next((ws for ws in workspaces if ws["id"] == workspace_id), None)
 
-        if not workspace:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Workspace not found or you don't have permission to update it"
-            )
-
-        # list_workspaces_for_user returns workspaces this user is a *member* of
-        # as well as ones they own, so membership alone was passing this check
-        # and any invited staff member could rename the owner's workspace.
-        if workspace.get("role") != "owner":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the workspace owner can rename it."
-            )
+        # Membership alone used to pass this, so any invited staff member could
+        # rename the owner's workspace. Checked against the capability table
+        # rather than an ownership list, which excluded organization admins who
+        # own nothing yet administer everything.
+        await assert_workspace_capability(store, user_id, workspace_id, Capability.EDIT_WORKSPACE)
 
         # Update the workspace
         success = await store.workspace_repo.update_workspace(
@@ -251,12 +261,20 @@ async def update_workspace(
                 detail="Failed to update workspace"
             )
         
-        # Fetch updated workspace
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
+        # Read back through what the caller may see, not what they own: an
+        # admin owns nothing, so the ownership list came back empty and the
+        # lookup below returned None, failing the request with a 500 after the
+        # rename had already succeeded.
+        workspaces = await store.workspace_repo.list_accessible_workspaces(user_id)
         updated_workspace = next((ws for ws in workspaces if ws["id"] == workspace_id), None)
-        
+        if not updated_workspace:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Workspace renamed but could not be read back",
+            )
+
         logger.info(f"Workspace {workspace_id} updated by user {user_id}")
-        
+
         return {
             "id": updated_workspace["id"],
             "name": updated_workspace["name"],
@@ -289,29 +307,14 @@ async def delete_workspace(
     """
     try:
         user_id = user_data["user_id"]
-        
-        # Get all user workspaces
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-        
-        # Check if workspace exists and belongs to user
+
+        # Membership alone used to pass this, so an invited staff member could
+        # permanently delete the owner's workspace and, by cascade, every
+        # document in it.
+        await assert_workspace_capability(store, user_id, workspace_id, Capability.DELETE_WORKSPACE)
+
+        workspaces = await store.workspace_repo.list_accessible_workspaces(user_id)
         workspace = next((ws for ws in workspaces if ws["id"] == workspace_id), None)
-        
-        if not workspace:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Workspace not found or you don't have permission to delete it"
-            )
-
-        # list_workspaces_for_user includes workspaces this user merely belongs
-        # to, so membership alone was passing this check and an invited staff
-        # member could permanently delete the owner's workspace and, by cascade,
-        # every document in it.
-        if workspace.get("role") != "owner":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the workspace owner can delete it."
-            )
-
         # Prevent deleting your last *owned* workspace. Counting every workspace
         # here meant one owned plus one joined looked like two, so an owner could
         # delete the only workspace they actually have.

@@ -31,6 +31,8 @@ export interface OrgContext {
     can_manage_members: boolean;
     can_manage_documents: boolean;
     can_rename_organization: boolean;
+    can_create_workspace: boolean;
+    capabilities: string[];
     seats_used: number;
     seat_limit: number | null;
 }

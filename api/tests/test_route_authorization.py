@@ -322,3 +322,48 @@ async def test_an_owner_s_role_cannot_be_changed(store, tenant, client):
     )
     assert res.status_code == 400
     assert await store.org_repo.get_role(tenant.org, tenant.owner) == "owner"
+
+
+async def test_a_member_cannot_create_a_workspace(store, tenant, client):
+    """The hole this class of bug leaves.
+
+    Only the plan's workspace limit was enforced, never the role, so any member
+    of a paying organization could create workspaces in it — and became owner
+    of what they created, which is a privilege escalation dressed as a feature.
+    """
+    await tenant.workspace("Finance")
+    member = await tenant.member(scope="organization")
+
+    res = await client.as_(member).post(
+        f"/api/v1/workspaces?organization_id={tenant.org}", json={"name": "Mine"}
+    )
+    assert res.status_code == 403, res.text
+
+
+async def test_a_member_cannot_rename_or_delete_a_workspace(store, tenant, client):
+    ws = await tenant.workspace("Finance")
+    member = await tenant.member(scope="organization")
+
+    renamed = await client.as_(member).patch(
+        f"/api/v1/workspaces/{ws}", json={"name": "Renamed"}
+    )
+    assert renamed.status_code == 403
+
+    deleted = await client.as_(member).delete(f"/api/v1/workspaces/{ws}")
+    assert deleted.status_code == 403
+
+
+async def test_an_admin_can_rename_a_workspace_they_do_not_own(store, tenant, client):
+    """Admins own nothing yet administer everything.
+
+    The check read an ownership list, which is empty for them, so an admin was
+    refused on a workspace they are meant to manage.
+    """
+    ws = await tenant.workspace("Finance")
+    admin = await tenant.member(scope="organization")
+    await store.org_repo.set_member_role(tenant.org, admin, "admin")
+
+    res = await client.as_(admin).patch(
+        f"/api/v1/workspaces/{ws}", json={"name": "Renamed by admin"}
+    )
+    assert res.status_code == 200, res.text
