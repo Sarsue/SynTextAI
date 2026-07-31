@@ -120,6 +120,7 @@ class AsyncUserRepository(AsyncBaseRepository):
         exp_year=None,
         organization_id: Optional[int] = None,
         seats: Optional[int] = None,
+        plan_key: Optional[str] = None,
     ) -> bool:
         """Add or update a user subscription.
 
@@ -137,6 +138,8 @@ class AsyncUserRepository(AsyncBaseRepository):
             seats: Seats the plan includes before overage applies. Written here
                 so seat limits survive without a Stripe round trip on every
                 page load.
+            plan_key: Which plan. Seat pricing differs per plan, so the overage
+                rate cannot be worked out without it.
 
         Returns:
             bool: True if successful, False otherwise
@@ -171,6 +174,8 @@ class AsyncUserRepository(AsyncBaseRepository):
                         existing_sub.trial_end = trial_end
                     if seats is not None:
                         existing_sub.seats = seats
+                    if plan_key is not None:
+                        existing_sub.plan_key = plan_key
 
                     # Update card details if provided
                     if all([card_last4, card_type, exp_month, exp_year]):
@@ -213,6 +218,7 @@ class AsyncUserRepository(AsyncBaseRepository):
                         current_period_end=current_period_end,
                         trial_end=trial_end,
                         seats=seats,
+                        plan_key=plan_key,
                     )
                     session.add(new_sub)
                     await session.flush()  # To get the ID of the new subscription

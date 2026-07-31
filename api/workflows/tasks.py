@@ -3,6 +3,7 @@ import os
 import asyncio
 import time
 from api.core.timing import emit, stage
+from api.core.seats import sync_seats_to_stripe
 from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs
 from api.repositories.repository_manager import RepositoryManager
 from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding
@@ -378,49 +379,92 @@ async def process_query_data(
             logger.warning(f"Failed to send WebSocket error notification: {str(ws_error)}")
         raise HTTPException(status_code=500, detail="Query processing failed")
 
-async def delete_user_task(user_id: str, user_gc_id: str):
-    """Deletes a user's account, subscription, and associated files."""
-    try:
-        user_sub = await store.user_repo.get_subscription(user_id)
-        if user_sub and user_sub.get("status") == "active":
-            stripe_sub_id = user_sub.get("stripe_subscription_id")
-            stripe_customer_id = user_sub.get("stripe_customer_id")
-            if stripe_sub_id:
-                stripe.Subscription.delete(stripe_sub_id)
-                logger.info(f"Subscription {stripe_sub_id} canceled.")
-            if stripe_customer_id:
-                payment_methods = await stripe.PaymentMethod.list_async(customer=stripe_customer_id, type="card")
-                for method in payment_methods.auto_paging_iter():
-                    await stripe.PaymentMethod.detach_async(method.id)
-                    logger.info(f"Payment method {method.id} detached.")
-                await stripe.Customer.delete_async(stripe_customer_id)
-                logger.info(f"Stripe customer {stripe_customer_id} deleted.")
+async def delete_user_task(user_id, user_gc_id: str):
+    """Deletes a user's account, subscription, and associated files.
 
-        # Delete files and user account
-        files = await store.file_repo.get_files_for_user(user_id)
-        await asyncio.gather(
-            *(asyncio.to_thread(delete_from_gcs, user_gc_id, f["name"]) for f in files),
-            return_exceptions=True
-        )
+    user_id arrives as an int from the route and as a str from anything that
+    read it out of a payload. The subscription lookup compares against an
+    integer column, so a str silently matched nothing and returned None,
+    skipping the whole Stripe branch: the account vanished while the
+    subscription kept billing. Normalised once, here.
+    """
+    try:
+        user_id = int(user_id)
+        # get_subscription returns (subscription, card_details), not a dict.
+        # This used to call user_sub.get("status") straight on the tuple, which
+        # raises AttributeError on the very first line of the task. The outer
+        # except swallowed it, so deleting an account cancelled nothing, removed
+        # no documents, and left the user row in place: the customer kept being
+        # billed for an account they had been told was deleted.
+        subscription_data = await store.user_repo.get_subscription(user_id)
+        subscription = subscription_data[0] if subscription_data else None
+
+        if subscription:
+            # Cancel whatever the status is. Gating on 'active' left a past_due
+            # or unpaid subscription running, which is the one case where the
+            # customer is most likely to be leaving because of billing.
+            stripe_sub_id = subscription.get("stripe_subscription_id")
+            stripe_customer_id = subscription.get("stripe_customer_id")
+            if stripe_sub_id:
+                try:
+                    await asyncio.to_thread(stripe.Subscription.cancel, stripe_sub_id)
+                    logger.info(f"Subscription {stripe_sub_id} canceled.")
+                except Exception as e:
+                    # Already cancelled, or gone. Not a reason to abandon the
+                    # rest of the deletion.
+                    logger.warning(f"Could not cancel subscription {stripe_sub_id}: {e}")
+            if stripe_customer_id:
+                try:
+                    payment_methods = await stripe.PaymentMethod.list_async(customer=stripe_customer_id, type="card")
+                    for method in payment_methods.auto_paging_iter():
+                        await stripe.PaymentMethod.detach_async(method.id)
+                        logger.info(f"Payment method {method.id} detached.")
+                    await stripe.Customer.delete_async(stripe_customer_id)
+                    logger.info(f"Stripe customer {stripe_customer_id} deleted.")
+                except Exception as e:
+                    logger.warning(f"Could not delete Stripe customer {stripe_customer_id}: {e}")
+
+        # Delete the stored documents.
+        #
+        # get_files_for_user returns a paginated envelope, so iterating it
+        # directly walked the dict's keys ('items', 'total', ...) and indexed a
+        # string. It is also paginated, and the default page would have left
+        # everything past the first page in storage: a customer who deleted
+        # their account still had documents sitting in the bucket.
+        file_page = await store.file_repo.get_files_for_user(user_id, limit=10000)
+        files = file_page.get("items", []) if isinstance(file_page, dict) else (file_page or [])
+        if files:
+            results = await asyncio.gather(
+                *(asyncio.to_thread(delete_from_gcs, user_gc_id, f["file_name"]) for f in files),
+                return_exceptions=True
+            )
+            failed = [
+                f["file_name"] for f, r in zip(files, results) if isinstance(r, Exception)
+            ]
+            if failed:
+                logger.error(f"Could not delete {len(failed)} object(s) from storage: {failed}")
+            logger.info(f"Deleted {len(files) - len(failed)}/{len(files)} stored documents for user {user_id}")
 
         # Organizations this user solely owns would otherwise survive as
         # zombies: organization_members cascades away with the user, but the
         # organization row itself does not, leaving a tenant with no owner and,
         # if the id is still cached client-side, one that a later signup can
         # resolve back to.
+        surviving_orgs = []
         try:
             for m in await store.org_repo.get_memberships(int(user_id)):
-                if m["role"] != "owner":
-                    continue
                 org_id = m["organization_id"]
                 others = [
                     x for x in await store.org_repo.list_members(org_id)
                     if x["user_id"] != int(user_id)
                 ]
-                if not others:
+                if m["role"] == "owner" and not others:
                     await store.org_repo.delete_organization(org_id)
                     logger.info(f"Deleted organization {org_id}, its last owner is gone")
-                else:
+                elif others:
+                    # Somebody else's organization that this person was a member
+                    # of. Their seat has to stop being charged for.
+                    surviving_orgs.append(org_id)
                     logger.info(
                         f"Organization {org_id} kept: {len(others)} other member(s) remain"
                     )
@@ -428,6 +472,15 @@ async def delete_user_task(user_id: str, user_gc_id: str):
             logger.error(f"Error cleaning up organizations for user {user_id}: {org_error}", exc_info=True)
 
         success = await store.user_repo.delete_user_account(user_id)
+
+        # Shrink the seat count of every organization they were a member of.
+        #
+        # Must run after the user row is gone, since the quantity is derived
+        # from a live count of members. Removing a member through the UI already
+        # did this; deleting the account did not, so the organization kept
+        # paying for somebody who no longer existed.
+        for org_id in surviving_orgs:
+            await sync_seats_to_stripe(store, org_id, reason="member account deleted")
         if success:
             logger.info(f"User account {user_id} deleted successfully")
         else:
