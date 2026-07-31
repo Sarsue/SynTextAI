@@ -247,3 +247,46 @@ async def test_organization_scope_member_appears_in_the_workspace_picker(store, 
     )
     assert sorted(w["id"] for w in listed) == sorted([ws1, ws2])
     assert {w["role"] for w in listed} == {"staff"}
+
+
+async def test_conversations_follow_workspace_access(store, tenant):
+    """A conversation is visible only while its workspace is.
+
+    Conversations were filtered by "did you create this", which is a different
+    question from "may you see this". Losing access to a workspace left its
+    threads in the sidebar, still readable, still citing documents that would
+    now refuse to open.
+    """
+    ws1 = await tenant.workspace("Finance")
+    ws2 = await tenant.workspace("Dentist")
+    member = await tenant.member(scope="organization")
+
+    in_ws1 = await store.chat_repo.add_chat_history("about finance", member, ws1)
+    in_ws2 = await store.chat_repo.add_chat_history("about dentistry", member, ws2)
+    await store.chat_repo.add_message("hello", "user", member, in_ws2)
+
+    async def visible_ids():
+        accessible = await store.workspace_repo.accessible_workspace_ids(
+            member, organization_id=tenant.org
+        )
+        rows = await store.chat_repo.get_all_user_chat_histories(
+            member, accessible_workspace_ids=accessible
+        )
+        return sorted(r["id"] for r in rows)
+
+    assert await visible_ids() == sorted([in_ws1, in_ws2])
+
+    # Narrowed to Finance: the Dentist thread goes with the workspace.
+    await store.org_repo.set_member_access(tenant.org, member, "workspace", [ws1])
+    assert await visible_ids() == [in_ws1]
+
+    # And its messages are no longer readable, even though they wrote them.
+    accessible = await store.workspace_repo.accessible_workspace_ids(
+        member, organization_id=tenant.org
+    )
+    assert await store.chat_repo.get_messages_for_chat_history(
+        in_ws2, member, accessible_workspace_ids=accessible
+    ) == []
+    assert await store.chat_repo.get_messages_for_chat_history(
+        in_ws1, member, accessible_workspace_ids=accessible
+    ) is not None

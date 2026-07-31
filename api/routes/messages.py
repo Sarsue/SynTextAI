@@ -62,14 +62,22 @@ async def create_message(
         if not await store.chat_repo.user_owns_chat_history(history_id, user_id):
             raise HTTPException(status_code=404, detail="Chat history not found")
 
-        if workspace_id is not None:
-            workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-            if workspace_id not in [ws["id"] for ws in workspaces]:
-                raise HTTPException(status_code=404, detail="Workspace not found")
+        # One question, asked the same way everywhere: which workspaces may
+        # this person see? This used to call list_workspaces_for_user, which
+        # answers "what do you own or were assigned" — a member with
+        # organization-wide reach has neither, so they could not send a message
+        # at all.
+        accessible = await store.workspace_repo.accessible_workspace_ids(user_id)
+
+        if workspace_id is not None and workspace_id not in accessible:
+            raise HTTPException(status_code=404, detail="Workspace not found")
 
         if file_id is not None:
             file_record = await store.file_repo.get_file_by_id(file_id)
-            if not file_record or file_record.get("user_id") != user_id:
+            # Authorized by the document's workspace, not by who uploaded it.
+            # Checking the uploader refused a member asking about a document
+            # the owner had put in a workspace they can read.
+            if not file_record or file_record.get("workspace_id") not in accessible:
                 raise HTTPException(status_code=404, detail="File not found")
 
         # Save the user message to the history

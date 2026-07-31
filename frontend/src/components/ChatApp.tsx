@@ -60,7 +60,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         pollFileStatus, // Trigger immediate status check after upload
         authLoading,
         incomingChatMessage,
-        clearIncomingChatMessage
+        clearIncomingChatMessage,
+        activeOrganizationId
     } = useUserContext();
     const { addToast } = useToast();
     const { webSocketStatus } = useUserContext();
@@ -227,7 +228,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         (async () => {
             try {
                 const res = await callApiWithToken(
-                    `api/v1/histories/messages?history_id=${encodeURIComponent(currentHistory)}`,
+                    `api/v1/histories/messages?history_id=${encodeURIComponent(currentHistory)}` +
+                        (activeOrganizationId != null
+                            ? `&organization_id=${encodeURIComponent(activeOrganizationId)}`
+                            : ''),
                     'GET'
                 );
                 if (!res?.ok || cancelled) return;
@@ -698,9 +702,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     const fetchHistories = async () => {
         try {
-            const scope = currentWorkspaceId != null
-                ? `?workspace_id=${encodeURIComponent(currentWorkspaceId)}`
-                : '';
+            // organization_id lets the backend scope conversations to the
+            // workspaces this person can still see, the same answer that
+            // governs documents. Without it a thread survives losing access to
+            // the workspace it was held in.
+            const params = new URLSearchParams();
+            if (currentWorkspaceId != null) params.set('workspace_id', String(currentWorkspaceId));
+            if (activeOrganizationId != null) params.set('organization_id', String(activeOrganizationId));
+            const scope = params.toString() ? `?${params.toString()}` : '';
             const historiesResponse = await callApiWithToken(`api/v1/histories${scope}`, 'GET');
             if (!historiesResponse?.ok) {
                 console.error('Failed to fetch chat histories:', historiesResponse?.status, historiesResponse?.statusText);

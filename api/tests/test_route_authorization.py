@@ -191,3 +191,39 @@ async def test_cannot_start_a_conversation_in_an_unreachable_workspace(store, te
         f"/api/v1/histories?title=hello&workspace_id={ws2}"
     )
     assert res.status_code == 403
+
+
+async def test_history_list_excludes_workspaces_the_caller_lost(store, tenant, client):
+    ws1 = await tenant.workspace("Finance")
+    ws2 = await tenant.workspace("Dentist")
+    member = await tenant.member(scope="organization")
+
+    keep = await store.chat_repo.add_chat_history("kept", member, ws1)
+    gone = await store.chat_repo.add_chat_history("gone", member, ws2)
+
+    res = await client.as_(member).get(f"/api/v1/histories?organization_id={tenant.org}")
+    assert res.status_code == 200
+    assert sorted(h["id"] for h in res.json()) == sorted([keep, gone])
+
+    await store.org_repo.set_member_access(tenant.org, member, "workspace", [ws1])
+
+    res = await client.as_(member).get(f"/api/v1/histories?organization_id={tenant.org}")
+    assert res.status_code == 200
+    assert [h["id"] for h in res.json()] == [keep]
+
+
+async def test_member_can_send_a_message_in_a_workspace_they_can_see(store, tenant, client):
+    """An organization-wide member owns no workspace and is assigned to none.
+
+    The guard called list_workspaces_for_user, which answers a different
+    question, so it returned nothing and every message was refused with
+    'Workspace not found'.
+    """
+    ws = await tenant.workspace("Finance")
+    member = await tenant.member(scope="organization")
+    history = await store.chat_repo.add_chat_history("hello", member, ws)
+
+    res = await client.as_(member).post(
+        f"/api/v1/messages?message=hi&history_id={history}&language=english&workspace_id={ws}"
+    )
+    assert res.status_code != 404, res.text

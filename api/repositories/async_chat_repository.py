@@ -15,7 +15,7 @@ from ..models import ChatHistory as ChatHistoryORM
 from ..models import Message as MessageORM
 
 # Import SQLAlchemy async components
-from sqlalchemy import select, and_, desc, func
+from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -132,15 +132,26 @@ class AsyncChatRepository(AsyncBaseRepository):
                 logger.error(f"Error adding message: {e}", exc_info=True)
                 return None
 
-    async def get_all_user_chat_histories(self, user_id: int, workspace_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get a user's chat histories, optionally scoped to one workspace.
+    async def get_all_user_chat_histories(
+        self,
+        user_id: int,
+        workspace_id: Optional[int] = None,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> List[Dict[str, Any]]:
+        """A user's conversations, in workspaces they can still see.
 
         Args:
             user_id: ID of the user
-            workspace_id: When given, only conversations belonging to this
-                workspace. Documents are workspace-scoped, so an unscoped list
-                mixes threads whose citations point at files the current
-                workspace cannot open.
+            workspace_id: When given, only conversations in this workspace.
+            accessible_workspace_ids: The workspaces this user may see. This is
+                the same answer that governs documents and retrieval, so a
+                conversation can never outlive access to the workspace it was
+                held in.
+
+        Conversations used to be filtered by "did you create this", which is a
+        different question from "may you see this". Losing access to a
+        workspace left its conversations in the sidebar, still readable, still
+        citing documents that would now refuse to open.
 
         Returns:
             List[Dict]: List of chat histories with metadata
@@ -151,6 +162,17 @@ class AsyncChatRepository(AsyncBaseRepository):
                 conditions = [ChatHistoryORM.user_id == user_id]
                 if workspace_id is not None:
                     conditions.append(ChatHistoryORM.workspace_id == workspace_id)
+                if accessible_workspace_ids is not None:
+                    # Conversations predating workspace scoping have no
+                    # workspace and stay visible to whoever held them; anything
+                    # filed in a workspace is visible only while that workspace
+                    # is.
+                    conditions.append(
+                        or_(
+                            ChatHistoryORM.workspace_id.is_(None),
+                            ChatHistoryORM.workspace_id.in_(accessible_workspace_ids),
+                        )
+                    )
                 stmt = select(ChatHistoryORM).where(
                     *conditions
                 ).options(selectinload(ChatHistoryORM.messages))
@@ -186,22 +208,38 @@ class AsyncChatRepository(AsyncBaseRepository):
             result = await session.execute(stmt)
             return result.scalar_one_or_none() is not None
 
-    async def get_messages_for_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, Any]]:
-        """Get all messages for a specific chat history.
+    async def get_messages_for_chat_history(
+        self,
+        chat_history_id: int,
+        user_id: int,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Messages in one conversation, if the caller may still see it.
 
         Args:
             chat_history_id: ID of the chat history
-            user_id: ID of the user (for security check)
+            user_id: ID of the user
+            accessible_workspace_ids: The workspaces this user may see. Having
+                written a conversation is not sufficient: access follows the
+                workspace, so losing the workspace closes the conversation too.
 
         Returns:
             List[Dict]: List of messages
         """
         async with self.get_async_session() as session:
             try:
-                # Verify user owns the chat history
-                stmt = select(ChatHistoryORM).where(
-                    and_(ChatHistoryORM.id == chat_history_id, ChatHistoryORM.user_id == user_id)
-                )
+                conditions = [
+                    ChatHistoryORM.id == chat_history_id,
+                    ChatHistoryORM.user_id == user_id,
+                ]
+                if accessible_workspace_ids is not None:
+                    conditions.append(
+                        or_(
+                            ChatHistoryORM.workspace_id.is_(None),
+                            ChatHistoryORM.workspace_id.in_(accessible_workspace_ids),
+                        )
+                    )
+                stmt = select(ChatHistoryORM).where(and_(*conditions))
                 result = await session.execute(stmt)
                 chat_history = result.scalar_one_or_none()
 
@@ -304,10 +342,18 @@ class AsyncChatRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
-                # Verify user owns the chat history
-                stmt = select(ChatHistoryORM).where(
-                    and_(ChatHistoryORM.id == chat_history_id, ChatHistoryORM.user_id == user_id)
-                )
+                conditions = [
+                    ChatHistoryORM.id == chat_history_id,
+                    ChatHistoryORM.user_id == user_id,
+                ]
+                if accessible_workspace_ids is not None:
+                    conditions.append(
+                        or_(
+                            ChatHistoryORM.workspace_id.is_(None),
+                            ChatHistoryORM.workspace_id.in_(accessible_workspace_ids),
+                        )
+                    )
+                stmt = select(ChatHistoryORM).where(and_(*conditions))
                 result = await session.execute(stmt)
                 chat_history = result.scalar_one_or_none()
 

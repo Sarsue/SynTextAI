@@ -71,12 +71,22 @@ async def create_history(
 @histories_router.get("")
 async def get_history_messages(
     workspace_id: Optional[int] = Query(None, description="Only conversations in this workspace"),
+    organization_id: Optional[int] = Query(None, description="Active organization"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
-        message_list = await store.chat_repo.get_all_user_chat_histories(user_id, workspace_id)
+        # The same answer that governs documents and retrieval. Conversations
+        # were filtered by "did you create this", so losing access to a
+        # workspace left its threads in the sidebar, still readable and still
+        # citing documents that would now refuse to open.
+        accessible = await store.workspace_repo.accessible_workspace_ids(
+            user_id, organization_id=organization_id
+        )
+        message_list = await store.chat_repo.get_all_user_chat_histories(
+            user_id, workspace_id, accessible_workspace_ids=accessible
+        )
         return message_list
     except HTTPException:
         # A 403 or 404 is this endpoint's answer, not a failure.
@@ -92,17 +102,23 @@ async def get_history_messages(
 @histories_router.get("/messages")
 async def get_specific_history_messages(
     history_id: int = Query(..., description="ID of the chat history"),
+    organization_id: Optional[int] = Query(None, description="Active organization"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
         user_id = user_data["user_id"]
+        accessible = await store.workspace_repo.accessible_workspace_ids(
+            user_id, organization_id=organization_id
+        )
         # Signature is (chat_history_id, user_id). These were passed the other
         # way round, so the ownership check compared a history id against a user
         # id, always failed, and every conversation came back empty while
         # logging "User N attempted to access unauthorized chat history M" with
         # the two values transposed.
-        message_list = await store.chat_repo.get_messages_for_chat_history(history_id, user_id)
+        message_list = await store.chat_repo.get_messages_for_chat_history(
+            history_id, user_id, accessible_workspace_ids=accessible
+        )
         return message_list
     except HTTPException:
         # A 403 or 404 is this endpoint's answer, not a failure.
