@@ -30,22 +30,12 @@ async def seat_summary(store: RepositoryManager, organization_id: int) -> Dict[s
     """
     members = await store.org_repo.count_members(organization_id)
 
-    if await store.org_repo.is_billing_exempt(organization_id):
-        return {
-            "members": members,
-            "included_seats": None,
-            "billable": False,
-            "next_seat_cents": 0,
-            "monthly_cents": 0,
-        }
-
     subscription = await store.org_repo.get_subscription_row(organization_id)
     plan = get_plan((subscription or {}).get("plan_key"))
 
     return {
         "members": members,
         "included_seats": plan.included_seats,
-        "billable": True,
         "plan": plan.key,
         "plan_name": plan.name,
         # Zero while there are still included seats left, which is what makes
@@ -71,10 +61,6 @@ async def sync_seats_to_stripe(
     with them. Drift is recoverable: the webhook and the next membership change
     both re-assert the quantity. Losing the member is not.
     """
-    if await store.org_repo.is_billing_exempt(organization_id):
-        logger.info("Org %s is billing exempt; not syncing seats", organization_id)
-        return None
-
     subscription = await store.org_repo.get_subscription_row(organization_id)
     if not subscription or not subscription.get("stripe_subscription_id"):
         logger.info("Org %s has no Stripe subscription; nothing to sync", organization_id)

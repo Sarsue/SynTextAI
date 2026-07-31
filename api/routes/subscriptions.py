@@ -239,9 +239,6 @@ async def create_subscription(
                 status_code=403,
                 detail="Your access is provided by your team's plan. Contact your workspace owner about billing.",
             )
-        if await store.org_repo.is_billing_exempt(organization_id):
-            raise HTTPException(status_code=400, detail="This organization does not require a subscription.")
-
         # Quantity is headcount. Stripe's graduated tiers do the rest: the base
         # amount covers the included seats and only the excess is charged.
         member_count = max(1, await store.org_repo.count_members(organization_id))

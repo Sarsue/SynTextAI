@@ -606,10 +606,15 @@ costing money at once. The sync never raises: the membership change has already
 happened, and drift is corrected by the next sync or the webhook.
 
 The trial was dropped rather than built. Access is bought with a card, or
-granted by being invited into an organization that already pays. Demo access is
-an organization flagged `billing_exempt` — entitled without a subscription,
-never charged for seats, ended by clearing the flag, which leaves the data and
-stops the access.
+granted by being invited into an organization that already pays. There is no
+third path: a billing-exemption flag was built and then removed, because it was
+a second way to be entitled that would have needed testing forever and could
+only be exercised in production. Everything is now verifiable end to end in
+develop, where Stripe test mode makes subscribing free.
+
+Granting an account access outside the normal flow is a database operation, not
+a product feature: insert a subscription row for the organization with status
+'active'. Deliberately not an endpoint, so it cannot be reached by a bug.
 
 Not doing yet: usage-based query pricing. It tracks cost best but makes bills
 unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;

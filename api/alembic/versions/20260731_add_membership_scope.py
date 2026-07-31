@@ -18,14 +18,14 @@ organization-wide invite is not about any one workspace, and organization_id is
 added so such an invite still knows the tenant it belongs to.
 
 Revision ID: 20260731_scope
-Revises: 20260731_exempt
+Revises: 20260731_plan_key
 """
 from alembic import op
 import sqlalchemy as sa
 
 
 revision = '20260731_scope'
-down_revision = '20260731_exempt'
+down_revision = '20260731_plan_key'
 branch_labels = None
 depends_on = None
 

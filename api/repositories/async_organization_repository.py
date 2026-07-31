@@ -271,24 +271,6 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )
                 return "none"
 
-    async def is_billing_exempt(self, organization_id: Optional[int]) -> bool:
-        """Whether this organization uses the product without paying.
-
-        Demo and evaluation accounts. Entitled without a subscription, and
-        never charged for seats. Clearing the flag ends the demo: the data
-        stays, the access stops.
-        """
-        if organization_id is None:
-            return False
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(Organization.billing_exempt).where(Organization.id == organization_id)
-                return bool((await session.execute(stmt)).scalar_one_or_none())
-            except Exception as e:
-                logger.error(f"Error reading billing_exempt for org {organization_id}: {e}", exc_info=True)
-                # Fail closed: an unreadable flag must not hand out free access.
-                return False
-
     async def get_subscription_row(self, organization_id: int) -> Optional[Dict[str, Any]]:
         """The organization's current subscription, as a plain dict.
 

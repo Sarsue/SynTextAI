@@ -42,7 +42,6 @@ class Organization(Base):
     name = Column(String, nullable=False)
     # Uses the product without paying: demo and evaluation accounts. Entitled
     # without a subscription, and never charged for seats.
-    billing_exempt = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=datetime.utcnow)
 
