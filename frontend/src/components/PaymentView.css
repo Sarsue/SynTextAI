@@ -54,3 +54,73 @@
     color: #dc2626;
     margin-top: 10px;
 }
+
+
+/* Plan picker. Layout and state only; the surface colours come from the
+   theme tokens so this follows dark mode like everything else. */
+.plan-choices {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.plan-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px;
+    text-align: left;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius, 8px);
+    background: var(--card-bg);
+    color: var(--text-color);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plan-choice:hover:not(:disabled) {
+    border-color: var(--accent-color);
+}
+
+/* Selection is carried by more than colour, so it survives a colour-vision
+   difference and a monochrome screen. */
+.plan-choice.is-selected {
+    border-color: var(--accent-color);
+    box-shadow: inset 0 0 0 1px var(--accent-color);
+}
+
+.plan-choice:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.plan-choice-name {
+    font-weight: 600;
+}
+
+.plan-choice-price {
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.plan-choice-period {
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--secondary-color);
+}
+
+.plan-choice-seats {
+    font-size: 0.9rem;
+}
+
+.plan-choice-description,
+.billing-note {
+    font-size: 0.85rem;
+    color: var(--secondary-color);
+}
+
+.billing-note {
+    margin-top: 12px;
+}

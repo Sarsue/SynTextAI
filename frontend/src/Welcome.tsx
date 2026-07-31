@@ -150,7 +150,7 @@ const Welcome: React.FC = () => {
                             <div className="welcome-icon">🎉</div>
                             <h2>You're ready to go</h2>
                             <p>
-                                Start your free trial, then upload your first document and invite your team.
+                                Choose a plan, then upload your first document and invite your team.
                             </p>
                             <p>Your staff will get instant cited answers — and stop interrupting you.</p>
                         </div>

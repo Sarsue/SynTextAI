@@ -111,7 +111,7 @@ const faqs = [
     },
     {
         q: 'Can I try before committing?',
-        a: 'Yes. Every new workspace starts with a free trial. Upload your documents and invite your team before entering any payment details.',
+        a: 'Get in touch and we will set you up with a working workspace on your own documents for a limited time. No card, no setup on your end.',
     },
 ];
 
@@ -158,7 +158,7 @@ const Home: React.FC = () => {
                 <div className="home-actions">
                     <Button asChild className="home-btn-primary home-btn-lg">
                         <Link to="/login" onClick={() => posthog.capture('homepage_get_started_click', { location: 'hero' })}>
-                            Start free trial
+                            Get started
                         </Link>
                     </Button>
                     <Button asChild variant="outline" className="home-btn-ghost home-btn-lg">
@@ -263,13 +263,13 @@ const Home: React.FC = () => {
             {/* Pricing */}
             <section className="home-section">
                 <h2 className="home-section-heading">Pricing</h2>
-                <p className="home-section-sub">One price per company. Add unlimited staff.</p>
+                <p className="home-section-sub">One price per company. Seats included, then pay only for who you add.</p>
                 <div className="home-pricing">
                     <div className="home-plan">
                         <div className="home-plan-name">Starter</div>
                         <div className="home-plan-price">$99<span className="home-plan-period">/mo</span></div>
                         <ul className="home-plan-features">
-                            <li>Up to 10 team members</li>
+                            <li>10 seats included, then $9 each</li>
                             <li>Unlimited documents</li>
                             <li>Cited answers</li>
                             <li>PDF and Word support</li>
@@ -286,7 +286,7 @@ const Home: React.FC = () => {
                         <div className="home-plan-name">Business</div>
                         <div className="home-plan-price">$249<span className="home-plan-period">/mo</span></div>
                         <ul className="home-plan-features">
-                            <li>Unlimited team members</li>
+                            <li>30 seats included, then $7 each</li>
                             <li>Unlimited documents</li>
                             <li>Cited answers</li>
                             <li>PDF and Word support</li>
@@ -301,8 +301,9 @@ const Home: React.FC = () => {
                     </div>
                 </div>
                 <p className="home-footnote">
-                    Payments are securely handled by Stripe. Sign up and you're in, no setup call required.
-                    Want a demo or a trial run first?{' '}
+                    Payments are securely handled by Stripe. Add a card and you're in, no setup call required.
+                    Seats are added as you invite people and removed the moment you remove them.
+                    Want to see it on your own documents first?{' '}
                     <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click', { location: 'pricing' })}>
                         Reach out to us
                     </a>.
@@ -343,7 +344,7 @@ const Home: React.FC = () => {
                 <h2 className="home-cta-heading">Stop answering the same questions twice.</h2>
                 <Button asChild className="home-btn-primary home-btn-lg">
                     <Link to="/login" onClick={() => posthog.capture('homepage_get_started_click', { location: 'bottom' })}>
-                        Start free trial
+                        Get started
                     </Link>
                 </Button>
             </section>

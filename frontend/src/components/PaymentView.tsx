@@ -14,6 +14,16 @@ interface PaymentViewProps {
     darkMode: boolean;
 }
 
+interface PlanOption {
+    key: string;
+    name: string;
+    description: string;
+    base_cents: number;
+    included_seats: number;
+    overage_cents: number;
+    available: boolean;
+}
+
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode }) => {
     const { fetchSubscriptionStatus, setSubscriptionStatus, subscriptionData, setSubscriptionData } = useUserContext(); // Getting subscriptionStatus from context
     const navigate = useNavigate();
@@ -23,11 +33,35 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     const [clientSecret, setClientSecret] = useState('');
     const [isRequestPending, setIsRequestPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [plans, setPlans] = useState<PlanOption[]>([]);
+    const [selectedPlan, setSelectedPlan] = useState<string>('starter');
 
     // Fetch Subscription Status
     useEffect(() => {
         if (user) fetchSubscriptionStatus();
     }, [user]);
+
+    // Prices come from the backend, which derives them from the same plan
+    // definition the Stripe prices were created from. Hardcoding them here is
+    // how a page ends up advertising a price the customer is not charged.
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const response = await fetch('/api/v1/subscriptions/plans');
+                if (!response.ok) return;
+                const data = await response.json();
+                if (cancelled || !Array.isArray(data?.plans)) return;
+                const available = data.plans.filter((p: PlanOption) => p.available);
+                setPlans(available);
+                if (available.length) setSelectedPlan(available[0].key);
+            } catch {
+                // Leaves the picker empty and the subscribe button disabled,
+                // which is better than offering a plan we cannot charge for.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
@@ -80,7 +114,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${await user?.getIdToken()}`,
                 },
-                body: JSON.stringify({ payment_method: paymentMethod?.id }),
+                body: JSON.stringify({ payment_method: paymentMethod?.id, plan: selectedPlan }),
             });
 
             if (!response.ok) {
@@ -97,7 +131,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 userId: user?.uid,
                 email: email,
                 subscriptionStatus: data.subscription_status,
-                plan: 'standard'
+                plan: selectedPlan
             });
 
             setSubscriptionData(data);
@@ -118,61 +152,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             });
             
             setError((error as Error)?.message || 'An error occurred while subscribing.');
-        } finally {
-            setIsRequestPending(false);
-        }
-    };
-
-    const handleStartTrial = async () => {
-        // Track trial start attempt
-        posthog.capture('trial_start_attempt', {
-            userId: user?.uid,
-            email: email
-        });
-        
-        setIsRequestPending(true);
-        setError(null);
-        try {
-            console.log("Starting free trial...");
-            const response = await fetch('/api/v1/subscriptions/start-trial', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${await user?.getIdToken()}`,
-                },
-                body: JSON.stringify({}),
-            });
-
-            if (!response.ok) {
-                const errorResponse = await response.json();
-                throw new Error(errorResponse?.error || 'Failed to start free trial.');
-            }
-
-            const data = await response.json();
-            // Track successful trial start
-            posthog.capture('trial_start_success', {
-                userId: user?.uid,
-                email: email,
-                trialEnd: data.trial_end
-            });
-            
-            setSubscriptionData(data);
-            setSubscriptionStatus('trialing');
-            // Same reason: the organization must be re-read before /chat will
-            // let us in, otherwise the trial appears not to have started.
-            await fetchSubscriptionStatus();
-            navigate('/chat');
-        } catch (error) {
-            console.error("Error starting trial:", error);
-            
-            // Track trial start error
-            posthog.capture('trial_start_error', {
-                userId: user?.uid,
-                email: email,
-                error: (error as Error)?.message || 'Unknown error'
-            });
-            
-            setError((error as Error)?.message || 'An error occurred while starting your trial.');
         } finally {
             setIsRequestPending(false);
         }
@@ -330,28 +309,58 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                     </form>
                 </>
             ) : subscriptionData?.subscription_status === 'none' ? (
-                // New user eligible for free trial
+                // No trial to offer. Access is bought here, or granted by being
+                // invited into an organization that already pays.
                 <>
-                    <p>You have access to a free trial.</p>
-                    <Button onClick={handleStartTrial} disabled={isRequestPending}>
-                        {isRequestPending ? 'Starting Trial...' : 'Start Free Trial'}
-                    </Button>
-                </>
-            ) : subscriptionData?.subscription_status === 'trialing' ? (
-                // Trial period active, prompt for subscription
-                <>
-                    <p>Your free trial is active.</p>
-                    {subscriptionData?.trial_end && (
-                        <p>
-                            Trial ends on: {new Date(subscriptionData.trial_end).toLocaleDateString()}.
-                            {subscriptionData.has_active_payment_method
-                                ? ' Charges will start on this date unless you cancel.'
-                                : ' Usage ends on this date unless you add a card and subscribe.'}
-                        </p>
-                    )}
-                    <Button onClick={handleSubscribe} disabled={isRequestPending}>
-                        {isRequestPending ? 'Processing...' : 'Subscribe Now'}
-                    </Button>
+                    <div className="plan-choices">
+                        {plans.map((plan) => {
+                            const isSelected = plan.key === selectedPlan;
+                            return (
+                                <button
+                                    type="button"
+                                    key={plan.key}
+                                    onClick={() => setSelectedPlan(plan.key)}
+                                    disabled={!plan.available}
+                                    aria-pressed={isSelected}
+                                    className={`plan-choice ${isSelected ? 'is-selected' : ''}`}
+                                >
+                                    <span className="plan-choice-name">{plan.name}</span>
+                                    <span className="plan-choice-price">
+                                        ${(plan.base_cents / 100).toFixed(0)}
+                                        <span className="plan-choice-period">/month</span>
+                                    </span>
+                                    <span className="plan-choice-seats">
+                                        {plan.included_seats} seats included, then $
+                                        {(plan.overage_cents / 100).toFixed(0)} each
+                                    </span>
+                                    <span className="plan-choice-description">{plan.description}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <form onSubmit={handleSubscribe}>
+                        <CardElement
+                            options={{
+                                style: {
+                                    base: {
+                                        color: darkMode ? "#ffffff" : "#000000",
+                                        backgroundColor: darkMode ? "#333" : "#ffffff",
+                                        "::placeholder": {
+                                            color: darkMode ? "#bbbbbb" : "#888888",
+                                        },
+                                    },
+                                },
+                            }}
+                        />
+                        <Button type="submit" disabled={isRequestPending || !plans.length}>
+                            {isRequestPending ? 'Processing...' : 'Subscribe'}
+                        </Button>
+                    </form>
+                    <p className="billing-note">
+                        Billed monthly. Seats beyond the included allowance are added to your next
+                        invoice as you invite people, and removed as soon as you remove them.
+                    </p>
                 </>
             ) : subscriptionData?.subscription_status === 'active' ? (
                 // Subscription is active, show card details and cancel button
