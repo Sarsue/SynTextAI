@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './FileViewerComponent.css';
 import { UploadedFile, ProcessingStatus } from './types';
-import { X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+} from '@/components/ui/dialog';
 
 interface FileViewerComponentProps {
     file: UploadedFile;
@@ -30,7 +35,8 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragmen
     const getFileType = (urlOrName: string): string | null => {
         // Strip any query/fragment first: "p15.pdf#page=36".split('.').pop()
         // is "pdf#page=36", which matches no known type and sends the viewer
-        // down the "unsupported file type" path.
+        // down the "unsupported file type" path. Signed URLs carry a query
+        // string too, for the same reason.
         const bare = urlOrName.split(/[?#]/)[0];
         const extension = bare.split('.').pop()?.toLowerCase();
         if (!extension) {
@@ -77,6 +83,10 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragmen
         if (fileType === 'pdf') {
             return (
                 <div className="pdf-container file-content-area">
+                    {/* key forces a remount when only the fragment changes:
+                        assigning a new hash to an existing iframe src does not
+                        renavigate, so clicking citation 1 then citation 3 would
+                        otherwise leave the viewer on the first page it opened. */}
                     <iframe
                         key={pdfIframeSrc}
                         ref={pdfViewerRef}
@@ -110,29 +120,32 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragmen
         }
     };
 
+    // shadcn Dialog rather than a hand-rolled fixed overlay: it brings the
+    // focus trap, Escape-to-close, scroll lock and aria wiring the previous
+    // markup had none of. The document surface itself is unchanged, so the
+    // #page=N anchor behaves exactly as before.
     return (
-        <div className={`file-viewer-modal ${darkMode ? 'dark-mode' : ''}`}>
-            <div className="file-viewer-content">
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="close-button"
-                    onClick={onClose}
-                >
-                    <X className="size-4" />
-                </Button>
-
-                <div className="file-viewer-header">
-                    <h2>{file.file_name}</h2>
-                </div>
+        <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+            <DialogContent
+                // A document needs the screen. tailwind-merge resolves these
+                // against DialogContent's own defaults (sm:max-w-sm, p-4,
+                // gap-4, grid), so the sizing here wins without !important.
+                className={`file-viewer-dialog flex flex-col w-[96vw] max-w-[96vw] sm:max-w-[1800px] h-[92vh] p-0 gap-0 overflow-hidden ${darkMode ? 'dark-mode' : ''}`}
+            >
+                <DialogHeader className="px-4 py-3 border-b shrink-0 pr-12">
+                    <DialogTitle className="truncate text-left">{file.file_name}</DialogTitle>
+                    <DialogDescription className="sr-only">
+                        Document preview for {file.file_name}
+                    </DialogDescription>
+                </DialogHeader>
 
                 <div className="file-viewer-main-layout">
                     <div className="document-view-container">
                         {renderFileContent()}
                     </div>
                 </div>
-            </div>
-        </div>
+            </DialogContent>
+        </Dialog>
     );
 };
 

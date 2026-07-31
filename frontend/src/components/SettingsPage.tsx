@@ -9,6 +9,8 @@ import { useUserContext } from '../UserContext';
 import { Stripe } from '@stripe/stripe-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import ConfirmDialog from './ConfirmDialog';
+import { useToast } from '../contexts/ToastContext';
 
 interface SettingsPageProps {
     stripePromise: Promise<Stripe | null>;
@@ -18,8 +20,10 @@ interface SettingsPageProps {
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
     const { darkMode, setDarkMode, setUser, orgContext, activeOrganizationId, setActiveOrganization, clearActiveOrganization } = useUserContext();
+    const { addToast } = useToast();
     const [orgName, setOrgName] = React.useState('');
     const [isRenaming, setIsRenaming] = React.useState(false);
+    const [confirmingDelete, setConfirmingDelete] = React.useState(false);
 
     // /chat is gated on the organization being entitled, so closing settings is
     // only meaningful once it is.
@@ -48,30 +52,21 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 // Re-read the context so the new name is reflected everywhere.
                 await setActiveOrganization(activeOrganizationId);
             } else {
-                alert('Could not rename the organization. Please try again.');
+                addToast('Could not rename the organization. Please try again.', 'error');
             }
         } catch (e) {
             console.error('Error renaming organization', e);
-            alert('Could not rename the organization. Please try again.');
+            addToast('Could not rename the organization. Please try again.', 'error');
         } finally {
             setIsRenaming(false);
         }
     };
 
     const handleDeleteAccount = async () => {
-        const confirmed = window.confirm(
-            "⚠️ WARNING: Deleting your account will permanently remove:\n\n" +
-            "- Your payment information 💳\n" +
-            "- Your chat history 💬\n" +
-            "- Your uploaded files 📂\n" +
-            "- Your account credentials 👤\n\n" +
-            "This action is irreversible! Are you sure you want to proceed?"
-        );
-
-        if (!confirmed) return;
+        setConfirmingDelete(false);
 
         if (!user) {
-            alert("No user found.");
+            addToast('No user found.', 'error');
             return;
         }
 
@@ -79,7 +74,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
             const idToken = await user.getIdToken();
             if (!idToken) {
                 console.error('User token not available');
-                alert("Authentication failed. Please try logging in again.");
+                addToast('Authentication failed. Please try logging in again.', 'error');
                 return;
             }
 
@@ -94,7 +89,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
             });
 
             if (response.ok) {
-                alert("✅ Your account has been successfully deleted.");
+                addToast('Your account has been deleted.', 'success');
                 // The active organization is persisted, so without clearing it
                 // a fresh signup would resolve back to the deleted account's
                 // organization.
@@ -104,11 +99,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
             } else {
                 const errorData = await response.json();
                 console.error("Delete error:", errorData);
-                alert(`❌ Failed to delete account: ${errorData.error || "Unknown error"}`);
+                addToast(`Failed to delete account: ${errorData.error || 'Unknown error'}`, 'error');
             }
         } catch (error) {
             console.error("Error deleting account:", error);
-            alert("⚠️ A network error occurred. Please try again later.");
+            addToast('A network error occurred. Please try again later.', 'error');
         }
     };
 
@@ -248,12 +243,22 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                             <li>Uploaded files</li>
                             <li>Account credentials</li>
                         </ul>
-                        <Button variant="destructive" onClick={handleDeleteAccount} className="w-fit">
+                        <Button variant="destructive" onClick={() => setConfirmingDelete(true)} className="w-fit">
                             Delete My Account
                         </Button>
                     </div>
                 </div>
             </div>
+
+            <ConfirmDialog
+                open={confirmingDelete}
+                title="Delete your account?"
+                description="This permanently removes your payment details, chat history, uploaded documents and account credentials. It cannot be undone."
+                confirmLabel="Delete my account"
+                destructive
+                onConfirm={handleDeleteAccount}
+                onCancel={() => setConfirmingDelete(false)}
+            />
         </div>
     );
 };

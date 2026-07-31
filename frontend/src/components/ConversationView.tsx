@@ -242,9 +242,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
 
             {fileError && <div className="error-message">{fileError}</div>}
             {selectedFile && (
-                // FileViewerComponent renders its own .file-viewer-modal /
-                // .file-viewer-content shell, so wrapping it in a second copy
-                // nested one fixed-position overlay inside another.
+                // FileViewerComponent renders its own Dialog, overlay included,
+                // so it must not be wrapped in another overlay.
                 <FileViewerComponent
                     file={selectedFile}
                     fragment={selectedFragment}

@@ -4,6 +4,7 @@ import { History } from './types';
 import './HistoryView.css';
 import { useUserContext } from '../UserContext';
 import { Button } from '@/components/ui/button';
+import ConfirmDialog from './ConfirmDialog';
 
 interface HistoryViewProps {
     histories: History[];
@@ -19,6 +20,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({
     onDeleteHistory,
 }) => {
     const [selectedHistoryId, setSelectedHistoryId] = React.useState<number | null>(null);
+    const [pendingDelete, setPendingDelete] = React.useState<History | null>(null);
     const { darkMode } = useUserContext(); // Access the darkMode state
 
     const onSelectHistory = (history: History) => {
@@ -61,10 +63,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                             className="delete-button shrink-0"
                             onClick={(e) => {
                                 e.stopPropagation();
-                                const isConfirmed = window.confirm('Are you sure you want to delete this history?');
-                                if (isConfirmed) {
-                                    onDeleteHistory(history);
-                                }
+                                setPendingDelete(history);
                             }}
                         >
                             <X className="size-4" />
@@ -73,7 +72,18 @@ const HistoryView: React.FC<HistoryViewProps> = ({
                 ))}
             </div>
 
-            {/* Save and Clear buttons removed */}
+            <ConfirmDialog
+                open={pendingDelete !== null}
+                title="Delete this conversation?"
+                description="The conversation and its answers will be removed. This cannot be undone."
+                confirmLabel="Delete"
+                destructive
+                onConfirm={() => {
+                    if (pendingDelete) onDeleteHistory(pendingDelete);
+                    setPendingDelete(null);
+                }}
+                onCancel={() => setPendingDelete(null)}
+            />
         </div>
 
     );

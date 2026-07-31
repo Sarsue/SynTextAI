@@ -18,6 +18,7 @@ import {
     ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import ConfirmDialog from './ConfirmDialog';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -61,6 +62,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
     } = useUserContext();
 interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
     const [fileStatus, setFileStatus] = useState<{[key: number]: FileStatusEntry}>({});
+    const [pendingDelete, setPendingDelete] = useState<UploadedFile | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
     const [workspaces, setWorkspaces] = useState<Array<{id: number; name: string}>>([]);
@@ -186,15 +188,19 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
 
     const handleDeleteClick = (file: UploadedFile, e: React.MouseEvent) => {
         e.stopPropagation();
-        const isConfirmed = window.confirm(`Are you sure you want to delete ${file.file_name}?`);
-        if (isConfirmed) {
-            setFileStatus(prev => ({
-                ...prev,
-                [file.id]: { isDeleting: true }
-            }));
-            
-            deleteFileFromContext(file.id);
-        }
+        setPendingDelete(file);
+    };
+
+    const confirmDelete = () => {
+        const file = pendingDelete;
+        setPendingDelete(null);
+        if (!file) return;
+        setFileStatus(prev => ({
+            ...prev,
+            [file.id]: { isDeleting: true }
+        }));
+
+        deleteFileFromContext(file.id);
     };
 
     const handleNextPage = () => {
@@ -398,7 +404,15 @@ interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
                 </Select>
             </div>
 
-
+            <ConfirmDialog
+                open={pendingDelete !== null}
+                title={pendingDelete ? `Delete ${pendingDelete.file_name}?` : 'Delete this document?'}
+                description="The document and everything extracted from it will be removed, and answers will no longer cite it. This cannot be undone."
+                confirmLabel="Delete"
+                destructive
+                onConfirm={confirmDelete}
+                onCancel={() => setPendingDelete(null)}
+            />
         </div>
     );
 };

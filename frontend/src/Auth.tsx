@@ -13,6 +13,7 @@ import {
   User
 } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from './contexts/ToastContext';
 import { auth } from './firebase';
 import { useUserContext } from './UserContext';
 import { useAnalytics } from './hooks/useAnalytics';
@@ -40,6 +41,7 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const navigate = useNavigate();
   const { user, subscriptionStatus, authLoading } = useUserContext();
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const { addToast } = useToast();
   // Sign up and sign in are the same Google call underneath. The distinction is
   // about intent and about having somewhere to explain what is going to happen,
   // not about enforcement: whether an account is new is decided by Firebase, and
@@ -127,11 +129,11 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
         code: err.code
       });
       
-      alert(errorMessage);
+      addToast(errorMessage, 'error');
     } finally {
       setIsSigningIn(false);
     }
-  }, [user, isSigningIn, navigate, safeCapture]);
+  }, [user, isSigningIn, navigate, safeCapture, addToast]);
 
   const logOut = useCallback(async () => {
     // Prevent multiple logout attempts
