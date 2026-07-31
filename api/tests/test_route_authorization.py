@@ -250,3 +250,75 @@ async def test_context_reports_capabilities_not_role_guesses(store, tenant, clie
     body = res.json()
     assert body["can_manage_billing"] is True
     assert "manage_billing" in body["capabilities"]
+
+
+async def test_owner_can_change_role_and_access_in_one_request(store, tenant, client):
+    """One decision, one call.
+
+    Sending them separately leaves a moment where role and access disagree,
+    and makes the UI do two round trips for what the owner sees as one change.
+    """
+    ws1 = await tenant.workspace("Finance")
+    await tenant.workspace("Dentist")
+    member = await tenant.member(scope="workspace", workspaces=[ws1])
+
+    res = await client.as_(tenant.owner).patch(
+        f"/api/v1/organizations/{tenant.org}/members/{member}/access",
+        json={"scope": "organization", "workspace_ids": [], "role": "admin"},
+    )
+    assert res.status_code == 200, res.text
+    assert await store.org_repo.get_role(tenant.org, member) == "admin"
+
+
+async def test_role_alone_can_be_changed(store, tenant, client):
+    ws = await tenant.workspace("Finance")
+    member = await tenant.member(scope="workspace", workspaces=[ws])
+
+    res = await client.as_(tenant.owner).patch(
+        f"/api/v1/organizations/{tenant.org}/members/{member}/access",
+        json={"role": "admin"},
+    )
+    assert res.status_code == 200, res.text
+    assert await store.org_repo.get_role(tenant.org, member) == "admin"
+    # Promotion carries reach: an admin administers the whole tenant.
+    assert await store.workspace_repo.accessible_workspace_ids(
+        member, organization_id=tenant.org
+    ) == [ws]
+
+
+async def test_nobody_can_change_their_own_role(store, tenant, client):
+    """Otherwise an admin promotes themselves by degrees."""
+    ws = await tenant.workspace("Finance")
+    admin = await tenant.member(scope="organization")
+    await store.org_repo.set_member_role(tenant.org, admin, "admin")
+
+    res = await client.as_(admin).patch(
+        f"/api/v1/organizations/{tenant.org}/members/{admin}/access",
+        json={"role": "admin"},
+    )
+    assert res.status_code == 400
+
+
+async def test_ownership_cannot_be_granted_through_this_path(store, tenant, client):
+    ws = await tenant.workspace("Finance")
+    member = await tenant.member(scope="workspace", workspaces=[ws])
+
+    res = await client.as_(tenant.owner).patch(
+        f"/api/v1/organizations/{tenant.org}/members/{member}/access",
+        json={"role": "owner"},
+    )
+    assert res.status_code == 400
+    assert await store.org_repo.get_role(tenant.org, member) == "member"
+
+
+async def test_an_owner_s_role_cannot_be_changed(store, tenant, client):
+    """Including by an admin, which would otherwise strip the billing owner."""
+    admin = await tenant.member(scope="organization")
+    await store.org_repo.set_member_role(tenant.org, admin, "admin")
+
+    res = await client.as_(admin).patch(
+        f"/api/v1/organizations/{tenant.org}/members/{tenant.owner}/access",
+        json={"role": "member"},
+    )
+    assert res.status_code == 400
+    assert await store.org_repo.get_role(tenant.org, tenant.owner) == "owner"

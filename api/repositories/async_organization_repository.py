@@ -351,6 +351,49 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )
                 return False
 
+    async def set_member_role(self, organization_id: int, user_id: int, role: str) -> bool:
+        """Change somebody's role within an organization.
+
+        Only 'member' and 'admin' are settable. Ownership is not handed over
+        through this path: transferring it is a different, rarer act that
+        should be deliberate, and allowing it here would let an admin quietly
+        promote themselves.
+
+        Refuses to change an owner's role at all, which also means the last
+        owner cannot demote themselves and leave a tenant nobody can bill for.
+        """
+        if role not in ("member", "admin"):
+            logger.error(f"Refusing to set unsupported role {role!r}")
+            return False
+
+        async with self.get_async_session() as session:
+            try:
+                member = (await session.execute(
+                    select(OrganizationMember).where(
+                        OrganizationMember.organization_id == organization_id,
+                        OrganizationMember.user_id == user_id,
+                    )
+                )).scalar_one_or_none()
+                if not member:
+                    return False
+                if member.role == "owner":
+                    logger.warning(
+                        f"Refusing to change the role of owner {user_id} in org {organization_id}"
+                    )
+                    return False
+
+                member.role = role
+                await session.commit()
+                logger.info(f"User {user_id} is now {role} in org {organization_id}")
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(
+                    f"Error setting role for user {user_id} in org {organization_id}: {e}",
+                    exc_info=True,
+                )
+                return False
+
     async def count_members(self, organization_id: int) -> int:
         """Seats consumed by this organization."""
         async with self.get_async_session() as session:

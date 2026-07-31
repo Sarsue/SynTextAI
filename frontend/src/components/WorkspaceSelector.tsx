@@ -466,8 +466,9 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     /** Move somebody between "every workspace" and a chosen set. */
     const updateMemberAccess = async (
         memberUserId: number,
-        scope: 'organization' | 'workspace',
+        scope: 'organization' | 'workspace' | null,
         workspaceIds: number[],
+        role?: 'member' | 'admin',
     ) => {
         const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
         if (!user || !orgId) return;
@@ -479,7 +480,14 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-                    body: JSON.stringify({ scope, workspace_ids: workspaceIds }),
+                    // Role and access travel together: they are one decision to
+                    // the person making it, and sending them separately leaves a
+                    // moment where the two disagree.
+                    body: JSON.stringify({
+                        scope,
+                        workspace_ids: workspaceIds,
+                        ...(role ? { role } : {}),
+                    }),
                 },
             );
             if (res.ok) {
@@ -845,7 +853,33 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                                             <span style={{ fontSize: 14 }}>{m.email}</span>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                <span style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{m.role}</span>
+                                                {m.role === 'owner' ? (
+                                                    <span style={{ fontSize: 12, color: '#888' }}>Owner</span>
+                                                ) : (
+                                                    /* What they may do, next to what they may
+                                                       see, because an owner deciding one is
+                                                       usually deciding both. */
+                                                    <Select
+                                                        value={m.role}
+                                                        disabled={isSaving}
+                                                        onValueChange={(v) =>
+                                                            updateMemberAccess(
+                                                                m.user_id,
+                                                                null,
+                                                                [],
+                                                                v as 'member' | 'admin',
+                                                            )
+                                                        }
+                                                    >
+                                                        <SelectTrigger className="h-7 w-[8.5rem] text-xs">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="member">Can read only</SelectItem>
+                                                            <SelectItem value="admin">Can manage</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )}
                                                 {m.role !== 'owner' && (
                                                     <Button
                                                         variant="ghost"
@@ -919,7 +953,9 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                             </div>
                                         ) : (
                                             <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
-                                                Sees every workspace, as {m.role}.
+                                                {m.role === 'owner'
+                                                    ? 'Sees every workspace and manages billing.'
+                                                    : 'Sees every workspace, and can upload, edit and invite.'}
                                             </div>
                                         )}
                                     </div>

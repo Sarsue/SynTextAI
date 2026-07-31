@@ -294,9 +294,17 @@ async def invite_to_organization(
 
 
 class MemberAccessRequest(BaseModel):
+    """What somebody may see, and what they may do.
+
+    Both in one request because they are one decision to the person making it,
+    and because changing them separately leaves a moment where the two
+    disagree. Either may be omitted to leave it as it is.
+    """
     # 'organization' for every workspace, 'workspace' for a chosen set.
-    scope: str
+    scope: Optional[str] = None
     workspace_ids: List[int] = []
+    # 'member' or 'admin'. Ownership is not transferred through this path.
+    role: Optional[str] = None
 
 
 @organizations_router.patch("/{organization_id}/members/{member_user_id}/access")
@@ -321,28 +329,54 @@ async def set_member_access(
         store, user_id, organization_id, Capability.CHANGE_MEMBER_ACCESS
     )
 
-    if body.scope not in ("organization", "workspace"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown access scope.")
+    if body.role is not None:
+        if body.role not in ("member", "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A member can be a member or an admin. Ownership is transferred separately.",
+            )
+        # Promoting yourself is how an admin would become an owner by degrees.
+        if member_user_id == user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot change your own role.",
+            )
+        if not await store.org_repo.set_member_role(organization_id, member_user_id, body.role):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not change this member's role. An owner's role cannot be changed here.",
+            )
 
-    if body.scope == "workspace" and not body.workspace_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Choose at least one workspace, or give them access to every workspace.",
-        )
+    if body.scope is not None:
+        if body.scope not in ("organization", "workspace"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown access scope.")
 
-    ok = await store.org_repo.set_member_access(
-        organization_id, member_user_id, body.scope, body.workspace_ids
-    )
-    if not ok:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not change access for this member.",
+        if body.scope == "workspace" and not body.workspace_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Choose at least one workspace, or give them access to every workspace.",
+            )
+
+        ok = await store.org_repo.set_member_access(
+            organization_id, member_user_id, body.scope, body.workspace_ids
         )
+        # An admin reaches every workspace by role, so set_member_access
+        # declines to narrow them. That is not a failure of this request.
+        if not ok and body.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not change access for this member.",
+            )
 
     # Seats are unchanged: they are still one member of the organization. No
     # Stripe sync here on purpose, so moving somebody between workspaces never
     # produces an invoice.
-    return {"message": "Access updated", "scope": body.scope, "workspace_ids": body.workspace_ids}
+    return {
+        "message": "Updated",
+        "scope": body.scope,
+        "workspace_ids": body.workspace_ids,
+        "role": body.role,
+    }
 
 
 @organizations_router.delete("/{organization_id}/members/{member_user_id}")
