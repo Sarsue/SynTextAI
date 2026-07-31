@@ -70,7 +70,7 @@ interface WorkspaceSelectorProps {
 }
 
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
-    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId, orgContext } = useUserContext();
+    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId, orgContext, isEntitled } = useUserContext();
     const { addToast } = useToast();
 
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -105,11 +105,16 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // Backend entitlement rules:
     // - premium: active | trialing
     // - free: none (or missing)
+    // isEntitled is resolved against the active organization by the backend.
+    // Deriving "free" from this user's own subscription status marked every
+    // invited member as free — they have no subscription of their own — and
+    // showed them upgrade prompts for a plan their company already pays for.
+    // Third component to make this mistake, so it now reads the shared answer.
     const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
     // Keyed to this user's OWN subscription on purpose. Creating a workspace
     // makes you its owner and therefore the account billed for it, so inherited
     // entitlement from someone else's workspace must not unlock it.
-    const isFreeUser = normalizedStatus === 'none';
+    const isFreeUser = !isEntitled && normalizedStatus === 'none';
     const isOwner = currentWorkspace?.role === 'owner';
 
     // The free workspace limit applies to workspaces you *own*. The backend's

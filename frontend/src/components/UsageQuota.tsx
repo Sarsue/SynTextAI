@@ -18,7 +18,7 @@ interface QuotaData {
 }
 
 const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
-    const { user, subscriptionStatus, orgContext } = useUserContext();
+    const { user, subscriptionStatus, isEntitled } = useUserContext();
     const [quotaData, setQuotaData] = useState<QuotaData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showDetails, setShowDetails] = useState(false);
@@ -35,8 +35,8 @@ const UsageQuota: React.FC<UsageQuotaProps> = ({ darkMode = false }) => {
     // 'none' and they were shown a free-plan banner and a 0/5 document counter
     // inside a company that pays — while nothing was in fact limiting them.
     // Entitlement is a property of the tenant; everyone in it inherits it.
-    const normalizedStatus = (orgContext?.subscription_status || subscriptionStatus || 'none').toLowerCase();
-    const isPremium = (orgContext?.entitled ?? false) || normalizedStatus === 'active' || normalizedStatus === 'trialing';
+    const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
+    const isPremium = isEntitled || normalizedStatus === 'active' || normalizedStatus === 'trialing';
     const isFreeUser = !isPremium && normalizedStatus === 'none';
     const isRestricted = !isPremium && !isFreeUser;
 
