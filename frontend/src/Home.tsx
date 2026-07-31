@@ -138,8 +138,8 @@ const Home: React.FC = () => {
                         Sign in
                     </Link>
                     <Button asChild className="home-btn-primary">
-                        <Link to="/login?mode=signup" onClick={() => posthog.capture('homepage_get_started_click', { location: 'header' })}>
-                            Get started
+                        <Link to="/signup" onClick={() => posthog.capture('homepage_get_started_click', { location: 'header' })}>
+                            Sign up
                         </Link>
                     </Button>
                 </div>
@@ -157,7 +157,7 @@ const Home: React.FC = () => {
                 </p>
                 <div className="home-actions">
                     <Button asChild className="home-btn-primary home-btn-lg">
-                        <Link to="/login?mode=signup" onClick={() => posthog.capture('homepage_get_started_click', { location: 'hero' })}>
+                        <Link to="/signup" onClick={() => posthog.capture('homepage_get_started_click', { location: 'hero' })}>
                             Get started
                         </Link>
                     </Button>
@@ -276,7 +276,7 @@ const Home: React.FC = () => {
                             <li>Email support</li>
                         </ul>
                         <Button asChild variant="outline" className="home-btn-outline">
-                            <Link to="/login?mode=signup" onClick={() => posthog.capture('homepage_pricing_click', { plan: 'starter' })}>
+                            <Link to="/signup" onClick={() => posthog.capture('homepage_pricing_click', { plan: 'starter' })}>
                                 Get started
                             </Link>
                         </Button>
@@ -294,7 +294,7 @@ const Home: React.FC = () => {
                             <li>Onboarding call included</li>
                         </ul>
                         <Button asChild className="home-btn-primary">
-                            <Link to="/login?mode=signup" onClick={() => posthog.capture('homepage_pricing_click', { plan: 'business' })}>
+                            <Link to="/signup" onClick={() => posthog.capture('homepage_pricing_click', { plan: 'business' })}>
                                 Get started
                             </Link>
                         </Button>
@@ -343,7 +343,7 @@ const Home: React.FC = () => {
             <section className="home-cta">
                 <h2 className="home-cta-heading">Stop answering the same questions twice.</h2>
                 <Button asChild className="home-btn-primary home-btn-lg">
-                    <Link to="/login?mode=signup" onClick={() => posthog.capture('homepage_get_started_click', { location: 'bottom' })}>
+                    <Link to="/signup" onClick={() => posthog.capture('homepage_get_started_click', { location: 'bottom' })}>
                         Get started
                     </Link>
                 </Button>

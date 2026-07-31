@@ -5,6 +5,7 @@ import { loadStripe } from '@stripe/stripe-js';
 import { useUserContext } from './UserContext';
 import Home from './Home';
 import Auth, { AuthRef } from './Auth';
+import SignUp from './SignUp';
 import Welcome from './Welcome';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
@@ -29,6 +30,12 @@ const App: React.FC = () => {
                         <Routes>
                         <Route path="/" element={<Home />} />
                         <Route path="/login" element={<Auth ref={authRef} />} />
+                        {/* Its own route, not a mode on the sign-in page.
+                            Signing in enters a company you belong to; signing
+                            up creates one you own. Sharing a screen meant an
+                            already-signed-in person saw only a sign out button
+                            and could not reach sign up at all. */}
+                        <Route path="/signup" element={<SignUp />} />
                         {/* Which tenant am I in? Auto-resolves and skips itself
                             when the user belongs to exactly one organization. */}
                         <Route

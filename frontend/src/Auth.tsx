@@ -243,7 +243,7 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
             ) : (
               <>
                 Want your own company account?{' '}
-                <button type="button" className="auth-link" onClick={() => setMode('signup')}>
+                <button type="button" className="auth-link" onClick={() => navigate('/signup')}>
                   Sign up
                 </button>
               </>
