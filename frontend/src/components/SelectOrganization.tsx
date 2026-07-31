@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getAuth, signOut } from 'firebase/auth';
 import { Building2, Loader2 } from 'lucide-react';
 import { useUserContext } from '../UserContext';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,23 @@ const SelectOrganization: React.FC = () => {
     const [orgs, setOrgs] = useState<OrganizationSummary[] | null>(null);
     const [error, setError] = useState<string | null>(null);
 
+    // Signing out is the only honest exit from here.
+    //
+    // Deleting an account left a valid Firebase session pointing at a user row
+    // that no longer exists, so this screen failed to load anything and offered
+    // "Back to sign in" — which, still signed in, redirected straight back here.
+    // A dead end you could not leave without clearing site data.
+    const leave = useCallback(async (message?: string) => {
+        try {
+            await signOut(getAuth());
+        } catch {
+            // Already gone, or offline. Leaving is still the right outcome.
+        }
+        if (message) sessionStorage.setItem('signed_out_reason', message);
+        // replace, so Back does not return to a screen that cannot load.
+        navigate('/', { replace: true });
+    }, [navigate]);
+
     useEffect(() => {
         if (!user) return;
         let cancelled = false;
@@ -50,20 +68,26 @@ const SelectOrganization: React.FC = () => {
                     return;
                 }
                 if (items.length === 0) {
-                    // Signing up either starts a company or joins one, so having
-                    // neither means something went wrong rather than a state the
-                    // product produces.
-                    setError('No organization found for your account. Please contact support.');
+                    // A real state now that signing in never creates anything:
+                    // somebody signed in who has not signed up and holds no
+                    // invitation. Send them out to the front page, where the
+                    // choice between signing up and asking for a demo lives.
+                    await leave('Sign up to start an organization, or ask the person who invited you to send the link again.');
                     return;
                 }
                 setOrgs(items);
             } catch (e) {
-                if (!cancelled) setError(e instanceof Error ? e.message : 'Something went wrong');
+                if (cancelled) return;
+                // Most often a deleted account: the session is still valid but
+                // the user behind it is gone. Nothing here can recover, so end
+                // the session rather than showing a button that loops.
+                console.error('Could not load organizations:', e);
+                await leave('Your session has ended. Sign in again to continue.');
             }
         })();
 
         return () => { cancelled = true; };
-    }, [user, navigate, setActiveOrganization]);
+    }, [user, navigate, setActiveOrganization, leave]);
 
     const choose = async (org: OrganizationSummary) => {
         await setActiveOrganization(org.organization_id);
@@ -74,8 +98,8 @@ const SelectOrganization: React.FC = () => {
         return (
             <div className={`select-org ${darkMode ? 'dark-mode' : ''}`} style={styles.wrap}>
                 <p style={styles.error}>{error}</p>
-                <Button variant="outline" onClick={() => navigate('/login', { replace: true })}>
-                    Back to sign in
+                <Button variant="outline" onClick={() => leave()}>
+                    Sign out
                 </Button>
             </div>
         );

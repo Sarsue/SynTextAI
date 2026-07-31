@@ -367,3 +367,77 @@ async def test_an_admin_can_rename_a_workspace_they_do_not_own(store, tenant, cl
         f"/api/v1/workspaces/{ws}", json={"name": "Renamed by admin"}
     )
     assert res.status_code == 200, res.text
+
+
+async def test_signing_in_never_creates_an_organization(store, tenant, client):
+    """Signing in enters what you belong to. It does not make you an owner.
+
+    An organization used to be created for anyone without a pending invite, so
+    signing in was enough to become an owner of something.
+    """
+    import uuid
+    from api.routes import users as users_route
+
+    email = f"signin-{uuid.uuid4().hex[:8]}@acme.co"
+
+    async def fake_token():
+        return {"email": email, "name": email, "uid": "gc-test"}
+
+    from api.app import app
+    app.dependency_overrides[users_route.get_firebase_user_info_from_token] = fake_token
+    try:
+        res = await client.as_(tenant.owner).post("/api/v1/users?intent=signin")
+        assert res.status_code in (200, 201), res.text
+        assert res.json().get("organization_id") is None
+
+        uid = await store.user_repo.get_user_id_from_email(email)
+        assert await store.org_repo.get_memberships(uid) == []
+    finally:
+        app.dependency_overrides.pop(users_route.get_firebase_user_info_from_token, None)
+        uid = await store.user_repo.get_user_id_from_email(email)
+        if uid:
+            await store.user_repo.delete_user_account(uid)
+
+
+async def test_an_existing_member_can_sign_up_and_own_a_company(store, tenant, client):
+    """The case that had no path at all.
+
+    Somebody invited into a company could never start one of their own: the
+    endpoint returned early on 'user already exists', so every way in led back
+    to the organization that had invited them.
+    """
+    from api.routes import users as users_route
+    from api.app import app
+
+    member = await tenant.member(scope="organization")
+
+    # The real address on the row, not a guess: signing up is keyed to the
+    # email, so a mismatch silently creates a second account instead of
+    # exercising the case under test.
+    from sqlalchemy import select
+    from api.models.orm_models import User
+    async with store.user_repo.get_async_session() as session:
+        email = (await session.execute(
+            select(User.email).where(User.id == member)
+        )).scalar_one()
+
+    async def fake_token():
+        return {"email": email, "name": email, "uid": f"gc-{member}"}
+
+    app.dependency_overrides[users_route.get_firebase_user_info_from_token] = fake_token
+    try:
+        res = await client.as_(member).post("/api/v1/users?intent=signup")
+        assert res.status_code == 200, res.text
+        own_org = res.json().get("organization_id")
+        assert own_org is not None
+
+        roles = {
+            m["organization_id"]: m["role"]
+            for m in await store.org_repo.get_memberships(member)
+        }
+        # Still staff where they were invited, owner of what they just started.
+        assert roles[tenant.org] == "member"
+        assert roles[own_org] == "owner"
+        await store.org_repo.delete_organization(own_org)
+    finally:
+        app.dependency_overrides.pop(users_route.get_firebase_user_info_from_token, None)

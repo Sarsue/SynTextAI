@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
@@ -58,11 +58,47 @@ async def get_firebase_user_info_from_token(authorization: str = Header(None)):
 
 
 # Route to create a new user
+async def _start_organization(store: RepositoryManager, user_id: int, email: str):
+    """Create an organization owned by this user, with a first workspace."""
+    org_label = (email.split("@")[0] or "My").strip()
+    organization_id = await store.org_repo.create_organization(
+        name=f"{org_label}'s Organization",
+        owner_user_id=user_id,
+    )
+    if not organization_id:
+        logger.error(f"Failed to create organization for user {user_id}")
+        return None
+    await store.workspace_repo.create_workspace(
+        user_id=user_id, name="My Workspace", organization_id=organization_id
+    )
+    logger.info(f"{email} started organization {organization_id} as owner")
+    return organization_id
+
+
 @users_router.post("", status_code=201) # This is the POST /api/v1/users endpoint
-async def create_user( # Function name remains 'create_user'
-    user_info: Dict = Depends(get_firebase_user_info_from_token), # Use the new dependency
+async def create_user(
+    intent: str = Query(
+        "signin",
+        description="'signup' to start an organization you own, 'signin' to enter ones you belong to",
+    ),
+    user_info: Dict = Depends(get_firebase_user_info_from_token),
     store: RepositoryManager = Depends(get_store)
 ):
+    """Register the caller, and act on what they came here to do.
+
+    Signing up and signing in are different intents and were indistinguishable
+    here: the endpoint keyed off whether a user row already existed, so anyone
+    who did returned early no matter which button they pressed. An invited
+    member could therefore never start a company of their own — every route in
+    led back to the organization that had invited them.
+
+    signup   Start an organization you own. Works whether or not you already
+             belong to somebody else's, which is the case this could not
+             express before. Idempotent: if you already own one, nothing
+             happens.
+    signin   Enter what you already belong to. Accepts any invite waiting for
+             this address, and never creates an organization.
+    """
     email = user_info.get('email')
     # Firebase tokens usually include 'name', but ensure a fallback or check if it's essential
     name = user_info.get('name') 
@@ -77,17 +113,35 @@ async def create_user( # Function name remains 'create_user'
         name = email 
 
     # Check if user already exists by email
+    wants_own_organization = (intent or "signin").lower() == "signup"
+
     existing_user_id = await store.user_repo.get_user_id_from_email(email)
     if existing_user_id:
-        logger.info(f"POST /users: User with email {email} already exists with ID {existing_user_id}. Returning 200 OK.")
-        # You might want to fetch and return the full existing user object
-        # For now, a simple confirmation is fine, or adapt to return what UserContext expects
-        # existing_user_obj = store.get_user_by_id(existing_user_id) # If you have such a method
-        # if existing_user_obj:
-        #     return existing_user_obj 
+        # Existing account. What happens next depends on why they are here.
+        joined = await store.workspace_repo.accept_pending_invites_for_email(
+            existing_user_id, email
+        )
+        if joined:
+            logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
+
+        organization_id = None
+        if wants_own_organization:
+            memberships = await store.org_repo.get_memberships(existing_user_id)
+            owned = next((m for m in memberships if m["role"] == "owner"), None)
+            if owned:
+                organization_id = owned["organization_id"]
+                logger.info(f"POST /users: {email} already owns organization {organization_id}")
+            else:
+                organization_id = await _start_organization(store, existing_user_id, email)
+
         return JSONResponse(
-            content={"message": "User already registered", "email": email, "user_id": existing_user_id}, 
-            status_code=200
+            content={
+                "message": "User already registered",
+                "email": email,
+                "user_id": existing_user_id,
+                "organization_id": organization_id,
+            },
+            status_code=200,
         )
 
     # If user does not exist, create them
@@ -112,27 +166,24 @@ async def create_user( # Function name remains 'create_user'
         # invited, not a step the join hinges on. Anyone else is starting their
         # own company and owns it.
         joined = await store.workspace_repo.accept_pending_invites_for_email(new_user_id, email)
-
         if joined:
             logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
-        else:
-            org_label = (email.split("@")[0] or "My").strip()
-            organization_id = await store.org_repo.create_organization(
-                name=f"{org_label}'s Organization",
-                owner_user_id=new_user_id,
-            )
-            if not organization_id:
-                logger.error(f"POST /users: Failed to create organization for user {new_user_id}")
-            else:
-                await store.workspace_repo.create_workspace(
-                    user_id=new_user_id, name="My Workspace", organization_id=organization_id
-                )
-                logger.info(
-                    f"POST /users: {email} started organization {organization_id} as owner"
-                )
+
+        # An organization is started only by somebody who came to start one.
+        # It used to be created for anyone without a pending invite, which made
+        # signing in enough to become an owner.
+        organization_id = None
+        if wants_own_organization:
+            organization_id = await _start_organization(store, new_user_id, email)
 
         return JSONResponse(
-            content={"message": "User registered", "email": email, "user_id": new_user_id},
+            content={
+                "message": "User registered",
+                "email": email,
+                "user_id": new_user_id,
+                "organization_id": organization_id,
+                "joined_organizations": joined,
+            },
             status_code=201,
         )
     except IntegrityError: 

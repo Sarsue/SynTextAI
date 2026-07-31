@@ -42,11 +42,12 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const { user, subscriptionStatus, authLoading } = useUserContext();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const { addToast } = useToast();
-  // Sign up and sign in are the same Google call underneath. The distinction is
-  // about intent and about having somewhere to explain what is going to happen,
-  // not about enforcement: whether an account is new is decided by Firebase, and
-  // whether an organization gets created is decided on the backend by looking
-  // for a pending invite. So these are honest labels, not gates.
+  // Sign up and sign in are the same Google call underneath, but they are not
+  // the same act. Signing up starts an organization you own; signing in enters
+  // ones you already belong to. The backend used to decide by looking for a
+  // pending invite, which meant an invited member could never start a company
+  // of their own — every way in led back to the one that invited them. The
+  // intent now travels with the request.
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const isLoggingOut = useRef(false);
   const { capture, reset: resetAnalytics } = useAnalytics();
@@ -88,9 +89,13 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
 
     setIsSigningIn(true);
     const provider = new GoogleAuthProvider();
-    
+
+    // Parked before the popup, because the auth listener that registers the
+    // account fires long after this component's state is gone.
+    sessionStorage.setItem('auth_intent', mode);
+
     try {
-      await safeCapture('auth_attempt', { method: 'google' });
+      await safeCapture('auth_attempt', { method: 'google', intent: mode });
       
       // Use popup for better mobile compatibility
       const result = await signInWithPopup(auth, provider);

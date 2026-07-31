@@ -62,12 +62,15 @@
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Send button positioning only -- background/border/padding come from
-   shadcn's Button itself, see InputArea.tsx. */
+/* Send button. Background, border and padding come from shadcn's Button
+   itself, see InputArea.tsx.
+
+   No absolute positioning. The button already sits in .input-controls, a flex
+   row with space-between, so positioning it absolutely as well lifted it out of
+   that flow and floated it over the textarea and the attach control beneath.
+   Flexbox puts it where the absolute rule was trying to. */
 .send-button {
-    position: absolute;
-    bottom: clamp(12px, 2vw, 16px);
-    right: clamp(12px, 2vw, 16px);
+    flex-shrink: 0;
 }
 
 /* Spinner */

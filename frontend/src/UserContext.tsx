@@ -98,7 +98,7 @@ interface UserContextType {
     fetchSubscriptionStatus: () => void;
     subscriptionData: SubscriptionData | null;
     setSubscriptionData: (data: SubscriptionData | null) => void;
-    registerUserInBackend: (user: FirebaseUser) => Promise<void>;
+    registerUserInBackend: (user: FirebaseUser, intent?: 'signin' | 'signup') => Promise<void>;
     socket: WebSocket | null;
     initializeWebSocket: () => Promise<void>;
     disconnectWebSocket: () => void;
@@ -459,9 +459,15 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [user, _callApiWithTokenInternal, activeOrganizationId, setActiveOrganization]);
 
-    const registerUserInBackend = useCallback(async (fbUser: FirebaseUser) => {
+    const registerUserInBackend = useCallback(async (
+        fbUser: FirebaseUser,
+        intent: 'signin' | 'signup' = 'signin',
+    ) => {
+        // The intent is the whole point of having two buttons. It used to be a
+        // label only, so the backend keyed off whether a user row existed and
+        // an invited member could never start a company of their own.
         const idToken = await fbUser.getIdToken();
-        const response = await fetch(`/api/v1/users`, {
+        const response = await fetch(`/api/v1/users?intent=${intent}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -491,7 +497,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
             setAuthLoading(true);
             if (fbUser) {
-                await registerUserInBackend(fbUser);
+                // The button that started this is long gone by the time
+                // Firebase reports back, so the intent is parked before the
+                // popup opens and read here. Defaults to signin, which never
+                // creates anything.
+                const intent = (sessionStorage.getItem('auth_intent') === 'signup')
+                    ? 'signup' : 'signin';
+                sessionStorage.removeItem('auth_intent');
+                await registerUserInBackend(fbUser, intent);
                 setUser(fbUser);
                 await fetchSubscriptionStatus();
                 await loadUserFiles(1, 10);
