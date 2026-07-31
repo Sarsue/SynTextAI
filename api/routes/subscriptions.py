@@ -52,6 +52,40 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
     logger.info(f"Authenticated user_id: {user_id}")
     return {"user_id": user_id, "user_info": user_info}
 
+
+def _period_end(stripe_subscription) -> Optional[datetime]:
+    """When the current billing period ends, as a datetime.
+
+    Stripe moved current_period_end off the subscription and onto the
+    subscription item in API version 2026-06-24. Reading it from the top level
+    raised AttributeError *after* the subscription had already been created and
+    charged, so the customer paid and the app answered 400: Stripe said active,
+    the database said none, and retrying created a second subscription.
+
+    Reads the item first, falls back to the subscription for older versions,
+    and returns None rather than raising — a missing renewal date is a display
+    detail, not a reason to fail a subscription that Stripe has accepted.
+    """
+    # Subscript access, not .get: a StripeObject routes attribute lookups
+    # through __getattr__, so .get raises AttributeError instead of behaving
+    # like a mapping. A dict is also accepted, which is what the webhook passes.
+    def _read(obj, key):
+        try:
+            return obj[key]
+        except Exception:
+            return None
+
+    items = _read(stripe_subscription, "items")
+    data = _read(items, "data") if items is not None else None
+    for item in data or []:
+        value = _read(item, "current_period_end")
+        if value:
+            return datetime.utcfromtimestamp(value)
+
+    value = _read(stripe_subscription, "current_period_end")
+    return datetime.utcfromtimestamp(value) if value else None
+
+
 async def _billing_organization_id(store: RepositoryManager, user_id: int) -> Optional[int]:
     """The organization this subscription belongs to.
 
@@ -303,7 +337,7 @@ async def create_subscription(
                 stripe_customer_id=stripe_customer_id,
                 stripe_subscription_id=created_subscription.id,
                 status=created_subscription.status,
-                current_period_end=datetime.utcfromtimestamp(created_subscription.current_period_end),
+                current_period_end=_period_end(created_subscription),
                 card_last4=payment_method.card.last4,
                 card_type=payment_method.card.brand,
                 exp_month=payment_method.card.exp_month,
@@ -324,7 +358,7 @@ async def create_subscription(
                 'card_exp_month': payment_method.card.exp_month,
                 'card_exp_year': payment_method.card.exp_year,
                 'trial_end': None,
-                'current_period_end': datetime.utcfromtimestamp(created_subscription.current_period_end).isoformat() if created_subscription.current_period_end else None,
+                'current_period_end': (lambda d: d.isoformat() if d else None)(_period_end(created_subscription)),
                 'has_active_payment_method': True,
             }
 
@@ -428,9 +462,13 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
         elif event_type == 'customer.subscription.updated':
             current_status = data_object['status']
             previous_status = event['data'].get('previous_attributes', {}).get('status') # Keep this for potential future use or logging
+            # Same relocation as above: on current API versions the period
+            # lives on the subscription item, not the subscription.
+            current_period_end_dt = _period_end(data_object)
             current_period_end = data_object.get('current_period_end')
-            current_period_end_dt = None
-            if isinstance(current_period_end, (int, float)):
+            if current_period_end_dt is not None:
+                pass
+            elif isinstance(current_period_end, (int, float)):
                 current_period_end_dt = datetime.utcfromtimestamp(current_period_end)
             elif isinstance(current_period_end, str):
                 # Defensive: if someone stored ISO strings, keep compatible.

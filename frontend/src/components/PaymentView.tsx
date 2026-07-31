@@ -120,7 +120,15 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             if (!response.ok) {
                 const errorResponse = await response.json();
                 console.error("Server error response:", errorResponse);
-                throw new Error(errorResponse?.error || 'Failed to complete subscription.');
+                // FastAPI returns {"detail": ...}, never {"error": ...}, so
+                // reading .error discarded every real message and replaced it
+                // with the generic one — including 'your card was declined'
+                // and the reason a subscription actually failed.
+                const detail = errorResponse?.detail ?? errorResponse?.error;
+                throw new Error(
+                    typeof detail === 'string' ? detail
+                        : detail?.message ?? 'Failed to complete subscription.'
+                );
             }
 
             const data = await response.json();
