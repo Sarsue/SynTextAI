@@ -254,8 +254,18 @@ class AsyncUserRepository(AsyncBaseRepository):
         exp_year=None,
         seats=None,
         plan_key=None,
+        stripe_subscription_id: Optional[str] = None,
     ) -> bool:
-        """Update a subscription by Stripe customer ID.
+        """Update one subscription, identified by subscription id where possible.
+
+        The customer is the wrong key on its own. A Stripe customer can carry
+        more than one subscription, which happens as soon as one person owns two
+        organizations, and this used scalar_one_or_none: the second row did not
+        pick the wrong one, it raised MultipleResultsFound and took the whole
+        webhook down with it. The subscription id identifies exactly one row.
+
+        The customer id is still accepted and still used as a fallback, because
+        rows written before subscriptions carried an id have nothing else.
 
         Args:
             stripe_customer_id: Stripe customer ID
@@ -265,16 +275,39 @@ class AsyncUserRepository(AsyncBaseRepository):
             card_type: Type of payment card
             exp_month: Card expiration month
             exp_year: Card expiration year
+            stripe_subscription_id: Stripe subscription ID, preferred key
 
         Returns:
             bool: True if successful, False otherwise
         """
         async with self.get_async_session() as session:
             try:
-                # Find subscription by stripe_customer_id
-                stmt = select(SubscriptionORM).where(SubscriptionORM.stripe_customer_id == stripe_customer_id)
-                result = await session.execute(stmt)
-                subscription = result.scalar_one_or_none()
+                subscription = None
+                if stripe_subscription_id:
+                    subscription = (await session.execute(
+                        select(SubscriptionORM).where(
+                            SubscriptionORM.stripe_subscription_id == stripe_subscription_id
+                        )
+                    )).scalars().first()
+
+                if subscription is None:
+                    # Fall back to the customer. first(), not
+                    # scalar_one_or_none(): if two rows really do share a
+                    # customer, updating the older one is wrong but recoverable,
+                    # while raising loses the event entirely and Stripe retries
+                    # it forever.
+                    rows = (await session.execute(
+                        select(SubscriptionORM)
+                        .where(SubscriptionORM.stripe_customer_id == stripe_customer_id)
+                        .order_by(SubscriptionORM.id.desc())
+                    )).scalars().all()
+                    if len(rows) > 1:
+                        logger.warning(
+                            "Stripe customer %s maps to %s subscription rows; updating the newest. "
+                            "A customer should belong to one organization.",
+                            stripe_customer_id, len(rows),
+                        )
+                    subscription = rows[0] if rows else None
 
                 if not subscription:
                     logger.error(f"No subscription found for Stripe customer ID: {stripe_customer_id}")

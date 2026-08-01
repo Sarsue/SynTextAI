@@ -54,6 +54,22 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
     return {"user_id": user_id, "user_info": user_info}
 
 
+def _read(obj, key, default=None):
+    """Read a field off a Stripe object, or a plain dict, without raising.
+
+    A StripeObject is not a dict and routes attribute lookups through
+    __getattr__, so `.get` raises AttributeError rather than returning a
+    default. Every place that forgot this failed silently or fatally: the seat
+    sync swallowed it and never billed anybody, and the webhook raised on the
+    very first field it touched. Subscript access works on both shapes, so this
+    is the only way these objects should be read.
+    """
+    try:
+        return obj[key]
+    except Exception:
+        return default
+
+
 def _period_end(stripe_subscription) -> Optional[datetime]:
     """When the current billing period ends, as a datetime.
 
@@ -67,15 +83,6 @@ def _period_end(stripe_subscription) -> Optional[datetime]:
     and returns None rather than raising — a missing renewal date is a display
     detail, not a reason to fail a subscription that Stripe has accepted.
     """
-    # Subscript access, not .get: a StripeObject routes attribute lookups
-    # through __getattr__, so .get raises AttributeError instead of behaving
-    # like a mapping. A dict is also accepted, which is what the webhook passes.
-    def _read(obj, key):
-        try:
-            return obj[key]
-        except Exception:
-            return None
-
     items = _read(stripe_subscription, "items")
     data = _read(items, "data") if items is not None else None
     for item in data or []:
@@ -355,22 +362,31 @@ async def create_subscription(
             logger.error(f"Request came without a valid payment method ID: {user_id}")
             raise HTTPException(status_code=400, detail="Payment method ID is missing")
 
-        # If stripe_customer_id is still None, check if the customer exists in Stripe
+        # The customer is the organization, not the person.
+        #
+        # This searched Stripe by email and took the first hit, so somebody who
+        # owns two companies billed both to one customer. Two subscriptions then
+        # shared a customer id, which is the only key the webhook had, and a
+        # person who owns one company while belonging to another is the model
+        # this product is built around. Matching on organization_id in metadata
+        # keeps one customer per tenant, and the email is still recorded so the
+        # Stripe dashboard reads the way you expect.
         if not stripe_customer_id:
-            # Look for an existing customer using the email
-            existing_customers = await stripe.Customer.list_async(email=user_info.get('email'))
-            if existing_customers.data:
-                stripe_customer_id = existing_customers.data[0].id
-                logger.info(f"Found existing Stripe customer: {stripe_customer_id}")
+            found = await stripe.Customer.search_async(
+                query=f"metadata['organization_id']:'{organization_id}'"
+            )
+            if found.data:
+                stripe_customer_id = found.data[0].id
+                logger.info(f"Reusing Stripe customer {stripe_customer_id} for org {organization_id}")
             else:
-                # Create a new Stripe customer if no existing customer is found
                 customer = await stripe.Customer.create_async(
-                    description=f"Customer for user_id {user_id}",
+                    description=f"Organization {organization_id}",
                     email=user_info.get('email'),
-                    name=user_info.get('name')
+                    name=user_info.get('name'),
+                    metadata={"organization_id": str(organization_id), "owner_user_id": str(user_id)},
                 )
                 stripe_customer_id = customer.id
-                logger.info(f"Created new Stripe customer: {stripe_customer_id}")
+                logger.info(f"Created Stripe customer {stripe_customer_id} for org {organization_id}")
 
         try:
             # Attach the payment method to the customer
@@ -530,24 +546,32 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
 
         elif event_type == 'customer.subscription.updated':
             current_status = data_object['status']
-            previous_status = event['data'].get('previous_attributes', {}).get('status') # Keep this for potential future use or logging
-            # Same relocation as above: on current API versions the period
-            # lives on the subscription item, not the subscription.
+            # _read, never .get. This handler used to call
+            # event['data'].get('previous_attributes', {}) and
+            # data_object.get('current_period_end'), both of which raise
+            # AttributeError on a StripeObject. The only handlers below catch
+            # signature and payload errors, so every subscription.updated event
+            # returned 500 and Stripe retried it forever. Nothing about a
+            # subscription going past_due or cancelled ever reached the
+            # database: the row stayed 'active' and the organization kept full
+            # access without paying. That is the leak, and it is the same
+            # mistake as the seat sync.
+            previous_status = _read(_read(event['data'], 'previous_attributes', {}) or {}, 'status')
             current_period_end_dt = _period_end(data_object)
-            current_period_end = data_object.get('current_period_end')
-            if current_period_end_dt is not None:
-                pass
-            elif isinstance(current_period_end, (int, float)):
-                current_period_end_dt = datetime.utcfromtimestamp(current_period_end)
-            elif isinstance(current_period_end, str):
-                # Defensive: if someone stored ISO strings, keep compatible.
-                try:
-                    current_period_end_dt = datetime.fromisoformat(current_period_end)
-                except Exception:
-                    current_period_end_dt = None
+            if previous_status and previous_status != current_status:
+                logger.info(
+                    "Subscription %s moved %s -> %s",
+                    _read(data_object, 'id'), previous_status, current_status,
+                )
 
+            # Keyed by the subscription, not the customer. One person owning two
+            # organizations gets one Stripe customer under the old lookup, and
+            # two rows sharing a customer id made scalar_one_or_none raise
+            # MultipleResultsFound: their webhooks broke entirely, and before
+            # that the wrong organization's row could be updated.
             await store.user_repo.update_subscription(
                 stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=_read(data_object, 'id'),
                 status=current_status,
                 current_period_end=current_period_end_dt
             )
@@ -559,12 +583,13 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
             # Business kept being measured against Starter's ten included
             # seats.
             try:
-                items = (data_object.get('items') or {}).get('data') or []
+                items = _read(_read(data_object, 'items', {}) or {}, 'data') or []
                 stripe_price_id = items[0]['price']['id'] if items else None
                 plan = plan_for_price_id(stripe_price_id)
                 if plan:
                     await store.user_repo.update_subscription(
                         stripe_customer_id=stripe_customer_id,
+                        stripe_subscription_id=_read(data_object, 'id'),
                         status=current_status,
                         current_period_end=current_period_end_dt,
                         seats=plan.included_seats,
@@ -573,7 +598,7 @@ async def webhook(request: Request, store: RepositoryManager = Depends(get_store
                 elif stripe_price_id:
                     logger.warning(
                         "Subscription %s uses price %s, which matches no configured plan",
-                        data_object.get('id'), stripe_price_id,
+                        _read(data_object, 'id'), stripe_price_id,
                     )
             except Exception as e:
                 # Never fail the webhook over this: Stripe retries on a non-2xx
