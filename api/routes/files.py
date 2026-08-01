@@ -204,13 +204,13 @@ async def save_file(
                         ),
                     )
 
-                # Enforce per-user document count and storage limits for free plans
-                # Pass the workspace so limits resolve against its owner's plan,
-                # not the uploader's. Staff in a paid workspace are covered.
+                # The workspace's organization must be subscribed. Passing the
+                # workspace is what makes the plan resolve against the company
+                # that pays rather than the person uploading, so staff are
+                # covered by their employer.
                 await assert_can_create_doc(
                     store,
                     user_id,
-                    new_doc_size_bytes=file_size,
                     workspace_id=actual_workspace_id,
                 )
 

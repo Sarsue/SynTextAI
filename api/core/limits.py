@@ -4,9 +4,23 @@ from fastapi import HTTPException, status
 
 from ..repositories.repository_manager import RepositoryManager
 
-FREE_DOC_LIMIT = 5
-FREE_STORAGE_LIMIT_BYTES = 500 * 1024 * 1024  # 500 MB
-FREE_WORKSPACE_LIMIT = 1
+# An organization has a subscription or it has nothing.
+#
+# There was a free tier here: five documents, 500 MB, one workspace. It belongs
+# to a product that no longer exists. Signing up takes a card, the trial was
+# dropped rather than built, and a demo is arranged by adding the person to an
+# organization that already pays. So nobody can arrive at a free allowance by
+# any route the product offers, and the code enforcing one could only fire
+# against a company whose payment had lapsed — telling somebody who had been
+# paying to "upgrade from free" and quietly permitting a sixth document to be
+# the thing that stopped them, rather than the lapse itself.
+#
+# One question now: is this organization subscribed. Yes means the plan's seats
+# apply and nothing else is capped. No means nothing at all.
+_NO_SUBSCRIPTION = {
+    "error_code": "SUBSCRIPTION_REQUIRED",
+    "message": "This organization does not have an active subscription.",
+}
 
 
 async def _get_subscription_status(store: RepositoryManager, user_id: int) -> str:
@@ -107,86 +121,44 @@ async def _organization_for_workspace(
     return await store.org_repo.get_organization_for_workspace(workspace_id)
 
 
-async def assert_can_create_doc(
-    store: RepositoryManager,
-    user_id: int,
-    new_doc_size_bytes: int,
-    workspace_id: Optional[int] = None,
+async def _assert_subscribed(
+    store: RepositoryManager, user_id: int, organization_id: Optional[int]
 ) -> None:
-    """Enforce free-plan limits for document creation.
-
-    Limits belong to the organization, so when uploading into a workspace the
-    governing plan is the workspace's organization, not the uploader's.
-    Without this, a staff member in a paid workspace would be measured against
-    their own non-existent free plan and blocked after five documents.
-
-    Raises HTTPException with 402 status code when limits are exceeded.
-    """
-    org_id = await _organization_for_workspace(store, workspace_id)
-
-    if org_id is not None:
-        status_str = await store.org_repo.get_subscription_status(org_id)
-    else:
-        status_str = await _get_subscription_status(store, user_id)
-    if _is_premium_plan(status_str):
-        # Premium/trial organizations are not restricted by these limits.
-        return
-
-    # Free plan. Count against the workspace when there is one, so two staff
-    # sharing a free workspace share its allowance rather than getting one each.
-    if workspace_id is not None:
-        doc_count = await store.file_repo.count_files_for_workspace(workspace_id)
-        total_bytes = await store.file_repo.total_storage_bytes_for_workspace(workspace_id)
-    else:
-        doc_count = await store.file_repo.count_files_for_user(user_id)
-        total_bytes = await store.file_repo.total_storage_bytes_for_user(user_id)
-
-    if doc_count >= FREE_DOC_LIMIT:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "error_code": "DOC_LIMIT_REACHED",
-                "message": "Free plan allows up to 5 documents. Delete a document or upgrade to add more.",
-            },
-        )
-
-    if total_bytes + max(new_doc_size_bytes, 0) > FREE_STORAGE_LIMIT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "error_code": "STORAGE_LIMIT_EXCEEDED",
-                "message": "Free plan includes up to 500 MB storage. Delete files or upgrade to continue.",
-            },
-        )
-
-
-async def assert_can_create_workspace(
-    store: RepositoryManager, user_id: int, organization_id: Optional[int] = None
-) -> None:
-    """Enforce free-plan limits for workspace creation.
+    """Raise 402 unless the governing organization is paying.
 
     The plan belongs to the organization, because the owner is the account that
-    signed up and pays. Measuring the caller instead meant an admin in a paying
-    organization was checked against their own non-existent free plan and
-    refused a second workspace the company had already paid for, and the count
-    only ever saw rows they had created themselves.
+    signed up and holds the card. Measuring the caller instead charged a staff
+    member for their own non-existent plan and refused them work their company
+    had already paid for.
     """
     if organization_id is not None:
         status_str = await store.org_repo.get_subscription_status(organization_id)
     else:
         status_str = await _get_subscription_status(store, user_id)
-    if _is_premium_plan(status_str):
-        return
 
-    if organization_id is not None:
-        count = await store.workspace_repo.count_workspaces_in_organization(organization_id)
-    else:
-        count = await store.workspace_repo.count_workspaces_for_user(user_id)
-    if count >= FREE_WORKSPACE_LIMIT:
+    if not _is_premium_plan(status_str):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "error_code": "WORKSPACE_LIMIT_REACHED",
-                "message": "Free plan allows 1 workspace. Delete an existing workspace or upgrade to create more.",
-            },
+            detail=_NO_SUBSCRIPTION,
         )
+
+
+async def assert_can_create_doc(
+    store: RepositoryManager,
+    user_id: int,
+    workspace_id: Optional[int] = None,
+) -> None:
+    """A document may be added to a workspace whose organization is subscribed.
+
+    The governing organization is the workspace's, not the uploader's, so a
+    staff member uploading into a company that pays is covered by that company.
+    """
+    org_id = await _organization_for_workspace(store, workspace_id)
+    await _assert_subscribed(store, user_id, org_id)
+
+
+async def assert_can_create_workspace(
+    store: RepositoryManager, user_id: int, organization_id: Optional[int] = None
+) -> None:
+    """A workspace may be created inside a subscribed organization."""
+    await _assert_subscribed(store, user_id, organization_id)

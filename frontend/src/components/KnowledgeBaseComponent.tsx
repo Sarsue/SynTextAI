@@ -3,7 +3,7 @@ import './KnowledgeBase.css';
 import { UploadedFile } from './types';
 import { KnownWebSocketMessage, FileStatusUpdatePayload, FileStatusUpdateMessage } from '../types/websocketTypes';
 import WorkspaceSelector from './WorkspaceSelector';
-import UsageQuota from './UsageQuota';
+import SubscriptionNotice from './SubscriptionNotice';
 import { useToast } from '../contexts/ToastContext';
 import {
     Library,
@@ -235,7 +235,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
     return (
         <div className={`knowledgebase-container ${darkMode ? 'dark-mode' : ''}`}>
             <WorkspaceSelector darkMode={darkMode} onWorkspaceChange={handleWorkspaceChange} />
-            <UsageQuota darkMode={darkMode} />
+            <SubscriptionNotice darkMode={darkMode} />
             <div className="knowledgebase-header">
                 <h3><Library className="size-4" /> Knowledge Base</h3>
             </div>

@@ -69,7 +69,14 @@ class WorkspaceResponse(BaseModel):
     id: int
     name: str
     user_id: int
-    role: Optional[str] = "owner"
+    # What you are here. Defaulting to "owner" made a field that failed to
+    # arrive the most privileged one; assume the least instead.
+    role: Optional[str] = "staff"
+    # Whether you may run this workspace: true for its owner and for an admin
+    # of the organization. Declared, because response_model silently drops
+    # anything it does not name — the route set this and Pydantic removed it on
+    # the way out, so the Team button disappeared for the owner of the company.
+    can_manage: bool = False
     created_at: str
     updated_at: str
 

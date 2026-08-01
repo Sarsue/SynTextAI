@@ -13,9 +13,24 @@ instantly queryable by the whole team, with answers grounded in and cited back t
 actual source documents. Think "ask a question, get an answer with a citation," not a
 generic chatbot.
 
-**Target market:** SMBs, 10–50 employees, in document-heavy verticals — healthcare/dental,
+**Target market:** SMBs, 10–100 employees, in document-heavy verticals — healthcare/dental,
 accounting, legal, property management, trades & HVAC, insurance, and (added 2026-07-29)
 manufacturing. One person's business (Osas), pre-revenue/early-revenue, moving fast.
+
+**Positioning (restated 2026-08-01): AI for small and medium businesses, meeting
+them in the tools they already use.** Documents are where this starts, not where
+it stops. A 10–100 person company keeps what it knows in a handful of systems,
+and the ones that matter differ by vertical: a dental practice's practice
+management system, a firm's document management system, the shared drive
+everyone actually saves to. The direction is integrations into those systems for
+the domains we choose to serve, so the answer is grounded in what the business
+already has rather than in what somebody remembered to upload.
+
+Two consequences for design decisions. Ingestion should stay indifferent to where
+bytes came from, because a connector is another source of documents and not a
+second product. And the tenant boundary has to hold for real, because a connector
+imports a company's whole drive, and the blast radius of getting access wrong
+stops being one uploaded file.
 
 **Manufacturing/maintenance-technician pivot considered and shelved (2026-07-29):** a
 narrower reposition toward manufacturing plant maintenance technicians (50-500 employee
@@ -196,16 +211,25 @@ code, not assumed, last checked 2026-07-29:
 
 ## Known gaps (read before you design around these)
 
-**Security — came out of a full security pass, none of these are hypothetical:**
-- **CORS is wide open** (`api/app.py`) — `allow_origins=["*"]` with
-  `allow_credentials=True`. Needs to be locked to the actual frontend domain(s).
-- **No rate limiting anywhere** — `api/middleware/` is empty. Chat and file upload
-  trigger paid LLM/embedding calls with no per-user or per-IP throttle.
-- **13+ endpoints return raw exception text to the client** (`detail=str(e)`) instead
-  of a generic message with the real detail logged server-side. Follow the pattern in
-  `histories.py` / the fixed parts of `messages.py`.
-- **No security headers** (CSP, HSTS, X-Frame-Options) at either the app or nginx layer
-  (`deploy.sh`) — only debug headers are currently set in production nginx config.
+**Security — came out of a full security pass. The first four are now closed;
+verified 2026-08-01, listed because knowing they were once open is what stops
+them being reopened:**
+- ~~CORS wide open~~ **Closed.** `api/app.py` reads `CORS_ORIGINS`, falling back
+  to the real domains plus local dev ports. Never widen this back to `*` while
+  `allow_credentials=True`; that combination lets any site on the internet make
+  authenticated requests with a logged-in user's credentials.
+- ~~No rate limiting~~ **Closed.** `api/core/rate_limit.py` holds a shared
+  limiter; endpoints opt in, and the paid-API paths (chat, upload) are covered.
+- ~~Raw exception text returned to clients~~ **Closed.** No `detail=str(e)`
+  remains in `api/routes/`. Routes re-raise `HTTPException` before the broad
+  handler, so a 403 or 404 stays a refusal instead of being turned into a 500 that
+  reads as the app being broken.
+- ~~No security headers~~ **Closed.** CSP (Report-Only), HSTS, X-Frame-Options,
+  X-Content-Type-Options and Referrer-Policy are set in `api/app.py`. The CSP is
+  still Report-Only: check the browser console for violations, then flip the
+  header name. `frame-src` must keep `storage.googleapis.com` or every citation
+  breaks when it is enforced.
+- **Still open: no DB-level RLS.** See below.
 - **Dependency vulnerabilities triaged 2026-07-29** (`gh` CLI wasn't available, ran
   `npm audit`/`pip-audit` directly against the actual lockfiles instead — counts won't
   match GitHub's Dependabot tally exactly, different scope/tooling, but same
@@ -234,26 +258,34 @@ code, not assumed, last checked 2026-07-29:
     "Recent changes," it was never actually functioning. `diskcache` 5.6.3
     (`PYSEC-2026-2447`) isn't directly imported anywhere in this codebase, likely a
     transitive dependency of another package; no fix version available yet.
-- **No DB-level RLS** — every new route touching a resource ID from the URL/query needs
-  an explicit ownership check (`check_ownership` helper exists, reuse it) or a
-  `user_id`-scoped repository query. There's no safety net underneath you if you skip
-  this, a broken-access-control bug in the flashcard/quiz endpoints shipped this way
-  before it was caught and fixed.
+- **No DB-level RLS** — every new route touching a resource ID from the URL or query
+  needs an explicit check. There is no safety net underneath you if you skip it; a
+  broken-access-control bug in the flashcard/quiz endpoints shipped this way before
+  it was caught and fixed.
+
+  Since 2026-08-01 there are exactly two questions and two ways to ask them.
+  *May you see it* is `accessible_workspace_ids`. *May you do it* is
+  `assert_workspace_capability` / `assert_organization_capability` from
+  `api/core/permissions.py`. Do not answer either from `files.user_id`, from
+  `list_workspaces_for_user`, or from a role string compared inline. Every
+  authorization bug in this codebase so far has been one of those three.
 
 **Product:**
 - **DOCX ingestion closed 2026-07-29** — `DocxProcessor` implemented, mirrors
   `PDFProcessor`'s shape, wired into the factory. Extraction logic tested against a
   generated sample doc (headings, body, table); not yet tested through the real
   upload → GCS → worker → DB → chat-citation path end to end.
-- **`TextProcessor` is built and orphaned** — exists, never wired into the factory's
-  `processor_map` for `.txt`/`.md`. Confirm it actually works before wiring it in, it's
-  never been exercised through the real pipeline.
-- **EdTech generator functions are orphaned, not deleted** — `generate_mcq_from_key_concepts`
-  and related functions in `workflows/tasks.py` are unreachable (the routes that called
-  them were removed 2026-07-24) but the functions themselves weren't deleted. Harmless,
-  cheap cleanup whenever that file is touched.
+- ~~`TextProcessor` built and orphaned~~ **Closed.** Wired into
+  `factory.py`'s `processor_map` for `.txt` and `.md`.
+- ~~EdTech generator functions orphaned~~ **Closed.** Deleted.
 - **Whether Redis (in `requirements.txt`, imported in `files.py`) is meant to be doing
   more than it currently is, or is leftover from an earlier design** — unconfirmed.
+  Only `RedisError` is imported, so today it is doing nothing.
+- **Integrations are not started.** The positioning above commits to meeting
+  businesses in the tools they use, and nothing in the codebase reads from an
+  external system yet. When it does, it should arrive as another source feeding the
+  same ingestion path, not as a parallel pipeline, and a connector's imported
+  documents belong to a workspace like any other.
 
 ## Roadmap (prioritized, not a wishlist)
 
@@ -521,13 +553,18 @@ that in mind when weighing "fastest to ship" against "closer to what a
 compliance-sensitive customer will eventually ask for," especially given the security
 gaps above and the healthcare/legal verticals in the target market.
 
-## The tenant model (decided 2026-07-29, not yet built)
+## The tenant model (decided 2026-07-29, built 2026-07-31 → 2026-08-01)
 
-**The single biggest structural gap in the product.** There is no organization
-entity. `Workspace` is doing three unrelated jobs at once: billing entity
-(`workspaces.user_id` implies who pays), security boundary (membership grants
-access), and document container. `Subscription` attaches to a *user*, not a
-company. Every multi-user defect found on 2026-07-29 traces back to this.
+**Built.** Organizations exist, subscriptions are keyed to them, workspaces live
+inside them, storage mirrors them, and access is answered in one place. What
+follows is the model as designed; the differences between it and what shipped are
+called out in "As built" at the end of the section.
+
+It was the single biggest structural gap in the product. There was no
+organization entity, so `Workspace` did three unrelated jobs at once: billing
+entity (`workspaces.user_id` implied who pays), security boundary (membership
+granted access), and document container. `Subscription` attached to a *user*, not
+a company. Every multi-user defect found on 2026-07-29 traced back to that.
 
 Target model, tenant and objects, in the Entra sense:
 
@@ -565,9 +602,54 @@ Cases to handle that nothing covers today:
 - Removing someone from an org leaves their uploads with the org. A departing
   employee does not take the SOPs.
 
-**Do this migration soon.** With one test customer, backfilling one org per
-existing owner is trivial. Every added customer makes it heavier, and the data
-at risk is billing data.
+### As built (2026-08-01)
+
+Four things ended up different from the sketch above, each for a reason worth
+keeping.
+
+**The roles are `owner`, `admin`, `staff`.** Not `member`, which was a third word
+for the same idea and got introduced by accident before being removed. Owner pays
+and can do everything. Admin runs the company inside the product but cannot touch
+billing, because somebody has to be unable to cancel the subscription. Staff read
+and ask, and change nothing: uploading and deleting are the same permission as
+managing, since a knowledge base nobody may add to does not need a role of its
+own. A migration rewrote the existing `member` rows; the word is still accepted as
+a synonym so an old row resolves, and nothing writes it.
+
+**Permissions are a capability table, not role strings.** `api/core/permissions.py`
+holds one map from role to capabilities, consulted everywhere. Role comparisons
+used to be written inline at nineteen call sites, so adding a role meant finding
+all nineteen and missing one meant a silent grant or a silent denial. Adding a
+role is now a row; adding a capability is an enum member plus the roles that hold
+it. Neither requires touching a route.
+
+**Reach is a per-member property, not a second kind of invite.** An
+`organization_members.scope` of `organization` sees every workspace in the
+company; `workspace` sees only what has been assigned. So a person is invited to
+the company once and the owner turns their visibility up or down afterwards,
+rather than the invite deciding forever. `accessible_workspace_ids` is the single
+answer to "what may this person see", and documents, retrieval, conversations and
+the workspace picker all ask it. Most bugs in this area were some other function
+being asked that question, `list_workspaces_for_user` ("what do you own") seven
+separate times.
+
+**Storage mirrors the tenant.** Objects live at
+`workspaces/{workspace_id}/{file_id}-{filename}`. Deleting a workspace deletes a
+prefix, deleting a person touches no storage at all, and renaming a workspace is
+free because the path is keyed by id. The file id leads the name because the
+folder is shared: without it, two people uploading `invoice.pdf` into one
+workspace wrote the same object and the second silently replaced the first. A
+document may also carry only one name per workspace, refused at upload, because
+two files with one name make a citation ambiguous.
+
+Documents are private. `files.file_url` is a stable identity and is deliberately
+not fetchable; reads go through a 30-minute signed URL minted per request after
+the caller's access is checked. Before this, every uploaded document was
+world-readable to anyone holding the URL.
+
+**Still open:** per-document ACLs. Deliberately not built. Organizing sensitive
+material into its own workspace covers the cases seen so far, and per-document
+access is a fourth boundary to keep correct for a demand no customer has stated.
 
 ### Pricing (agreed 2026-07-29, site copy not yet updated)
 
@@ -612,6 +694,31 @@ a second way to be entitled that would have needed testing forever and could
 only be exercised in production. Everything is now verifiable end to end in
 develop, where Stripe test mode makes subscribing free.
 
+**There is no free tier, and as of 2026-08-01 there is no code for one.** An
+organization has a subscription or it has nothing. Subscribed means the plan's
+seats apply and nothing else is capped; unsubscribed means no app at all, and the
+only refusal is `SUBSCRIPTION_REQUIRED`.
+
+This had to be removed rather than left dormant. `api/core/limits.py` still
+enforced five documents, 500 MB and one workspace, and the UI still carried an
+upgrade banner, a usage meter and a create button that disabled itself. None of
+it could fire for a customer arriving through the product, because signup takes a
+card and an unsubscribed organization is bounced to billing before it reaches the
+app. What it could do was fire against a *paying* company whose status had not
+loaded, which is exactly how it was found: an owner looking at "Free plan: 1
+workspace. Upgrade for more!" on an active subscription. Dormant code that can
+only run when something else is already broken makes the broken thing harder to
+see.
+
+The one real state left is a lapse. `SubscriptionNotice` says the plan needs
+attention and points at settings; staff are never shown a payment form for
+somebody else's subscription.
+
+Deliberately still uncapped: storage per organization. Per-file is 100 MB and
+uploads are rate limited, so this is not urgent, but if a ceiling is ever wanted
+it belongs in `plans.py` as an attribute of a paid plan, not as a revived free
+tier.
+
 Granting an account access outside the normal flow is a database operation, not
 a product feature: insert a subscription row for the organization with status
 'active'. Deliberately not an endpoint, so it cannot be reached by a bug.
@@ -621,6 +728,55 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-01 (the free tier is gone, and two labels stopped lying):** Removed
+  `FREE_DOC_LIMIT`, `FREE_STORAGE_LIMIT_BYTES`, `FREE_WORKSPACE_LIMIT` and every
+  branch behind them, the upgrade banner and workspace-limit prompts,
+  `useLimitHandler` (already unreferenced), and `UsageQuota`, which now exists as
+  `SubscriptionNotice` and reports only a lapse. Reasoning in the pricing section
+  above.
+
+  **`list_accessible_workspaces` reported `role: "owner"` for admins**, because
+  every caller wanted "may you manage this" and the field was named for something
+  else. Two callers read the name literally and were wrong for it: the
+  last-workspace guard counted an admin as owning workspaces they do not own and
+  let them delete the organization's last one, and the free-plan count charged
+  them for the owner's workspaces. Now `role` is what you are and `can_manage` is
+  what you may do, and the guard asks whether the *organization* would be left
+  with none, which is the invariant it was always about.
+
+  `can_manage` then vanished on the way out, because `WorkspaceResponse` did not
+  declare it and `response_model` silently drops undeclared fields. The Team
+  button disappeared for the owner of the company. Worth remembering: a field
+  added to a route's dict is not a field the browser receives.
+
+  **The app looped between two organizations.** `fetchSubscriptionStatus`
+  refreshed the org context using the `activeOrganizationId` captured when the
+  callback was built, which right after a switch is the *previous* organization.
+  That alone flips once. It ran forever because the Firebase auth subscription
+  listed callbacks in its dependencies that are rebuilt whenever the active
+  organization changes, so every change tore the listener down and re-subscribed
+  it, and re-subscribing fires immediately. 245 registrations and 412 context
+  loads in one sitting, and it paused when the tab was backgrounded because
+  browsers throttle it there. Invisible until an account owned one company while
+  belonging to another: with one organization, the stale id was the right id.
+
+  Killing that loop removed an accidental refresh it was doing, which is what
+  produced the free-plan banner on a paid account. Entitlement is now re-fetched
+  deliberately when the active organization changes, through a ref, so the
+  refresh happens without the identity churn.
+
+- **2026-07-31 → 2026-08-01 (storage moved to the tenant):** Objects were keyed
+  by the uploader's firebase uid while access, retrieval and citations were all
+  keyed by workspace. That one mismatch is why deleting a person deleted
+  documents belonging to a company they had merely joined, and why the worker
+  reversed an uploader's uid out of a URL to fetch bytes it already had the id
+  for. Details in "As built" above. Also fixed in passing: deleting a workspace
+  never removed its objects, deleting a document authorized by uploader so an
+  owner could not remove an admin's file (and a file whose uploader was deleted
+  carried `user_id NULL` and could never be deleted by anyone), and moving a
+  document between workspaces left the object under the old prefix, so deleting
+  the old workspace would have destroyed a document belonging to the new one.
 
 - **2026-07-29 (multi-user actually works now):** Invited staff could join a
   workspace and then **do nothing in it**. Both read paths filtered on

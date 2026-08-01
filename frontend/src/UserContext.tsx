@@ -597,6 +597,22 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Entering an organization asks again what that organization is entitled
+    // to.
+    //
+    // Entitlement is held by the organization, never by the person, so a status
+    // fetched before one was chosen answers for nobody: it comes back "none"
+    // and the app shows a paying company the free-plan banner and the upgrade
+    // prompt. This used to happen by accident — the callback's identity changed
+    // whenever the organization did, and an effect elsewhere re-ran because of
+    // it. Removing that churn is what stopped the app looping, and it took this
+    // refresh with it. Doing it deliberately is the same work without the loop:
+    // the handler is reached through the ref, so this depends on the id alone.
+    useEffect(() => {
+        if (!user || activeOrganizationId == null) return;
+        authHandlers.current.fetchSubscriptionStatus();
+    }, [user, activeOrganizationId]);
+
     useEffect(() => {
         if (user) {
             initializeWebSocket();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Folder, Users, Plus, ChevronDown, Pencil, Trash2, Check, Package, AlertTriangle, X } from 'lucide-react';
+import { Folder, Users, Plus, ChevronDown, Pencil, Trash2, Check, AlertTriangle, X } from 'lucide-react';
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 import './WorkspaceSelector.css';
@@ -75,7 +75,7 @@ interface WorkspaceSelectorProps {
 }
 
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
-    const { user, subscriptionStatus, setCurrentWorkspaceRole, activeOrganizationId, orgContext, isEntitled, accessChangedAt } = useUserContext();
+    const { user, setCurrentWorkspaceRole, activeOrganizationId, orgContext, accessChangedAt } = useUserContext();
     const { addToast } = useToast();
 
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -107,34 +107,24 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [isSendingInvite, setIsSendingInvite] = useState(false);
     const [nextSeatCents, setNextSeatCents] = useState<number | null>(null);
 
-    // Backend entitlement rules:
-    // - premium: active | trialing
-    // - free: none (or missing)
-    // isEntitled is resolved against the active organization by the backend.
-    // Deriving "free" from this user's own subscription status marked every
-    // invited member as free — they have no subscription of their own — and
-    // showed them upgrade prompts for a plan their company already pays for.
-    // Third component to make this mistake, so it now reads the shared answer.
-    const normalizedStatus = (subscriptionStatus || 'none').toLowerCase();
-    // Keyed to this user's OWN subscription on purpose. Creating a workspace
-    // makes you its owner and therefore the account billed for it, so inherited
-    // entitlement from someone else's workspace must not unlock it.
-    const isFreeUser = !isEntitled && normalizedStatus === 'none';
-    // Default true so a missing field cannot lock an owner out of their own
-    // product; the backend refuses regardless, so the worst case is a button
-    // that explains itself when pressed.
+    // There is no free plan, so there is nothing to count here.
+    //
+    // This screen used to carry a whole tier: a workspace allowance, an upgrade
+    // banner, a create button that disabled itself past one workspace. All of
+    // it described a product that was cancelled before launch. Signing up takes
+    // a card and a demo is arranged by adding somebody to a company that
+    // already pays, so an organization is subscribed or it cannot reach this
+    // screen at all — which made the banner something only a paying customer
+    // could ever be shown, and only when their status failed to load.
+    //
+    // Whether the button appears is one question with one answer, and the
+    // backend gives it. Default true so a missing field cannot lock an owner
+    // out of their own product; the backend refuses regardless, so the worst
+    // case is a button that explains itself when pressed.
     const canCreateWorkspace = orgContext?.can_create_workspace ?? true;
     // Managing the team is an admin's job as much as an owner's, so ask
     // whether you may manage rather than whether you are the owner.
     const canManageWorkspace = currentWorkspace?.can_manage ?? false;
-
-    // The free plan allows the organization one workspace. It is the
-    // organization that holds the plan, because the owner is the account that
-    // signed up and pays, so counting per person could only ever approximate
-    // it: filtering for role 'owner' told an admin to upgrade over workspaces
-    // somebody else was already paying for. This list is scoped to the active
-    // organization, so its length is the count.
-    const ownedWorkspaceCount = workspaces.length;
 
     // Fetch workspaces on mount, and again whenever access changes.
     //
@@ -213,13 +203,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
         if (!user) {
             addToast('You must be logged in to create a workspace', 'error');
-            return;
-        }
-
-        // Check free tier limit
-        if (isFreeUser && ownedWorkspaceCount >= 1) {
-            addToast('Free users are limited to 1 workspace. Upgrade to create more!', 'error');
-            setShowCreateModal(false);
             return;
         }
 
@@ -699,19 +682,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                             variant="outline"
                             size="sm"
                             onClick={() => setShowCreateModal(true)}
-                            title={isFreeUser && ownedWorkspaceCount >= 1 ? 'Upgrade to create more workspaces' : 'Create new workspace'}
+                            title="Create new workspace"
                         >
                             <Plus className="size-4" /> New
                         </Button>
                     )}
                 </div>
-
-                {isFreeUser && ownedWorkspaceCount >= 1 && (
-                    <div className="workspace-limit-banner">
-                        <Package className="size-4 shrink-0" />
-                        <span>Free plan: 1 workspace. <a href="/settings">Upgrade</a> for more!</span>
-                    </div>
-                )}
             </div>
 
             {/* Create Workspace Modal */}
@@ -740,21 +716,13 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
                     {error && <div className="error-message">{error}</div>}
 
-                    {isFreeUser && ownedWorkspaceCount >= 1 && (
-                        <div className="upgrade-prompt">
-                            <p><strong>Free Tier Limit Reached</strong></p>
-                            <p>Upgrade to premium to create unlimited workspaces and unlock more features!</p>
-                            <a href="/settings" className="upgrade-link">View Plans →</a>
-                        </div>
-                    )}
-
                     <DialogFooter>
                         <Button variant="outline" onClick={handleCancelCreate} disabled={isCreating}>
                             Cancel
                         </Button>
                         <Button
                             onClick={handleCreateWorkspace}
-                            disabled={isCreating || !newWorkspaceName.trim() || (isFreeUser && ownedWorkspaceCount >= 1)}
+                            disabled={isCreating || !newWorkspaceName.trim()}
                         >
                             {isCreating ? 'Creating...' : 'Create Workspace'}
                         </Button>
