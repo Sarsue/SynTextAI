@@ -9,6 +9,7 @@ from ..core.utils import (
     upload_to_gcs,
     delete_from_gcs,
     generate_signed_url,
+    move_object_to_workspace,
     SIGNED_URL_TTL,
 )
 import logging
@@ -501,25 +502,39 @@ async def move_file_to_workspace(
                 detail="File not found"
             )
         
-        if file['user_id'] != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to move this file"
+        # Authorized on both ends, by capability. It checked file['user_id']
+        # against the caller, which refused an admin moving a document somebody
+        # else had uploaded, and read the target from list_workspaces_for_user,
+        # which answers what you own rather than what you may use.
+        if file.get('workspace_id') is not None:
+            await assert_workspace_capability(
+                store, user_id, file['workspace_id'], Capability.DELETE_DOCUMENT
             )
-        
-        # Verify target workspace exists and belongs to user
-        workspaces = await store.workspace_repo.list_workspaces_for_user(user_id)
-        workspace_ids = [ws['id'] for ws in workspaces]
-        
-        if target_workspace_id not in workspace_ids:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Target workspace not found or doesn't belong to you"
-            )
+        await assert_workspace_capability(
+            store, user_id, target_workspace_id, Capability.UPLOAD_DOCUMENT
+        )
         
         # Update file's workspace
-        success = await store.file_repo.update_file_workspace(file_id, target_workspace_id)
-        
+        # Move the object first. A document's path names the workspace it is
+        # in, and the whole layout rests on that: leaving the object behind
+        # would mean deleting the old workspace destroyed a document belonging
+        # to the new one. Failing here leaves everything as it was.
+        moved_url = await asyncio.to_thread(
+            move_object_to_workspace,
+            file.get('file_url') or '',
+            target_workspace_id,
+            file.get('file_name') or '',
+        )
+        if not moved_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not move the stored document",
+            )
+
+        success = await store.file_repo.update_file_workspace(
+            file_id, target_workspace_id, file_url=moved_url
+        )
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

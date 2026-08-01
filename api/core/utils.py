@@ -286,6 +286,47 @@ def delete_from_gcs(file_url: str):
         logger.error(f"Error deleting {object_path} from GCS: {e}")
 
 
+def move_object_to_workspace(file_url: str, workspace_id: int, filename: str) -> Optional[str]:
+    """Relocate a stored object into another workspace's folder.
+
+    Returns the new canonical URL, or None if it could not be moved.
+
+    Without this the path and the row disagree the moment a document is moved
+    between workspaces: the object stays under the old workspace's prefix while
+    the row claims the new one. Deleting the old workspace would then destroy a
+    document belonging to the new one, and deleting the new one would leave the
+    object behind. The invariant this whole layout rests on is that a
+    document's path names the workspace it is in.
+    """
+    source_path = object_path_from_url(file_url)
+    if not source_path:
+        logger.warning(f"Cannot move unrecognised file_url: {file_url}")
+        return None
+
+    target_path = workspace_object_path(workspace_id, filename)
+    if source_path == target_path:
+        return file_url
+
+    try:
+        client = _gcs_client()
+        bucket = client.bucket(bucket_name)
+        source = bucket.blob(source_path)
+        if not source.exists():
+            logger.warning(f"Cannot move {source_path}: not found")
+            return None
+
+        # Copy then delete, rather than trusting a rename to be atomic. A failed
+        # delete leaves a duplicate, which is recoverable; a failed copy after a
+        # delete loses the document.
+        bucket.copy_blob(source, bucket, target_path)
+        source.delete()
+        logger.info(f"Moved {source_path} to {target_path}")
+        return canonical_gcs_url(target_path)
+    except Exception as e:
+        logger.error(f"Error moving {source_path} to {target_path}: {e}")
+        return None
+
+
 def delete_workspace_objects(workspace_id: int) -> int:
     """Delete everything stored for a workspace. Returns how many went.
 

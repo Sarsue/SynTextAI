@@ -707,13 +707,19 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
                 return None
     
-    async def update_file_workspace(self, file_id: int, workspace_id: int) -> bool:
-        """Update the workspace of a file.
-        
+    async def update_file_workspace(
+        self, file_id: int, workspace_id: int, file_url: Optional[str] = None
+    ) -> bool:
+        """Move a file to another workspace.
+
         Args:
             file_id: ID of the file to update
             workspace_id: New workspace ID
-            
+            file_url: New stored location. Passed together with the workspace
+                because the object physically moves with it, and a row whose
+                url points at the old workspace's folder would break the
+                invariant that a document's path names the workspace it is in.
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -728,6 +734,8 @@ class AsyncFileRepository(AsyncBaseRepository):
                     return False
                 
                 file.workspace_id = workspace_id
+                if file_url:
+                    file.file_url = file_url
                 await session.commit()
                 logger.info(f"Updated file {file_id} workspace to {workspace_id}")
                 return True
