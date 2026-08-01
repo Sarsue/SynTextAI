@@ -150,19 +150,6 @@ def _touch_heartbeat() -> None:
 _store = None
 
 
-def _infer_user_gc_id_from_file_url(url: str) -> Optional[str]:
-    try:
-        if not url:
-            return None
-        parsed = urlparse(url)
-        parts = [p for p in (parsed.path or "").split("/") if p]
-        # Expected: /<bucket>/<user_gc_id>/...
-        if len(parts) < 2:
-            return None
-        return parts[1] or None
-    except Exception:
-        return None
-
 
 def get_repository_manager():
     """Get or create a RepositoryManager instance with proper database configuration"""
@@ -333,11 +320,9 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                 )
                 return
 
-            inferred_gc_id = payload.get("user_gc_id") or _infer_user_gc_id_from_file_url(str(file_url)) or ""
 
             try:
                 result = await process_file_data(
-                    user_gc_id=str(inferred_gc_id),
                     file_id=int(file_id),
                     user_id=int(user_id),
                     filename=str(filename),

@@ -13,7 +13,6 @@ class IngestionAgentState(TypedDict, total=False):
     file_id: int
     filename: str
     file_url: str
-    user_gc_id: str
     workspace_id: Optional[int]
     language: str
     comprehension_level: str
@@ -49,7 +48,6 @@ class IngestionAgent:
         file_id: int,
         filename: str,
         file_url: str,
-        user_gc_id: str,
         workspace_id: int | None = None,
         language: str = "en",
         comprehension_level: str = "Beginner",
@@ -59,7 +57,6 @@ class IngestionAgent:
             "file_id": file_id,
             "filename": filename,
             "file_url": file_url,
-            "user_gc_id": user_gc_id,
             "workspace_id": workspace_id,
             "language": language,
             "comprehension_level": comprehension_level,
@@ -83,7 +80,6 @@ class IngestionAgent:
             file_id=state["file_id"],
             filename=state["filename"],
             file_url=state["file_url"],
-            user_gc_id=state.get("user_gc_id") or "",
             workspace_id=state.get("workspace_id"),
             language=state.get("language") or "en",
             comprehension_level=state.get("comprehension_level") or "Beginner",

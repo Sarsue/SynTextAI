@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, Body
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, Body
 from fastapi.responses import JSONResponse
 from datetime import datetime
 from typing import Dict, Optional
@@ -121,12 +121,34 @@ async def _billing_organization_id(
 # Route to get subscription status
 @subscriptions_router.get("/status")
 async def subscription_status(
+    organization_id: Optional[int] = Query(None, description="The organization being viewed"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
+    """Billing state for the organization the caller is in.
+
+    Resolved by user before, which is a different question. Somebody who owns
+    an unpaid company while belonging to a paid one was shown the paid
+    subscription on their own company's billing page: the banner said "no plan
+    yet" and the panel underneath said "your subscription is active", with the
+    plan picker hidden because the page believed there was nothing to buy. Two
+    sources of truth on one screen, disagreeing.
+    """
     try:
         user_id = user_data["user_id"]
-        subscription_data = await store.user_repo.get_subscription(user_id)
+        subscription_data = None
+        if organization_id is not None:
+            row = await store.org_repo.get_subscription_row(organization_id)
+            if row and row.get("id"):
+                # Reuse the per-user reader for card details, but only when the
+                # subscription it returns is the one this organization holds.
+                by_user = await store.user_repo.get_subscription(user_id)
+                if by_user and by_user[0].get("id") == row["id"]:
+                    subscription_data = by_user
+                else:
+                    subscription_data = (row, None)
+        else:
+            subscription_data = await store.user_repo.get_subscription(user_id)
 
         # Entitlement is an organization property, not a personal one. A staff
         # member invited into a paid workspace has no subscription of their own

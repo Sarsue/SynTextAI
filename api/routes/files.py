@@ -201,7 +201,7 @@ async def save_file(
                 # Reset file pointer after reading
                 await file.seek(0)
 
-                gcs_url = await upload_to_gcs(file, user_gc_id, file.filename)
+                gcs_url = await upload_to_gcs(file, actual_workspace_id, file.filename)
                 if not gcs_url:
                     logger.error(f"Failed to upload {file.filename} to storage (gcs_url is empty)")
                     raise HTTPException(status_code=500, detail="Failed to upload file to storage")
@@ -445,7 +445,7 @@ async def delete_file(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
 
         if file_to_delete.get('file_url') and "storage.googleapis.com" in file_to_delete.get('file_url'):
-             await asyncio.to_thread(delete_from_gcs, user_gc_id, file_to_delete.get('file_name'))
+             await asyncio.to_thread(delete_from_gcs, file_to_delete.get('file_url'))
 
         if not await store.file_repo.delete_file_entry(user_id, file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")

@@ -153,16 +153,32 @@ def format_timestamp(seconds: float) -> str:
         raise
 
 
-async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
+def workspace_object_path(workspace_id: int, filename: str) -> str:
+    """Where a document lives: under its workspace.
+
+    Storage used to be keyed by the uploader — {firebase_uid}/{filename} —
+    while access, retrieval and citations were all keyed by workspace. That one
+    mismatch is what made deleting a person delete documents belonging to a
+    company they had merely joined, and what forced the worker to reverse the
+    uploader's uid out of a URL just to fetch bytes it already had the id for.
+
+    A document belongs to a workspace. Deleting a workspace is now deleting a
+    prefix, and deleting a person touches no storage at all.
+    """
+    return f"workspaces/{workspace_id}/{filename}"
+
+
+async def upload_to_gcs(file: UploadFile, workspace_id: int, filename: str):
     try:
-        logger.debug(f"Uploading file {filename} to GCS for user {user_gc_id}...")
+        logger.debug(f"Uploading file {filename} to GCS for workspace {workspace_id}...")
 
         # Initialize GCS client with explicit credentials file path
         credentials_path = '/app/api/config/credentials.json'
         logger.info(f"Using GCS credentials from {credentials_path}")
         client = storage.Client.from_service_account_json(credentials_path)
         bucket = client.bucket(bucket_name)
-        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        object_path = workspace_object_path(workspace_id, filename)
+        blob = bucket.blob(object_path)
 
         # Determine the correct content type based on file extension
         content_type = "application/octet-stream"  # Default type
@@ -216,7 +232,6 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
         # headers and forwarded answers, and the customers this is sold to
         # upload patient records, privileged files and tax documents. Reads now
         # go through generate_signed_url() after an access check.
-        object_path = f"{user_gc_id}/{filename}"
         url = canonical_gcs_url(object_path)
         logger.info(f"Successfully uploaded {filename} to GCS with content type {content_type}: {url}")
         return url
@@ -225,39 +240,70 @@ async def upload_to_gcs(file: UploadFile, user_gc_id: str, filename: str):
         logger.error(f"Error uploading {filename} to GCS: {e}")
         return None
 
-def download_from_gcs(user_gc_id, filename):
+def download_bytes(object_path: str):
+    """Fetch an object by its path.
+
+    Took (uploader_uid, filename) before, so anything wanting to read a
+    document had to know who had uploaded it — which the worker does not, and
+    reversed out of the URL to compensate. files.file_url already carries the
+    full path, for objects under the old layout and the new one alike, which is
+    why nothing had to be moved.
+    """
+    if not object_path:
+        return None
     try:
-        logger.debug(f"Downloading file {filename} from GCS for user {user_gc_id}...")
-        # Use explicit credentials file path instead of default credentials
-        credentials_path = "/app/api/config/credentials.json"
-        client = storage.Client.from_service_account_json(credentials_path)
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        client = _gcs_client()
+        blob = client.bucket(bucket_name).blob(object_path)
         if not blob.exists():
-            logger.warning(f"File {filename} not found in GCS")
+            logger.warning(f"Object {object_path} not found in GCS")
             return None
-        file_data = blob.download_as_bytes()
-        logger.info(f"Successfully downloaded {filename} from GCS")
-        return file_data
+        data = blob.download_as_bytes()
+        logger.info(f"Downloaded {object_path} from GCS")
+        return data
     except Exception as e:
-        logger.error(f"Error downloading {filename} from GCS: {e}")
+        logger.error(f"Error downloading {object_path} from GCS: {e}")
         return None
 
-def delete_from_gcs(user_gc_id, filename):
+
+def download_from_gcs(file_url: str):
+    """Fetch a document by its stored URL."""
+    return download_bytes(object_path_from_url(file_url))
+
+def delete_from_gcs(file_url: str):
+    """Delete one document by its stored URL."""
+    object_path = object_path_from_url(file_url)
+    if not object_path:
+        logger.warning(f"Cannot delete unrecognised file_url: {file_url}")
+        return
     try:
-        logger.debug(f"Deleting file {filename} from GCS for user {user_gc_id}...")
-        # Use explicit credentials file path instead of default credentials
-        credentials_path = "/app/api/config/credentials.json"
-        client = storage.Client.from_service_account_json(credentials_path)
-        bucket = client.get_bucket(bucket_name)
-        blob = bucket.blob(f"{user_gc_id}/{filename}")
+        blob = _gcs_client().bucket(bucket_name).blob(object_path)
         if not blob.exists():
-            logger.warning(f"File {filename} not found in GCS")
+            logger.warning(f"Object {object_path} not found in GCS")
             return
         blob.delete()
-        logger.info(f"Successfully deleted {filename} from GCS")
+        logger.info(f"Deleted {object_path} from GCS")
     except Exception as e:
-        logger.error(f"Error deleting {filename} from GCS: {e}")
+        logger.error(f"Error deleting {object_path} from GCS: {e}")
+
+
+def delete_workspace_objects(workspace_id: int) -> int:
+    """Delete everything stored for a workspace. Returns how many went.
+
+    The whole point of mirroring workspaces in the bucket: removing a
+    workspace's documents is removing a prefix, rather than working out which
+    of somebody's uploads happened to live there.
+    """
+    prefix = f"workspaces/{workspace_id}/"
+    deleted = 0
+    try:
+        client = _gcs_client()
+        for blob in client.list_blobs(bucket_name, prefix=prefix):
+            blob.delete()
+            deleted += 1
+        logger.info(f"Deleted {deleted} object(s) under {prefix}")
+    except Exception as e:
+        logger.error(f"Error deleting objects under {prefix}: {e}")
+    return deleted
 
 
 def detect_content_type(text: str) -> str:

@@ -444,7 +444,14 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const fetchSubscriptionStatus = useCallback(async () => {
         if (!user) return;
-        const response = await _callApiWithTokenInternal('/api/v1/subscriptions/status', 'GET');
+        // Scoped to the organization being viewed. Without it the answer came
+        // back for the person, so somebody inside their own unpaid company saw
+        // the subscription of a different company they happen to belong to.
+        const orgId = localStorage.getItem('active_organization_id');
+        const url = orgId
+            ? `/api/v1/subscriptions/status?organization_id=${encodeURIComponent(orgId)}`
+            : '/api/v1/subscriptions/status';
+        const response = await _callApiWithTokenInternal(url, 'GET');
         if (response?.ok) {
             const data = await response.json();
             setSubscriptionStatus(data.subscription_status ?? 'none');

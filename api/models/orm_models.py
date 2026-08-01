@@ -24,7 +24,12 @@ class User(Base):
     # Relationships
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
     chat_histories = relationship("ChatHistory", back_populates="user", cascade="all, delete-orphan")
-    files = relationship("File", back_populates="user", cascade="all, delete-orphan")
+    # No delete cascade, and passive_deletes so Postgres' ON DELETE SET NULL is
+    # what happens. With the ORM cascade in place SQLAlchemy deleted the File
+    # rows itself before the database ever saw the delete, so a document
+    # uploaded into a company workspace still vanished when its uploader was
+    # removed — the schema said one thing and the mapping did another.
+    files = relationship("File", back_populates="user", passive_deletes=True)
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
     workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
 
@@ -210,7 +215,10 @@ class File(Base):
     file_name = Column(String)
     file_url = Column(String)
     created_at = Column(DateTime, default=func.now())
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Who uploaded it, cleared when that account goes. A document belongs to
+    # the workspace, not to the person who happened to add it: cascading here
+    # meant offboarding somebody destroyed the company's own documents.
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
     file_type = Column(String, nullable=True)  # 'pdf', 'youtube', etc.
     # Using direct PostgreSQL enum type with string literal

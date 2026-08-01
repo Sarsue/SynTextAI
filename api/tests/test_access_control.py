@@ -290,3 +290,36 @@ async def test_conversations_follow_workspace_access(store, tenant):
     assert await store.chat_repo.get_messages_for_chat_history(
         in_ws1, member, accessible_workspace_ids=accessible
     ) is not None
+
+
+async def test_documents_outlive_the_person_who_uploaded_them(store, tenant):
+    """Offboarding somebody must not erase the company's documents.
+
+    files.user_id cascaded on delete, so removing a person removed every
+    document they had ever uploaded — including documents sitting in a company
+    workspace they did not own — along with their chunks and segments. A
+    document belongs to the workspace, not to whoever happened to add it.
+    """
+    from api.workflows.tasks import delete_user_task
+
+    ws = await tenant.workspace("Finance")
+    uploader = await tenant.member(scope="organization")
+    await store.org_repo.set_member_role(tenant.org, uploader, "admin")
+
+    theirs = await store.file_repo.add_file(
+        uploader, "handbook.pdf", "https://x/handbook.pdf", 10, ws
+    )
+    owners = await store.file_repo.add_file(
+        tenant.owner, "policies.pdf", "https://x/policies.pdf", 10, ws
+    )
+    assert theirs and owners
+
+    await delete_user_task(uploader, "gc-uploader")
+
+    # The company keeps both documents; one simply no longer names an uploader.
+    surviving = await store.file_repo.get_file_by_id(theirs)
+    assert surviving is not None, "the uploader's document was deleted with them"
+    assert surviving["user_id"] is None
+    assert surviving["workspace_id"] == ws
+
+    assert await store.file_repo.get_file_by_id(owners) is not None

@@ -4,7 +4,7 @@ import asyncio
 import time
 from api.core.timing import emit, stage
 from api.core.seats import sync_seats_to_stripe
-from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs
+from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs, delete_workspace_objects
 from api.repositories.repository_manager import RepositoryManager
 from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding
 from api.services.syntext_agent import SyntextAgent
@@ -78,33 +78,12 @@ async def _process_file_data_impl(
     file_id: int,
     filename: str,
     file_url: str,
-    user_gc_id: str,
     workspace_id: int | None,
     language: str = "en",
     comprehension_level: str = "Beginner",
 ) -> Dict[str, Any]:
     """Processes the uploaded file: download, extract, generate embeddings, and update database."""
     logger.info(f"Starting processing for file: {filename} (ID: {file_id}, User: {user_id})")
-
-    def _infer_user_gc_id_from_file_url(url: str) -> Optional[str]:
-        """Infer firebase uid / GCS prefix from a public GCS URL.
-
-        Expected patterns:
-        - https://storage.googleapis.com/<bucket>/<user_gc_id>/<filename>
-        - https://storage.googleapis.com/<bucket>/<user_gc_id>/...
-        """
-        try:
-            if not url:
-                return None
-            parsed = urlparse(url)
-            # Path looks like: /<bucket>/<user_gc_id>/<filename>
-            parts = [p for p in (parsed.path or "").split("/") if p]
-            if len(parts) < 2:
-                return None
-            inferred = parts[1]
-            return inferred or None
-        except Exception:
-            return None
 
     async with store.file_repo.get_async_session() as transaction:  # Start transaction
         try:
@@ -170,20 +149,16 @@ async def _process_file_data_impl(
             file_data = None
             download_started = time.perf_counter()
 
-            # Fetch with the service account, never over the public URL.
+            # Fetch by URL, with the service account.
             #
-            # This used to try requests.get(file_url) first, which only ever
-            # worked because uploads were made world-readable. Documents are
-            # private now, so that path is a guaranteed 403 preceded by a 30s
-            # timeout window; the credentialed download below is the real one
-            # and always was.
+            # file_url carries the full object path, so the worker no longer
+            # needs to know who uploaded a document in order to read it. It used
+            # to take (uploader_uid, filename) and, when the uid was missing,
+            # reverse it back out of the URL — a helper that existed only
+            # because storage was keyed by person while everything else was
+            # keyed by workspace.
             logger.info(f"Downloading file {filename} from GCS")
-            if not user_gc_id:
-                inferred_gc_id = _infer_user_gc_id_from_file_url(file_url)
-                if inferred_gc_id:
-                    logger.info("user_gc_id missing; inferred from file_url for GCS download")
-                    user_gc_id = inferred_gc_id
-            file_data = await asyncio.to_thread(download_from_gcs, user_gc_id, filename)
+            file_data = await asyncio.to_thread(download_from_gcs, file_url)
             if file_data is None:
                 return await handle_processing_error(
                     file_id_int, f"Failed to download file {filename} from GCS"
@@ -209,7 +184,6 @@ async def _process_file_data_impl(
                     filename=filename,
                     file_data=file_data,
                     file_url=file_url,
-                    user_gc_id=user_gc_id,
                     language=language,
                     comprehension_level=comprehension_level,
                 )
@@ -238,7 +212,6 @@ async def process_file_data(
     file_id: int,
     filename: str,
     file_url: str,
-    user_gc_id: str,
     workspace_id: int | None,
     language: str = "en",
     comprehension_level: str = "Beginner",
@@ -251,7 +224,6 @@ async def process_file_data(
             file_id=file_id,
             filename=filename,
             file_url=file_url,
-            user_gc_id=user_gc_id,
             workspace_id=workspace_id,
             language=language,
             comprehension_level=comprehension_level,
@@ -269,7 +241,6 @@ async def process_file_data(
             file_id=file_id,
             filename=filename,
             file_url=file_url,
-            user_gc_id=user_gc_id,
             workspace_id=workspace_id,
             language=language,
             comprehension_level=comprehension_level,
@@ -379,7 +350,7 @@ async def process_query_data(
             logger.warning(f"Failed to send WebSocket error notification: {str(ws_error)}")
         raise HTTPException(status_code=500, detail="Query processing failed")
 
-async def delete_user_task(user_id, user_gc_id: str):
+async def delete_user_task(user_id, user_gc_id: str = None):
     """Deletes a user's account, subscription, and associated files.
 
     user_id arrives as an int from the route and as a str from anything that
@@ -424,50 +395,54 @@ async def delete_user_task(user_id, user_gc_id: str):
                 except Exception as e:
                     logger.warning(f"Could not delete Stripe customer {stripe_customer_id}: {e}")
 
-        # Delete the stored documents.
+        # Which organizations disappear with this person: the ones they own
+        # alone. Everything in those goes; everything in a company that
+        # survives stays, whoever uploaded it.
+        departing_orgs = set()
+        surviving_orgs = []
+        try:
+            for m in await store.org_repo.get_memberships(user_id):
+                org_id = m["organization_id"]
+                others = [
+                    x for x in await store.org_repo.list_members(org_id)
+                    if x["user_id"] != user_id
+                ]
+                if m["role"] == "owner" and not others:
+                    departing_orgs.add(org_id)
+                elif others:
+                    surviving_orgs.append(org_id)
+        except Exception as org_error:
+            logger.error(f"Could not resolve organizations for user {user_id}: {org_error}", exc_info=True)
+
+        # Storage follows the workspace, so there is nothing to work out here.
         #
-        # get_files_for_user returns a paginated envelope, so iterating it
-        # directly walked the dict's keys ('items', 'total', ...) and indexed a
-        # string. It is also paginated, and the default page would have left
-        # everything past the first page in storage: a customer who deleted
-        # their account still had documents sitting in the bucket.
-        file_page = await store.file_repo.get_files_for_user(user_id, limit=10000)
-        files = file_page.get("items", []) if isinstance(file_page, dict) else (file_page or [])
-        if files:
-            results = await asyncio.gather(
-                *(asyncio.to_thread(delete_from_gcs, user_gc_id, f["file_name"]) for f in files),
-                return_exceptions=True
-            )
-            failed = [
-                f["file_name"] for f, r in zip(files, results) if isinstance(r, Exception)
-            ]
-            if failed:
-                logger.error(f"Could not delete {len(failed)} object(s) from storage: {failed}")
-            logger.info(f"Deleted {len(files) - len(failed)}/{len(files)} stored documents for user {user_id}")
+        # This used to resolve which organizations were departing, which
+        # workspaces those held, and which of this person's uploads happened to
+        # live in them — sixty-odd lines to answer a question that only existed
+        # because objects were filed under the uploader. Deleting an
+        # organization deletes its workspaces, and each workspace takes its own
+        # prefix with it.
+        for org_id in departing_orgs:
+            try:
+                for ws_id in await store.workspace_repo.accessible_workspace_ids(
+                    user_id, organization_id=org_id
+                ):
+                    removed = await asyncio.to_thread(delete_workspace_objects, ws_id)
+                    logger.info(f"Removed {removed} object(s) for workspace {ws_id}")
+            except Exception as e:
+                logger.error(f"Could not clear storage for organization {org_id}: {e}", exc_info=True)
 
         # Organizations this user solely owns would otherwise survive as
         # zombies: organization_members cascades away with the user, but the
         # organization row itself does not, leaving a tenant with no owner and,
         # if the id is still cached client-side, one that a later signup can
         # resolve back to.
-        surviving_orgs = []
         try:
-            for m in await store.org_repo.get_memberships(int(user_id)):
-                org_id = m["organization_id"]
-                others = [
-                    x for x in await store.org_repo.list_members(org_id)
-                    if x["user_id"] != int(user_id)
-                ]
-                if m["role"] == "owner" and not others:
-                    await store.org_repo.delete_organization(org_id)
-                    logger.info(f"Deleted organization {org_id}, its last owner is gone")
-                elif others:
-                    # Somebody else's organization that this person was a member
-                    # of. Their seat has to stop being charged for.
-                    surviving_orgs.append(org_id)
-                    logger.info(
-                        f"Organization {org_id} kept: {len(others)} other member(s) remain"
-                    )
+            for org_id in departing_orgs:
+                await store.org_repo.delete_organization(org_id)
+                logger.info(f"Deleted organization {org_id}, its last owner is gone")
+            for org_id in surviving_orgs:
+                logger.info(f"Organization {org_id} kept: other members remain")
         except Exception as org_error:
             logger.error(f"Error cleaning up organizations for user {user_id}: {org_error}", exc_info=True)
 

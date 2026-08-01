@@ -307,15 +307,27 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 <div className="settings-section">
                     <h2 className="section-title text-destructive">Delete Account</h2>
                     <div className="section-content">
+                        {/* Says what actually happens. It promised to erase
+                            "uploaded files" full stop, which is wrong for a
+                            document sitting in a company workspace: that
+                            document belongs to the company, and erasing it
+                            would mean one person leaving takes their
+                            colleagues' knowledge base with them. */}
                         <p className="text-sm text-muted-foreground">
-                            Deleting your account will permanently erase all of your data, including:
+                            This permanently erases:
                         </p>
                         <ul className="list-disc ml-5 text-sm text-muted-foreground">
-                            <li>Payment details</li>
-                            <li>Chat history</li>
-                            <li>Uploaded files</li>
-                            <li>Account credentials</li>
+                            <li>Your account, sign-in and payment details</li>
+                            <li>Your chat history</li>
+                            <li>
+                                Any company you own on your own, and everything in it,
+                                documents included
+                            </li>
                         </ul>
+                        <p className="text-sm text-muted-foreground">
+                            Documents you uploaded into a company that has other people in
+                            it stay with that company. It cannot be undone.
+                        </p>
                         <Button variant="destructive" onClick={() => setConfirmingDelete(true)} className="w-fit">
                             Delete My Account
                         </Button>
