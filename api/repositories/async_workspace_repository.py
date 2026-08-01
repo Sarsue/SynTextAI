@@ -104,6 +104,29 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error counting workspaces for user {user_id}: {e}", exc_info=True)
                 return 0
 
+    async def count_workspaces_in_organization(self, organization_id: int) -> int:
+        """Return the number of workspaces belonging to an organization.
+
+        What the last-workspace rule is really about. An organization with no
+        workspaces is a dead end for everyone in it, whoever happened to create
+        them, and counting per person could not express that: an admin owns
+        none, so any count of theirs is either always zero or, as it was,
+        inflated by workspaces belonging to somebody else.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(func.count(WorkspaceORM.id)).where(
+                    WorkspaceORM.organization_id == organization_id
+                )
+                result = await session.execute(stmt)
+                return int(result.scalar() or 0)
+            except Exception as e:
+                logger.error(
+                    f"Error counting workspaces in organization {organization_id}: {e}",
+                    exc_info=True,
+                )
+                return 0
+
     async def list_accessible_workspaces(
         self, user_id: int, organization_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
@@ -134,24 +157,34 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 # session for each while this one was still held, which
                 # exhausted a pool of two on the second workspace and produced
                 # QueuePool timeouts under nothing more than normal use.
-                admin_orgs = set((await session.execute(
-                    select(OrganizationMember.organization_id).where(
-                        OrganizationMember.user_id == user_id,
-                        OrganizationMember.role.in_(("owner", "admin")),
-                    )
-                )).scalars().all())
+                org_roles = dict((await session.execute(
+                    select(
+                        OrganizationMember.organization_id,
+                        OrganizationMember.role,
+                    ).where(OrganizationMember.user_id == user_id)
+                )).all())
 
+                # Your role is your role in the organization. A workspace does
+                # not have one of its own.
+                #
+                # This used to be computed per workspace: owner if you created
+                # the row or administered the organization, staff otherwise. So
+                # an admin read as "owner" everywhere, the last-workspace guard
+                # counted workspaces they do not own, and the free-plan limit
+                # billed them for the owner's. The owner is the account that
+                # signed up and pays; that is an organization-level fact, and
+                # deriving a second, per-workspace notion of ownership from
+                # whoever happened to click New was the whole mistake.
                 result = []
                 for ws in rows:
-                    if ws.user_id == user_id or ws.organization_id in admin_orgs:
-                        role = "owner"
-                    else:
-                        role = "staff"
+                    role = org_roles.get(ws.organization_id) or "staff"
                     result.append({
                         "id": ws.id,
                         "name": ws.name,
                         "user_id": ws.user_id,
+                        "organization_id": ws.organization_id,
                         "role": role,
+                        "can_manage": role in ("owner", "admin"),
                         "created_at": ws.created_at,
                         "updated_at": ws.updated_at,
                     })

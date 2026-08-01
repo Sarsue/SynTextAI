@@ -37,7 +37,12 @@ interface Workspace {
     id: number;
     name: string;
     user_id: number;
+    // What you are here: owner, admin or staff. Distinct from can_manage,
+    // which is what you may do. The backend used to report "owner" for admins
+    // because every caller wanted the second question, which left anything
+    // asking the first one quietly wrong.
     role: string;
+    can_manage: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -119,12 +124,17 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // product; the backend refuses regardless, so the worst case is a button
     // that explains itself when pressed.
     const canCreateWorkspace = orgContext?.can_create_workspace ?? true;
-    const isOwner = currentWorkspace?.role === 'owner';
+    // Managing the team is an admin's job as much as an owner's, so ask
+    // whether you may manage rather than whether you are the owner.
+    const canManageWorkspace = currentWorkspace?.can_manage ?? false;
 
-    // The free workspace limit applies to workspaces you *own*. The backend's
-    // count_workspaces_for_user counts only owned rows, so counting every
-    // workspace here told staff to upgrade for something the backend allows.
-    const ownedWorkspaceCount = workspaces.filter(w => w.role === 'owner').length;
+    // The free plan allows the organization one workspace. It is the
+    // organization that holds the plan, because the owner is the account that
+    // signed up and pays, so counting per person could only ever approximate
+    // it: filtering for role 'owner' told an admin to upgrade over workspaces
+    // somebody else was already paying for. This list is scoped to the active
+    // organization, so its length is the count.
+    const ownedWorkspaceCount = workspaces.length;
 
     // Fetch workspaces on mount, and again whenever access changes.
     //
@@ -670,7 +680,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         )}
                     </DropdownMenu>
 
-                    {isOwner && (
+                    {canManageWorkspace && (
                         <Button
                             variant="outline"
                             size="sm"

@@ -323,3 +323,48 @@ async def test_documents_outlive_the_person_who_uploaded_them(store, tenant):
     assert surviving["workspace_id"] == ws
 
     assert await store.file_repo.get_file_by_id(owners) is not None
+
+
+async def test_an_admin_is_not_reported_as_the_owner(store, tenant):
+    """Role says what you are; can_manage says what you may do.
+
+    These were one field. An admin was reported as "owner" of every workspace
+    in the organization, because every caller that read it wanted the second
+    question. The two that read it literally were wrong for it: the guard
+    protecting an organization's last workspace counted workspaces the admin
+    does not own and waved a deletion through, and the free-plan limit measured
+    them against workspaces somebody else was paying for.
+
+    The owner is the account that signed up and pays. That is a fact about the
+    organization, not about who happened to click New on a workspace.
+    """
+    ws = await tenant.workspace("Finance")
+    # Distinct names: the fixture derives the email from the name, so two
+    # members created with the default name are one user.
+    admin = await tenant.member(name="manager", scope="organization")
+    await store.org_repo.set_member_role(tenant.org, admin, "admin")
+    staff = await tenant.member(name="reader", scope="organization")
+
+    def only(listed):
+        assert len(listed) == 1
+        return listed[0]
+
+    as_owner = only(await store.workspace_repo.list_accessible_workspaces(
+        tenant.owner, organization_id=tenant.org))
+    as_admin = only(await store.workspace_repo.list_accessible_workspaces(
+        admin, organization_id=tenant.org))
+    as_staff = only(await store.workspace_repo.list_accessible_workspaces(
+        staff, organization_id=tenant.org))
+
+    assert as_owner["role"] == "owner"
+    assert as_admin["role"] == "admin", "an admin was reported as the owner"
+    assert as_staff["role"] == "staff"
+
+    # All three see the same workspace; two of them may manage it.
+    assert as_owner["can_manage"] and as_admin["can_manage"]
+    assert not as_staff["can_manage"]
+
+    # And the count that the last-workspace rule and the plan limit ask for is
+    # the organization's, which is the same number whoever is asking.
+    assert await store.workspace_repo.count_workspaces_in_organization(tenant.org) == 1
+    assert ws

@@ -127,7 +127,11 @@ async def list_workspaces(
                 "id": ws["id"],
                 "name": ws["name"],
                 "user_id": ws["user_id"],
-                "role": ws.get("role", "owner"),
+                # Falling back to "owner" made a missing role the most
+                # privileged one. Assume the least instead; the backend refuses
+                # regardless, and this only decides what the UI offers.
+                "role": ws.get("role", "staff"),
+                "can_manage": ws.get("can_manage", False),
                 "created_at": ws["created_at"].isoformat() if ws.get("created_at") else None,
                 "updated_at": ws["updated_at"].isoformat() if ws.get("updated_at") else None,
             }
@@ -185,8 +189,9 @@ async def create_workspace(
 
         await assert_organization_capability(store, user_id, org_id, Capability.CREATE_WORKSPACE)
 
-        # Enforce workspace creation limits based on subscription plan
-        await assert_can_create_workspace(store, user_id)
+        # Enforce workspace creation limits against the organization's plan,
+        # which is the one being paid for.
+        await assert_can_create_workspace(store, user_id, organization_id=org_id)
         
         # Create the workspace
         workspace_id = await store.workspace_repo.create_workspace(
@@ -315,17 +320,26 @@ async def delete_workspace(
         # document in it.
         await assert_workspace_capability(store, user_id, workspace_id, Capability.DELETE_WORKSPACE)
 
+        # An organization must keep at least one workspace, or everyone in it
+        # is left with nowhere to put a document and no way back.
+        #
+        # This counted workspaces where the caller's role read "owner", which
+        # that list reported for admins too. An admin owns none, so the count
+        # was made up of the owner's workspaces and the guard let them delete
+        # the organization's last one. The organization is what the rule was
+        # always about; the caller's own tally never expressed it.
         workspaces = await store.workspace_repo.list_accessible_workspaces(user_id)
         workspace = next((ws for ws in workspaces if ws["id"] == workspace_id), None)
-        # Prevent deleting your last *owned* workspace. Counting every workspace
-        # here meant one owned plus one joined looked like two, so an owner could
-        # delete the only workspace they actually have.
-        owned_count = sum(1 for ws in workspaces if ws.get("role") == "owner")
-        if owned_count <= 1:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete your last workspace. Users must have at least one workspace."
+        organization_id = workspace.get("organization_id") if workspace else None
+        if organization_id is not None:
+            remaining = await store.workspace_repo.count_workspaces_in_organization(
+                organization_id
             )
+            if remaining <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot delete the last workspace. Create another one first."
+                )
 
         # Delete the workspace (files will cascade delete)
         success = await store.workspace_repo.delete_workspace(workspace_id)

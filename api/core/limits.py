@@ -160,17 +160,28 @@ async def assert_can_create_doc(
         )
 
 
-async def assert_can_create_workspace(store: RepositoryManager, user_id: int) -> None:
+async def assert_can_create_workspace(
+    store: RepositoryManager, user_id: int, organization_id: Optional[int] = None
+) -> None:
     """Enforce free-plan limits for workspace creation.
 
-    Free users may create only a single workspace. Trialing/active subscriptions
-    are allowed multiple workspaces for now.
+    The plan belongs to the organization, because the owner is the account that
+    signed up and pays. Measuring the caller instead meant an admin in a paying
+    organization was checked against their own non-existent free plan and
+    refused a second workspace the company had already paid for, and the count
+    only ever saw rows they had created themselves.
     """
-    status_str = await _get_subscription_status(store, user_id)
+    if organization_id is not None:
+        status_str = await store.org_repo.get_subscription_status(organization_id)
+    else:
+        status_str = await _get_subscription_status(store, user_id)
     if _is_premium_plan(status_str):
         return
 
-    count = await store.workspace_repo.count_workspaces_for_user(user_id)
+    if organization_id is not None:
+        count = await store.workspace_repo.count_workspaces_in_organization(organization_id)
+    else:
+        count = await store.workspace_repo.count_workspaces_for_user(user_id)
     if count >= FREE_WORKSPACE_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
