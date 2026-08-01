@@ -1,5 +1,6 @@
 """Workspace API routes for managing user workspaces."""
 
+import asyncio
 import logging
 from typing import Dict, List, Optional
 
@@ -15,6 +16,7 @@ from ..core.permissions import (
     is_admin,
 )
 from ..core.seats import sync_seats_to_stripe
+from ..core.utils import delete_workspace_objects
 
 logger = logging.getLogger(__name__)
 
@@ -327,13 +329,25 @@ async def delete_workspace(
 
         # Delete the workspace (files will cascade delete)
         success = await store.workspace_repo.delete_workspace(workspace_id)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete workspace"
             )
-        
+
+        # And its documents. The rows cascaded, but the objects did not: they
+        # stayed in the bucket after the customer deleted the workspace, still
+        # holding whatever they had uploaded. Deleting a prefix is the whole
+        # reason storage mirrors workspaces; this was the one place that knew to
+        # do it and did not.
+        #
+        # After the rows, deliberately. Objects removed first and a failed row
+        # delete would leave documents listed in the app whose bytes are gone;
+        # this way a failure leaves recoverable orphans instead, and says so.
+        removed = await asyncio.to_thread(delete_workspace_objects, workspace_id)
+        logger.info(f"Removed {removed} stored object(s) for workspace {workspace_id}")
+
         logger.info(f"Workspace {workspace_id} deleted by user {user_id}")
         return None  # 204 No Content
 

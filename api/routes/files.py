@@ -189,6 +189,21 @@ async def save_file(
                 
                 logger.info(f"File {file.filename} validated: {file_size / 1024 / 1024:.2f}MB")
 
+                # One name, one document, per workspace. Two files called
+                # invoice.pdf sitting side by side in a shared folder is
+                # confusing to everyone in it and makes citations ambiguous:
+                # an answer says "invoice.pdf, page 3" and nobody knows which.
+                if await store.file_repo.file_name_exists_in_workspace(
+                    actual_workspace_id, file.filename
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"{file.filename} is already in this workspace. "
+                            "Delete it first, or rename this one."
+                        ),
+                    )
+
                 # Enforce per-user document count and storage limits for free plans
                 # Pass the workspace so limits resolve against its owner's plan,
                 # not the uploader's. Staff in a paid workspace are covered.
@@ -202,20 +217,35 @@ async def save_file(
                 # Reset file pointer after reading
                 await file.seek(0)
 
-                gcs_url = await upload_to_gcs(file, actual_workspace_id, file.filename)
-                if not gcs_url:
-                    logger.error(f"Failed to upload {file.filename} to storage (gcs_url is empty)")
-                    raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+                # The row comes first, because its id is what makes the stored
+                # object unique inside a shared workspace folder. Two people
+                # uploading the same filename used to write the same object and
+                # silently overwrite each other.
                 file_id = await store.file_repo.add_file(
-                    user_id=user_id, 
-                    file_name=file.filename, 
-                    file_url=gcs_url, 
+                    user_id=user_id,
+                    file_name=file.filename,
+                    file_url="",
                     file_size_bytes=file_size,
                     workspace_id=actual_workspace_id
                 )
                 if not file_id:
                     logger.error(f"Failed to create file record for {file.filename}")
                     continue
+
+                gcs_url = await upload_to_gcs(file, actual_workspace_id, file_id, file.filename)
+                if not gcs_url:
+                    # Take the row back out. A file row with no stored object is
+                    # a document that shows up in the list and can never be
+                    # opened or ingested.
+                    logger.error(f"Failed to upload {file.filename} to storage (gcs_url is empty)")
+                    await store.file_repo.delete_file_entry(file_id)
+                    raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+
+                if not await store.file_repo.set_file_url(file_id, gcs_url):
+                    logger.error(f"Failed to record stored location for {file.filename}")
+                    await asyncio.to_thread(delete_from_gcs, gcs_url)
+                    await store.file_repo.delete_file_entry(file_id)
+                    raise HTTPException(status_code=500, detail="Failed to upload file to storage")
 
                 file_record = await store.file_repo.get_file_by_id(file_id=file_id)
                 uploaded_files_responses.append(FileResponse.model_validate(file_record))
@@ -439,16 +469,29 @@ async def delete_file(
 ):
     try:
         user_id = user_data["user_id"]
-        user_gc_id = user_data["user_gc_id"]
 
         file_to_delete = await store.file_repo.get_file_by_id(file_id)
-        if not file_to_delete or file_to_delete.get('user_id') != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found or unauthorized.")
+        if not file_to_delete:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
+
+        # Authorized by capability in the document's workspace, not by who
+        # uploaded it. The uploader check refused an owner deleting a document
+        # an admin had added, and left anything uploaded by a since-deleted
+        # account permanently undeletable: those rows carry user_id NULL, which
+        # equals nobody.
+        workspace_id = file_to_delete.get('workspace_id')
+        if workspace_id is not None:
+            await assert_workspace_capability(
+                store, user_id, workspace_id, Capability.DELETE_DOCUMENT
+            )
+        elif file_to_delete.get('user_id') != user_id:
+            # Pre-workspace rows fall back to the uploader.
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
 
         if file_to_delete.get('file_url') and "storage.googleapis.com" in file_to_delete.get('file_url'):
              await asyncio.to_thread(delete_from_gcs, file_to_delete.get('file_url'))
 
-        if not await store.file_repo.delete_file_entry(user_id, file_id):
+        if not await store.file_repo.delete_file_entry(file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -523,7 +566,6 @@ async def move_file_to_workspace(
             move_object_to_workspace,
             file.get('file_url') or '',
             target_workspace_id,
-            file.get('file_name') or '',
         )
         if not moved_url:
             raise HTTPException(

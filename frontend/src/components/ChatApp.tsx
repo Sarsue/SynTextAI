@@ -451,8 +451,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 }
                 try {
                     const startTime = Date.now();
+                    // Upload into the workspace being looked at. Without this
+                    // the server fell back to the first workspace the uploader
+                    // can reach, so switching to another one and adding a
+                    // document filed it somewhere else: it never appeared in
+                    // the list, which filters by this same id, and it was
+                    // stored under the wrong workspace's folder.
+                    const uploadWorkspaceParam = currentWorkspaceId != null
+                        ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}`
+                        : '';
                     const fileDataResponse = await callApiWithToken(
-                        `api/v1/files?language=english`,
+                        `api/v1/files?language=english${uploadWorkspaceParam}`,
                         'POST',
                         formData
                     );

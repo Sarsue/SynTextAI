@@ -359,11 +359,16 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error summing storage bytes for workspace {workspace_id}: {e}", exc_info=True)
                 return 0
 
-    async def delete_file_entry(self, user_id: int, file_id: int) -> bool:
+    async def delete_file_entry(self, file_id: int) -> bool:
         """Delete a file and all associated data.
 
+        Authorization is the route's job, not this method's. Matching on
+        user_id here meant deletion was scoped to whoever happened to upload the
+        document: an owner could not remove one an admin had added, and a
+        document left behind by a deleted account carries user_id NULL, so it
+        matched nobody and could never be deleted at all.
+
         Args:
-            user_id: ID of the user who owns the file
             file_id: ID of the file to delete
 
         Returns:
@@ -371,19 +376,18 @@ class AsyncFileRepository(AsyncBaseRepository):
         """
         async with self.get_async_session() as session:
             try:
-                # Check if the file exists and belongs to the user
-                stmt = select(FileORM).where(and_(FileORM.id == file_id, FileORM.user_id == user_id))
+                stmt = select(FileORM).where(FileORM.id == file_id)
                 result = await session.execute(stmt)
                 file_obj = result.scalar_one_or_none()
 
                 if not file_obj:
-                    logger.warning(f"File {file_id} not found or not owned by user {user_id}")
+                    logger.warning(f"File {file_id} not found")
                     return False
 
                 # Delete the file (cascade should handle related entities)
                 await session.delete(file_obj)
                 await session.commit()
-                logger.info(f"Successfully deleted file {file_id} for user {user_id} with cascade")
+                logger.info(f"Successfully deleted file {file_id} with cascade")
                 return True
 
             except Exception as e:
@@ -393,10 +397,9 @@ class AsyncFileRepository(AsyncBaseRepository):
                 try:
                     await session.execute(text("DELETE FROM chunks WHERE file_id = :file_id"), {"file_id": file_id})
                     await session.execute(text("DELETE FROM segments WHERE file_id = :file_id"), {"file_id": file_id})
-                    await session.execute(text("DELETE FROM files WHERE id = :file_id AND user_id = :user_id"),
-                                         {"file_id": file_id, "user_id": user_id})
+                    await session.execute(text("DELETE FROM files WHERE id = :file_id"), {"file_id": file_id})
                     await session.commit()
-                    logger.info(f"Successfully deleted file {file_id} for user {user_id} using manual SQL deletion")
+                    logger.info(f"Successfully deleted file {file_id} using manual SQL deletion")
                     return True
                 except Exception as sql_error:
                     error_msg = f"SQL fallback error deleting file {file_id}: {str(sql_error)[:1000]}"
@@ -743,6 +746,61 @@ class AsyncFileRepository(AsyncBaseRepository):
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Error updating file {file_id} workspace: {e}", exc_info=True)
+                return False
+
+    async def file_name_exists_in_workspace(self, workspace_id: int, file_name: str) -> bool:
+        """Is a document by this name already in this workspace?
+
+        Workspace-scoped, not user-scoped. get_file_by_name asks whether *you*
+        have a file by that name, which is the wrong question in a folder
+        several people share: it would let one person's upload land on top of a
+        name somebody else had already used.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(FileORM.id).where(
+                    and_(
+                        FileORM.workspace_id == workspace_id,
+                        FileORM.file_name == file_name,
+                    )
+                ).limit(1)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none() is not None
+            except Exception as e:
+                logger.error(
+                    f"Error checking name {file_name} in workspace {workspace_id}: {e}",
+                    exc_info=True,
+                )
+                # Say no rather than blocking an upload on a failed lookup. The
+                # id in the object path means a duplicate that slips through
+                # costs a confusing list entry, not a lost document.
+                return False
+
+    async def set_file_url(self, file_id: int, file_url: str) -> bool:
+        """Record where a file's bytes ended up.
+
+        Upload happens after the row exists, because the object path is keyed by
+        the row id to keep two uploads of the same filename from colliding
+        inside a shared workspace folder. The row is therefore briefly urlless,
+        and this closes that gap.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(FileORM).where(FileORM.id == file_id)
+                result = await session.execute(stmt)
+                file = result.scalar_one_or_none()
+
+                if not file:
+                    logger.warning(f"File {file_id} not found for url update")
+                    return False
+
+                file.file_url = file_url
+                await session.commit()
+                return True
+
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error setting url for file {file_id}: {e}", exc_info=True)
                 return False
 
     async def get_file_by_name(self, user_id: int, filename: str) -> Optional[Dict[str, Any]]:

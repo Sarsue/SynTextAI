@@ -153,8 +153,8 @@ def format_timestamp(seconds: float) -> str:
         raise
 
 
-def workspace_object_path(workspace_id: int, filename: str) -> str:
-    """Where a document lives: under its workspace.
+def workspace_object_path(workspace_id: int, file_id: int, filename: str) -> str:
+    """Where a document lives: under its workspace, keyed by its row.
 
     Storage used to be keyed by the uploader — {firebase_uid}/{filename} —
     while access, retrieval and citations were all keyed by workspace. That one
@@ -164,11 +164,19 @@ def workspace_object_path(workspace_id: int, filename: str) -> str:
 
     A document belongs to a workspace. Deleting a workspace is now deleting a
     prefix, and deleting a person touches no storage at all.
+
+    The row id leads the filename because the workspace folder is shared. Keyed
+    on name alone, two people uploading invoice.pdf into the same workspace
+    would write the same object: the second overwrites the first's bytes, two
+    rows point at one object, and deleting either takes the other's document
+    with it. Under the old uploader-keyed layout that could only collide with
+    yourself, which read as replacing your own file. It cannot collide now,
+    because no two rows share an id.
     """
-    return f"workspaces/{workspace_id}/{filename}"
+    return f"workspaces/{workspace_id}/{file_id}-{filename}"
 
 
-async def upload_to_gcs(file: UploadFile, workspace_id: int, filename: str):
+async def upload_to_gcs(file: UploadFile, workspace_id: int, file_id: int, filename: str):
     try:
         logger.debug(f"Uploading file {filename} to GCS for workspace {workspace_id}...")
 
@@ -177,7 +185,7 @@ async def upload_to_gcs(file: UploadFile, workspace_id: int, filename: str):
         logger.info(f"Using GCS credentials from {credentials_path}")
         client = storage.Client.from_service_account_json(credentials_path)
         bucket = client.bucket(bucket_name)
-        object_path = workspace_object_path(workspace_id, filename)
+        object_path = workspace_object_path(workspace_id, file_id, filename)
         blob = bucket.blob(object_path)
 
         # Determine the correct content type based on file extension
@@ -286,7 +294,7 @@ def delete_from_gcs(file_url: str):
         logger.error(f"Error deleting {object_path} from GCS: {e}")
 
 
-def move_object_to_workspace(file_url: str, workspace_id: int, filename: str) -> Optional[str]:
+def move_object_to_workspace(file_url: str, workspace_id: int) -> Optional[str]:
     """Relocate a stored object into another workspace's folder.
 
     Returns the new canonical URL, or None if it could not be moved.
@@ -297,13 +305,18 @@ def move_object_to_workspace(file_url: str, workspace_id: int, filename: str) ->
     document belonging to the new one, and deleting the new one would leave the
     object behind. The invariant this whole layout rests on is that a
     document's path names the workspace it is in.
+
+    The leaf name comes from the object being moved, not from the row's
+    file_name, so the id prefix that makes it unique travels with it. Rebuilding
+    the name here would strip that prefix back off and hand the target workspace
+    a collision.
     """
     source_path = object_path_from_url(file_url)
     if not source_path:
         logger.warning(f"Cannot move unrecognised file_url: {file_url}")
         return None
 
-    target_path = workspace_object_path(workspace_id, filename)
+    target_path = f"workspaces/{workspace_id}/{source_path.rsplit('/', 1)[-1]}"
     if source_path == target_path:
         return file_url
 
