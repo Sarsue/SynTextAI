@@ -11,6 +11,7 @@ from ..core.utils import get_user_id
 from ..core.limits import resolve_entitlement
 from ..core.plans import PLANS, get_plan, plan_for_price_id
 from ..core.seats import seat_summary, sync_seats_to_stripe
+from ..core.permissions import Capability, assert_organization_capability
 from api.repositories.repository_manager import RepositoryManager
 import asyncio
 # Load environment variables
@@ -86,17 +87,33 @@ def _period_end(stripe_subscription) -> Optional[datetime]:
     return datetime.utcfromtimestamp(value) if value else None
 
 
-async def _billing_organization_id(store: RepositoryManager, user_id: int) -> Optional[int]:
-    """The organization this subscription belongs to.
+async def _billing_organization_id(
+    store: RepositoryManager, user_id: int, organization_id: Optional[int] = None
+) -> Optional[int]:
+    """The organization a subscription belongs to.
 
-    Subscriptions are read back by organization, so anything written without
-    one leaves the tenant looking unpaid: the customer starts a trial and is
-    immediately locked out of the app they just subscribed to. Owners and admins
-    are the only roles that can be billing for a tenant.
+    Pass organization_id: it is the tenant the customer is actually in.
+
+    Without it this walked the membership list and took the first organization
+    where the user was owner *or admin*, which is not the same question. An
+    admin of somebody else's company who signed up for their own was billed
+    against the company that had invited them — creating a second live
+    subscription on an organization that already paid, while their own stayed
+    unpaid and locked. Real money, on the wrong account.
+
+    Falls back to an organization they *own*, never merely administer, since
+    billing is an owner's to hold.
     """
     memberships = await store.org_repo.get_memberships(user_id)
+
+    if organization_id is not None:
+        match = next(
+            (m for m in memberships if m["organization_id"] == organization_id), None
+        )
+        return match["organization_id"] if match else None
+
     for m in memberships:
-        if m["role"] in ("owner", "admin"):
+        if m["role"] == "owner":
             return m["organization_id"]
     return None
 
@@ -252,6 +269,7 @@ async def cancel_sub(
 async def create_subscription(
     payment_method: str = Body(..., embed=True),
     plan: str = Body("starter", embed=True),
+    organization_id: Optional[int] = Body(None, embed=True),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -273,12 +291,29 @@ async def create_subscription(
             logger.error("No Stripe price configured for plan %s (%s)", selected_plan.key, selected_plan.env_var)
             raise HTTPException(status_code=503, detail="Billing is not configured for that plan yet.")
 
-        organization_id = await _billing_organization_id(store, user_id)
-        if organization_id is None:
+        billing_org_id = await _billing_organization_id(store, user_id, organization_id)
+        if billing_org_id is None:
             raise HTTPException(
                 status_code=403,
                 detail="Your access is provided by your team's plan. Contact your workspace owner about billing.",
             )
+
+        # Billing belongs to the owner. An admin runs the workspace; somebody
+        # has to be unable to put a second subscription on it.
+        await assert_organization_capability(
+            store, user_id, billing_org_id, Capability.MANAGE_BILLING
+        )
+
+        # One live subscription per organization. Without this an admin, or an
+        # owner who reached checkout twice, could stack a second one on a tenant
+        # that already pays.
+        existing_org_status = await store.org_repo.get_subscription_status(billing_org_id)
+        if (existing_org_status or "none").lower() in {"active", "trialing"}:
+            raise HTTPException(
+                status_code=400,
+                detail="This organization already has an active subscription.",
+            )
+        organization_id = billing_org_id
         # Quantity is headcount. Stripe's graduated tiers do the rest: the base
         # amount covers the included seats and only the excess is charged.
         member_count = max(1, await store.org_repo.count_members(organization_id))

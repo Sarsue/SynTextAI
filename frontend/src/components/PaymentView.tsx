@@ -25,7 +25,7 @@ interface PlanOption {
 }
 
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode }) => {
-    const { fetchSubscriptionStatus, setSubscriptionStatus, subscriptionData, setSubscriptionData } = useUserContext(); // Getting subscriptionStatus from context
+    const { fetchSubscriptionStatus, setSubscriptionStatus, subscriptionData, setSubscriptionData, activeOrganizationId } = useUserContext(); // Getting subscriptionStatus from context
     const navigate = useNavigate();
     const stripe = useStripe();
     const elements = useElements();
@@ -114,7 +114,14 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${await user?.getIdToken()}`,
                 },
-                body: JSON.stringify({ payment_method: paymentMethod?.id, plan: selectedPlan }),
+                // Which organization is being paid for. Without it the backend
+                // guessed from the membership list and could bill a company the
+                // customer merely administers rather than the one they are in.
+                body: JSON.stringify({
+                    payment_method: paymentMethod?.id,
+                    plan: selectedPlan,
+                    organization_id: activeOrganizationId,
+                }),
             });
 
             if (!response.ok) {
@@ -291,7 +298,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
-            <h3>Payment</h3>
 
             {/* Handle the case where the user needs to update their card */}
             {isCardUpdateRequired ? (

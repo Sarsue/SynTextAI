@@ -441,3 +441,53 @@ async def test_an_existing_member_can_sign_up_and_own_a_company(store, tenant, c
         await store.org_repo.delete_organization(own_org)
     finally:
         app.dependency_overrides.pop(users_route.get_firebase_user_info_from_token, None)
+
+
+async def test_an_admin_cannot_subscribe_someone_else_s_organization(store, tenant, client):
+    """Real money on the wrong account.
+
+    _billing_organization_id took the first organization where the caller was
+    owner *or admin*, ignoring which one they were actually in. An admin of
+    somebody else's company who subscribed for their own was billed against the
+    company that had invited them, stacking a second live subscription on a
+    tenant that already paid while their own stayed unpaid and locked.
+    """
+    admin = await tenant.member(scope="organization")
+    await store.org_repo.set_member_role(tenant.org, admin, "admin")
+
+    res = await client.as_(admin).post(
+        "/api/v1/subscriptions/subscribe",
+        json={
+            "payment_method": "pm_card_visa",
+            "plan": "starter",
+            "organization_id": tenant.org,
+        },
+    )
+    # Billing is the owner's. Refused before any Stripe call is made.
+    assert res.status_code == 403, res.text
+
+
+async def test_an_organization_cannot_be_subscribed_twice(store, tenant, client):
+    """One live subscription per tenant."""
+    from api.core.plans import STARTER
+
+    await store.user_repo.add_or_update_subscription(
+        user_id=tenant.owner,
+        organization_id=tenant.org,
+        stripe_customer_id="cus_test_existing",
+        stripe_subscription_id="sub_test_existing",
+        status="active",
+        seats=STARTER.included_seats,
+        plan_key="starter",
+    )
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/subscriptions/subscribe",
+        json={
+            "payment_method": "pm_card_visa",
+            "plan": "starter",
+            "organization_id": tenant.org,
+        },
+    )
+    assert res.status_code == 400, res.text
+    assert "already has an active subscription" in res.text
