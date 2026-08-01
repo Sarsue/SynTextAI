@@ -30,6 +30,32 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     // only meaningful once it is.
     const canLeaveSettings = Boolean(orgContext?.entitled);
 
+    // How many other organizations this person could switch to. Fetched only
+    // when they are stuck, so the way out is offered only when there is one.
+    const [otherOrganizations, setOtherOrganizations] = React.useState(0);
+    React.useEffect(() => {
+        if (canLeaveSettings || !user) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const idToken = await user.getIdToken();
+                const res = await fetch('/api/v1/organizations', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                const others = (data.items || []).filter(
+                    (o: any) => o.organization_id !== orgContext?.organization_id
+                );
+                if (!cancelled) setOtherOrganizations(others.length);
+            } catch {
+                // Leaves the link off. Better than offering a way out that
+                // might loop straight back here.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [canLeaveSettings, user, orgContext?.organization_id]);
+
     // Seed the field once the organization context arrives.
     React.useEffect(() => {
         if (orgContext?.name) setOrgName(orgContext.name);
@@ -160,10 +186,29 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
             <div className="settings-content">
                 {!canLeaveSettings && (
                     <div className="settings-section">
-                        <p className="text-sm text-muted-foreground">
-                            Start your trial below to open your workspace. Nothing is
-                            charged today.
+                        <p className="text-sm">
+                            <strong>{orgContext?.name || 'This organization'}</strong> has no
+                            plan yet. Choose one below to start using it.
                         </p>
+                        {/* An exit. Somebody who signed up for their own company
+                            while already belonging to another was trapped here:
+                            closing goes to /chat, /chat requires a plan, and it
+                            bounced straight back with nothing to click. Only
+                            offered when there is somewhere else to go, or the
+                            chooser would auto-resolve and return them here. */}
+                        {otherOrganizations > 0 && (
+                            <p className="text-sm text-muted-foreground" style={{ marginTop: 8 }}>
+                                Or{' '}
+                                <button
+                                    type="button"
+                                    className="auth-link"
+                                    onClick={() => navigate('/select-organization')}
+                                >
+                                    switch to another organization
+                                </button>{' '}
+                                you belong to.
+                            </p>
+                        )}
                     </div>
                 )}
                 {/* Payment, owners only.
