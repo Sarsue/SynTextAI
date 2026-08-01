@@ -76,7 +76,15 @@ async def sync_seats_to_stripe(
             return None
 
         item = items[0]
-        if item.get("quantity") == members:
+        # item["quantity"], not item.get("quantity"). A StripeObject raises
+        # AttributeError on .get, and this whole function is wrapped in a
+        # never-raise handler, so the sync failed at its first line every single
+        # time and logged it as a Stripe problem. Nothing was ever billed: an
+        # organization with two members sat at quantity 1 while every call site
+        # believed it had synced. A dict-like object that is not a dict, inside
+        # a function that swallows errors on purpose, is how a revenue path
+        # stays broken without anyone seeing it.
+        if item["quantity"] == members:
             return members
 
         await stripe.SubscriptionItem.modify_async(

@@ -8,6 +8,26 @@ from api.repositories.repository_manager import RepositoryManager
 import logging
 
 from api.core.limits import resolve_entitlement
+from api.core.seats import sync_seats_to_stripe
+
+
+async def _bill_for_joins(store: RepositoryManager, joined: list) -> None:
+    """Charge for seats taken by invites this sign-in accepted.
+
+    Seats were synced only by the explicit accept route, which is the path
+    almost nobody takes: signing in accepts every invite waiting for the
+    address, so by the time the link is revisited the token is spent and that
+    route never runs. The result was a member who joined the ordinary way
+    costing nothing, forever. Found with two members on a subscription whose
+    quantity was one.
+
+    Never raises. The person has already joined; a Stripe hiccup must not turn
+    that into a failed sign-in, and the next sync or the webhook corrects drift.
+    """
+    for organization_id in joined or []:
+        await sync_seats_to_stripe(
+            store, organization_id, reason="invite accepted at sign in"
+        )
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
@@ -118,6 +138,7 @@ async def create_user(
         )
         if joined:
             logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
+            await _bill_for_joins(store, joined)
 
         organization_id = None
         if wants_own_organization:
@@ -163,6 +184,7 @@ async def create_user(
         joined = await store.workspace_repo.accept_pending_invites_for_email(new_user_id, email)
         if joined:
             logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
+            await _bill_for_joins(store, joined)
 
         # An organization is started only by somebody who came to start one.
         # It used to be created for anyone without a pending invite, which made
