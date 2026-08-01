@@ -474,8 +474,17 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // unrelated action happened to re-resolve it, such as renaming the
             // organization. Refresh it here so every caller is covered rather
             // than each one remembering.
-            if (activeOrganizationId) {
-                await setActiveOrganization(activeOrganizationId);
+            //
+            // Refresh the organization this status was actually fetched for,
+            // read at the top of this call. Using the activeOrganizationId
+            // captured when this callback was built put the app back into the
+            // *previous* organization: switching sets the state and this
+            // closure still holds the old value, so signing up bounced the
+            // person straight out of the company they had just created. With
+            // one organization the wrong id was the right id and it never
+            // showed.
+            if (orgId) {
+                await setActiveOrganization(Number(orgId));
             }
         } else {
             // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
@@ -486,7 +495,10 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setIsOrgOwner(true);
             setIsMemberOnly(false);
         }
-    }, [user, _callApiWithTokenInternal, activeOrganizationId, setActiveOrganization]);
+        // activeOrganizationId is deliberately absent: this reads the id from
+        // storage, so depending on the state only churned this callback's
+        // identity every time the organization changed.
+    }, [user, _callApiWithTokenInternal, setActiveOrganization]);
 
     const registerUserInBackend = useCallback(async (
         fbUser: FirebaseUser,
@@ -521,9 +533,45 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [_callApiWithTokenInternal, addToast, loadUserFiles, filePagination.page, filePagination.pageSize]);
     
+    // Subscribe to Firebase once, for the life of the provider.
+    //
+    // The dependency list used to name these four callbacks, two of which
+    // (fetchSubscriptionStatus, loadUserFiles) are rebuilt whenever the active
+    // organization changes. So every organization change tore down the auth
+    // listener and re-subscribed it, and re-subscribing fires the callback
+    // immediately with the current user — re-registering the account against
+    // the backend and re-fetching everything. Paired with a stale id putting
+    // the app back in the previous organization, that is a loop: it flipped
+    // between the two companies for as long as the tab was in front,
+    // registering the user hundreds of times, and paused when the tab was
+    // backgrounded because browsers throttle it there.
+    //
+    // A ref keeps the handlers current without the subscription depending on
+    // their identity.
+    const authHandlers = useRef({
+        registerUserInBackend,
+        fetchSubscriptionStatus,
+        loadUserFiles,
+        disconnectWebSocket,
+    });
+    useEffect(() => {
+        authHandlers.current = {
+            registerUserInBackend,
+            fetchSubscriptionStatus,
+            loadUserFiles,
+            disconnectWebSocket,
+        };
+    }, [registerUserInBackend, fetchSubscriptionStatus, loadUserFiles, disconnectWebSocket]);
+
     useEffect(() => {
         const auth = getAuth();
         const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+            const {
+                registerUserInBackend,
+                fetchSubscriptionStatus,
+                loadUserFiles,
+                disconnectWebSocket,
+            } = authHandlers.current;
             setAuthLoading(true);
             if (fbUser) {
                 // The button that started this is long gone by the time
@@ -545,7 +593,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setAuthLoading(false);
         });
         return () => unsubscribe();
-    }, [registerUserInBackend, fetchSubscriptionStatus, loadUserFiles, disconnectWebSocket]);
+        // Empty on purpose. See the note above the ref.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         if (user) {
