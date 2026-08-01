@@ -125,7 +125,10 @@ const SelectOrganization: React.FC = () => {
                         <span style={styles.cardBody}>
                             <span style={styles.name}>{org.name}</span>
                             <span style={styles.meta}>
-                                {org.role === 'owner' ? 'Owner' : org.role === 'admin' ? 'Admin' : 'Member'}
+                                {/* Staff, not Member. 'member' was removed from the
+                                    code this morning for being a third word for a
+                                    role that already had one, and it survived here. */}
+                                {org.role === 'owner' ? 'Owner' : org.role === 'admin' ? 'Admin' : 'Staff'}
                                 {' · '}
                                 {org.member_count} {org.member_count === 1 ? 'person' : 'people'}
                                 {!org.entitled && ' · plan needs attention'}

@@ -877,8 +877,15 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                                             <SelectValue />
                                                         </SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="staff">Can read only</SelectItem>
-                                                            <SelectItem value="admin">Can manage</SelectItem>
+                                                            {/* The role by name, with what it
+                                                                means underneath. Naming the
+                                                                effect instead ("Can read only")
+                                                                gave one role a different name on
+                                                                every screen, and none of them
+                                                                matched the word support, the
+                                                                database and the docs use. */}
+                                                            <SelectItem value="staff">Staff</SelectItem>
+                                                            <SelectItem value="admin">Admin</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 )}
@@ -897,6 +904,16 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
                                         {m.can_edit_access ? (
                                             <div style={{ marginTop: 8 }}>
+                                                {/* Access is a staff question and only a staff
+                                                    question. An admin runs the company, so they
+                                                    see all of it whatever this said, which is
+                                                    why the backend reports can_edit_access false
+                                                    for them and this whole block is absent.
+                                                    Somebody who should be held to two
+                                                    workspaces is staff. */}
+                                                <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>
+                                                    Reads and asks questions. Changes nothing.
+                                                </div>
                                                 {/* Checkboxes, not one-of-many: access is a
                                                     set. Somebody can belong to three of five
                                                     workspaces, which a single select cannot
@@ -955,9 +972,13 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                             </div>
                                         ) : (
                                             <div style={{ marginTop: 4, fontSize: 12, color: '#888' }}>
+                                                {/* Says why there is no workspace picker here,
+                                                    rather than leaving a control that appears
+                                                    for one person and not another with no
+                                                    explanation. */}
                                                 {m.role === 'owner'
-                                                    ? 'Sees every workspace, manages billing.'
-                                                    : 'Sees every workspace. Can upload and delete documents, and manage people.'}
+                                                    ? 'Sees every workspace. Manages billing.'
+                                                    : 'Sees every workspace. Uploads, deletes, and manages people.'}
                                             </div>
                                         )}
                                     </div>

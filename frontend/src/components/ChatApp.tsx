@@ -899,11 +899,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                                     <div className="signed-in-org">
                                         {orgContext.name}
                                         {orgContext.role && orgContext.role !== 'owner' && (
-                                            /* What they can do, not the word the
-                                               database happens to store. */
+                                            /* The role, by its name. This said
+                                               "can manage" and "read only",
+                                               which described the same thing a
+                                               third way: the chooser called it
+                                               Member and the members list called
+                                               it Can read only. One role should
+                                               not have three names, least of all
+                                               when the database, the capability
+                                               table and the docs all agree on
+                                               one. */
                                             <span className="signed-in-role">
                                                 {' · '}
-                                                {orgContext.role === 'admin' ? 'can manage' : 'read only'}
+                                                {orgContext.role === 'admin' ? 'Admin' : 'Staff'}
                                             </span>
                                         )}
                                     </div>
