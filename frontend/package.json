@@ -30,6 +30,7 @@
   "scripts": {
     "start": "vite",
     "dev": "vite",
+    "dev:stack": "VITE_DEV_PORT=5173 VITE_API_TARGET=http://127.0.0.1:3000 vite --mode dev",
     "start-api": "cd backend && /Users/osas/opt/anaconda3/envs/docsynth/bin/flask run --no-debugger",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
