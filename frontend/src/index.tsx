@@ -7,13 +7,6 @@ import { UserProvider } from './UserContext';
 import { ToastProvider } from './contexts/ToastContext';
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration"; // Import service worker
 
-// Automated sign-in for local testing. A dynamic import behind a literal-false
-// condition, so the module is not in the production bundle at all rather than
-// being shipped and merely unreachable. See devSignIn.ts.
-if (import.meta.env.DEV) {
-    import('./devSignIn');
-}
-
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 root.render(
   <ToastProvider>
