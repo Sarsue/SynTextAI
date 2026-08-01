@@ -209,6 +209,7 @@ from .routes.analytics import router as analytics_router, posthog_middleware
 from .routes.internal import router as internal_router  # ⬅️ Add internal router
 from .routes.workspaces import workspaces_router
 from .routes.organizations import organizations_router
+from .routes.sendgrid_events import router as sendgrid_events_router
 
 # Include routers
 app.include_router(files_router)
@@ -220,6 +221,10 @@ app.include_router(analytics_router)
 app.include_router(internal_router, prefix="/api/v1/internal")  # ⬅️ Include internal router
 app.include_router(workspaces_router)
 app.include_router(organizations_router)
+# Public and unauthenticated by necessity: SendGrid posts here, and it holds no
+# credential of ours. Its own prefix rather than /api/v1, because it is not part
+# of the product's API and is not versioned alongside it.
+app.include_router(sendgrid_events_router)
 
 # Define the build path for React app
 build_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../frontend/build"))

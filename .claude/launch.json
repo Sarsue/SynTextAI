@@ -2,10 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "frontend-vite",
+      "name": "frontend-vs-stack",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
-      "port": 3000
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev:stack"],
+      "port": 5173,
+      "autoPort": false
     }
   ]
 }

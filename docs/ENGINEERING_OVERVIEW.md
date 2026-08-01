@@ -729,6 +729,44 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-01 (why mail fails, and the end of the dependency triage):** Added
+  `POST /api/sendgrid/events`, SendGrid's event webhook. A 202 from the send API
+  means SendGrid accepted the message, not that anybody received it: rejection by
+  the recipient's server, spam filing from an unauthenticated domain, and
+  suppression from an old bounce all happen afterwards and silently, which is why
+  invites could read as sent and never arrive. Failures now log with the
+  `reason` field, which is the one that explains them. Public and unauthenticated
+  by necessity, so it verifies the ECDSA signature when
+  `SENDGRID_WEBHOOK_PUBLIC_KEY` is set, and always answers 2xx otherwise —
+  SendGrid retries any non-2xx, and a batch holds up to a thousand events for
+  unrelated messages, so one malformed entry must not cost the rest. Not stored
+  in the database on purpose: the question is "why did this not arrive", the logs
+  already have timestamps, and a table needs a migration, a retention policy and
+  a screen before it beats grep.
+
+  **The endpoint must be deployed before the webhook is configured in SendGrid**,
+  or every event posts into a 404.
+
+  **Dependency triage closed, 2026-08-01.** Backend `pip-audit`: clean, no known
+  vulnerabilities. Frontend, two highs left and neither is actionable:
+
+  - `react-router-dom` 7.18.2 — GHSA-qwww-vcr4-c8h2, RSC-mode CSRF. The advisory
+    covers `7.12.0 - 8.2.0` and **no patched version exists in any line**; npm's
+    suggested "fix" is a downgrade to 6.30.4, a major break across the whole
+    routing layer. The vulnerable surface is React Router's RSC server runtime.
+    This app imports `HashRouter`, `Route`, `Routes`, `Navigate`, `Link`,
+    `useNavigate`, `useLocation`, `useSearchParams` and `useParams`, and nothing
+    else — no server handler, no data-router actions or loaders, no RSC. Not
+    reachable. Revisit when a patched 7.x or 8.x ships.
+  - `vite` 5.4.21 — `server.fs.deny` bypass **on Windows alternate paths**, in
+    the dev server. A devDependency that never ships, on a team running macOS and
+    Linux. The fix is vite 8, three majors up, which is a deliberate build-tool
+    upgrade rather than a security response.
+
+  Both are recorded rather than suppressed, so the count staying non-zero is a
+  known state and not an unread warning. What moved the number from 34 to 5 was
+  the firebase 10 → 12 upgrade and the orphan-dependency removals, both earlier.
+
 - **2026-08-01 (the free tier is gone, and two labels stopped lying):** Removed
   `FREE_DOC_LIMIT`, `FREE_STORAGE_LIMIT_BYTES`, `FREE_WORKSPACE_LIMIT` and every
   branch behind them, the upgrade banner and workspace-limit prompts,
