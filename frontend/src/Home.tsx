@@ -167,7 +167,12 @@ const Home: React.FC = () => {
                         </a>
                     </Button>
                 </div>
-                <p className="home-footnote">No credit card required.</p>
+                {/* It is, in fact, required. The trial was dropped rather than
+                    built, so signing up takes a card and an organization with
+                    no subscription is entitled to nothing. Promising otherwise
+                    sold the one thing the product does not do, and the person
+                    who believed it found out at the payment form. */}
+                <p className="home-footnote">$99 a month. Cancel anytime.</p>
             </section>
 
             <div className="home-divider" />
