@@ -163,9 +163,28 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const reconnectTimeoutId = useRef<NodeJS.Timeout | null>(null);
     const filesRef = useRef<UploadedFile[]>([]);
 
+    // Who is signed in, readable synchronously.
+    //
+    // The `user` state is a render behind during the one moment it matters
+    // most. Firebase reports an account, the listener calls setUser and then
+    // immediately calls the handlers that need it — but those closures were
+    // built on the previous render, where user was still null, so they returned
+    // at their own guard and did nothing. Sign-in fetched no subscription
+    // status, which left it null, which is the condition Auth waits on before
+    // redirecting: signed in, parked on the sign-in page, with only a sign out
+    // button on it.
+    //
+    // This used to be papered over by the auth listener re-subscribing whenever
+    // a handler changed identity, which fired it again with fresh closures.
+    // That churn was the organization loop, so removing it exposed this. A ref
+    // updated before the handlers run is the same guarantee without the loop.
+    const userRef = useRef<FirebaseUser | null>(null);
+    const currentUser = () => user ?? userRef.current;
+
     const toggleDarkMode = () => setDarkMode((prev) => !prev);
 
     const _callApiWithTokenInternal = useCallback(async (url: string, method: string, body?: any) => {
+        const user = currentUser();
         if (!user) return null;
         try {
             const buildHeaders = (token: string): HeadersInit => {
@@ -412,6 +431,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
      * rather than blended across every organization they belong to.
      */
     const setActiveOrganization = useCallback(async (organizationId: number) => {
+        const user = currentUser();
         if (!user) return;
         try {
             const idToken = await user.getIdToken();
@@ -443,7 +463,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, [user, activeOrganizationId, orgContext, setActiveOrganization]);
 
     const fetchSubscriptionStatus = useCallback(async () => {
-        if (!user) return;
+        if (!currentUser()) return;
         // Scoped to the organization being viewed. Without it the answer came
         // back for the person, so somebody inside their own unpaid company saw
         // the subscription of a different company they happen to belong to.
@@ -572,6 +592,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 loadUserFiles,
                 disconnectWebSocket,
             } = authHandlers.current;
+            // Before anything else, and before setUser, because the handlers
+            // below run in this same tick and read it.
+            userRef.current = fbUser;
             setAuthLoading(true);
             if (fbUser) {
                 // The button that started this is long gone by the time

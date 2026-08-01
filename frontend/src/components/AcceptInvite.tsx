@@ -28,6 +28,21 @@ const AcceptInvite: React.FC = () => {
         if (!token) { setPageStatus('invalid'); return; }
         fetch(`/api/v1/workspaces/invites/${token}`)
             .then(async res => {
+                if (res.status === 410 && user) {
+                    // Already used, by this person, moments ago.
+                    //
+                    // Signing in accepts every invite waiting for the address,
+                    // because the link is how somebody learns they were invited
+                    // and not a step the join depends on. So the ordinary path
+                    // through this page — click accept, get sent to sign in,
+                    // come back — returns to a token that sign-in has already
+                    // consumed. Reading that as a broken link told somebody who
+                    // had just successfully joined that their invite was
+                    // unavailable, and left them on a dead end.
+                    setPageStatus('done');
+                    navigate('/select-organization', { replace: true });
+                    return;
+                }
                 if (!res.ok) {
                     const data = await res.json().catch(() => ({}));
                     setErrorMsg(data.detail || 'This invite link is invalid or has expired.');
@@ -38,7 +53,7 @@ const AcceptInvite: React.FC = () => {
                 }
             })
             .catch(() => { setErrorMsg('Could not reach the server.'); setPageStatus('invalid'); });
-    }, [token]);
+    }, [token, user, navigate]);
 
     const handleAccept = async () => {
         if (!user) {
