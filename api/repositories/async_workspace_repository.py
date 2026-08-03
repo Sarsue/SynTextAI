@@ -279,13 +279,19 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
             try:
                 from ..models.orm_models import OrganizationMember
 
-                # Organizations this user reads in full: either they administer
-                # the tenant, or they were invited to the organization rather
-                # than to one workspace inside it.
+                # Organizations this user reads in full: they own the tenant, or
+                # their membership reaches the whole of it.
+                #
+                # Admin used to imply org-wide here, which made scope
+                # meaningless for admins and left "confine this admin to two
+                # workspaces" impossible to express. An admin is now what the
+                # word says — somebody who may upload, delete and assign staff —
+                # inside whichever workspaces they were given. Owner stays
+                # unbounded, because the company is theirs.
                 orgwide_stmt = select(OrganizationMember.organization_id).where(
                     OrganizationMember.user_id == user_id,
                     or_(
-                        OrganizationMember.role.in_(("owner", "admin")),
+                        OrganizationMember.role == "owner",
                         OrganizationMember.scope == "organization",
                     ),
                 )
@@ -375,13 +381,26 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 if not membership:
                     return None
                 org_role, org_scope = membership
-                if org_role in ("owner", "admin"):
+
+                # The owner of the company may act in any of its workspaces.
+                if org_role == "owner":
                     return "owner"
-                # Invited to the organization: reads every workspace in it, but
-                # as staff, so uploading and member management stay with owners.
-                if org_scope == "organization":
-                    return "staff"
-                return None
+
+                # Everyone else reaches only as far as their scope says, and an
+                # admin is no exception.
+                #
+                # Admin used to return "owner" here regardless of scope, which
+                # let an admin confined to one workspace upload into any other
+                # by naming its id. The read path hid those workspaces, so the
+                # confinement looked real: they could not see Payroll, and could
+                # still write to it. Seeing and doing were answered by different
+                # rules, and only one of them had been tightened.
+                if org_scope != "organization":
+                    return None
+
+                # Organization-wide reach. Admin manages what it can see; staff
+                # reads it.
+                return "admin" if org_role == "admin" else "staff"
             except Exception as e:
                 logger.error(f"Error getting role for user {user_id} in workspace {workspace_id}: {e}", exc_info=True)
                 return None
@@ -515,13 +534,22 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
         email: str,
         workspace_id: Optional[int] = None,
         organization_id: Optional[int] = None,
+        role: str = "staff",
+        scope: str = "organization",
+        workspace_ids: Optional[List[int]] = None,
     ) -> Optional[str]:
         """Create an invite token for an email. Returns the token string.
 
-        Pass workspace_id to invite somebody into one workspace, or
-        organization_id alone to give them the whole tenant. The two reaches
-        are what organization_members.scope records when the invite is
-        accepted.
+        The invite carries what the person will be, not merely that they may
+        join. Every invite used to produce an organization-wide staff member,
+        so an owner who meant to add an admin, or to confine somebody to two
+        workspaces, had to correct it afterwards in the members list once the
+        person was already in with more access than intended.
+
+        role   'staff' to ask questions, 'admin' to also upload, delete and
+               assign staff to workspaces.
+        scope  'organization' for every workspace including ones added later,
+               'workspace' for the ones named in workspace_ids.
         """
         if workspace_id is None and organization_id is None:
             logger.error("create_invite needs a workspace or an organization")
@@ -547,12 +575,25 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                     existing.status = "expired"
 
                 token = str(uuid.uuid4())
+                # Normalise once, here, so nothing downstream has to guess.
+                # A workspace scope with no workspaces would grant nothing and
+                # read as a bug to whoever accepted it; treat it as the whole
+                # organization, which is what the inviter plainly meant.
+                chosen = [int(w) for w in (workspace_ids or []) if w is not None]
+                if scope != "workspace" or not chosen:
+                    scope, chosen = "organization", []
+                    if workspace_id is not None:
+                        scope, chosen = "workspace", [workspace_id]
+
                 invite = WorkspaceInvite(
                     workspace_id=workspace_id,
                     organization_id=organization_id,
                     email=email,
                     token=token,
                     status="pending",
+                    role="admin" if str(role).lower() == "admin" else "staff",
+                    scope=scope,
+                    workspace_ids=chosen or None,
                     expires_at=datetime.utcnow() + timedelta(days=7),
                 )
                 session.add(invite)
@@ -643,21 +684,36 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 )
                 for invite, org_id in (await session.execute(stmt)).all():
                     invite.status = "accepted"
-                    # Joining always means joining the company, with every
-                    # workspace visible. What they see after that is the owner's
-                    # to set, so an invite no longer carries a reach of its own.
-                    scope = "organization"
+                    # What the inviter chose, not what the code assumes.
+                    #
+                    # This hardcoded staff and organization-wide, so an owner
+                    # who meant to add an admin, or to confine somebody to two
+                    # workspaces, got neither and had to correct it in the
+                    # members list once the person was already in. Old rows
+                    # carry the defaults the migration gave them, which are
+                    # exactly what this used to do.
+                    scope = invite.scope or "organization"
+                    role = "admin" if (invite.role or "staff").lower() == "admin" else "staff"
+                    granted = list(invite.workspace_ids or [])
+                    if scope == "workspace" and not granted and invite.workspace_id is not None:
+                        granted = [invite.workspace_id]
+                    if scope != "workspace" or not granted:
+                        scope, granted = "organization", []
 
-                    if invite.workspace_id is not None:
+                    # Assign every workspace the invite granted, not just one.
+                    # Access is a set, and an invite naming three workspaces has
+                    # to produce three assignments or it silently grants less
+                    # than it offered.
+                    for ws_id in granted:
                         existing_ws = (await session.execute(
                             select(WorkspaceMember).where(
-                                WorkspaceMember.workspace_id == invite.workspace_id,
+                                WorkspaceMember.workspace_id == ws_id,
                                 WorkspaceMember.user_id == user_id,
                             )
                         )).scalar_one_or_none()
                         if not existing_ws:
                             session.add(WorkspaceMember(
-                                workspace_id=invite.workspace_id, user_id=user_id, role="staff"
+                                workspace_id=ws_id, user_id=user_id, role=role
                             ))
 
                     if org_id:
@@ -675,7 +731,7 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                         else:
                             session.add(OrganizationMember(
                                 organization_id=org_id, user_id=user_id,
-                                role="staff", scope=scope,
+                                role=role, scope=scope,
                             ))
                         if org_id not in joined:
                             joined.append(org_id)

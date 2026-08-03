@@ -223,7 +223,22 @@ async def list_organization_members(
 
 
 class OrganizationInviteRequest(BaseModel):
+    """Who to invite, and what they will be when they arrive.
+
+    Role and reach are part of the invitation, not a correction made afterwards.
+    Every invite used to produce an organization-wide staff member, so an owner
+    who meant to add an admin, or to confine somebody to two workspaces, let
+    them in with more access than intended and then went to fix it on another
+    screen.
+    """
     email: EmailStr
+    # 'staff' asks questions. 'admin' also uploads, deletes documents and
+    # assigns staff to workspaces. Ownership is not granted this way.
+    role: str = "staff"
+    # 'organization' for every workspace including later ones, 'workspace' for
+    # the ones named below.
+    scope: str = "organization"
+    workspace_ids: List[int] = []
 
 
 @organizations_router.post("/{organization_id}/invites", status_code=status.HTTP_201_CREATED)
@@ -248,8 +263,36 @@ async def invite_to_organization(
         store, user_id, organization_id, Capability.INVITE_MEMBER
     )
 
+    if body.role not in ("staff", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Role must be staff or admin.",
+        )
+    if body.scope not in ("organization", "workspace"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access must be the whole organization or chosen workspaces.",
+        )
+
+    # Only workspaces of this company can be handed out. Without this the ids
+    # come straight off the request body, so an owner could name a workspace
+    # belonging to somebody else's tenant and grant their own invitee access to
+    # it.
+    if body.scope == "workspace" and body.workspace_ids:
+        theirs = set(await store.org_repo.workspace_ids_in_organization(organization_id))
+        stray = [w for w in body.workspace_ids if w not in theirs]
+        if stray:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Those workspaces are not part of this organization.",
+            )
+
     token = await store.workspace_repo.create_invite(
-        body.email, organization_id=organization_id
+        body.email,
+        organization_id=organization_id,
+        role=body.role,
+        scope=body.scope,
+        workspace_ids=body.workspace_ids,
     )
     if not token:
         raise HTTPException(

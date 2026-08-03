@@ -250,12 +250,16 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                         "email": email,
                         "role": role,
                         "joined_at": joined,
-                        # Owners and admins administer the tenant, so their
-                        # reach is the whole organization regardless of what
-                        # the column says.
-                        "scope": "organization" if role in ("owner", "admin") else scope,
+                        # The owner's reach is the whole company, whatever the
+                        # column says, because the company is theirs. An admin's
+                        # is whatever they were given: admin describes what they
+                        # may do, not how far they can see, so an admin confined
+                        # to two workspaces now reports two.
+                        "scope": "organization" if role == "owner" else scope,
                         "workspace_ids": sorted(assigned.get(uid, [])),
-                        "can_edit_access": role not in ("owner", "admin"),
+                        # Only the owner's reach is fixed. Everyone else's is the
+                        # owner's to set, which is the whole point of the picker.
+                        "can_edit_access": role != "owner",
                     }
                     for uid, email, role, joined, scope in rows
                 ]
@@ -393,6 +397,28 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                     exc_info=True,
                 )
                 return False
+
+    async def workspace_ids_in_organization(self, organization_id: int) -> List[int]:
+        """Every workspace belonging to this organization.
+
+        Used to check that workspaces named in a request actually belong to the
+        tenant doing the naming. Ids arriving in a request body are just
+        integers; without this an owner could grant their invitee access to a
+        workspace in somebody else's company.
+        """
+        async with self.get_async_session() as session:
+            try:
+                rows = await session.execute(
+                    select(WorkspaceORM.id).where(
+                        WorkspaceORM.organization_id == organization_id
+                    )
+                )
+                return list(rows.scalars().all())
+            except Exception as e:
+                logger.error(
+                    f"Error listing workspaces for org {organization_id}: {e}", exc_info=True
+                )
+                return []
 
     async def count_members(self, organization_id: int) -> int:
         """Seats consumed by this organization."""
