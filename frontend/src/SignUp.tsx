@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { useUserContext } from './UserContext';
@@ -21,11 +21,52 @@ import { Button } from '@/components/ui/button';
  *   signed out  authenticate with Google, then start the organization
  *   signed in   start the organization on the account already in hand
  */
+/** The company this account owns, once we have asked. */
+interface OwnedCompany {
+    organization_id: number;
+    name: string;
+}
+
 const SignUp: React.FC = () => {
     const navigate = useNavigate();
     const { user, darkMode, setActiveOrganization, fetchSubscriptionStatus } = useUserContext();
     const { addToast } = useToast();
     const [isWorking, setIsWorking] = useState(false);
+
+    // Does this account already own a company?
+    //
+    // undefined while we have not asked, null once we know it does not. A
+    // signed-in visitor was offered "Create my company account" regardless, and
+    // pressing it returned the company they already had — the backend is
+    // idempotent and the database refuses a second one, so nothing broke, but
+    // the button described an act it was never going to perform. Somebody who
+    // reached this screen by accident had no way to tell that from a screen
+    // that would take their money.
+    const [owned, setOwned] = useState<OwnedCompany | null | undefined>(undefined);
+
+    useEffect(() => {
+        if (!user) { setOwned(null); return; }
+        let cancelled = false;
+        (async () => {
+            try {
+                const idToken = await user.getIdToken();
+                const res = await fetch('/api/v1/organizations', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (!res.ok) throw new Error('could not load organizations');
+                const data = await res.json();
+                if (cancelled) return;
+                const mine = (data.items || []).find((o: any) => o.role === 'owner');
+                setOwned(mine ? { organization_id: mine.organization_id, name: mine.name } : null);
+            } catch {
+                // Offer to create rather than blocking on a failed lookup. The
+                // backend returns the existing company if there is one, so the
+                // worst case is a button that turns out to be a no-op.
+                if (!cancelled) setOwned(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [user]);
 
     const startOrganization = useCallback(async () => {
         const auth = getAuth();
@@ -110,10 +151,45 @@ const SignUp: React.FC = () => {
             <div className="auth-card">
                 <h1 className="auth-title">Syntext</h1>
                 <p className="auth-sub">
-                    Start a company account. You will pick a plan and add a card.
+                    {owned
+                        ? 'You already have a company account.'
+                        : 'Start a company account. You will pick a plan and add a card.'}
                 </p>
 
-                {user ? (
+                {user && owned === undefined ? (
+                    <p className="auth-hint">Checking your account...</p>
+                ) : user && owned ? (
+                    // Already has one. You sign up once; everything after that
+                    // is an invitation. Offering to create a second company
+                    // here would describe an act the database refuses.
+                    <>
+                        <p className="auth-hint">
+                            Signed in as {user.email}. You already own{' '}
+                            <strong>{owned.name}</strong>, and an account owns one company.
+                            You can be invited into as many others as you like.
+                        </p>
+                        <Button
+                            className="w-full"
+                            disabled={isWorking}
+                            onClick={async () => {
+                                setIsWorking(true);
+                                await setActiveOrganization(owned.organization_id);
+                                navigate('/chat', { replace: true });
+                            }}
+                        >
+                            {isWorking ? 'Opening...' : `Go to ${owned.name}`}
+                        </Button>
+                        <p className="auth-hint auth-hint-quiet">
+                            <button
+                                type="button"
+                                className="auth-link"
+                                onClick={() => navigate('/select-organization')}
+                            >
+                                Switch to another organization
+                            </button>
+                        </p>
+                    </>
+                ) : user ? (
                     <>
                         <p className="auth-hint">
                             Signed in as {user.email}. This creates a company account you own,
