@@ -86,6 +86,21 @@ class OrganizationMember(Base):
         # Named as the migration created it: index=True would have generated
         # ix_organization_members_organization_id and proposed swapping them.
         Index("ix_organization_members_org_id", "organization_id"),
+        # One person owns at most one company. Declared here, not only in the
+        # migration, because autogenerate compares the database against these
+        # models: undeclared, the next generated migration proposes dropping it,
+        # and dropping it silently restores the race that gave one email two
+        # companies from a single click.
+        #
+        # Partial on purpose. Owning one while belonging to several is the whole
+        # membership model, so the rule constrains owners and says nothing about
+        # anybody else.
+        Index(
+            "uq_one_owned_organization_per_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("role = 'owner'"),
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -161,6 +176,16 @@ class WorkspaceInvite(Base):
     email = Column(String, nullable=False)
     token = Column(String, nullable=False)
     status = Column(String, nullable=False, default="pending")  # "pending" | "accepted" | "expired"
+    # What they will be once they accept, decided by whoever invited them.
+    # Every invite used to produce an organization-wide staff member, so the
+    # owner had to correct the role and reach afterwards, on another screen,
+    # once the person was already in.
+    role = Column(String, nullable=False, default="staff")  # "staff" | "admin"
+    scope = Column(String, nullable=False, default="organization")  # "organization" | "workspace"
+    # The workspaces a 'workspace'-scoped invite grants. A list, because access
+    # is a set: three of five workspaces is a normal thing to want, and the
+    # single workspace_id above cannot say it.
+    workspace_ids = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
 

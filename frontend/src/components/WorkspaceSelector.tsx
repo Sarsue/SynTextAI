@@ -104,6 +104,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [memberToRemove, setMemberToRemove] = useState<OrgMember | null>(null);
     const [membersError, setMembersError] = useState<string | null>(null);
     const [inviteEmail, setInviteEmail] = useState('');
+    // What the invited person will be when they arrive. Decided here rather
+    // than corrected in the list afterwards, which let somebody in with more
+    // access than was meant and then asked the owner to go and fix it.
+    const [inviteRole, setInviteRole] = useState<'staff' | 'admin'>('staff');
+    const [inviteScope, setInviteScope] = useState<'organization' | 'workspace'>('organization');
+    const [inviteWorkspaceIds, setInviteWorkspaceIds] = useState<number[]>([]);
     const [isSendingInvite, setIsSendingInvite] = useState(false);
     const [nextSeatCents, setNextSeatCents] = useState<number | null>(null);
 
@@ -429,7 +435,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 { method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` } },
             );
             if (res.ok) {
-                addToast(`${email} removed`, 'success');
+                // Names the outcome, not the click. "Removed" alone leaves the
+                // owner wondering whether it took effect now or at renewal,
+                // which is the question they had when they opened the dialog.
+                addToast(`${email} removed. They no longer have access.`, 'success');
                 await fetchOrgMembers();
                 if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
@@ -544,16 +553,20 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         setIsSendingInvite(true);
         try {
             const idToken = await user.getIdToken();
-            // One kind of invite: it makes somebody a member of the company.
-            // What they can see is set afterwards, per member, in the list
-            // below. Asking at invite time conflated how they joined with what
-            // they see, and froze the answer at the moment of invitation.
+            // The invitation carries the decision: what they may do, and how
+            // far they can see. Both remain changeable in the list below, but
+            // they no longer start as a guess the owner has to correct.
             const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
             const url = `/api/v1/organizations/${orgId}/invites`;
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-                body: JSON.stringify({ email: inviteEmail.trim() }),
+                body: JSON.stringify({
+                    email: inviteEmail.trim(),
+                    role: inviteRole,
+                    scope: inviteScope,
+                    workspace_ids: inviteScope === 'workspace' ? inviteWorkspaceIds : [],
+                }),
             });
             if (res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -567,6 +580,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                     addToast(`Invite sent to ${inviteEmail}`, 'success');
                 }
                 setInviteEmail('');
+                setInviteRole('staff');
+                setInviteScope('organization');
+                setInviteWorkspaceIds([]);
+                await fetchOrgMembers();
                 if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
                 const data = await res.json().catch(() => ({}));
@@ -809,9 +826,74 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         </Button>
                     </div>
 
-                    <p className="text-xs text-muted-foreground mt-1">
-                        They join your organization and can see every workspace.
-                        Change what they see from the list below once they accept.
+                    {/* What they will be, chosen before they are let in. */}
+                    <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 13, minWidth: 44 }}>Role</span>
+                        <Select
+                            value={inviteRole}
+                            disabled={isSendingInvite}
+                            onValueChange={(v) => setInviteRole(v as 'staff' | 'admin')}
+                        >
+                            <SelectTrigger className="h-8 w-[9rem] text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="staff">Staff</SelectItem>
+                                <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <span style={{ fontSize: 12, color: '#888' }}>
+                            {inviteRole === 'admin'
+                                ? 'Uploads, deletes, manages people.'
+                                : 'Reads and asks questions.'}
+                        </span>
+                    </div>
+
+                    {/* How far it reaches. Applies to admins too: admin says
+                        what they may do, not how much they can see. */}
+                    <div style={{ marginTop: 10 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={inviteScope === 'organization'}
+                                disabled={isSendingInvite}
+                                onChange={(e) => {
+                                    setInviteScope(e.target.checked ? 'organization' : 'workspace');
+                                    setInviteWorkspaceIds(e.target.checked ? [] : workspaces.map(w => w.id));
+                                }}
+                            />
+                            <span>Every workspace, including new ones</span>
+                        </label>
+
+                        {inviteScope === 'workspace' && (
+                            <div style={{ paddingLeft: 22, marginTop: 4 }}>
+                                {workspaces.map(ws => {
+                                    const checked = inviteWorkspaceIds.includes(ws.id);
+                                    return (
+                                        <label
+                                            key={ws.id}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', padding: '2px 0' }}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                disabled={isSendingInvite}
+                                                onChange={() => setInviteWorkspaceIds(
+                                                    checked
+                                                        ? inviteWorkspaceIds.filter(id => id !== ws.id)
+                                                        : [...inviteWorkspaceIds, ws.id],
+                                                )}
+                                            />
+                                            <span>{ws.name}</span>
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+
+                    <p className="text-xs text-muted-foreground mt-2">
+                        You can change both from the list below at any time.
                     </p>
 
                     {nextSeatCents !== null && (

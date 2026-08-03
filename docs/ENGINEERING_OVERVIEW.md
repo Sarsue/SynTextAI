@@ -230,6 +230,24 @@ them being reopened:**
   header name. `frame-src` must keep `storage.googleapis.com` or every citation
   breaks when it is enforced.
 - **Still open: no DB-level RLS.** See below.
+- **Re-triaged 2026-08-03: down to 5 from 34, and the remaining ones have
+  nowhere to go.** The backend is clean, `pip-audit` finds nothing. The frontend
+  has two highs and neither has a fix that is worth taking:
+  - **react-router / react-router-dom**, GHSA-qwww-vcr4-c8h2, "RSC Mode CSRF
+    Bypass". The advisory covers `7.12.0 - 8.2.0` and **no patched version has
+    been published in any line** — npm's suggested "fix" is a downgrade to
+    6.30.4, a major-version break across the whole routing layer. The vulnerable
+    surface is React Server Components mode, and this app imports only
+    `HashRouter`, `Routes`, `Route`, `Navigate`, `Link`, `useNavigate`,
+    `useLocation`, `useSearchParams`, `useParams`. No server handler, no data
+    router, no actions or loaders. Not reachable. Recheck when a patched 7.x or
+    8.x appears; do not downgrade.
+  - **vite**, `server.fs.deny` bypass **on Windows**, in the dev server. A
+    devDependency that never ships, an OS nobody here develops on, and the fix
+    is vite 8 from 5.4.21 — three majors of build-tool risk for a hole that
+    cannot be reached in this setup. Worth taking when the build tooling is
+    upgraded deliberately, not as a security response.
+
 - **Dependency vulnerabilities triaged 2026-07-29** (`gh` CLI wasn't available, ran
   `npm audit`/`pip-audit` directly against the actual lockfiles instead — counts won't
   match GitHub's Dependabot tally exactly, different scope/tooling, but same
@@ -360,6 +378,33 @@ Genuinely still open, roughly in value order:
 Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
 
 **Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
+
+**1. Onboarding that makes membership legible from the first screen (raised
+2026-08-03).**
+
+Sign-up should ask for the company name and take payment as one flow starting at
+the home page. Today it creates a company named after the email prefix, then
+sends the person to settings to pay, so the two halves of becoming a customer
+happen on different screens with a redirect between them, and the name is
+something they discover rather than choose.
+
+The deeper reason is that joining and starting are still easy to confuse.
+Somebody sent an invite link ended up creating their own company alongside the
+one they were invited to, because every route through a signed-in state with no
+organization leads to sign-up. The screens now say which is which (see "Recent
+changes", 2026-08-03), and the database refuses a second owned company, so this
+is no longer a correctness problem. It is a clarity problem, which is why it is
+Tier 2 rather than Tier 0.
+
+Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
+means accept, sign in, and land in the company that invited you, never being
+offered one of your own; an owner can remove a member; a member can delete their
+account freely; an owner must cancel the subscription before deleting theirs.
+The last three are built. Only the first is outstanding.
+
+Worth doing before real marketing spend, not before the next deploy: the current
+flow works and is honest, it just asks a customer to understand more than it
+should.
 
 **2. Self-hosted model platform (agreed 2026-07-30). The Tier 2 initiative.**
 
@@ -728,6 +773,77 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-03 (the day live Stripe was exercised, and what it cost):** The
+  payment path ran against real money for the first time. Almost everything that
+  broke was invisible in test mode.
+
+  **Seats had never been billed at all.** `seats.py` called `item.get("quantity")`
+  on a StripeObject, which raises AttributeError rather than returning a default,
+  inside a function that swallows exceptions on purpose. So the sync failed at
+  its first line every single time and logged it as a Stripe problem. An
+  organization with two members sat at quantity 1 while every call site believed
+  it had synced. Found by comparing a live subscription against its member count.
+  A dict-like object that is not a dict, inside a function designed never to
+  raise, is how a revenue path stays broken without anyone seeing it. `_read()`
+  in `subscriptions.py` now exists so nothing reads a Stripe object any other way.
+
+  **And the seat sync fired on the path almost nobody takes.** It ran on the
+  explicit accept-invite route, but signing in accepts every invite waiting for
+  the address, so by the time the link is revisited the token is spent and that
+  route never runs. Members who joined the ordinary way were free forever.
+
+  **One email owned two companies.** Signing up with Google fired two
+  `POST /users?intent=signup` at once — the auth listener sends one, and the
+  sign-up screen sent another after the popup closed. Both asked whether the
+  person already owned a company, both asked before either had inserted its
+  membership row, both created one. The subscription then attached to whichever
+  the person happened to be standing in, which is how $99 landed on an
+  organization the customer was not looking at. The duplicate call is gone, and
+  a partial unique index on `organization_members (user_id) WHERE role = 'owner'`
+  makes it impossible rather than unlikely.
+
+  **Deleting an account destroyed a paid subscription, silently.** The task
+  cancels the Stripe subscription, deletes the customer and deletes every
+  organization the person solely owns, and refunds nothing. An account deleted
+  four minutes after paying took the whole month with it, with the cancel button
+  unused on the same screen. That is where the $99 went. Deletion is now refused
+  with a 409 while an owned company still pays. Refusing is the only option that
+  moves no money on its own, and it makes the order deliberate. Staff are never
+  blocked, since somebody else's subscription is not theirs to be trapped by.
+
+  **Entitlement answered about the person when asked about a company.**
+  `resolve_entitlement` asks "does any company of yours pay", which is right for
+  an unscoped call and wrong for a scoped one, so an owner of a paying company
+  was told their unpaid second company was entitled — "no plan yet" in the
+  banner, "your subscription is active" in the panel below.
+  `entitlement_for_organization` answers about the company actually named.
+
+  **And `organization_id` on that endpoint was never checked**, so any signed-in
+  person could read any company's subscription status and renewal date by
+  guessing a small integer. Found while testing the fix above.
+
+  **Signing in with no company signed you out.** Authentication had worked
+  perfectly; the missing thing was a company. Ending the session threw away the
+  one part that succeeded and made it look like a rejected login — reported as
+  "can't sign in", which is exactly how it felt. It now goes to sign-up, still
+  signed in. Sign-up in turn stops offering a company to somebody who has one.
+
+  **Removal told nobody.** It deleted the membership, the workspace assignments
+  and the seat correctly, then said nothing, so the person's browser kept
+  showing what it had loaded at sign-in. Narrowing access already sent a socket
+  event; removing entirely did not, so the stronger act was the quieter one.
+
+  **Email was never being delivered, for a reason no code change could fix.**
+  Ten messages requested, ten processed, zero delivered, zero bounced, empty
+  sending IP, nothing in any suppression list. Not the sender identity, not DNS,
+  not credits, not reputation — the account itself was not releasing mail, which
+  has no API and is a support matter. Two real faults were found on the way: the
+  app sent from an address that was not a verified sender, and the SendGrid
+  event webhook had been configured against an endpoint that did not exist, so
+  every delivery event had been posting into a 405 since it was set up. That
+  endpoint exists now (`/api/sendgrid/events`), which is what makes the next
+  failure explain itself instead of being noticed weeks later.
 
 - **2026-08-01 (why mail fails, and the end of the dependency triage):** Added
   `POST /api/sendgrid/events`, SendGrid's event webhook. A 202 from the send API

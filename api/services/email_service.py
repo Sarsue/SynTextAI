@@ -63,22 +63,34 @@ def send_workspace_invite(to_email: str, workspace_name: str, token: str, invite
         from_email=cfg["from_email"],
         to_emails=to_email,
         subject=f"{inviter_name} invited you to join their knowledge base on Syntext",
+        # The link, plainly, and nothing to press.
+        #
+        # A styled anchor here was reported as "this site doesn't support a
+        # secure connection" while the same URL pasted into a browser worked
+        # fine. Mail clients and scanners rewrite button targets through their
+        # own redirectors, and whatever that hop resolved to did not match what
+        # the browser expected. Not worth diagnosing per client: the link is the
+        # thing being delivered, and a link needs no chrome to work.
+        #
+        # No em dashes, per the house style for anything a customer reads.
         html_content=f"""
         <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
             <h2 style="color: #0062b1;">You've been invited</h2>
-            <p>{inviter_name} has invited you to <strong>{workspace_name}</strong> on Syntext — your team's shared knowledge base.</p>
-            <p>Click the button below to accept the invite and join your team.</p>
-            <a href="{invite_url}"
-               style="display: inline-block; background: #0062b1; color: white; padding: 12px 24px;
-                      border-radius: 6px; text-decoration: none; font-weight: 600; margin: 16px 0;">
-                Accept Invite
-            </a>
+            <p>{inviter_name} has invited you to <strong>{workspace_name}</strong> on Syntext, your team's shared knowledge base.</p>
+            <p>Open this link to accept:</p>
+            <p style="word-break: break-all; font-size: 15px;">
+                <a href="{invite_url}" style="color: #0062b1;">{invite_url}</a>
+            </p>
             <p style="color: #888; font-size: 13px;">This invite expires in 7 days.<br>
                If you weren't expecting this, you can ignore it.</p>
-            <p style="color: #888; font-size: 12px;">If the button doesn't work, paste this into your browser:<br>
-               <span style="word-break: break-all;">{invite_url}</span></p>
         </div>
         """,
+        plain_text_content=(
+            f"{inviter_name} has invited you to {workspace_name} on Syntext, "
+            "your team's shared knowledge base.\n\n"
+            f"Open this link to accept:\n{invite_url}\n\n"
+            "This invite expires in 7 days. If you weren't expecting this, you can ignore it.\n"
+        ),
     )
 
     sg = SendGridAPIClient(cfg["api_key"])

@@ -367,6 +367,29 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         break;
                     }
 
+                    // Removed from a company outright.
+                    //
+                    // Say which one, then let go of it. Everything on screen was
+                    // fetched when they signed in and is now refused, so leaving
+                    // it there looks like access survived removal.
+                    //
+                    // Deliberately not a sign-out. Losing one company is not
+                    // losing an account: they may own another or belong to
+                    // several, and clearing the tenant sends them wherever they
+                    // still belong. Somebody with nothing left lands on sign-up,
+                    // still signed in.
+                    case 'removed_from_organization': {
+                        const data: any = parsedMessage.data || {};
+                        const name = data.organization_name || 'that organization';
+                        addToast(
+                            `You no longer have access to ${name}. If that's a mistake, ask whoever manages it.`,
+                            'warning',
+                        );
+                        clearActiveOrganization();
+                        setAccessChangedAt(Date.now());
+                        break;
+                    }
+
                     case 'message_received': {
                         const data: any = parsedMessage.data || {};
                         setIncomingChatMessage({
