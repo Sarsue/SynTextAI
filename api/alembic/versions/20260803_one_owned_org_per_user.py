@@ -31,10 +31,6 @@ INDEX_NAME = "uq_one_owned_organization_per_user"
 def upgrade():
     conn = op.get_bind()
 
-    # Refuse to run rather than pick a winner. Deciding which of somebody's two
-    # organizations survives is a judgement about their data — which holds the
-    # documents, which the subscription is attached to — and a migration is the
-    # wrong place to make it silently.
     duplicates = conn.execute(
         sa.text(
             """
@@ -47,13 +43,64 @@ def upgrade():
         )
     ).fetchall()
 
-    if duplicates:
-        detail = "; ".join(f"user {row[0]} owns organizations {list(row[1])}" for row in duplicates)
-        raise RuntimeError(
-            "Cannot enforce one owned organization per user until existing duplicates are "
-            f"resolved: {detail}. Decide which organization survives (the one holding the "
-            "subscription and the documents), move or delete the other, then re-run."
-        )
+    for user_id, orgs in duplicates:
+        orgs = list(orgs)
+
+        # The keeper is decided by evidence, in the order that matters to the
+        # customer: the company being paid for, then the one holding documents,
+        # then the oldest. Every duplicate this migration exists for came from a
+        # double signup seconds apart, so usually only the first rule fires.
+        keeper = conn.execute(
+            sa.text(
+                """
+                SELECT o.id
+                FROM organizations o
+                LEFT JOIN subscriptions s
+                       ON s.organization_id = o.id
+                      AND lower(s.status) IN ('active', 'trialing')
+                LEFT JOIN workspaces w ON w.organization_id = o.id
+                LEFT JOIN files f ON f.workspace_id = w.id
+                WHERE o.id = ANY(:orgs)
+                GROUP BY o.id, s.id
+                ORDER BY (s.id IS NOT NULL) DESC, count(f.id) DESC, o.id ASC
+                LIMIT 1
+                """
+            ),
+            {"orgs": orgs},
+        ).scalar()
+
+        losers = [o for o in orgs if o != keeper]
+
+        # Never delete an organization holding documents. If one does, this is
+        # not the duplicate-signup case and a migration must not guess: two
+        # companies with real content is a merge, and a merge is somebody's
+        # decision, not a schema change.
+        with_files = conn.execute(
+            sa.text(
+                """
+                SELECT o.id, count(f.id) AS n
+                FROM organizations o
+                LEFT JOIN workspaces w ON w.organization_id = o.id
+                LEFT JOIN files f ON f.workspace_id = w.id
+                WHERE o.id = ANY(:orgs)
+                GROUP BY o.id
+                HAVING count(f.id) > 0
+                """
+            ),
+            {"orgs": losers},
+        ).fetchall()
+
+        if with_files:
+            detail = ", ".join(f"organization {row[0]} holds {row[1]} document(s)" for row in with_files)
+            raise RuntimeError(
+                f"User {user_id} owns organizations {orgs} and more than one holds documents "
+                f"({detail}). Resolve by hand: decide which survives, move the documents, then "
+                "re-run. This migration will not merge companies."
+            )
+
+        for org in losers:
+            conn.execute(sa.text("DELETE FROM organizations WHERE id = :id"), {"id": org})
+            print(f"  removed empty duplicate organization {org} owned by user {user_id}; kept {keeper}")
 
     op.execute(
         sa.text(
