@@ -63,6 +63,12 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         return () => { cancelled = true; };
     }, []);
 
+    // Who still has to pay. Anything that is not a live subscription lands on
+    // the subscribe form, including a status that has not loaded yet, because
+    // the alternative is a screen with no way forward on it.
+    const _status = (subscriptionData?.subscription_status || '').toLowerCase();
+    const needsSubscription = ['', 'none', 'canceled', 'cancelled', 'deleted', 'incomplete_expired', 'unpaid'].includes(_status);
+
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
         const cardElement = elements?.getElement(CardElement);
@@ -322,9 +328,22 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                         </Button>
                     </form>
                 </>
-            ) : subscriptionData?.subscription_status === 'none' ? (
+            ) : needsSubscription ? (
                 // No trial to offer. Access is bought here, or granted by being
                 // invited into an organization that already pays.
+                //
+                // Reached by anyone without a live subscription, whichever way
+                // they got there. A cancelled subscription used to have its own
+                // branch offering a "Subscribe Again" button and nothing else:
+                // no plan picker and, fatally, no CardElement. Pressing it made
+                // handleSubscribe look for a card field that had never been
+                // rendered, and the failure surfaced as "Payment system is
+                // unavailable. Please refresh the page." Refreshing could not
+                // help. Somebody whose plan lapsed was told the product was
+                // broken and given no way to pay.
+                //
+                // Never had a subscription and had one that ended are the same
+                // situation to a customer: no access, and a card to enter.
                 <>
                     <div className="plan-choices">
                         {plans.map((plan) => {
@@ -398,14 +417,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                     )}
                     <Button variant="outline" onClick={handleCancelSubscription} disabled={isRequestPending}>
                         {isRequestPending ? 'Processing...' : 'Cancel Subscription'}
-                    </Button>
-                </>
-            ) : subscriptionData?.subscription_status === 'deleted' || subscriptionData?.subscription_status === 'canceled' ? (
-                // User has canceled or deleted subscription, prompt to subscribe again
-                <>
-                    <p>Your subscription has been deleted or canceled.</p>
-                    <Button onClick={handleSubscribe} disabled={isRequestPending}>
-                        {isRequestPending ? 'Processing...' : 'Subscribe Again'}
                     </Button>
                 </>
             ) : (
