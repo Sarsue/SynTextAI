@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
@@ -252,6 +252,35 @@ async def delete_user(
         user_id = user_data["user_id"]
         user_info = user_data["user_info"]
         user_gc_id = user_info['user_id']
+
+        # A paying company has to be cancelled before its owner can leave.
+        #
+        # Deleting an account cancels the Stripe subscription, deletes the
+        # customer and deletes every organization the person solely owns. None
+        # of that refunds the invoice already charged, so an account deleted
+        # minutes after paying took the whole month with it, silently, with the
+        # cancel button sitting unused on the same screen. That is exactly how
+        # $99 was lost the first time this ran against live Stripe.
+        #
+        # Refusing is the only option here that moves no money on its own. It
+        # also makes the order deliberate: cancel, see what that did, then
+        # delete. Somebody who wants both still gets both, one screen apart.
+        for membership in await store.org_repo.get_memberships(user_id):
+            if membership["role"] != "owner":
+                continue
+            status_str = (
+                await store.org_repo.get_subscription_status(membership["organization_id"])
+                or "none"
+            ).lower()
+            if status_str in {"active", "trialing", "past_due"}:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"{membership['name']} still has a subscription. Cancel it first, "
+                        "then delete your account. Deleting now would end the plan without "
+                        "refunding the period you have already paid for."
+                    ),
+                )
 
         # Trigger Celery task to delete user and associated files
         background_tasks.add_task(delete_user_task, user_id, user_gc_id)
