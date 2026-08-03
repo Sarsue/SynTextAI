@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, Body
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, Body, status
 from fastapi.responses import JSONResponse
 from datetime import datetime
 from typing import Dict, Optional
@@ -8,7 +8,7 @@ import logging
 import os
 from dotenv import load_dotenv
 from ..core.utils import get_user_id
-from ..core.limits import resolve_entitlement
+from ..core.limits import entitlement_for_organization, resolve_entitlement
 from ..core.plans import PLANS, get_plan, plan_for_price_id
 from ..core.seats import seat_summary, sync_seats_to_stripe
 from ..core.permissions import Capability, assert_organization_capability
@@ -145,6 +145,18 @@ async def subscription_status(
         user_id = user_data["user_id"]
         subscription_data = None
         if organization_id is not None:
+            # Belong to it before asking about its billing.
+            #
+            # organization_id came straight off the query string and was used
+            # unchecked, so any signed-in person could read any company's
+            # subscription status and renewal date by guessing a small integer.
+            # Not the card, which is filtered further down, but enough to learn
+            # that a named competitor pays and when they renew.
+            if await store.org_repo.get_role(organization_id, user_id) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not a member of this organization.",
+                )
             row = await store.org_repo.get_subscription_row(organization_id)
             if row and row.get("id"):
                 # Reuse the per-user reader for card details, but only when the
@@ -157,11 +169,20 @@ async def subscription_status(
         else:
             subscription_data = await store.user_repo.get_subscription(user_id)
 
-        # Entitlement is an organization property, not a personal one. A staff
-        # member invited into a paid workspace has no subscription of their own
-        # and must still be treated as entitled, otherwise the frontend sends
-        # them through billing onboarding for an account that already pays.
-        entitlement = await resolve_entitlement(store, user_id)
+        # Answer for the organization when one is named, and only fall back to
+        # the person when none is.
+        #
+        # resolve_entitlement asks "does any company of yours pay", which is the
+        # right question for an unscoped call and the wrong one here: somebody
+        # owning a paying company and an unpaid one was told the unpaid one was
+        # entitled, so its billing page said "no plan yet" above and "your
+        # subscription is active" below. A staff member invited into a paid
+        # company is still covered, because entitlement now comes from that
+        # company's own subscription rather than from anything they hold.
+        if organization_id is not None:
+            entitlement = await entitlement_for_organization(store, user_id, organization_id)
+        else:
+            entitlement = await resolve_entitlement(store, user_id)
 
         if not subscription_data:
             return {

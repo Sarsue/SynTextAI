@@ -112,6 +112,40 @@ async def resolve_entitlement(store: RepositoryManager, user_id: int) -> Dict[st
     }
 
 
+async def entitlement_for_organization(
+    store: RepositoryManager, user_id: int, organization_id: int
+) -> Dict[str, Any]:
+    """What this one organization is entitled to, and what this user is in it.
+
+    resolve_entitlement answers a question about a person: is there any company
+    of theirs that pays. That is the right question when no organization is
+    named, and the wrong one when one is. Somebody who owns a paying company and
+    a second unpaid one was told the unpaid one was entitled, because they
+    themselves were — so its billing page said "no plan yet" in the banner and
+    "your subscription is active" in the panel below.
+
+    Membership is not checked here; the caller has already established the user
+    may see this organization.
+    """
+    status_str = await store.org_repo.get_subscription_status(organization_id)
+    role = await store.org_repo.get_role(organization_id, user_id)
+    entitled = _is_premium_plan(status_str)
+
+    return {
+        "entitled": entitled,
+        # Whose money it is: yours when you own this company, the company's when
+        # you were invited into it.
+        "source": ("own" if role == "owner" else "organization") if entitled else None,
+        "organization_id": organization_id,
+        "role": role,
+        "status": status_str,
+        "is_org_owner": role == "owner",
+        # A pure invitee here, whatever they may own elsewhere. Billing belongs
+        # to this company's owner, and they must never be asked to fix it.
+        "is_member_only": role not in ("owner", "admin"),
+    }
+
+
 async def _organization_for_workspace(
     store: RepositoryManager, workspace_id: Optional[int]
 ) -> Optional[int]:
