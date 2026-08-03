@@ -17,19 +17,15 @@ export default defineConfig({
     outDir: 'build',
   },
   server: {
-    // Overridable so a dev server can run beside the Docker stack rather than
-    // instead of it: the container already holds port 3000 and serves the API
-    // on it, so the automated sign-in harness runs Vite on 5173 and proxies to
-    // the container. Defaults are unchanged for anyone running the API alone.
-    port: Number(process.env.VITE_DEV_PORT ?? 3000),
+    port: 3000,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_TARGET ?? 'http://localhost:5000',
+        target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false,
       },
       '/ws': {
-        target: (process.env.VITE_API_TARGET ?? 'http://localhost:5000').replace(/^http/, 'ws'),
+        target: 'ws://localhost:5000',
         ws: true,
         changeOrigin: true,
       },
