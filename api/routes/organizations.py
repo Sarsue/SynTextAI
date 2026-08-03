@@ -422,6 +422,17 @@ async def remove_organization_member(
             detail="You cannot remove yourself. Delete the account instead.",
         )
 
+    # Read the name while they are still a member of it, so the message they
+    # get can say which company they have lost rather than "access changed".
+    organization_name = next(
+        (
+            m["name"]
+            for m in await store.org_repo.get_memberships(member_user_id)
+            if m["organization_id"] == organization_id
+        ),
+        "the organization",
+    )
+
     removed = await store.org_repo.remove_member(organization_id, member_user_id)
     if not removed:
         raise HTTPException(
@@ -432,4 +443,35 @@ async def remove_organization_member(
     # Their seat stops being charged immediately rather than at renewal.
     await sync_seats_to_stripe(store, organization_id, reason="member removed from organization")
 
-    return {"message": "Member removed", "user_id": member_user_id}
+    # Tell them they are out.
+    #
+    # Narrowing somebody's access sent this; removing them entirely did not, so
+    # the stronger act was the quieter one. The rows were gone and every new
+    # request would have been refused, but their browser holds the workspace,
+    # document and conversation lists it fetched at sign-in, and nothing asked
+    # it to look again. To the owner who had just removed them, and to the
+    # person still looking at the screen, that reads as access surviving
+    # removal.
+    #
+    # The client re-resolves the organization on this event, which now refuses
+    # them, so it clears the tenant and sends them wherever they belong next.
+    # Its own event, not access_changed. Being removed is a different thing
+    # from having your reach narrowed, and it needs a different sentence: the
+    # client can say which company is gone instead of quietly re-resolving and
+    # leaving somebody to work out why the screen changed.
+    try:
+        await websocket_manager.send_message(
+            str(member_user_id),
+            "removed_from_organization",
+            {"organization_id": organization_id, "organization_name": organization_name},
+        )
+    except Exception as e:
+        # Removal has already happened and is already enforced server side.
+        # Their next load picks it up regardless.
+        logger.warning(f"Could not notify user {member_user_id} of removal: {e}")
+
+    return {
+        "message": "Member removed",
+        "user_id": member_user_id,
+        "organization_name": organization_name,
+    }

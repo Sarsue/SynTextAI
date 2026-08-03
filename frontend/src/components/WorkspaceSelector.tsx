@@ -429,7 +429,10 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 { method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` } },
             );
             if (res.ok) {
-                addToast(`${email} removed`, 'success');
+                // Names the outcome, not the click. "Removed" alone leaves the
+                // owner wondering whether it took effect now or at renewal,
+                // which is the question they had when they opened the dialog.
+                addToast(`${email} removed. They no longer have access.`, 'success');
                 await fetchOrgMembers();
                 if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
