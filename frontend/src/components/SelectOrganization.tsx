@@ -27,7 +27,6 @@ const SelectOrganization: React.FC = () => {
     const navigate = useNavigate();
     const { user, darkMode, setActiveOrganization } = useUserContext();
     const [orgs, setOrgs] = useState<OrganizationSummary[] | null>(null);
-    const [error, setError] = useState<string | null>(null);
 
     // Signing out is the only honest exit from here.
     //
@@ -61,21 +60,28 @@ const SelectOrganization: React.FC = () => {
                 const items: OrganizationSummary[] = data.items || [];
                 if (cancelled) return;
 
-                // Only ask when there is a genuine choice to make.
-                if (items.length === 1) {
+                // You sign in to a company. How many you belong to decides the
+                // whole screen, and there are only three answers.
+                //
+                //   none   not a customer yet. Sign up, which creates one.
+                //   one    no choice to make. Enter it and say nothing.
+                //   many   ask.
+                //
+                // None used to sign the person out and drop them on the front
+                // page. Authentication was never the problem — they are signed
+                // in perfectly well — so ending the session threw away the one
+                // thing that had worked and made a missing company look like a
+                // rejected login. It was reported as "can't sign in", which is
+                // exactly how it felt. Sign-up takes the account already in
+                // hand, so there is no second Google round trip.
+                if (items.length === 0) {
+                    navigate('/signup', { replace: true });
+                } else if (items.length === 1) {
                     await setActiveOrganization(items[0].organization_id);
                     navigate('/chat', { replace: true });
-                    return;
+                } else {
+                    setOrgs(items);
                 }
-                if (items.length === 0) {
-                    // A real state now that signing in never creates anything:
-                    // somebody signed in who has not signed up and holds no
-                    // invitation. Send them out to the front page, where the
-                    // choice between signing up and asking for a demo lives.
-                    await leave('Sign up to start an organization, or ask the person who invited you to send the link again.');
-                    return;
-                }
-                setOrgs(items);
             } catch (e) {
                 if (cancelled) return;
                 // Most often a deleted account: the session is still valid but
@@ -94,17 +100,10 @@ const SelectOrganization: React.FC = () => {
         navigate('/chat', { replace: true });
     };
 
-    if (error) {
-        return (
-            <div className={`select-org ${darkMode ? 'dark-mode' : ''}`} style={styles.wrap}>
-                <p style={styles.error}>{error}</p>
-                <Button variant="outline" onClick={() => leave()}>
-                    Sign out
-                </Button>
-            </div>
-        );
-    }
-
+    // No error branch. Nothing ever set it: a failed load signs the person out
+    // through leave(), because the only way this request fails for a signed-in
+    // account is that the account behind it is gone, and no button on this
+    // screen can recover from that.
     if (!orgs) {
         return (
             <div style={styles.wrap}>
