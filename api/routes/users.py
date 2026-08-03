@@ -73,14 +73,40 @@ async def get_firebase_user_info_from_token(authorization: str = Header(None)):
 
 
 # Route to create a new user
+async def _owned_organization_id(store: RepositoryManager, user_id: int):
+    """The organization this person owns, if any."""
+    memberships = await store.org_repo.get_memberships(user_id)
+    owned = next((m for m in memberships if m["role"] == "owner"), None)
+    return owned["organization_id"] if owned else None
+
+
 async def _start_organization(store: RepositoryManager, user_id: int, email: str):
-    """Create an organization owned by this user, with a first workspace."""
+    """Create the organization this user owns, or return the one they have.
+
+    Idempotent under concurrency, which matters because signing up used to fire
+    two of these at once and each created a company. The check below closes the
+    common case; the partial unique index on organization_members closes the
+    race, and reaching it means another request won, so its organization is the
+    answer.
+    """
+    existing = await _owned_organization_id(store, user_id)
+    if existing:
+        logger.info(f"{email} already owns organization {existing}")
+        return existing
+
     org_label = (email.split("@")[0] or "My").strip()
     organization_id = await store.org_repo.create_organization(
         name=f"{org_label}'s Organization",
         owner_user_id=user_id,
     )
     if not organization_id:
+        # Either a real failure or the index refusing a second organization for
+        # somebody who already has one. Ask again: if a concurrent request just
+        # created it, that is the organization to use, and nothing went wrong.
+        raced = await _owned_organization_id(store, user_id)
+        if raced:
+            logger.info(f"{email} owns organization {raced}, created concurrently")
+            return raced
         logger.error(f"Failed to create organization for user {user_id}")
         return None
     await store.workspace_repo.create_workspace(
@@ -142,13 +168,9 @@ async def create_user(
 
         organization_id = None
         if wants_own_organization:
-            memberships = await store.org_repo.get_memberships(existing_user_id)
-            owned = next((m for m in memberships if m["role"] == "owner"), None)
-            if owned:
-                organization_id = owned["organization_id"]
-                logger.info(f"POST /users: {email} already owns organization {organization_id}")
-            else:
-                organization_id = await _start_organization(store, existing_user_id, email)
+            # _start_organization answers both cases: it returns the one they
+            # already own, and is safe to call twice at once.
+            organization_id = await _start_organization(store, existing_user_id, email)
 
         return JSONResponse(
             content={

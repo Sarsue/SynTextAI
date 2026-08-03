@@ -48,9 +48,14 @@ const SignUp: React.FC = () => {
     }, []);
 
     const finish = useCallback(async (organizationId: number | null) => {
-        if (organizationId) {
-            await setActiveOrganization(organizationId);
+        if (!organizationId) {
+            // The organization was created by the auth listener, so its id is
+            // not in hand here. The chooser resolves it, and forwards silently
+            // when there is only one, which after signing up there is.
+            navigate('/select-organization', { replace: true });
+            return;
         }
+        await setActiveOrganization(organizationId);
         await fetchSubscriptionStatus();
         // Straight to billing: an organization with no subscription is entitled
         // to nothing, so landing in the app would only show a locked one.
@@ -74,18 +79,31 @@ const SignUp: React.FC = () => {
     const signUpWithGoogle = useCallback(async () => {
         setIsWorking(true);
         try {
-            // Read by the auth listener, which registers the account before
-            // this component gets another turn.
+            // The auth listener does the registering, reading this intent when
+            // Firebase reports the account.
+            //
+            // It used to POST here as well, immediately after the popup closed,
+            // so one click sent two signup requests at once. Each asked whether
+            // this person already owned an organization, both asked before
+            // either had inserted its membership row, and both created one. Two
+            // companies from a single sign-up, with the subscription landing on
+            // whichever the person happened to be standing in afterwards.
+            //
+            // The database refuses a second owned organization now, so this is
+            // no longer the thing holding the rule up. It is still one request
+            // rather than two, because the second never did anything the first
+            // was not already doing.
             sessionStorage.setItem('auth_intent', 'signup');
             await signInWithPopup(getAuth(), new GoogleAuthProvider());
-            const data = await startOrganization();
-            await finish(data?.organization_id ?? null);
+            // The listener resolves the organization; entering it and landing
+            // on billing is the same as for somebody already signed in.
+            await finish(null);
         } catch (e) {
             addToast(e instanceof Error ? e.message : 'Could not sign up', 'error');
         } finally {
             setIsWorking(false);
         }
-    }, [startOrganization, finish, addToast]);
+    }, [finish, addToast]);
 
     return (
         <div className={`auth-page ${darkMode ? 'dark-mode' : ''}`}>
