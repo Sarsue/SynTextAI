@@ -344,7 +344,10 @@ for it.
 5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
 6. ~~Triage the 34 Dependabot vulnerabilities~~ — **triaged 2026-07-29**, see "Known gaps" above.
 
-**Tier 1 — cheap, closes an existing gap:**
+**Tier 1 — cheap, closes an existing gap. Closed 2026-08-03.** All three items
+below are done. The efficiency backlog that follows is a separate list and is
+*not* closed: items 18-22 remain genuinely open.
+
 7. ~~Wire `TextProcessor` into the factory for `.txt`/`.md`~~ — **closed 2026-07-29.** Rewrote it, the old version was incompatible with the current codebase, not just unverified.
 8. ~~Demo workspace~~ — **not needed.** Osas already has a real test customer for demos instead of a synthetic one.
 9. ~~Clean up orphaned EdTech generator functions in `tasks.py`~~ — **closed 2026-07-29.**
@@ -379,62 +382,73 @@ Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-
 
 **Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
 
-**1. Onboarding that makes membership legible from the first screen (raised
-2026-08-03).**
+**1. The agentic platform. The Tier 2 initiative (direction set 2026-08-03).**
 
-Sign-up should ask for the company name and take payment as one flow starting at
-the home page. Today it creates a company named after the email prefix, then
-sends the person to settings to pay, so the two halves of becoming a customer
-happen on different screens with a redirect between them, and the name is
-something they discover rather than choose.
+Tier 2 is one thing: an agent that uses tools and skills, running open models we
+serve ourselves, with the DigitalOcean endpoint gone. Not a cost optimisation
+that happens to involve models. The product stops being "ask a question about
+your documents, get a cited answer" and becomes "give it something to do".
 
-The deeper reason is that joining and starting are still easy to confuse.
-Somebody sent an invite link ended up creating their own company alongside the
-one they were invited to, because every route through a signed-in state with no
-organization leads to sign-up. The screens now say which is which (see "Recent
-changes", 2026-08-03), and the database refuses a second owned company, so this
-is no longer a correctness problem. It is a clarity problem, which is why it is
-Tier 2 rather than Tier 0.
+This was previously written up as a self-hosted model platform gated on hosted
+inference passing $500-1,000/month. That framing was wrong about the reason.
+Waiting for a cost threshold made sense for a migration whose only payoff was a
+cheaper bill; it makes no sense for the thing the product is meant to become.
+The phases below survive intact, because they were always the right sequence.
+Only the trigger changed: it is a decision now, not a threshold.
 
-Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
-means accept, sign in, and land in the company that invited you, never being
-offered one of your own; an owner can remove a member; a member can delete their
-account freely; an owner must cancel the subscription before deleting theirs.
+**What agentic means here, concretely.** A tool is something the model can call:
+search these documents, read this page, list the workspaces, draft this. A skill
+is a named procedure over tools that a customer recognises as their own work,
+which is where the vertical focus pays: "check this invoice against the contract"
+for accounting, "find every clause about termination" for legal. Orchestration is
+the model deciding which to use and in what order, then composing a cited answer.
 
-Everything except the first is built, including role and reach chosen at invite
-time (2026-08-03). What remains is the sign-up screen itself: naming the company
-and paying for it as one flow from the home page, instead of a company named
-after the email prefix followed by a redirect to settings.
+**The job queue is not part of that, and must not be absorbed into it.** This is
+the one boundary to hold. The worker's tenant scoping, per-user fairness, lease
+reclaim and separated query/ingest budgets exist because a naive loop got all of
+them wrong, and they were paid for in real bugs. An agent harness knows none of
+it. The whole agent loop — many tool calls, several model round trips — runs
+*inside* a single queued job. The model decides what to do; the queue still
+decides when it runs and on whose behalf. Model orchestration and job
+orchestration are different words that happen to share a verb.
 
-Worth doing before real marketing spend, not before the next deploy: the current
-flow works and is honest, it just asks a customer to understand more than it
-should.
+**Why open models are load-bearing rather than incidental.** Agent loops make
+many more model calls than a single Q&A, so hosted per-token pricing scales
+badly with exactly the behaviour we are adding. Tool calling also wants a model
+chosen for it rather than whatever an endpoint offers. And on-prem, which is what
+closes HIPAA and privilege-sensitive deals, is impossible while inference leaves
+the building. Serving our own models is the enabling step, which is why phase 1
+comes first.
 
-**2. Self-hosted model platform (agreed 2026-07-30). The Tier 2 initiative.**
+**Still true, and still the gate on quality:** the 20-question citation benchmark
+below. An agent that calls five tools and cites the wrong page is worse than a
+single retrieval that cites the right one. Capture the baseline against the
+hosted endpoint before any of this starts.
+
+**2. Serving our own models: the three phases (agreed 2026-07-30, reframed
+2026-08-03 as the delivery path for the agentic platform above).**
 
 What were tracked separately as a knowledge layer, self-hosting and vision
 extraction are one migration: move the model work onto hardware we own, then
 spend the now-cheap inference on capabilities that were previously unaffordable.
 Sequenced, because each phase depends on the one before it.
 
-**Do nothing yet, and know exactly what would change that.** A serverless-GPU
-proposal was weighed on 2026-07-30 and declined, not because self-hosting is
-urgent but because we already satisfy its core advice: chat runs on DigitalOcean's
-hosted endpoint and embeddings on Voyage, so GPU spend is already zero and already
-scales to nothing when idle. Moving to serverless GPU would swap one hosted setup
-for another and buy a migration for no gain. Two specifics also disqualified it:
-cold starts of 30-120s are acceptable for background ingestion but fatal for
-interactive chat, and its single synchronous `/ask` endpoint would discard the job
-queue, per-tenant fairness and progress updates built on 2026-07-29.
+**These thresholds are no longer the trigger, and are kept as instrumentation.**
+Phase 1 used to wait for hosted inference to pass $500-1,000/month, for vision
+pricing to make ingestion uneconomic, for a customer to demand on-prem, or for
+latency to become a complaint. That was the right test for a migration whose
+only payoff was a cheaper bill. It is the wrong test for the platform the
+product is being built on, so the work starts when it is scheduled rather than
+when a bill crosses a line. Watch the numbers anyway: they say how urgent it is
+and they are the argument for the on-prem edition when a customer asks.
 
-Start phase 1 when any of these becomes true, and not before:
-
-- Hosted inference consistently exceeds roughly $500-1,000/month.
-- Vision extraction (phase 2) is wanted and per-page hosted vision pricing makes
-  ingestion uneconomic. Measure this rather than assuming it.
-- A customer requires on-prem, at which point this stops being a cost decision
-  and becomes a sales one.
-- Latency or provider reliability becomes a product complaint.
+**Serverless GPU was weighed on 2026-07-30 and declined; that still holds, and
+matters more now.** Cold starts of 30-120s are tolerable for background
+ingestion and fatal for interactive chat, and its single synchronous `/ask`
+endpoint would discard the job queue, per-tenant fairness and progress updates.
+An agent loop makes that worse rather than better: many model round trips per
+job, each paying the same tax. Own the box, or keep a hosted endpoint until you
+do, but do not route an agent through cold starts.
 
 **Phase 1 — Serve our own models.** `gradient_chat` posts OpenAI-shaped payloads
 to `{INFERENCE_BASE_URL}/chat/completions`, and embeddings to
@@ -572,6 +586,37 @@ is not.
 on the same GPU, but video and audio ingestion was deliberately removed on
 2026-07-29 and named the largest cost sink. Owning a GPU is not a reason to bring
 it back.
+
+**3. Onboarding that makes membership legible from the first screen (raised
+2026-08-03, demoted below the agentic platform 2026-08-03).**
+
+Sign-up should ask for the company name and take payment as one flow starting at
+the home page. Today it creates a company named after the email prefix, then
+sends the person to settings to pay, so the two halves of becoming a customer
+happen on different screens with a redirect between them, and the name is
+something they discover rather than choose.
+
+The deeper reason is that joining and starting are still easy to confuse.
+Somebody sent an invite link ended up creating their own company alongside the
+one they were invited to, because every route through a signed-in state with no
+organization leads to sign-up. The screens now say which is which (see "Recent
+changes", 2026-08-03), and the database refuses a second owned company, so this
+is no longer a correctness problem. It is a clarity problem, which is why it is
+Tier 2 rather than Tier 0.
+
+Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
+means accept, sign in, and land in the company that invited you, never being
+offered one of your own; an owner can remove a member; a member can delete their
+account freely; an owner must cancel the subscription before deleting theirs.
+
+Everything except the first is built, including role and reach chosen at invite
+time (2026-08-03). What remains is the sign-up screen itself: naming the company
+and paying for it as one flow from the home page, instead of a company named
+after the email prefix followed by a redirect to settings.
+
+Worth doing before real marketing spend, not before the next deploy: the current
+flow works and is honest, it just asks a customer to understand more than it
+should.
 
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
