@@ -1,61 +1,60 @@
 # The citation benchmark.
 #
-# This is the gate on every change to retrieval, the agent loop, and the model.
-# Nothing about how answers are produced ships without running this first.
+# The gate on every change to retrieval, the agent loop, and the model. Nothing
+# about how answers are produced ships without running this first.
 #
-# WHAT IT MEASURES, IN ORDER OF IMPORTANCE
+# WHAT IT MEASURES, IN ORDER
 #
 #   1. Did it cite the right pages?     <- the product
 #   2. Did it say the right thing?      <- secondary
 #
-# That order is deliberate. A prettier answer citing the wrong page is a
-# regression, not an improvement. An accountant who follows a citation to page
-# 18 and finds nothing there stops trusting every other answer we have given
-# them.
+# A prettier answer citing the wrong page is a regression. An accountant who
+# follows a citation to page 15 and finds nothing there stops trusting every
+# answer we ever gave them.
 #
-# THE CORPUS
+# THE CORPUS, AND HOW TO GET IT
 #
-# Five public US small-business documents, chosen because they match the
-# customers we sell to and because no public benchmark contains them, so a model
-# cannot have memorised the answers:
+# Five public US federal small-business documents. Public so a run is
+# reproducible, and absent from published benchmarks, so a model cannot have
+# memorised the answers. Upload all five into one workspace before running.
 #
-#   irs_publication_583_starting_a_business.pdf
-#   irs_publication_334_tax_guide_small_business.pdf
-#   osha_small_business_handbook.pdf
-#   sba_business_plan_guide.pdf
-#   eeoc_small_business_facts.pdf
+#   irs_publication_583_starting_a_business.pdf        28pp
+#     https://www.irs.gov/pub/irs-pdf/p583.pdf
+#   irs_publication_334_tax_guide_small_business.pdf   57pp
+#     https://www.irs.gov/pub/irs-pdf/p334.pdf
+#   osha_small_business_handbook.pdf                   98pp
+#     https://www.osha.gov/sites/default/files/publications/SMALL-BUSINESS.pdf
+#   sba_business_planning_guide.pdf                    24pp
+#     https://legacy.sba.gov/sites/default/files/2020-05/SD-SBDC-Business-Planning-Guide-R-3_2015_0.pdf
+#   ada_guide_small_business.pdf                       20pp
+#     https://archive.ada.gov/smbusgd.pdf
 #
-# Upload all five into one workspace before running. The runner asks each
-# question against that workspace and scores what comes back.
+# EVERY PAGE HERE WAS VERIFIED, NOT ASSUMED (2026-08-04)
+#
+# The first draft of this file guessed page numbers. Checked against the real
+# PDFs, almost every one was wrong, and two documents named did not exist at
+# all. Worse, the guesses were plausible: "how long do I keep tax records" was
+# pointed at a page whose "3 years" refers to reporting self-employment income
+# to the SSA, not to record retention. The retention table is on page 15. A
+# benchmark wrong about its own corpus reports broken retrieval when retrieval
+# is fine, which is worse than having none.
+#
+# Pages below are PDF pages, one-indexed, as a citation resolves them. They do
+# not match the numbers printed in the footers, which sit several behind.
+#
+# When adding a question: find the answer in the PDF first, then write the
+# question. Never the other way round.
 #
 # FIELDS
 #
-#   id               stable, never reused. Results are tracked against it.
-#   question         what the user types, phrased the lazy way people ask
-#   citations        list of acceptable sources. Each entry is one file and the
-#                    pages a correct citation may point at. More than one entry
-#                    means the answer must draw on more than one place.
-#   must_include     short factual strings that must appear in the answer.
-#                    A number, a name, a term. Not a whole sentence.
-#   must_not_include optional. A known wrong answer, such as a superseded
-#                    figure or the adjacent row of a table.
-#   must_be_refusal  optional, true when the honest answer is "the documents do
-#                    not say". citations and must_include are then ignored.
-#   notes            why this question is here.
-#
-# PAGE NUMBERS ARE THE PDF PAGE, NOT THE PRINTED ONE
-#
-# Government publications usually have a cover and contents pages, so the number
-# printed in the footer is several behind the page the citation resolves to.
-# Verify each one against the uploaded file before trusting a failure: a
-# benchmark that is wrong about pages reports broken retrieval when retrieval is
-# fine, which is worse than having no benchmark.
-#
-# RUNNING IT
-#
-# Capture the baseline against the current pipeline BEFORE changing anything.
-# Every later comparison is measured against that first run, so a missing
-# baseline makes the whole exercise a matter of opinion.
+#   id               stable, never reused
+#   question         what a user types, phrased the lazy way people ask
+#   citations        acceptable sources; each entry one file and its pages.
+#                    Two entries means the answer needs both documents.
+#   must_include     short factual strings that must appear. A number, a term.
+#   must_not_include optional. A known wrong answer or a near-miss distractor.
+#   must_be_refusal  optional; the honest answer is "the documents do not say".
+#   notes            why this question is here, and what it is guarding.
 
 questions:
   #
@@ -66,282 +65,252 @@ questions:
     question: "how long do i keep tax records"
     citations:
       - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [18]
-    must_include:
-      - "3 years"
+        pages: [15]
+    must_include: ["3 years"]
+    must_not_include: ["3 months"]
     notes: >
-      Straightforward factual lookup.
+      The retention table. Page 7 also says "3 years" but about reporting
+      self-employment income to the SSA, so this is a distractor test as much
+      as a lookup: must_not_include catches an answer built from that page.
 
   - id: 2
-    question: "what business records should i keep"
+    question: "why do i need to keep business records"
     citations:
       - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4, 5]
-    must_include:
-      - "income"
-      - "expenses"
-      - "records"
+        pages: [11]
+    must_include: ["records"]
     notes: >
-      Cross-page retrieval.
+      Answer sits under a heading phrased differently from the question.
 
   - id: 3
-    question: "what is an imminent danger"
+    question: "what accounting method should i use"
+    citations:
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [5]
+    must_include: ["cash", "accrual"]
+    notes: >
+      Two named methods on one page.
+
+  - id: 4
+    question: "how do i check my workplace for hazards"
     citations:
       - file: "osha_small_business_handbook.pdf"
         pages: [8]
-    must_include:
-      - "death"
-      - "serious physical harm"
+    must_include: ["self-inspection"]
     notes: >
-      Definition lookup.
-
-  - id: 4
-    question: "how often should i inspect my workplace"
-    citations:
-      - file: "osha_small_business_handbook.pdf"
-        pages: [11]
-    must_include:
-      - "regular"
-      - "inspection"
-    notes: >
-      Typical safety question.
+      The document's own term is "self-inspection", which the question avoids.
+      Fails if retrieval only does keyword overlap.
 
   - id: 5
     question: "cash or accrual accounting whats the difference"
     citations:
       - file: "irs_publication_334_tax_guide_small_business.pdf"
-        pages: [13, 14]
-    must_include:
-      - "cash"
-      - "accrual"
+        pages: [14]
+    must_include: ["cash method", "accrual"]
     notes: >
-      Accounting concepts spanning pages.
+      Same concept as id 3 in a different document. Both are correct sources;
+      this checks the right one is cited when the question names neither.
 
   - id: 6
     question: "can i deduct business travel"
     citations:
       - file: "irs_publication_334_tax_guide_small_business.pdf"
-        pages: [27]
-    must_include:
-      - "travel"
+        pages: [34]
+    must_include: ["transportation"]
     notes: >
-      Financial deduction lookup.
+      "travel" appears on six pages; only this one carries the deduction rules.
 
   - id: 7
     question: "what goes in an executive summary"
     citations:
-      - file: "sba_business_plan_guide.pdf"
-        pages: [3]
-    must_include:
-      - "executive summary"
+      - file: "sba_business_planning_guide.pdf"
+        pages: [4]
+    must_include: ["executive summary"]
     notes: >
-      Planning document retrieval.
+      Plain lookup.
 
   - id: 8
     question: "how do i describe my target market"
     citations:
-      - file: "sba_business_plan_guide.pdf"
-        pages: [7, 8]
-    must_include:
-      - "target market"
+      - file: "sba_business_planning_guide.pdf"
+        pages: [14]
+    must_include: ["target market"]
     notes: >
-      Multi-page planning answer.
+      Page 4 mentions target market in a contents-style pointer that literally
+      says "See Details on Pages 14 and 15". Citing page 4 is the near-miss.
 
   - id: 9
-    question: "can i discriminate because of age"
+    question: "do i have to make my shop wheelchair accessible"
     citations:
-      - file: "eeoc_small_business_facts.pdf"
-        pages: [2]
-    must_include:
-      - "age"
+      - file: "ada_guide_small_business.pdf"
+        pages: [6]
+    must_include: ["readily achievable"]
     notes: >
-      Employment law lookup.
+      The legal test is a term of art the question does not use.
 
   - id: 10
-    question: "who investigates discrimination complaints"
+    question: "how many employees before ada employment rules apply"
     citations:
-      - file: "eeoc_small_business_facts.pdf"
-        pages: [1]
-    must_include:
-      - "EEOC"
+      - file: "ada_guide_small_business.pdf"
+        pages: [19]
+    must_include: ["15 or more"]
     notes: >
-      Agency identification.
+      A number stated once, in a resources section rather than the main body.
+
+  #
+  # ---------- Numeric and table-heavy ----------
+  #
+
+  - id: 11
+    question: "how long do i have to report a workplace death"
+    citations:
+      - file: "osha_small_business_handbook.pdf"
+        pages: [15]
+    must_include: ["8 hours"]
+    must_not_include: ["24 hours"]
+    notes: >
+      Deaths are 8 hours, hospitalisations 24, and both sit in the same
+      sentence. The classic adjacent-value error.
+
+  - id: 12
+    question: "when do i report an amputation to osha"
+    citations:
+      - file: "osha_small_business_handbook.pdf"
+        pages: [15]
+    must_include: ["24 hours"]
+    must_not_include: ["8 hours"]
+    notes: >
+      The same sentence read the other way round. Passing one of 11 or 12 while
+      failing the other means the model is pattern-matching, not reading.
+
+  - id: 13
+    question: "am i exempt from injury recordkeeping"
+    citations:
+      - file: "osha_small_business_handbook.pdf"
+        pages: [14]
+    must_include: ["partially exempt"]
+    notes: >
+      The document says partially exempt, never fully. An answer claiming a
+      full exemption is wrong in a way that matters to a customer.
+
+  - id: 14
+    question: "how long do i keep injury records"
+    citations:
+      - file: "osha_small_business_handbook.pdf"
+        pages: [15]
+    must_include: ["five years"]
+    must_not_include: ["3 years"]
+    notes: >
+      Retention appears in two documents with different answers, five years
+      here and three in IRS 583. Tests that the right regime is cited.
 
   #
   # ---------- Multi-document synthesis ----------
   #
 
-  - id: 11
-    question: "what records do i keep and how long"
-    citations:
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4, 5]
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [18]
-    must_include:
-      - "income"
-      - "expenses"
-      - "3 years"
-    notes: >
-      Retrieval must combine record types with retention guidance.
-
-  - id: 12
-    question: "how do i start a business and keep my taxes organized"
-    citations:
-      - file: "sba_business_plan_guide.pdf"
-        pages: [3, 4]
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4, 5]
-    must_include:
-      - "business plan"
-      - "records"
-    notes: >
-      Requires synthesis across planning and tax documents.
-
-  - id: 13
-    question: "how do i keep employees safe and avoid discrimination"
-    citations:
-      - file: "osha_small_business_handbook.pdf"
-        pages: [8, 11]
-      - file: "eeoc_small_business_facts.pdf"
-        pages: [1, 2]
-    must_include:
-      - "hazard"
-      - "EEOC"
-    notes: >
-      Multi-document HR question.
-
-  - id: 14
-    question: "what should i plan before opening my business and what tax records should i keep"
-    citations:
-      - file: "sba_business_plan_guide.pdf"
-        pages: [3]
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4]
-    must_include:
-      - "executive summary"
-      - "records"
-    notes: >
-      Common startup workflow.
-
   - id: 15
-    question: "how do i hire people legally"
+    question: "what records do i keep for tax and for injuries and for how long"
     citations:
-      - file: "eeoc_small_business_facts.pdf"
-        pages: [2]
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [15]
       - file: "osha_small_business_handbook.pdf"
-        pages: [8]
-    must_include:
-      - "discrimination"
-      - "safe"
+        pages: [15]
+    must_include: ["3 years", "five years"]
     notes: >
-      Employment plus workplace safety.
-
-  #
-  # ---------- Numeric / table-heavy ----------
-  #
+      Two regimes, two documents, two different retention periods. The failure
+      to watch for is collapsing both into one number.
 
   - id: 16
-    question: "how long do i have to report a workplace death"
+    question: "how do i start a business and keep my taxes organized"
     citations:
-      - file: "osha_small_business_handbook.pdf"
-        pages: [22]
-    must_include:
-      - "8 hours"
+      - file: "sba_business_planning_guide.pdf"
+        pages: [4]
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [11]
+    must_include: ["executive summary", "records"]
     notes: >
-      Numeric answer.
+      Planning plus recordkeeping.
 
   - id: 17
-    question: "how many employees are exempt from some recordkeeping rules"
+    question: "what do i need to do to keep employees safe and my premises accessible"
     citations:
       - file: "osha_small_business_handbook.pdf"
-        pages: [18]
-    must_include:
-      - "10"
+        pages: [8]
+      - file: "ada_guide_small_business.pdf"
+        pages: [6]
+    must_include: ["self-inspection", "readily achievable"]
     notes: >
-      Numeric retrieval.
-
-  #
-  # ---------- Refusal tests ----------
-  #
+      Two unrelated compliance regimes in one question.
 
   - id: 18
-    question: "how many paid vacation days do employees get"
-    must_be_refusal: true
+    question: "how do i write a business plan and set up accounting"
+    citations:
+      - file: "sba_business_planning_guide.pdf"
+        pages: [4, 14]
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [5]
+    must_include: ["executive summary", "target market", "accrual"]
     notes: >
-      None of the documents define vacation entitlements.
+      Three facts across two documents and three pages. The hardest grounded
+      question here, and the one most likely to lose a citation quietly.
 
   - id: 19
-    question: "what is the canadian gst rate"
-    must_be_refusal: true
+    question: "what should i track for taxes and for travel expenses"
+    citations:
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [11]
+      - file: "irs_publication_334_tax_guide_small_business.pdf"
+        pages: [34]
+    must_include: ["records", "transportation"]
     notes: >
-      Corpus is US small-business guidance.
+      Two IRS documents that overlap heavily. Tests picking the specific one.
 
   - id: 20
-    question: "does this explain how to register a trademark"
-    must_be_refusal: true
+    question: "do i need an ein and what accounting method comes with it"
+    citations:
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [4, 5]
+    must_include: ["employer identification number", "cash"]
     notes: >
-      Outside corpus scope.
+      Two facts, one document, adjacent pages.
 
   - id: 21
-    question: "what health insurance plan should i buy"
-    must_be_refusal: true
+    question: "what forms do i keep for injuries and how long do i keep them"
+    citations:
+      - file: "osha_small_business_handbook.pdf"
+        pages: [14, 15]
+    must_include: ["OSHA 300", "five years"]
     notes: >
-      Requires advice not present in the documents.
+      Cross-page within one document, where the form name and the retention
+      period are separated.
 
   #
-  # ---------- Cross-document consistency ----------
+  # ---------- Refusals ----------
   #
 
   - id: 22
-    question: "what should i do first before opening my company"
-    citations:
-      - file: "sba_business_plan_guide.pdf"
-        pages: [3]
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4]
-    must_include:
-      - "business plan"
-      - "records"
+    question: "how many paid vacation days do employees get"
+    must_be_refusal: true
     notes: >
-      Tests combining complementary guidance from two documents.
+      No document defines vacation entitlement. Federal law does not require
+      it, so a confident answer here is invention, not retrieval.
 
   - id: 23
-    question: "what documents help me stay compliant after i hire employees"
-    citations:
-      - file: "osha_small_business_handbook.pdf"
-        pages: [11]
-      - file: "eeoc_small_business_facts.pdf"
-        pages: [2]
-    must_include:
-      - "inspection"
-      - "discrimination"
+    question: "what is the canadian gst rate"
+    must_be_refusal: true
     notes: >
-      Requires retrieving from two unrelated manuals.
+      Corpus is entirely US federal guidance.
 
   - id: 24
-    question: "what should i track for taxes and business expenses"
-    citations:
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4, 5]
-      - file: "irs_publication_334_tax_guide_small_business.pdf"
-        pages: [27]
-    must_include:
-      - "expenses"
-      - "travel"
+    question: "how do i register a trademark"
+    must_be_refusal: true
     notes: >
-      Cross-document accounting synthesis.
+      Plausibly small-business, genuinely absent. The dangerous kind: adjacent
+      enough that a model may answer from training rather than documents.
 
   - id: 25
-    question: "how do i write a business plan and keep accounting records"
-    citations:
-      - file: "sba_business_plan_guide.pdf"
-        pages: [3, 7]
-      - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [4, 5]
-    must_include:
-      - "executive summary"
-      - "target market"
-      - "records"
+    question: "what health insurance plan should i buy for my staff"
+    must_be_refusal: true
     notes: >
-      End-to-end startup workflow requiring multiple citations.
+      Asks for advice rather than a fact. Should decline and say what the
+      documents do cover.
