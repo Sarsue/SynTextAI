@@ -472,6 +472,67 @@ Sources, so this can be checked rather than trusted:
 `github.com/NousResearch/hermes-agent/issues/34352` (the multi-tenant issue),
 `hermes-agent.nousresearch.com/docs`, `huggingface.co/NousResearch/Hermes-4-70B`.
 
+**The model asks. We do the work. (added 2026-08-03, after checking the model
+card rather than the marketing.)**
+
+Switching the endpoint to Hermes 4 gives the app no new powers on the day it
+happens. The model card is plain: it emits a tool call and *"the actual
+execution and response handling falls to the developer"*. It is text only. It
+cannot browse, click, or see. The 60+ tools, the browsing and the vision belong
+to Hermes Agent and Nous Portal, which we are not using.
+
+What we get is a model that asks for tools cleanly and in a format vLLM and
+SGLang already parse. That is the hard part to retrofit and worth having. But
+everything the agent can actually *do*, we build.
+
+**Every tool is one of our own functions, wrapped.**
+
+The hard part already exists. `accessible_workspace_ids`, the file search, the
+workspace list: each is a function that already knows who is asking and refuses
+what they may not have. Making one into a tool is three small things. Describe
+it to the model. Run it when the model asks. Hand the result back.
+
+The property that matters: a tool closes over the caller. `search_documents`
+cannot reach another company's files because the function underneath already
+cannot. A general-purpose tool from somebody else's framework has no idea our
+tenants exist. That is the whole reason the tools have to be ours, and it is the
+same reason we took the model and left the program.
+
+**Adding a tool, start to finish:**
+
+1. Pick a job a real person does by hand today.
+2. Find or write the function. It must take the caller's identity and enforce
+   it, like every repository method already does.
+3. Describe it to the model: a name, one line on what it does, its arguments.
+4. Run it when the model asks, inside the queued job, never outside the tenant
+   check.
+5. Feed the result back so the model can use it, and so the answer can cite it.
+
+A **skill** is a named bundle of these that a customer recognises as their own
+work. "Check this invoice against the contract" is a skill. It is three or four
+tools in an order, given a name the customer already uses.
+
+**Where the tool list comes from: the customer, not us.**
+
+Do not invent tools in an empty room. The list is discovered by sitting with a
+real business and watching what they repeat. That is what the vertical focus is
+for, and it is the part that cannot be bought or copied.
+
+| Vertical | The repeated work to look for |
+|---|---|
+| Dental | Which consent form applies. What our policy says about this code. |
+| Legal | Every clause about termination across these twelve contracts. |
+| Accounting | Does this invoice match the contract we signed. |
+
+The rule: **if we cannot name the person who does this by hand today, we are not
+building it yet.** A tool nobody asked for is worse than no tool, because it
+still has to be maintained and it still widens what the agent can reach.
+
+This is also the honest sales motion. We are not selling an agent that does
+everything. We are selling one that does the three things this business does
+every week, using their documents, with a citation. That is a conversation to
+have with customers, not a feature to guess at.
+
 **Still true, and still the gate on quality:** the 20-question citation benchmark
 below. An agent that calls five tools and cites the wrong page is worse than a
 single retrieval that cites the right one. Capture the baseline against the
@@ -501,6 +562,26 @@ endpoint would discard the job queue, per-tenant fairness and progress updates.
 An agent loop makes that worse rather than better: many model round trips per
 job, each paying the same tax. Own the box, or keep a hosted endpoint until you
 do, but do not route an agent through cold starts.
+
+**Phase 1 costs nothing to start, and does not need a GPU (priced 2026-08-03).**
+Hermes 4 70B is served by OpenAI-compatible providers at roughly $0.13 per
+million input tokens and $0.40 per million output. At three seats and a hundred
+questions each a day, that is under $20 a month even allowing ten model round
+trips per agent job. Renting a 24GB GPU is about $108 a month and would not run
+a 70B anyway, so the self-hosted comparison is really a 14B against a hosted
+70B. Break-even against owning is somewhere near 270 million output tokens a
+month, roughly a hundred times current size.
+
+So phase 1 starts as a **hosted swap**: repoint the endpoint at a provider
+serving Hermes 4, run the benchmark, learn whether it is actually better for our
+documents. Zero capex, and the same two environment variables either way.
+
+Owning hardware is a **sales decision, not a cost decision**. Do it when a
+customer's contract requires that data never leaves the building, price it as a
+premium tier, and let their money buy the box. One warning: the cheapest rented
+GPUs are marketplaces of other people's machines. Fine for benchmarking, never
+for customer documents, since that buys the cost of self-hosting with worse
+privacy than we have today.
 
 **Phase 1 — Serve our own models.** `gradient_chat` posts OpenAI-shaped payloads
 to `{INFERENCE_BASE_URL}/chat/completions`, and embeddings to
