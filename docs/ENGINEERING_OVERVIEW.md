@@ -400,7 +400,11 @@ Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
 means accept, sign in, and land in the company that invited you, never being
 offered one of your own; an owner can remove a member; a member can delete their
 account freely; an owner must cancel the subscription before deleting theirs.
-The last three are built. Only the first is outstanding.
+
+Everything except the first is built, including role and reach chosen at invite
+time (2026-08-03). What remains is the sign-up screen itself: naming the company
+and paying for it as one flow from the home page, instead of a company named
+after the email prefix followed by a redirect to settings.
 
 Worth doing before real marketing spend, not before the next deploy: the current
 flow works and is honest, it just asks a customer to understand more than it
@@ -774,6 +778,40 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-03, later (an invite says what somebody will be):** Every invite
+  produced an organization-wide staff member, because that is what the accept
+  path hardcoded. An owner who meant to add an admin, or to confine somebody to
+  two workspaces, let them in with more access than intended and then corrected
+  it on another screen. The invite now carries role (`staff` or `admin`) and
+  reach (`organization`, or a chosen set in `workspace_ids`), both still
+  changeable afterwards in the members list.
+
+  **Scope applies to admins now.** It did not before: `admin` implied the whole
+  company whatever the column said, which made "confine this admin to two
+  workspaces" impossible to express. Admin describes what somebody may do, not
+  how much they can see. Owner stays unbounded, because the company is theirs.
+
+  **And the read and write paths disagreed about it.**
+  `accessible_workspace_ids` hid the workspaces a confined admin had not been
+  given, while `get_user_role_in_workspace` still returned `"owner"` for any
+  admin regardless of scope. So they could not see Payroll and could upload into
+  it by naming its id, holding *owner* capabilities while doing so. Seeing and
+  doing are two questions and only one had been tightened. This is the third
+  time that shape has produced a bug (see `list_workspaces_for_user`, and the
+  `role`/`can_manage` conflation): when a rule changes, find every function that
+  answers a version of the same question, not just the one that was reported.
+
+  Also: workspace ids in a request body are checked against the organization
+  doing the inviting, so an owner cannot grant their invitee access to a
+  workspace in somebody else's tenant. The partial unique index is declared on
+  the model as well as in its migration, because autogenerate compares the
+  database against the models and would otherwise propose dropping it, silently
+  restoring the race that gave one email two companies. And the invite email
+  sends the link as text: a styled button was reported as "this site doesn't
+  support a secure connection" while the same URL pasted into a browser worked,
+  which is what mail clients rewriting link targets through their own
+  redirectors does.
+
 - **2026-08-03 (the day live Stripe was exercised, and what it cost):** The
   payment path ran against real money for the first time. Almost everything that
   broke was invisible in test mode.
@@ -834,16 +872,27 @@ answer that with fair-use limits rather than repricing everyone.
   showing what it had loaded at sign-in. Narrowing access already sent a socket
   event; removing entirely did not, so the stronger act was the quieter one.
 
-  **Email was never being delivered, for a reason no code change could fix.**
-  Ten messages requested, ten processed, zero delivered, zero bounced, empty
-  sending IP, nothing in any suppression list. Not the sender identity, not DNS,
-  not credits, not reputation — the account itself was not releasing mail, which
-  has no API and is a support matter. Two real faults were found on the way: the
-  app sent from an address that was not a verified sender, and the SendGrid
-  event webhook had been configured against an endpoint that did not exist, so
-  every delivery event had been posting into a 405 since it was set up. That
-  endpoint exists now (`/api/sendgrid/events`), which is what makes the next
-  failure explain itself instead of being noticed weeks later.
+  **Email was never being delivered, for a reason no code change could fix, and
+  it is fixed now.** Ten messages requested, ten processed, zero delivered, zero
+  bounced, empty sending IP, nothing in any suppression list. Not the sender
+  identity, not DNS, not credits, not reputation: the account itself was not
+  releasing mail, which has no API and was a support matter. Osas raised it, the
+  hold was lifted, and the same day closed with 12 delivered, 36 opens and a
+  click. Worth recording that messages from the *unverified* sender delivered
+  too once the hold went, so the from-address was never the blocker either.
+
+  The lesson is the diagnosis, not the fault. SendGrid's own stats answered this
+  in one call and nobody had looked; `requests` and `processed` climbing while
+  `delivered` stays at zero, with an empty sending IP and empty suppression
+  lists, is an account that is accepting mail and not sending it. No amount of
+  reading application code would have found that.
+
+  Two real faults were found on the way. The app sent from an address that was
+  not a verified sender, now `noreply@syntextai.com`. And the SendGrid event
+  webhook had been configured against an endpoint that did not exist, so every
+  delivery event had been posting into a 405 since it was set up. That endpoint
+  exists now (`/api/sendgrid/events`), which is what makes the next failure
+  explain itself instead of being noticed weeks later.
 
 - **2026-08-01 (why mail fails, and the end of the dependency triage):** Added
   `POST /api/sendgrid/events`, SendGrid's event webhook. A 202 from the send API
