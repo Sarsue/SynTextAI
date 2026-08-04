@@ -117,6 +117,7 @@ services:
       # itself. Defaults to the fixed pipeline so a stray shell export cannot
       # quietly change what every local query does.
       - AGENT_MODE=${AGENT_MODE:-pipeline}
+      - TOOL_SEARCH_RESULTS=${TOOL_SEARCH_RESULTS:-8}
       - QUERY_CONCURRENCY=4
       - INGEST_CONCURRENCY=2
       - MAX_RUNS_PER_USER=3

@@ -403,6 +403,20 @@ which is where the vertical focus pays: "check this invoice against the contract
 for accounting, "find every clause about termination" for legal. Orchestration is
 the model deciding which to use and in what order, then composing a cited answer.
 
+**Status, measured 2026-08-04: the tool layer is built and it is losing.**
+`AGENT_MODE=tools` exists, works, and scores **13-14/22** on citations against
+the fixed pipeline's **16-18/22**, on the same corpus with two runs each. It
+defaults to off. Two things it does are genuinely better and neither is a
+number the pipeline can reach by tuning: refusals hit 4/4, and a question
+spanning two documents cites both, because the model searched twice.
+
+Read that as a schedule, not a verdict. The pipeline has had a day of defect
+fixes behind it and the tool loop has had one. But the ordering stands: **the
+tool layer only replaces the pipeline when it beats it on citations**, and
+"the architecture is more interesting" is not a reason to ship it. The
+benchmark decides, and it now knows its own noise, so the decision is
+checkable rather than argued.
+
 **The job queue is not part of that, and must not be absorbed into it.** This is
 the one boundary to hold. The worker's tenant scoping, per-user fairness, lease
 reclaim and separated query/ingest budgets exist because a naive loop got all of
@@ -987,6 +1001,93 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-04 (the pipeline was broken, not badly tuned):** The first
+  benchmark baseline scored 10/25 with 11/21 citations, and three questions
+  answered *"I couldn't find enough evidence in your documents"*. Running
+  `hybrid_search` by hand for those three put the correct page at rank 1,
+  rank 4 and rank 1. Retrieval had found them. Every stage after it threw
+  them away.
+
+  Six defects, none of them a tuning knob:
+
+  | what | effect |
+  |---|---|
+  | `CrossEncoderReRanker` re-embedded `content[:600]` with the same bi-encoder that made the score it claimed to improve | deleted correct pages; the ADA guide states its 15-employee threshold at character 2460, and the first 600 are phone numbers |
+  | `chunk_selector.select()` ran on its 3000-token default | ~6 of 15 chunks reached a 120,000-token window |
+  | `plainto_tsquery('simple', …)` ANDed stopwords | matched **zero rows**; the keyword half of "hybrid search" had never worked |
+  | `1 - (emb <-> emb)` used Euclidean under a cosine formula | negative scores, two halves with no shared scale |
+  | `text_chunk[:max_context_length]` | a token budget slicing characters |
+  | the citation gate | told customers their document was empty when the answer was at rank 1 |
+
+  Result: citations **11/21 → 16-18/22**. The reranker is deleted, not fixed.
+
+  **A per-document cap was built, measured, and thrown away.** A 98-page
+  handbook was taking 14 of 15 slots, so capping its share looked obviously
+  right. Swept at top_k 15/25/40 against caps of off, /3 and /4, uncapped won
+  or tied at every single point. `top_k` went to 25 instead. Room, not
+  rationing. The sweep is in the commit; the cap is not in the code.
+
+- **2026-08-04 (the benchmark had to be made honest before it could be used):**
+  Three things were wrong with the instrument, and each one had already
+  produced a false conclusion.
+
+  **It could not see its own noise.** Two runs of identical code scored 17/25
+  and 16/25, five questions flipping. Three prompt variants had already been
+  compared at one run each and reported as improvements and regressions; none
+  of those comparisons could see what they claimed. `--repeat N` now reports
+  the range and states outright how large a change has to be to count.
+
+  **It was wrong about its own corpus.** Question 24, "how do i register a
+  trademark", was written as a refusal on the note *"plausibly small-business,
+  genuinely absent"*. The SBA guide has a `Trademarks/Service Marks` section on
+  page 10. Nobody checked, which is the exact failure the file's own header
+  warns about. Found by the tool agent, which searched, quoted the passage, and
+  added that the guide gives no step-by-step procedure. Only one of the four
+  refusal questions had ever been verified; all four now are, and the new one
+  was checked against the corpus before being written.
+
+  **It scored typography.** A correct answer failed for writing
+  `self‑inspection` with U+2011, and a citation was read as absent because the
+  marker came back as `[Segment 1]` with U+202F. Rescoring the original
+  baseline answers with the fixed scorer gives 14/25 rather than 10/25 with
+  citations unchanged at 11/21, which is the point: **the scorer fix bought no
+  product improvement and is not counted as one.**
+
+  It also scored an expired Firebase token as a catastrophic regression: a full
+  three-run sweep returned 0/26 because every request was a 401. One cheap
+  authenticated call now runs first.
+
+- **2026-08-04 (tools: built, measured, switched off):** `AGENT_MODE=tools`
+  gives the model `search_documents`, `read_page` and `list_documents` and lets
+  it decide how often to call them. Same benchmark, same corpus, two runs each:
+
+  ```
+                        citations        refusals   overall
+    fixed pipeline      16-18/22 (17.0)   3/4       18-20/26
+    tool agent          13-14/22 (13.5)   3-4/4     13/26
+  ```
+
+  The pipeline wins by more than either side's noise, so the flag defaults to
+  `pipeline` and this ships off. It is kept because two things it does are new:
+  refusals reached **4/4** for the first time, and question 17 cites both OSHA
+  and the ADA guide where the fixed pipeline retrieves fourteen OSHA chunks and
+  one ADA chunk.
+
+  **Citations are verified, not trusted.** The model names a page; the code
+  checks that claim against the passages the tools actually returned and drops
+  any citation to a page it was never shown. The first run scored 8/22 because
+  the model wrote "Publication 583, page 12", which names no file and cannot
+  become a link, so every citation was discarded **in silence**. Each passage
+  now carries the exact string to copy, and drops are counted and logged. That
+  one fix moved citations from 8 to 13-14.
+
+  **The model never names a workspace.** Scope is bound once from the
+  authenticated request and the tool schemas have no field for it, so an
+  instruction hidden inside an uploaded PDF has nothing to address.
+
+  **Extraction was never the problem.** IRS Table 3 extracts cleanly, header
+  and all. The only unicode fault was in the scorer.
 
 - **2026-08-03, later (an invite says what somebody will be):** Every invite
   produced an organization-wide staff member, because that is what the accept

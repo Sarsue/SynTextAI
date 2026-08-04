@@ -34,11 +34,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MAX_SEARCH_RESULTS = 8
+# How many passages one search returns. The fixed pipeline puts 25 in front of
+# the model in a single shot; at 8 this agent was seeing a third of that per
+# call, which is a plausible reason it cited the first page matching a phrase
+# rather than the page defining the concept. Tunable so the question can be
+# settled by running it rather than argued about.
+MAX_SEARCH_RESULTS = int(os.getenv("TOOL_SEARCH_RESULTS", "8"))
 MAX_PAGE_CHARS = 6000
 
 
