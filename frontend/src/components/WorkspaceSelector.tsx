@@ -132,6 +132,25 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // whether you may manage rather than whether you are the owner.
     const canManageWorkspace = currentWorkspace?.can_manage ?? false;
 
+    // Who can actually see the workspace this panel is about.
+    //
+    // The panel is titled "Team — <workspace>" and listed everybody in the
+    // company, so somebody confined to Finance appeared under Payroll as
+    // though they could read it. The owner reasonably read that as a leak. It
+    // was not one, the backend has never let them near it, but a screen that
+    // says a person is somewhere they cannot go is its own kind of wrong, and
+    // it is the screen an owner uses to decide who to remove.
+    //
+    // Same rule the backend uses: organization-wide reach, or named on this
+    // workspace. The owner is always in it.
+    const canSeeCurrentWorkspace = (m: OrgMember) =>
+        m.role === 'owner'
+        || m.scope === 'organization'
+        || (currentWorkspace ? m.workspace_ids.includes(currentWorkspace.id) : false);
+
+    const workspaceMembers = orgMembers.filter(canSeeCurrentWorkspace);
+    const elsewhereInCompany = orgMembers.length - workspaceMembers.length;
+
     // Fetch workspaces on mount, and again whenever access changes.
     //
     // accessChangedAt is bumped by the socket event an owner's change sends, so
@@ -806,7 +825,13 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
             {/* Members / Invite Modal */}
             <Dialog open={showMembersModal} onOpenChange={setShowMembersModal}>
-                <DialogContent className="sm:max-w-md">
+                {/* Bounded and scrollable. Each member row carries a role
+                    control, a description and a checkbox per workspace, so the
+                    dialog outgrew the viewport at about four people and the
+                    rest could not be reached at all: no scroll, and the buttons
+                    at the bottom off-screen. A team panel that stops working
+                    once you have a team is worse than not having one. */}
+                <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Team — {currentWorkspace?.name}</DialogTitle>
                     </DialogHeader>
@@ -915,12 +940,14 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                             {membersError && (
                                 <div className="error-message" style={{ fontSize: 13, marginBottom: 8 }}>{membersError}</div>
                             )}
-                            {!membersError && orgMembers.length === 0 && (
+                            {!membersError && workspaceMembers.length === 0 && (
                                 <div style={{ fontSize: 13, color: '#888' }}>
-                                    Nobody else yet. Invite someone above.
+                                    {orgMembers.length === 0
+                                        ? 'Nobody else yet. Invite someone above.'
+                                        : `Nobody can see ${currentWorkspace?.name} yet. Invite someone, or give an existing member access.`}
                                 </div>
                             )}
-                            {orgMembers.map(m => {
+                            {workspaceMembers.map(m => {
                                 const isSaving = savingAccessFor === m.user_id;
                                 // One workspace selected, or every workspace.
                                 // A multi-select belongs here eventually; until
@@ -1074,6 +1101,16 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                     </div>
                                 );
                             })}
+
+                            {/* Says where everyone else went, so a filtered list
+                                does not read as people having disappeared. */}
+                            {elsewhereInCompany > 0 && (
+                                <div style={{ fontSize: 12, color: '#888', marginTop: 10 }}>
+                                    {elsewhereInCompany} other {elsewhereInCompany === 1 ? 'person' : 'people'} in
+                                    this company {elsewhereInCompany === 1 ? 'does' : 'do'} not have access to{' '}
+                                    {currentWorkspace?.name}. Switch workspace to manage {elsewhereInCompany === 1 ? 'them' : 'them'}.
+                                </div>
+                            )}
                         </div>
                     )}
 

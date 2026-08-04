@@ -344,7 +344,10 @@ for it.
 5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
 6. ~~Triage the 34 Dependabot vulnerabilities~~ — **triaged 2026-07-29**, see "Known gaps" above.
 
-**Tier 1 — cheap, closes an existing gap:**
+**Tier 1 — cheap, closes an existing gap. Closed 2026-08-03.** All three items
+below are done. The efficiency backlog that follows is a separate list and is
+*not* closed: items 18-22 remain genuinely open.
+
 7. ~~Wire `TextProcessor` into the factory for `.txt`/`.md`~~ — **closed 2026-07-29.** Rewrote it, the old version was incompatible with the current codebase, not just unverified.
 8. ~~Demo workspace~~ — **not needed.** Osas already has a real test customer for demos instead of a synthetic one.
 9. ~~Clean up orphaned EdTech generator functions in `tasks.py`~~ — **closed 2026-07-29.**
@@ -379,62 +382,238 @@ Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-
 
 **Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
 
-**1. Onboarding that makes membership legible from the first screen (raised
-2026-08-03).**
+**1. The agentic platform. The Tier 2 initiative (direction set 2026-08-03).**
 
-Sign-up should ask for the company name and take payment as one flow starting at
-the home page. Today it creates a company named after the email prefix, then
-sends the person to settings to pay, so the two halves of becoming a customer
-happen on different screens with a redirect between them, and the name is
-something they discover rather than choose.
+Tier 2 is one thing: an agent that uses tools and skills, running open models we
+serve ourselves, with the DigitalOcean endpoint gone. Not a cost optimisation
+that happens to involve models. The product stops being "ask a question about
+your documents, get a cited answer" and becomes "give it something to do".
 
-The deeper reason is that joining and starting are still easy to confuse.
-Somebody sent an invite link ended up creating their own company alongside the
-one they were invited to, because every route through a signed-in state with no
-organization leads to sign-up. The screens now say which is which (see "Recent
-changes", 2026-08-03), and the database refuses a second owned company, so this
-is no longer a correctness problem. It is a clarity problem, which is why it is
-Tier 2 rather than Tier 0.
+This was previously written up as a self-hosted model platform gated on hosted
+inference passing $500-1,000/month. That framing was wrong about the reason.
+Waiting for a cost threshold made sense for a migration whose only payoff was a
+cheaper bill; it makes no sense for the thing the product is meant to become.
+The phases below survive intact, because they were always the right sequence.
+Only the trigger changed: it is a decision now, not a threshold.
 
-Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
-means accept, sign in, and land in the company that invited you, never being
-offered one of your own; an owner can remove a member; a member can delete their
-account freely; an owner must cancel the subscription before deleting theirs.
+**What agentic means here, concretely.** A tool is something the model can call:
+search these documents, read this page, list the workspaces, draft this. A skill
+is a named procedure over tools that a customer recognises as their own work,
+which is where the vertical focus pays: "check this invoice against the contract"
+for accounting, "find every clause about termination" for legal. Orchestration is
+the model deciding which to use and in what order, then composing a cited answer.
 
-Everything except the first is built, including role and reach chosen at invite
-time (2026-08-03). What remains is the sign-up screen itself: naming the company
-and paying for it as one flow from the home page, instead of a company named
-after the email prefix followed by a redirect to settings.
+**The job queue is not part of that, and must not be absorbed into it.** This is
+the one boundary to hold. The worker's tenant scoping, per-user fairness, lease
+reclaim and separated query/ingest budgets exist because a naive loop got all of
+them wrong, and they were paid for in real bugs. An agent harness knows none of
+it. The whole agent loop — many tool calls, several model round trips — runs
+*inside* a single queued job. The model decides what to do; the queue still
+decides when it runs and on whose behalf. Model orchestration and job
+orchestration are different words that happen to share a verb.
 
-Worth doing before real marketing spend, not before the next deploy: the current
-flow works and is honest, it just asks a customer to understand more than it
-should.
+**Why open models are load-bearing rather than incidental.** Agent loops make
+many more model calls than a single Q&A, so hosted per-token pricing scales
+badly with exactly the behaviour we are adding. Tool calling also wants a model
+chosen for it rather than whatever an endpoint offers. And on-prem, which is what
+closes HIPAA and privilege-sensitive deals, is impossible while inference leaves
+the building. Serving our own models is the enabling step, which is why phase 1
+comes first.
 
-**2. Self-hosted model platform (agreed 2026-07-30). The Tier 2 initiative.**
+**Hermes: what we take and what we leave (researched 2026-08-03).**
+
+Hermes is two things with one name, both from Nous Research.
+
+1. **Hermes 4** is a set of open models. You download them and run them yourself.
+2. **Hermes Agent** is a program that runs an agent. MIT licensed. Lots of parts
+   already built: skills, memory, 60+ tools, MCP, and adapters for Slack, Teams,
+   WhatsApp and about twenty other places.
+
+**Decision: take the models, leave the program.**
+
+Here is the whole reason, in one sentence. Hermes Agent puts everybody's memory
+in one pile.
+
+Their own open issue says it plainly: *"one agent = one tenant. Memory is
+global, sessions don't scope by tenant, and there is no isolation between
+groups, channels, or users."* Memory reads and writes skip the hook system, so
+a plugin cannot fix it. You would have to fork the project and then own that
+fork forever, as a one-person company with paying customers.
+
+That one pile is the exact thing we sell against. A dental practice's records
+must never be readable by a law firm. Making that true is what 2026-08-01 to
+2026-08-03 was spent on. Putting our agent on a component that does not have it
+would throw that away. The same issue thread records an agent reading one
+customer's competitor notes and publishing them in a public article, and the
+operator nearly being sued.
+
+The official workaround is one process per customer. That throws away the job
+queue, per-tenant fairness and lease reclaim, and it does not fit one box.
+
+What we take:
+
+| From Hermes | What we get | Cost to us |
+|---|---|---|
+| Hermes 4 open weights | A model built for tool calling, run on our hardware | Two env vars, then the benchmark |
+| Its tool-call format | vLLM and SGLang already parse it (`--tool-call-parser hermes`) | Nothing. No parser to write |
+| The idea of skills | Named procedures over tools, per vertical | We build it inside our own worker |
+| MCP support | A standard way to plug in tools instead of a bespoke one | Adopt the protocol, not their runtime |
+
+What we do not take: the agent runtime, its memory, its sessions, its adapters.
+We keep our own tenancy, our own queue, and our own membership model, because
+those are correct and theirs are not.
+
+**When to look again.** If a `memory:scope` hook lands and the maintainers
+commit to real tenant isolation, reassess. The issue is currently labelled
+`needs-decision`. Until then this is settled, so do not reopen it without new
+evidence from that thread.
+
+Sources, so this can be checked rather than trusted:
+`github.com/NousResearch/hermes-agent/issues/34352` (the multi-tenant issue),
+`hermes-agent.nousresearch.com/docs`, `huggingface.co/NousResearch/Hermes-4-70B`.
+
+**The model asks. We do the work. (added 2026-08-03, after checking the model
+card rather than the marketing.)**
+
+Switching the endpoint to Hermes 4 gives the app no new powers on the day it
+happens. The model card is plain: it emits a tool call and *"the actual
+execution and response handling falls to the developer"*. It is text only. It
+cannot browse, click, or see. The 60+ tools, the browsing and the vision belong
+to Hermes Agent and Nous Portal, which we are not using.
+
+What we get is a model that asks for tools cleanly and in a format vLLM and
+SGLang already parse. That is the hard part to retrofit and worth having. But
+everything the agent can actually *do*, we build.
+
+**Every tool is one of our own functions, wrapped.**
+
+The hard part already exists. `accessible_workspace_ids`, the file search, the
+workspace list: each is a function that already knows who is asking and refuses
+what they may not have. Making one into a tool is three small things. Describe
+it to the model. Run it when the model asks. Hand the result back.
+
+The property that matters: a tool closes over the caller. `search_documents`
+cannot reach another company's files because the function underneath already
+cannot. A general-purpose tool from somebody else's framework has no idea our
+tenants exist. That is the whole reason the tools have to be ours, and it is the
+same reason we took the model and left the program.
+
+**Adding a tool, start to finish:**
+
+1. Pick a job a real person does by hand today.
+2. Find or write the function. It must take the caller's identity and enforce
+   it, like every repository method already does.
+3. Describe it to the model: a name, one line on what it does, its arguments.
+4. Run it when the model asks, inside the queued job, never outside the tenant
+   check.
+5. Feed the result back so the model can use it, and so the answer can cite it.
+
+A **skill** is a named bundle of these that a customer recognises as their own
+work. "Check this invoice against the contract" is a skill. It is three or four
+tools in an order, given a name the customer already uses.
+
+**Where the tool list comes from: the customer, not us.**
+
+Do not invent tools in an empty room. The list is discovered by sitting with a
+real business and watching what they repeat. That is what the vertical focus is
+for, and it is the part that cannot be bought or copied.
+
+| Vertical | The repeated work to look for |
+|---|---|
+| Dental | Which consent form applies. What our policy says about this code. |
+| Legal | Every clause about termination across these twelve contracts. |
+| Accounting | Does this invoice match the contract we signed. |
+
+The rule: **if we cannot name the person who does this by hand today, we are not
+building it yet.** A tool nobody asked for is worse than no tool, because it
+still has to be maintained and it still widens what the agent can reach.
+
+This is also the honest sales motion. We are not selling an agent that does
+everything. We are selling one that does the three things this business does
+every week, using their documents, with a citation. That is a conversation to
+have with customers, not a feature to guess at.
+
+**Still true, and still the gate on quality:** the 20-question citation benchmark
+below. An agent that calls five tools and cites the wrong page is worse than a
+single retrieval that cites the right one. Capture the baseline against the
+hosted endpoint before any of this starts.
+
+**2. Serving our own models: the three phases (agreed 2026-07-30, reframed
+2026-08-03 as the delivery path for the agentic platform above).**
 
 What were tracked separately as a knowledge layer, self-hosting and vision
 extraction are one migration: move the model work onto hardware we own, then
 spend the now-cheap inference on capabilities that were previously unaffordable.
 Sequenced, because each phase depends on the one before it.
 
-**Do nothing yet, and know exactly what would change that.** A serverless-GPU
-proposal was weighed on 2026-07-30 and declined, not because self-hosting is
-urgent but because we already satisfy its core advice: chat runs on DigitalOcean's
-hosted endpoint and embeddings on Voyage, so GPU spend is already zero and already
-scales to nothing when idle. Moving to serverless GPU would swap one hosted setup
-for another and buy a migration for no gain. Two specifics also disqualified it:
-cold starts of 30-120s are acceptable for background ingestion but fatal for
-interactive chat, and its single synchronous `/ask` endpoint would discard the job
-queue, per-tenant fairness and progress updates built on 2026-07-29.
+**These thresholds are no longer the trigger, and are kept as instrumentation.**
+Phase 1 used to wait for hosted inference to pass $500-1,000/month, for vision
+pricing to make ingestion uneconomic, for a customer to demand on-prem, or for
+latency to become a complaint. That was the right test for a migration whose
+only payoff was a cheaper bill. It is the wrong test for the platform the
+product is being built on, so the work starts when it is scheduled rather than
+when a bill crosses a line. Watch the numbers anyway: they say how urgent it is
+and they are the argument for the on-prem edition when a customer asks.
 
-Start phase 1 when any of these becomes true, and not before:
+**Serverless GPU was weighed on 2026-07-30 and declined; that still holds, and
+matters more now.** Cold starts of 30-120s are tolerable for background
+ingestion and fatal for interactive chat, and its single synchronous `/ask`
+endpoint would discard the job queue, per-tenant fairness and progress updates.
+An agent loop makes that worse rather than better: many model round trips per
+job, each paying the same tax. Own the box, or keep a hosted endpoint until you
+do, but do not route an agent through cold starts.
 
-- Hosted inference consistently exceeds roughly $500-1,000/month.
-- Vision extraction (phase 2) is wanted and per-page hosted vision pricing makes
-  ingestion uneconomic. Measure this rather than assuming it.
-- A customer requires on-prem, at which point this stops being a cost decision
-  and becomes a sales one.
-- Latency or provider reliability becomes a product complaint.
+**Order of work, corrected 2026-08-03. Tools first, model second.**
+
+The phases below read as though the model swap comes first. It does not, and
+doing it first teaches us nothing: with no tools defined, Hermes 4 behaves
+exactly like what we run today, because the only thing it adds is the ability to
+ask for tools we have not written.
+
+The right order, and the reason for each step:
+
+1. **Build the tool layer against the endpoint we already have.** Verified
+   2026-08-03: the current endpoint (`openai-gpt-oss-20b`) already accepts a
+   `tools` array and returns well-formed `tool_calls`. A probe asking it to
+   search documents came back with `search_documents({"query": "refund
+   policy"})` on the first try. So the whole agent loop can be built and
+   debugged for zero extra cost, on infrastructure that already works.
+2. **Run the loop beside the current pipeline, not instead of it.** Both answer
+   the same 20 benchmark questions. Compare citation correctness first.
+3. **Only then remove the hardcoded retrieval.** This is the step that carries
+   real risk, and it is worth being blunt about why. Today retrieval is
+   deterministic: every question searches, at a 3000-token budget, before the
+   model sees anything. Handing that choice to the model means it may not
+   search, or may search badly, and citation accuracy is the product. Do not
+   delete the deterministic path until the benchmark says the agent matches or
+   beats it. Keep it behind a flag afterwards.
+4. **Then swap the model**, and re-run the same benchmark. Now the comparison
+   means something: it measures tool-calling quality between two models on an
+   identical loop, which is the actual question.
+
+Written down because the tempting order is the reverse. Swapping an endpoint is
+a satisfying afternoon and changes nothing a customer can see. Writing the first
+tool is duller and is the whole feature.
+
+**Phase 1 costs nothing to start, and does not need a GPU (priced 2026-08-03).**
+Hermes 4 70B is served by OpenAI-compatible providers at roughly $0.13 per
+million input tokens and $0.40 per million output. At three seats and a hundred
+questions each a day, that is under $20 a month even allowing ten model round
+trips per agent job. Renting a 24GB GPU is about $108 a month and would not run
+a 70B anyway, so the self-hosted comparison is really a 14B against a hosted
+70B. Break-even against owning is somewhere near 270 million output tokens a
+month, roughly a hundred times current size.
+
+So phase 1 starts as a **hosted swap**: repoint the endpoint at a provider
+serving Hermes 4, run the benchmark, learn whether it is actually better for our
+documents. Zero capex, and the same two environment variables either way.
+
+Owning hardware is a **sales decision, not a cost decision**. Do it when a
+customer's contract requires that data never leaves the building, price it as a
+premium tier, and let their money buy the box. One warning: the cheapest rented
+GPUs are marketplaces of other people's machines. Fine for benchmarking, never
+for customer documents, since that buys the cost of self-hosting with worse
+privacy than we have today.
 
 **Phase 1 — Serve our own models.** `gradient_chat` posts OpenAI-shaped payloads
 to `{INFERENCE_BASE_URL}/chat/completions`, and embeddings to
@@ -572,6 +751,37 @@ is not.
 on the same GPU, but video and audio ingestion was deliberately removed on
 2026-07-29 and named the largest cost sink. Owning a GPU is not a reason to bring
 it back.
+
+**3. Onboarding that makes membership legible from the first screen (raised
+2026-08-03, demoted below the agentic platform 2026-08-03).**
+
+Sign-up should ask for the company name and take payment as one flow starting at
+the home page. Today it creates a company named after the email prefix, then
+sends the person to settings to pay, so the two halves of becoming a customer
+happen on different screens with a redirect between them, and the name is
+something they discover rather than choose.
+
+The deeper reason is that joining and starting are still easy to confuse.
+Somebody sent an invite link ended up creating their own company alongside the
+one they were invited to, because every route through a signed-in state with no
+organization leads to sign-up. The screens now say which is which (see "Recent
+changes", 2026-08-03), and the database refuses a second owned company, so this
+is no longer a correctness problem. It is a clarity problem, which is why it is
+Tier 2 rather than Tier 0.
+
+Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
+means accept, sign in, and land in the company that invited you, never being
+offered one of your own; an owner can remove a member; a member can delete their
+account freely; an owner must cancel the subscription before deleting theirs.
+
+Everything except the first is built, including role and reach chosen at invite
+time (2026-08-03). What remains is the sign-up screen itself: naming the company
+and paying for it as one flow from the home page, instead of a company named
+after the email prefix followed by a redirect to settings.
+
+Worth doing before real marketing spend, not before the next deploy: the current
+flow works and is honest, it just asks a customer to understand more than it
+should.
 
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
