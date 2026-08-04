@@ -134,7 +134,9 @@ class Client:
         r = requests.get(
             f"{self.base}/api/v1/files",
             headers=self.headers,
-            params={"page": 1, "page_size": 200, "workspace_id": self.workspace_id},
+            # page_size is capped at 100 by the route; 200 is a 422, not a
+            # bigger page.
+            params={"page": 1, "page_size": 100, "workspace_id": self.workspace_id},
             timeout=60,
         )
         r.raise_for_status()
@@ -145,7 +147,13 @@ class Client:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             files = self.list_files()
-            states = {f["file_name"]: f.get("processing_status") for f in files}
+            # The route emits "status" while its declared FileResponse model
+            # says "processing_status". Read both: the payload is the truth,
+            # and reading only the documented name silently sees None.
+            states = {
+                f["file_name"]: f.get("status") or f.get("processing_status")
+                for f in files
+            }
             pending = {n: s for n, s in states.items() if s not in ("processed", "failed")}
             failed = [n for n, s in states.items() if s == "failed"]
             if failed:
@@ -157,26 +165,69 @@ class Client:
         print("    timed out waiting for ingestion")
         return False
 
-    def ask(self, question: str) -> str:
-        """One question, one fresh conversation, so nothing leaks between them."""
-        r = requests.get(
+    def new_history(self, title: str) -> int:
+        r = requests.post(
+            f"{self.base}/api/v1/histories",
+            headers=self.headers,
+            params={"title": title[:60], "workspace_id": self.workspace_id},
+            timeout=60,
+        )
+        r.raise_for_status()
+        body = r.json()
+        return body.get("id") or body.get("history_id") or body["history"]["id"]
+
+    def ask(self, question: str, poll_timeout_s: int = 300) -> str:
+        """Ask one question in its own conversation and wait for the answer.
+
+        Answers are not returned by the request that asks. POST /messages
+        enqueues an agent run and returns immediately; the answer is written
+        into the conversation and pushed over a websocket. A runner that reads
+        the POST response gets the question back and scores nothing.
+
+        A fresh history per question keeps conversational context from leaking
+        between them, which would make results depend on the order they ran in.
+        """
+        history_id = self.new_history(question)
+        before = len(self.messages(history_id))
+
+        r = requests.post(
             f"{self.base}/api/v1/messages",
             headers=self.headers,
             params={
                 "message": question,
-                "language": "english",
+                "language": "English",
+                "history_id": history_id,
                 "workspace_id": self.workspace_id,
             },
-            timeout=300,
+            timeout=120,
         )
         r.raise_for_status()
+
+        deadline = time.time() + poll_timeout_s
+        while time.time() < deadline:
+            msgs = self.messages(history_id)
+            replies = [
+                m for m in msgs
+                if (m.get("sender") or "").lower() not in ("user", "human")
+                and (m.get("content") or "").strip()
+            ]
+            if replies and len(msgs) > before:
+                return replies[-1]["content"]
+            time.sleep(3)
+        return "__TIMEOUT__ no answer within %ss" % poll_timeout_s
+
+    def messages(self, history_id: int) -> List[Dict[str, Any]]:
+        r = requests.get(
+            f"{self.base}/api/v1/histories/messages",
+            headers=self.headers,
+            params={"history_id": history_id},
+            timeout=60,
+        )
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
         body = r.json()
-        if isinstance(body, str):
-            return body
-        for key in ("message", "answer", "content", "response"):
-            if isinstance(body.get(key), str):
-                return body[key]
-        return json.dumps(body)
+        return body if isinstance(body, list) else body.get("items", [])
 
 
 def score(q: Dict[str, Any], answer: str) -> Dict[str, Any]:

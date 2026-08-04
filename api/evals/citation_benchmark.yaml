@@ -65,13 +65,17 @@ questions:
     question: "how long do i keep tax records"
     citations:
       - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [15]
+        pages: [15, 16]
     must_include: ["3 years"]
     must_not_include: ["3 months"]
     notes: >
-      The retention table. Page 7 also says "3 years" but about reporting
-      self-employment income to the SSA, so this is a distractor test as much
-      as a lookup: must_not_include catches an answer built from that page.
+      The answer spans two pages: Table 3 with the periods is on 15, the
+      "How Long To Keep Records" section on 16. Either is a correct citation.
+      Page 7 also says "3 years" but about reporting self-employment income to
+      the SSA, so this is a distractor test as much as a lookup, and
+      must_not_include catches an answer built from that page.
+      Widened from [15] on 2026-08-04 after the first baseline: the pipeline
+      cited 16 and was right. Verified against the PDF, not conceded.
 
   - id: 2
     question: "why do i need to keep business records"
@@ -212,7 +216,7 @@ questions:
     question: "what records do i keep for tax and for injuries and for how long"
     citations:
       - file: "irs_publication_583_starting_a_business.pdf"
-        pages: [15]
+        pages: [15, 16]
       - file: "osha_small_business_handbook.pdf"
         pages: [15]
     must_include: ["3 years", "five years"]
