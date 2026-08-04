@@ -483,6 +483,10 @@ class AsyncFileRepository(AsyncBaseRepository):
     DEFAULT_VECTOR_WEIGHT = 0.7
     DEFAULT_BM25_WEIGHT = 0.3
     DEFAULT_TOP_K = 10
+    # How deep each of the two searches goes before the results are fused. Has
+    # to exceed top_k by enough that a chunk ranked well by one search and
+    # poorly by the other still survives to be fused.
+    CANDIDATE_POOL = 100
 
     async def hybrid_search(
         self,
@@ -543,6 +547,58 @@ class AsyncFileRepository(AsyncBaseRepository):
                         REPLACE(
                           plainto_tsquery('english', :keywords)::text, ' & ', ' | '
                         )::tsquery AS keywords
+                    ),
+                    -- Two searches, each in the shape its index can answer,
+                    -- rather than one blended expression no index can.
+                    --
+                    -- The previous version ordered by
+                    --   0.7 * (1 - cosine) + 0.3 * ts_rank_cd(...)
+                    -- which is not a distance, so Postgres had no choice but to
+                    -- scan every chunk in the workspace, recompute to_tsvector
+                    -- over text that had not changed since upload, and sort the
+                    -- lot: 171ms for 316 chunks, and linear from there.
+                    vec AS (
+                      SELECT c.id AS chunk_id,
+                             ROW_NUMBER() OVER (ORDER BY c.embedding <=> q.embedding) AS rank
+                      FROM chunks c
+                      JOIN files f ON f.id = c.file_id
+                      CROSS JOIN query q
+                      WHERE """ + where_sql + """
+                      ORDER BY c.embedding <=> q.embedding
+                      LIMIT :candidates
+                    ),
+                    txt AS (
+                      SELECT c.id AS chunk_id,
+                             ROW_NUMBER() OVER (ORDER BY ts_rank_cd(s.tsv, q.keywords, 32) DESC) AS rank
+                      FROM segments s
+                      JOIN chunks c ON c.segment_id = s.id
+                      JOIN files f ON f.id = s.file_id
+                      CROSS JOIN query q
+                      WHERE """ + where_sql + """ AND s.tsv @@ q.keywords
+                      ORDER BY ts_rank_cd(s.tsv, q.keywords, 32) DESC
+                      LIMIT :candidates
+                    ),
+                    -- Reciprocal rank fusion. Ranks are comparable across the
+                    -- two lists in a way the raw scores never were: a cosine
+                    -- similarity and a ts_rank_cd share no scale, and the old
+                    -- 0.7/0.3 blend of them was arithmetic on incomparable
+                    -- units. Position is the only thing both lists agree on.
+                    -- The constant 60 is the usual one; it stops the top result
+                    -- of either list dominating the other outright.
+                    fused AS (
+                      SELECT chunk_id, SUM(weight / (60 + rank)) AS hybrid_score
+                      FROM (
+                        -- Cast explicitly: asyncpg sends a bare parameter as
+                        -- text, and "text / bigint" is not an operator, so the
+                        -- fusion failed at runtime while working fine in psql
+                        -- where the same expression had a literal in it.
+                        SELECT chunk_id, rank,
+                               CAST(:vector_weight AS double precision) AS weight FROM vec
+                        UNION ALL
+                        SELECT chunk_id, rank,
+                               CAST(:bm25_weight AS double precision) AS weight FROM txt
+                      ) ranked
+                      GROUP BY chunk_id
                     )
                     SELECT
                       c.id AS id,
@@ -553,25 +609,12 @@ class AsyncFileRepository(AsyncBaseRepository):
                       f.file_url AS file_url,
                       s.page_number AS page_number,
                       s.meta_data AS meta_data,
-                      (
-                        -- <=> is cosine distance. This was <->, Euclidean, so
-                        -- "1 - distance" produced negative similarities on
-                        -- unrelated pages and a score that could not be weighed
-                        -- against a text rank on any shared scale.
-                        :vector_weight * (1 - (c.embedding <=> q.embedding)) +
-                        -- Normalisation 32 is rank/(rank+1), which bounds the
-                        -- text score to [0,1) so the 0.7/0.3 blend means what it
-                        -- says. Unbounded, the keyword half was noise.
-                        :bm25_weight * ts_rank_cd(
-                          to_tsvector('english', COALESCE(s.content, '')), q.keywords, 32
-                        )
-                      ) AS hybrid_score
-                    FROM chunks c
+                      fused.hybrid_score AS hybrid_score
+                    FROM fused
+                    JOIN chunks c ON c.id = fused.chunk_id
                     JOIN files f ON f.id = c.file_id
                     LEFT JOIN segments s ON s.id = c.segment_id
-                    CROSS JOIN query q
-                    WHERE """ + where_sql + """
-                    ORDER BY hybrid_score DESC
+                    ORDER BY fused.hybrid_score DESC
                     LIMIT :top_k
                     """
                 )
@@ -588,6 +631,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                     "vector_weight": vw,
                     "bm25_weight": bw,
                     "top_k": k,
+                    "candidates": max(self.CANDIDATE_POOL, k * 4),
                     "user_id": user_id,
                     "workspace_id": workspace_id,
                     "file_id": file_id,
