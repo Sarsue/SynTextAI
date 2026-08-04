@@ -324,6 +324,15 @@ def main() -> int:
     ap.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     ap.add_argument("--label", default="run", help="name for this run, e.g. baseline")
     ap.add_argument("--only", type=int, nargs="*", help="run only these question ids")
+    ap.add_argument(
+        "--repeat", type=int, default=1,
+        help=(
+            "Ask everything this many times and report the spread. The model is "
+            "not deterministic: two runs of identical code scored 16/21 and 14/21 "
+            "on citations, with five questions flipping. Any comparison drawn from "
+            "a single run of each side cannot see a change smaller than that."
+        ),
+    )
     args = ap.parse_args()
 
     if not args.token:
@@ -347,29 +356,71 @@ def main() -> int:
             print("corpus is not fully ingested; scores would be meaningless")
             return 1
 
-    print(f"\nasking {len(questions)} questions\n")
-    results = []
-    for q in questions:
-        try:
-            answer = client.ask(q["question"])
-        except Exception as e:  # a transport failure is a failed question
-            answer = f"__ERROR__ {e}"
-        r = score(q, answer)
-        results.append(r)
-        mark = "pass" if r["passed"] else "FAIL"
-        print(f"  {r['id']:>3}  {mark:4}  {q['question'][:52]:54}", end="")
-        print("" if r["passed"] else f"  {r['failures'][0][:60]}")
+    passes = []  # per-run tallies, for the spread
+    for run_index in range(1, args.repeat + 1):
+        if args.repeat > 1:
+            print(f"\n--- run {run_index} of {args.repeat} ---")
+        print(f"\nasking {len(questions)} questions\n")
+        results = []
+        for q in questions:
+            try:
+                answer = client.ask(q["question"])
+            except Exception as e:  # a transport failure is a failed question
+                answer = f"__ERROR__ {e}"
+            r = score(q, answer)
+            results.append(r)
+            mark = "pass" if r["passed"] else "FAIL"
+            print(f"  {r['id']:>3}  {mark:4}  {q['question'][:52]:54}", end="")
+            print("" if r["passed"] else f"  {r['failures'][0][:60]}")
 
+        grounded = [r for r in results if r["kind"] == "grounded"]
+        refusals = [r for r in results if r["kind"] == "refusal"]
+        passed = [r for r in results if r["passed"]]
+        cited_ok = [r for r in grounded if r.get("cited_correctly")]
+        passes.append({
+            "results": results,
+            "passed": len(passed),
+            "grounded": len(grounded),
+            "citations_correct": len(cited_ok),
+            "refusals": len(refusals),
+            "refusals_honoured": len([r for r in refusals if r["passed"]]),
+        })
+
+        print(f"\n{'=' * 64}")
+        print(f"  overall            {len(passed)}/{len(results)}")
+        print(f"  citations correct  {len(cited_ok)}/{len(grounded)}   <- the one that matters")
+        print(f"  refusals honoured  {len([r for r in refusals if r['passed']])}/{len(refusals)}")
+        print(f"{'=' * 64}")
+
+    if args.repeat > 1:
+        cites = [p["citations_correct"] for p in passes]
+        overall = [p["passed"] for p in passes]
+        flipped = sorted({
+            r["id"]
+            for i in range(len(passes))
+            for j in range(i + 1, len(passes))
+            for r in passes[i]["results"]
+            if r["passed"] != next(
+                x["passed"] for x in passes[j]["results"] if x["id"] == r["id"]
+            )
+        })
+        print(f"\n{'=' * 64}")
+        print(f"  ACROSS {args.repeat} RUNS OF THE SAME CODE")
+        print(f"  citations correct  {min(cites)}-{max(cites)} of {passes[0]['grounded']}"
+              f"   (mean {sum(cites) / len(cites):.1f})")
+        print(f"  overall            {min(overall)}-{max(overall)} of {len(passes[0]['results'])}")
+        print(f"  unstable questions {flipped or 'none'}")
+        print(f"\n  A change is only real if it moves the number by more than")
+        print(f"  {max(cites) - min(cites)} citations, which is what this pipeline moves on its own.")
+        print(f"{'=' * 64}")
+
+    # The last run is the one written out in full; the spread is what the
+    # summary is for.
+    results = passes[-1]["results"]
     grounded = [r for r in results if r["kind"] == "grounded"]
     refusals = [r for r in results if r["kind"] == "refusal"]
     passed = [r for r in results if r["passed"]]
     cited_ok = [r for r in grounded if r.get("cited_correctly")]
-
-    print(f"\n{'=' * 64}")
-    print(f"  overall            {len(passed)}/{len(results)}")
-    print(f"  citations correct  {len(cited_ok)}/{len(grounded)}   <- the one that matters")
-    print(f"  refusals honoured  {len([r for r in refusals if r['passed']])}/{len(refusals)}")
-    print(f"{'=' * 64}")
 
     RESULTS_DIR.mkdir(exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -379,6 +430,11 @@ def main() -> int:
         "when": stamp,
         "base_url": args.base_url,
         "workspace": args.workspace,
+        "repeat": args.repeat,
+        "spread": {
+            "citations_correct": [p["citations_correct"] for p in passes],
+            "passed": [p["passed"] for p in passes],
+        },
         "totals": {
             "questions": len(results),
             "passed": len(passed),
