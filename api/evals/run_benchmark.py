@@ -433,8 +433,11 @@ def main() -> int:
         print(f"  {max(cites) - min(cites)} citations, which is what this pipeline moves on its own.")
         print(f"{'=' * 64}")
 
-    # The last run is the one written out in full; the spread is what the
-    # summary is for.
+    # Every run is written out, not just the last. With --repeat the useful
+    # question is which questions fail *every* time and which merely flicker,
+    # and only the first kind is worth chasing. Keeping one run threw away the
+    # comparison the flag exists to make.
+    all_runs = [p["results"] for p in passes]
     results = passes[-1]["results"]
     grounded = [r for r in results if r["kind"] == "grounded"]
     refusals = [r for r in results if r["kind"] == "refusal"]
@@ -463,6 +466,17 @@ def main() -> int:
             "refusals_honoured": len([r for r in refusals if r["passed"]]),
         },
         "results": results,
+        "runs": all_runs,
+        # How often each question passed across the repeats. A question at 0/4
+        # is a defect; one at 2/4 is the pipeline being unstable about it, and
+        # the two need different work.
+        "stability": {
+            str(r["id"]): sum(
+                1 for run in all_runs
+                for x in run if x["id"] == r["id"] and x["passed"]
+            )
+            for r in results
+        },
     }, indent=2))
     print(f"\nwritten to {out}")
     print("diff against a previous run to see what a change actually did.")

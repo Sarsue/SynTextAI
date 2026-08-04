@@ -72,11 +72,14 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "name": "search_documents",
             "description": (
                 "Search the customer's documents and return the most relevant "
-                "passages, each with its file name and page number. Call this "
-                "more than once when a question has separate parts: search each "
-                "part in its own words rather than combining them into one "
-                "query. If the results do not answer the question, say so "
-                "instead of answering from your own knowledge."
+                "passages, each with its file name and page number. Expect to "
+                "call this several times for one question: a narrow search "
+                "repeated beats one broad search, because a single ranking puts "
+                "one part of a question above the rest and drops the others. "
+                "Search each part separately, and search again for any rule the "
+                "first results used without defining. If the results do not "
+                "answer the question, say so instead of answering from your own "
+                "knowledge."
             ),
             "parameters": {
                 "type": "object",
@@ -99,9 +102,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "function": {
             "name": "read_page",
             "description": (
-                "Read one full page of one document. Use it to check a figure or "
-                "a deadline before stating it, or to read around a passage that "
-                "search returned only part of."
+                "Read one full page of one document. Use it when a search result "
+                "uses a term or a rule without defining it: the definition is "
+                "usually a page or two earlier, and that earlier page is the one "
+                "worth citing. Also use it to check a figure or a deadline "
+                "before stating it."
             ),
             "parameters": {
                 "type": "object",

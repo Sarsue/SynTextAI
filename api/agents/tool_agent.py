@@ -71,11 +71,19 @@ Rules, in order of importance:
    broad subject is not enough: passages about running a small business do not
    answer a question about registering a trademark.
 
-3. If the question has several parts, search for each part separately, in the
-   words the documents would use. One search that combines every part will rank
-   one part above the others and miss the rest.
+3. Search more than once, narrowly, rather than once broadly. One search that
+   combines every part of a question ranks one part above the rest and misses
+   them. Search each part in its own words. A second search costs nothing and
+   is expected, not a sign you did the first one badly.
 
-4. Give the specific figures, deadlines and terms the documents use. Do not
+4. Before you answer, check that you have the passage that STATES the rule, not
+   merely one that applies it or mentions the words. If a passage says "if doing
+   so is readily achievable" while explaining parking spaces, it is using a rule
+   defined somewhere else; search for that rule, or read_page around it, and
+   cite where it is defined. Citing a page that merely contains the phrase sends
+   the reader to the wrong place, which is the worst thing an answer can do.
+
+5. Give the specific figures, deadlines and terms the documents use. Do not
    round, summarise away a number, or replace the document's own wording with a
    paraphrase when the exact phrase is what the reader needs.
 """
@@ -125,6 +133,7 @@ class ToolAgent:
         messages.append({"role": "user", "content": message})
 
         searches = 0
+        reads = 0
         for turn in range(self._max_turns):
             reply = chat_with_tools(messages, tools=TOOL_SCHEMAS)
             if not reply:
@@ -135,7 +144,7 @@ class ToolAgent:
             if not calls:
                 answer = (reply.get("content") or "").strip()
                 if answer:
-                    return self._finish(answer, tools, searches, turn + 1)
+                    return self._finish(answer, tools, searches, reads, turn + 1)
                 # No content and no calls is a wasted turn. Ask once for an
                 # answer rather than returning silence.
                 messages.append(reply)
@@ -151,6 +160,8 @@ class ToolAgent:
                 name = fn.get("name") or ""
                 if name == "search_documents":
                     searches += 1
+                elif name == "read_page":
+                    reads += 1
                 output = await tools.run(name, fn.get("arguments") or "{}")
                 messages.append({
                     "role": "tool",
@@ -175,7 +186,7 @@ class ToolAgent:
         }
 
     def _finish(
-        self, answer: str, tools: DocumentTools, searches: int, turns: int
+        self, answer: str, tools: DocumentTools, searches: int, reads: int, turns: int
     ) -> Dict[str, Any]:
         answer, used = self._verify_citations(answer, tools)
         source_map = "\n".join(
@@ -186,9 +197,14 @@ class ToolAgent:
                 for n, c in enumerate(used, start=1)
             ]
         )
+        # searches and reads are logged because the score alone cannot say
+        # whether a change to the instructions changed the behaviour. An
+        # instruction telling the model to search twice is worth nothing if it
+        # still searches once, and the number is the only way to tell.
         logger.info({
             "event": "tool_agent.answered",
-            "turns": turns, "searches": searches, "citations": len(used),
+            "turns": turns, "searches": searches, "reads": reads,
+            "citations": len(used),
         })
         return {
             "response": answer + ("\n\n" + source_map if used else ""),
@@ -196,6 +212,7 @@ class ToolAgent:
             "mode": "tools",
             "turns": turns,
             "searches": searches,
+            "reads": reads,
         }
 
     def _verify_citations(

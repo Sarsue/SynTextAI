@@ -1,0 +1,515 @@
+{
+  "label": "tools-narrow-x4",
+  "when": "20260804-181830",
+  "base_url": "http://127.0.0.1:3000",
+  "workspace": 4219,
+  "repeat": 4,
+  "spread": {
+    "citations_correct": [
+      12,
+      15,
+      13,
+      13
+    ],
+    "passed": [
+      13,
+      15,
+      13,
+      14
+    ]
+  },
+  "totals": {
+    "questions": 26,
+    "passed": 14,
+    "grounded": 22,
+    "citations_correct": 13,
+    "refusals": 4,
+    "refusals_honoured": 4
+  },
+  "results": [
+    {
+      "id": 1,
+      "question": "how long do i keep tax records",
+      "answer": "You need to keep tax\u2010related records for the length of time the IRS could still need them to enforce tax laws or the taxpayer can still amend the return. The IRS publications say:\n\n* \u201cYou must keep your records as long as they may be needed for the administration of any provision of the Internal Revenue Code. Generally, this means you must keep records that support an item of income or deduction on a return until the period of limitations for that return runs out.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* \u201cEmployment taxes. If you have employees, you must keep all employment tax records for at least 4\u202fyears after the date the tax becomes due or is paid, whichever is later.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* \u201cKeep records relating to property until the period of limitations expires for the year in which you dispose of the property in a taxable disposition. You must keep these records to figure any depreciation, amortization, or depletion deduction, and to figure your basis for computing gain or loss when you sell or otherwise dispose of the property.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* \u201cWhen your records are no longer needed for tax purposes, do not discard them until you check to see if you have to keep them longer for other purposes. For example, your insurance company or creditors may require you to keep them longer than the IRS does.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\nThese passages provide the specific retention periods that the IRS requires for tax records.\n\n\n\n**Sources:**\n1. [irs_publication_583_starting_a_business.pdf (Page 16)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)",
+      "cited": [
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 16
+        }
+      ],
+      "failures": [
+        "missing required text: '3 years'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": true
+    },
+    {
+      "id": 2,
+      "question": "why do i need to keep business records",
+      "answer": "Because the documents show, you must keep business records for several concrete reasons:\n\n* **To support the amounts on your tax return.**  \n  \u201cYou need good records to prepare your tax returns. These records must support the income, expenses, and credits you report.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=11)\n\n* **To satisfy the IRS\u2019s requirement to keep records for the period of limitations.**  \n  \u201cYou must keep your records as long as they may be needed for the administration of any provision of the Internal Revenue Code \u2026 you must keep records that support an item of income or deduction on a return until the period of limitations for that return runs out.\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* **To provide documentation in case the IRS inspects your returns.**  \n  \u201cYou must keep your business records available at all times for inspection by the IRS. If the IRS examines any of your tax returns, you may be asked to explain the items reported. A complete set of records will speed up the examination.\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* **To monitor the progress of your business.**  \n  \u201cGood records will help you do the following. Monitor the progress of your business\u2026.\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* **To prepare accurate financial statements.**  \n  \u201cGood records to prepare accurate financial statements. These statements can help you\u2026.\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n\n* **To keep track of deductible expenses and other specific records.**  \n  \u201cYou need to keep supporting documents, ... It is important to keep these documents because they support the entries in your books and on your tax return.\u201d [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)\n\nIn short, the documents say that business records are required to prove tax figures, keep the IRS satisfied, meet statutory retention periods, aid in business management, and produce financial statements.\n\n\n\n**Sources:**\n1. [irs_publication_583_starting_a_business.pdf (Page 11)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=11)\n2. [irs_publication_583_starting_a_business.pdf (Page 16)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n3. [irs_publication_583_starting_a_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)",
+      "cited": [
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 11
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 16
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 12
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 3,
+      "question": "what accounting method should i use",
+      "answer": "You choose an accounting method when you file your first business tax return (Schedule\u202fC, Form\u202f1040).  The method you pick must fit your business activities and, once it\u2019s chosen, you must keep it the same unless you get IRS approval to change it\u3010irs_publication_334_tax_guide_small_business.pdf, page 14\u3011.\n\n**Available methods**\n\n* **Cash method** \u2013 report income when you receive it and expenses when you pay them.  Most sole\u2011propietors who have no inventory use this method because it\u2019s simpler\u3010irs_publication_334_tax_guide_small_business.pdf, page 16\u3011.  \n* **Accrual method** \u2013 report income when you earn it and expenses when you incur them, even if you haven\u2019t yet received or paid cash.  If your business needs to keep inventory, you must use an accrual method for purchases and sales\u3010irs_publication_334_tax_guide_small_business.pdf, page 16\u3011.  \n* **Special methods** \u2013 for specific items of income or expense (e.g., depreciation, bad debts).  \n* **Combination method** \u2013 a mix of cash, accrual, and special methods, provided it consistently shows your income and clearly separates inventory treatment if applicable\u3010irs_publication_583_starting_a_business.pdf, page 5\u3011.\n\n**When to use each**\n\n* If you **don\u2019t keep inventory** (or can treat inventory as non\u2011incidental material or supplies), you may choose the **cash method**.  \n* If you **do keep inventory**, you must **use the accrual method** for inventory purchases and sales, though you may still use cash for other items.  \n\nSo, start by determining whether your business holds inventory. If it does, use the accrual method for inventory; otherwise, the cash method is usually appropriate. If you later want to change the method, you must file Form\u202f1128 or Form\u202f3115 and obtain IRS approval\u3010irs_publication_334_tax_guide_small_business.pdf, page 14\u3011\u3010irs_publication_583_starting_a_business.pdf, page 5\u3011.",
+      "cited": [],
+      "failures": [
+        "did not cite: irs_publication_583_starting_a_business.pdf p[5]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 4,
+      "question": "how do i check my workplace for hazards",
+      "answer": "To check your workplace for hazards you should use **routine self\u2011inspections** and the **self\u2011inspection checklists** that the handbook provides.\n\n1. **Perform a self\u2011inspection**  \n   The handbook says:  \n   *\u201cWorkplace Self\u2011Inspection  \n   An effective way to identify workplace hazards is for knowledgeable and experienced workers to conduct routine safety and health inspections (i. e. , self\u2011inspections). The only way to know if potential hazards exist and if they are under control is to assess work processes directly.\u201d*  \n   [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n\n2. **Follow the three\u2011step inspection process** \u2013 identify, control, and monitor \u2013 as listed in the handbook:  \n   *\u201c\u2022\u202fidentify hazards,  \n   \u2022\u202fcontrol identified hazards,  \n   \u2022\u202fmonitor and evaluate hazard controls to verify that they continue to be effective.\u201d*  \n   [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n\n3. **Use the self\u2011inspection checklists** to structure your review. The handbook explains:  \n   *\u201cSelf\u2011Inspection Checklists  \n   The checklists in the handbook are intended for general industry workplaces, but not for construction or maritime industries. They are a starting point for identifying workplace hazards. The checklists can give you some indication of where to begin taking action to make your business safer and more healthful for your workers.\u201d*  \n   [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n\n4. **Integrate inspections with a safety and health program**. As part of the recommended practices, hazard identification and assessment is one of the seven core elements of a safety and health program:  \n   *\u201cHazard identification and assessment\u201d*  \n   [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=7)\n\nBy routinely inspecting work processes, using the provided checklists to spot hazards, and controlling and monitoring those hazards, you create a systematic approach to keeping the workplace safe.\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n2. [osha_small_business_handbook.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=7)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 8
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 7
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 5,
+      "question": "cash or accrual accounting whats the difference",
+      "answer": "**Cash\u202fmethod**\n\n*  Income is put on the tax return **when it is actually received** (or constructively received, e.g., a bank deposit).  \n   \u201cUnder the cash method, include in your gross income all items of income you actually or constructively receive during your tax year.\u201d\u202f[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=14)  \n*  Expenses are deducted in the year they are **paid**.  \n   \u201cUnder the cash method, you generally deduct expenses in the tax year in which you actually pay them.\u201d\u202f[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=15)  \n\n**Accrual\u202fmethod**\n\n*  Income is reported in the year it is **earned** even if payment comes later.  \n   \u201cUnder an accrual method, you generally report income in the year earned and deduct or capitalize expenses in the year incurred.\u201d\u202f[[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=16)  \n*  Expenses are deducted (or capitalized) in the year they are **incurred**, regardless of when they are paid.  \n   \u201cUnder an accrual method of accounting, you generally report income in the year earned and deduct or capitalize expenses in the year incurred.\u201d\u202f[[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=16)  \n\n**Key difference**\n\nThe cash method matches income and expenses to the year they are actually received or paid, while the accrual method matches them to the year the economic event occurs\u2014when you earn the revenue or incur the expense. This matching principle gives the accrual method a clearer picture of a business\u2019s true financial performance for a given year.\n\n\n\n**Sources:**\n1. [irs_publication_334_tax_guide_small_business.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=14)\n2. [irs_publication_334_tax_guide_small_business.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=15)\n3. [irs_publication_334_tax_guide_small_business.pdf (Page 16)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=16)",
+      "cited": [
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 14
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 15
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 16
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 6,
+      "question": "can i deduct business travel",
+      "answer": "Yes.  According to IRS\u202fPublication\u202f334 (Tax Guide for Small Businesses) you may deduct the ordinary and necessary costs of traveling away from home for business.  The guide makes it clear that those costs include:\n\n* **Transportation** \u2013 the cost of air, train, bus, or car travel between your home and the business destination, plus fares for taxis, commuter bus, or limousine to and from the airport or hotel, and the cost of sending baggage or display material between regular and temporary work locations.  [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40)  \n* **Meals and lodging** \u2013 the expenses for meals and lodging on an overnight or otherwise long\u2011enough trip that requires sleep or rest.  You may use actual expenses or a standard meal allowance, and you can deduct only 50\u202f% of meal costs.  [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)  \n* **Cleaning** \u2013 the cost of dry cleaning or laundry while on the trip.  [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)  \n* **Telephone** \u2013 business calls, fax, or other communication expenses incurred while traveling.  [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)  \n* **Tips** \u2013 tips paid on any of the above services.  [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)\n\nTo qualify, the trip must meet the \u201caway\u2011from\u2011home\u201d criteria:  \n1. Your duties require you to be away from the general area of your tax home for longer than an ordinary day\u2019s work, **and**  \n2. You need to get sleep or rest to perform your duties.  [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40)\n\nOnly expenses that are ordinary, necessary, and directly related to your business are deductible.  No deduction is allowed for personal commuting costs (e.g., driving from your home to your regular workplace).  [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=35)\n\n\n\n**Sources:**\n1. [irs_publication_334_tax_guide_small_business.pdf (Page 40)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40)\n2. [irs_publication_334_tax_guide_small_business.pdf (Page 41)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)\n3. [irs_publication_334_tax_guide_small_business.pdf (Page 35)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=35)",
+      "cited": [
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 40
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 41
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 35
+        }
+      ],
+      "failures": [
+        "did not cite: irs_publication_334_tax_guide_small_business.pdf p[34]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 7,
+      "question": "what goes in an executive summary",
+      "answer": "A business plan\u2019s executive summary should be a short, concise overview that covers the key points of the plan.  According to the SBA Business Planning Guide it should:\n\n> Executive Summary:  \n> This portion should be brief; usually one or two paragraphs, but it should give the reader an overview of what you want to accomplish. For example, describe your idea, how much money you need, what you need it for, how much money you will bring (or have put) into the business, and a brief schedule of your goals. Since you won\u2019t know some of these facts until you complete your business plan, write this section last.  \n\n[cite this passage as: [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)]\n\n\n\n**Sources:**\n1. [sba_business_planning_guide.pdf (Page 4)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)",
+      "cited": [
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 4
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 8,
+      "question": "how do i describe my target market",
+      "answer": "To describe your target market, follow the guidance in the SBA Business Planning Guide:\n\n1. **Identify the market niche** \u2013 state who your best customer is.  \n2. **Describe that customer\u2019s characteristics**.  \n   - For business markets: segment by industry, company size, location, or product use/application.  \n   - For consumer markets: segment by demographics (age, gender), geographic location, economic status, lifestyle, product application, or benefits sought.  \n   *\u201cDescribe your market niche; who is your best customer. Identify those customers and describe their characteristics. Business markets might be classified by industry, company size, location, or product use/application. Consumer (household) markets might be segmented by demographics, (age, gender), geographic location, economic status, lifestyle, product application or benefits sought.\u201d* [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=14)\n\n3. **Estimate market size and growth potential** \u2013 use population figures, sales tax data, industry information, etc.  \n   *\u201cEstimate the approximate size and growth potential of the target market(s) using population figures, sales tax info, industry information, etc. Estimate how much of the total market you will capture.\u201d* [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=14)\n\n4. **Show how you will reach that market** \u2013 include location, distribution, promotion, and pricing that are tailored to the identified segments.  \n   *\u201cHow will your promotional activities (such as advertising, personal selling or publicity) be tailored to your target market? Include rate sheets, promotional material and time lines for your promotional campaign.\u201d* [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=15)\n\nUsing these steps, craft a concise paragraph (or set of bullet points) that clearly states who your ideal customer is, the key traits that differentiate them, the size of that group, and the strategies you will use to capture a share of it.\n\n\n\n**Sources:**\n1. [sba_business_planning_guide.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=14)\n2. [sba_business_planning_guide.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=15)",
+      "cited": [
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 14
+        },
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 15
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 9,
+      "question": "do i have to make my shop wheelchair accessible",
+      "answer": "You do need to make your shop physically accessible.  \nThe ADA Small\u2011Business Guide states:\n\n- \u201cWhen a business has two public entrances, in most cases **only one must be accessible**\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10).  \n- If only one entrance is accessible, a **sign must direct customers to that entrance** and it must remain open during store hours [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10).  \n- For parking, the guide says: \u201c**If parking is provided for the public, designated accessible parking spaces must be provided, if doing so is readily achievable**\u201d and that these spaces must be \u201cclosest to the accessible entrance and on an accessible route\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8).  \n\nSo, if your shop has two entrances you must make at least one of them wheelchair\u2011accessible and provide the required signage and access. If your shop has only one entrance, you still must remove barriers (steps, narrow doors, etc.) to make that entrance accessible whenever that is readily achievable. Additionally, if you offer parking, you must provide accessible spaces when doing so is readily achievable.\n\n\n\n**Sources:**\n1. [ada_guide_small_business.pdf (Page 10)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)\n2. [ada_guide_small_business.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8)",
+      "cited": [
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 10
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 8
+        }
+      ],
+      "failures": [
+        "did not cite: ada_guide_small_business.pdf p[6]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 10,
+      "question": "how many employees before ada employment rules apply",
+      "answer": "The ADA employer\u2011employment provisions begin to apply when a business has **15 or more employees**.  \n[cite this passage as: [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=19)]\n\n\n\n**Sources:**\n1. [ada_guide_small_business.pdf (Page 19)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=19)",
+      "cited": [
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 19
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 11,
+      "question": "how long do i have to report a workplace death",
+      "answer": "All work\u2011related fatalities must be reported to OSHA within **8 hours** of the incident.  \n\n*[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)*  \n*[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=48)*\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)\n2. [osha_small_business_handbook.pdf (Page 48)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=48)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 15
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 48
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 12,
+      "question": "when do i report an amputation to osha",
+      "answer": "An amputation must be reported to OSHA **within 24\u202fhours** of the injury.  \n\n[cite this passage as: [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)]\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 15
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 13,
+      "question": "am i exempt from injury recordkeeping",
+      "answer": "You are only exempt from OSHA\u2019s injury\u2011recordkeeping requirements if your business meets one of the following conditions:\n\n* **You had 10 or fewer workers during all of the last calendar year,** or  \n* **You operate in a low\u2011hazard industry specified in 29\u202fCFR\u202fPart\u202f1904, Subpart\u202fB, Appendix\u202fA.**\n\nIn either case you still must report work\u2011related fatalities, in\u2011patient hospitalizations, amputations, and loss of an eye to OSHA, and you still need to keep the other mandatory reports if applicable. **[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=14)**\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=14)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 14
+        }
+      ],
+      "failures": [
+        "missing required text: 'partially exempt'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": true
+    },
+    {
+      "id": 14,
+      "question": "how long do i keep injury records",
+      "answer": "Injury and illness records, such as OSHA Forms\u202f300,\u202f300A and\u202f301, must be kept at the worksite for **at least five\u202fyears**.  \n[cite this passage as: [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)]\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 15
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 15,
+      "question": "what records do i keep for tax and for injuries and for how long",
+      "answer": "**Tax\u2011related records**\n\n| What to keep | How long to keep it | Source |\n|--------------|--------------------|--------|\n| Records that support any item of income or deduction on a tax return (e.g., receipts, invoices, bank statements, canceled checks, payroll records) | Keep them **as long as they may be needed for the administration of any provision of the Internal Revenue Code**.  In practice that means keeping them **until the period of limitations for that return runs out**. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| Copies of your filed tax returns | Keep them **for at least the same time you keep the supporting documents** (and often longer for reference). | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| Employment\u2011tax records (including payroll, Form 941/944, wage and tax statements) | Keep them **at least 4\u202fyears after the date the tax becomes due or is paid, whichever is later**. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| Asset\u2011related records (purchase price, depreciation schedules, sale documents) | Keep them **until the period of limitations expires for the year in which the asset is disposed of in a taxable disposition**. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n\n**Injury & illness records (OSHA)**\n\n| What to keep | How long to keep it | Source |\n|--------------|--------------------|--------|\n| OSHA Form\u202f300 log, OSHA Form\u202f301 incident reports, OSHA Form\u202f300A annual summaries | Keep them **at the worksite for at least five (5) years**. | [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15) |\n| Worker medical and exposure records | Keep them for the **time period required for each specific type of record** (e.g., medical records, chemical exposure logs). | [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15) |\n| OSHA\u2011required incident reports (fatalities, in\u2011patient hospitalizations, amputations, loss of an eye) | **Report them to OSHA within 8\u202fhours** for fatalities, and within **24\u202fhours** for in\u2011patient hospitalizations, amputations, or loss of an eye. | [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15) |\n\n> **Summary**  \n> \u2022 For tax purposes, keep income\u2011related documentation until the IRS period of limitations expires (typically 3\u20116\u202fyears, depending on the type of return), keep employment\u2011tax records for 4\u202fyears, and keep asset records until the limit period of the disposition year ends.  \n> \u2022 For workplace injuries, maintain OSHA Forms\u202f300,\u202f301,\u202f300A and related worker medical records on\u2011site for **5\u202fyears**, and provide OSHA the required fatality or severe\u2011injury reports promptly (within 8\u202fhours or 24\u202fhours as specified).\n\n\n\n**Sources:**\n1. [irs_publication_583_starting_a_business.pdf (Page 16)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n2. [osha_small_business_handbook.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)",
+      "cited": [
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 16
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 15
+        }
+      ],
+      "failures": [
+        "missing required text: ['3 years', 'three years']"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": true
+    },
+    {
+      "id": 16,
+      "question": "how do i start a business and keep my taxes organized",
+      "answer": "I could not finish looking that up. Please ask about a more specific part of it.",
+      "cited": [],
+      "failures": [
+        "did not cite: sba_business_planning_guide.pdf p[4]; irs_publication_583_starting_a_business.pdf p[11]",
+        "missing required text: 'executive summary'",
+        "missing required text: 'records'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 17,
+      "question": "what do i need to do to keep employees safe and my premises accessible",
+      "answer": "**To keep employees safe and keep your premises accessible, your small business should**\n\n1. **Identify and control hazards**  \n   * Conduct routine workplace self\u2011inspections to identify hazards, control them, and monitor the effectiveness of those controls.  \n   * Use the self\u2011inspection checklists in the OSHA Small Business Safety & Health Handbook as a starting point.  \n   * Example: \u201cWorkplace Self\u2011Inspection \u2013 an effective way to identify hazards \u2026 can help you identify hazards, control identified hazards, and monitor and evaluate hazard controls to verify that they continue to be effective\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8).\n\n2. **Follow OSHA\u2019s General Duty Clause**  \n   * Employers must provide \u201ca place of employment which are free from recognized hazards that are causing or are likely to cause death or serious physical harm to employees.\u201d  \n   * If a standard does not already address a hazard, the general duty clause applies.  \n   * \u201cEach employer \u2013 (1) shall furnish to each of his employees employment and a place of employment which are free from recognized hazards \u2026\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=91).\n\n3. **Keep the premises physically accessible** (ADA Standards for Accessible Design, summarized in *ada_guide_small_business.pdf*)  \n   * **Accessible parking** \u2013 provide designated accessible parking spaces that have an access aisle, clear vertical clearance, and the international symbol of accessibility.  If the parking lot has 25\u201350 spaces, provide 1 or 2 accessible spaces; if 1 space is provided it must be van\u2011accessible.  \n     * \u201cIf your parking lot has 25 or fewer spaces, then 1 should be an accessible parking space. If it has 50 or fewer, it should have 2\u201d [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=9).  \n   * **Accessible routes** \u2013 all routes between parking, entrances, and key workplace areas must have no steps or steep slopes, and must have a firm, stable, slip\u2011resistant surface.  \n     * \u201cAn accessible route must be provided between the access aisle and the accessible building entrance \u2026 it must have a firm, stable, slip\u2011resistant surface\u201d [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8).  \n   * **Entrances** \u2013 doors should be at least 36\u202finches wide (opening 32\u202finches); use lever or loop handles instead of knobs or round knobs that require a tight grasp.  \n     * \u201cMost entrances \u2026 use 36 inch wide doors \u2026 Changing or adding door hardware is usually relatively easy and inexpensive\u201d [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=12).  \n   * **Ramps** \u2013 slope no steeper than 1:12, handrails on both sides if the rise is greater than 6\u202finches, and a clear landing of at least 36\u202finches by 90\u202finches.  \n     * \u201cWhen a ramp is added \u2026 the slope of the ramp should be as shallow as possible but not more than 1:12 \u2026 handrails whenever the slope is more that 1:20\u201d [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10).  \n   * **Signage** \u2013 install the international symbol of accessibility and, where required, \u201cvan accessible\u201d or \u201caccessible entrance\u201d signs in visible positions.  \n     * \u201cA sign with the international symbol of accessibility must be located in front of the parking space \u2026 mounted high enough so it is not hidden\u201d [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8).  \n   * **Doors and turnstiles** \u2013 if a turnstile or narrow entrance is used, provide an accessible passage or gate that is at least 32\u202finches wide.  \n     * \u201cIf an inaccessible turnstile is located for the entrance \u2026 a security gate or access passage must be provided \u2026 it must be at least 32 inches wide\u201d [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=13).  \n\n4. **Employ training and communication**  \n   * Use OSHA\u2011approved training programs (e.g., Outreach Training Program) to educate workers on safe work practices and the right to refuse unsafe work.  \n     * \u201cEmployers must provide additional training for their workers on specific hazards of their job\u201d [[8]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=92).  \n\n5. **Leverage compliance assistance**  \n   * Take advantage of the OSHA On\u2011Site Consultation Program for free, confidential guidance on hazards and safety improvements.  \n     * \u201cThe OSHA On\u2011Site Consultation Program offers no\u2011cost and confidential occupational safety and health services \u2026 to identify safety and health hazards in workplaces and how to fix them\u201d [[9]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=90).  \n\n**In short:** Scan the workplace for hazards, apply the OSHA general duty clause, keep parking and routes, doors, ramps, and signage ADA\u2011compliant, train employees, and use OSHA\u2019s free consultation and training resources.\n\nIf you need clarification on any specific area\u2014e.g., fire safety, slip\u2011resistance, or chemical hazard communication\u2014please let me know and I can locate the exact passages that cover those topics.\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n2. [osha_small_business_handbook.pdf (Page 91)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=91)\n3. [ada_guide_small_business.pdf (Page 9)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=9)\n4. [ada_guide_small_business.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8)\n5. [ada_guide_small_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=12)\n6. [ada_guide_small_business.pdf (Page 10)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)\n7. [ada_guide_small_business.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=13)\n8. [osha_small_business_handbook.pdf (Page 92)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=92)\n9. [osha_small_business_handbook.pdf (Page 90)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=90)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 8
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 91
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 9
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 8
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 12
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 10
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 13
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 92
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 90
+        }
+      ],
+      "failures": [
+        "did not cite: ada_guide_small_business.pdf p[6]",
+        "missing required text: 'readily achievable'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 18,
+      "question": "how do i write a business plan and set up accounting",
+      "answer": "**Writing a Business Plan**\n\n1. **Start with an outline** \u2013 a plan should include a cover page, an optional table of contents, an executive summary, a description of the business, a market analysis, an organization/management section, a description of products or services, an operations plan, a marketing plan, a financial section, and exhibits. The SBA guide says the outline is a good place to start:  \n   [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)\n\n2. **Cover page** \u2013 list the company name, address, phone number, owners, and the date.  \n   [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)\n\n3. **Executive summary** \u2013 a short paragraph summarizing what you want to accomplish, how much money you need, how you will use it, and a brief schedule of goals.  \n   [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)\n\n4. **Business description** \u2013 give an overview, industry background, why your business can compete, and future projections.  \n   [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=12)\n\n5. **Products or services** \u2013 describe what you sell, why it matters, how it differs, and future offerings.  \n   [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=12)\n\n6. **Market analysis** \u2013 identify your target market, size, and competition, and estimate how much of that market you will capture.  \n   [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=14)\n\n7. **Organization and management** \u2013 state your legal structure, ownership percentages, board advisors, and detailed responsibilities for each key person.  \n   [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=13)\n\n8. **Operations plan** \u2013 describe facilities, equipment, supply chain, inventory needs, and production capacity.  \n   [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=12)\n\n9. **Marketing plan** \u2013 explain your product positioning, service level, and how customers will experience your business.  \n   [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=14)\n\n10. **Financial section** \u2013 include historical financial statements (if any), a three\u2011year income projection, a cash\u2011flow projection, a balance sheet, a break\u2011even analysis, and a source\u2011uses of funds sheet.  \n    [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=16)\n\n11. **Exhibits** \u2013 add resumes, contracts, invoices, floor plans, etc., to support the content of your plan.  \n    [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)\n\n\n**Setting Up Accounting**\n\n1. **Choose a tax year** \u2013 You can adopt a calendar\u2011tax year or a fiscal\u2011tax year (12 consecutive months ending on the last day of any month except December). If you start a sole\u2011prop business you must keep the calendar year unless you get IRS approval to change it.  \n   [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=14)\n\n2. **Pick an accounting method** \u2013 the method (cash, accrual, special, or combination) must be used for all financial reporting. If you handle inventory, use the accrual method unless you qualify as a \u201csmall business taxpayer\u201d that can treat inventories as non\u2011incidental supplies.  \n   [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=14)\n\n3. **Keep complete, separate books for each business** \u2013 journal entries (receipts, expenses, payroll) and a ledger of totals.  \n   [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)\n\n4. **Use a business checkbook** \u2013 open a separate business checking account, record expenses daily, and keep deposit slips, canceled checks, and receipts.  \n   [[8]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14)\n\n5. **Reconcile monthly** \u2013 compare your bank statement with the checkbook and your books; correct any discrepancies.  \n   [[8]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14)\n\n6. **Track supporting documents** \u2013 keep sales slips, invoices, deposit slips, and canceled checks to prove the amounts recorded in your books.  \n   [[9]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13)\n\n7. **Maintain electronic storage** \u2013 if you use an electronic system, it must provide indexing, preservation, and legible retrieval for the IRS.  \n   [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)\n\n8. **Record petty\u2011cash** \u2013 maintain a petty cash fund for small payments; each use should have a slip and receipt.  \n   [[9]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13)\n\nBy following the structure laid out in the SBA guide for your business plan and the IRS guidance for establishing a clear accounting system, you\u2019ll create a solid foundation\n\n\n\n**Sources:**\n1. [sba_business_planning_guide.pdf (Page 4)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=4)\n2. [sba_business_planning_guide.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=12)\n3. [sba_business_planning_guide.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=14)\n4. [sba_business_planning_guide.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=13)\n5. [sba_business_planning_guide.pdf (Page 16)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/320-sba_business_planning_guide.pdf#page=16)\n6. [irs_publication_334_tax_guide_small_business.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=14)\n7. [irs_publication_583_starting_a_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)\n8. [irs_publication_583_starting_a_business.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14)\n9. [irs_publication_583_starting_a_business.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13)",
+      "cited": [
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 4
+        },
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 12
+        },
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 14
+        },
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 13
+        },
+        {
+          "file": "sba_business_planning_guide.pdf",
+          "page": 16
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 14
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 12
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 14
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 13
+        }
+      ],
+      "failures": [
+        "did not cite: irs_publication_583_starting_a_business.pdf p[5]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 19,
+      "question": "what should i track for taxes and for travel expenses",
+      "answer": "**What to track for taxes**  \n\n| What you need to keep | Why it matters | Where the document says it |\n|-----------------------|----------------|---------------------------|\n| **Gross receipts** \u2013 every dollar you receive from the business (e.g., sales receipts, bank deposits) | Needed to verify income on the return and to calculate net profit | *irs_publication_583_starting_a_business.pdf, page 11* \u2013 \u201cYou should keep supporting documents that show the amounts and sources of your gross receipts.\u201d |\n| **Expense receipts** \u2013 invoices, canceled checks, credit\u2011card slips, or bank statements for every business purchase | Supports every deduction you claim on your return | *irs_publication_583_starting_a_business.pdf, page\u202f13* \u2013 \u201cProof of payment of an amount, by itself, does not establish that you are entitled to a tax deduction \u2026 you should also keep other documents, such as credit\u2011card sales slips and invoices, to show that you also incurred the cost.\u201d |\n| **Mileage log** \u2013 record of every business trip: date, purpose, starting & ending mileage | Required for claiming the standard mileage rate or actual vehicle expenses | *irs_publication_334_tax_guide_small_business.pdf, page\u202f40* \u2013 \u201cYou can deduct the cost of traveling ... by airplane, train, bus, or car \u2026 Car or truck. You can deduct the costs of operating and maintaining your vehicle \u2026 as actual expenses or the standard mileage rate.\u201d |\n| **Travel & lodging receipts** \u2013 hotel bills, airfare, train tickets | Needed so you can deduct 50\u202f% of meals and 100\u202f% of lodging, if the trip is overnight | *irs_publication_334_tax_guide_small_business.pdf, page\u202f41* \u2013 \u201cMeals and lodging. You can deduct the cost of meals and lodging if your business trip is overnight \u2026 You can use actual expenses or the standard meal allowance \u2026 In most cases, you can deduct only 50\u202f% of your meal expenses.\u201d |\n| **Business\u2011use portion of personal\u2011use items** \u2013 e.g., automobile fuel, parking fees, tolls, telephone, or internet used for the business | Allows you to split expenses between personal & business use | *irs_publication_334_tax_guide_small_business.pdf, page\u202f35* \u2013 \u201cIf you use your vehicle for both business and personal purposes, you must divide your expenses between business and personal use. \u2026 You can divide your expenses based on the miles driven for each purpose.\u201d |\n| **Tax\u2011specific records** \u2013 e\u2011actuals for excise taxes, employment taxes, and other taxes you file | Required for claiming those deductions and for IRS audit support | *irs_publication_334_tax_guide_small_business.pdf, page\u202f40* \u2013 \u201cYou can deduct on Schedule\u202fC (Form\u202f1040) various federal, state, local, and foreign taxes directly attributable to your business.\u201d |\n| **Retention schedule** \u2013 the length of time to keep each type of record | Helps you know how long you must keep evidence and avoid penalties | *irs_publication_583_starting_a_business.pdf, page\u202f16* \u2013 \u201cYou must keep the records as long as they may be needed for the administration of any provision ... Generally, you must keep the records as long as they may be needed \u2026 until the period of limitations for that return runs out.\u201d |\n\n**What to track for travel expenses**  \n\n| Item | What to log | Why it matters | Source |\n|------|-------------|----------------|--------|\n| **Trip date** | Date of departure & return | Establishes the tax\u2011year and whether the trip was \u201caway from home\u201d | *irs_publication_334_tax_guide_small_business.pdf, page\u202f40* \u2013 \u201cYou are traveling away from home if both the following conditions are met\u2026\u201d |\n| **Destination** | City, state, or country | Required to show that the travel is for business | *irs_publication_334_tax_guide_small_business.pdf, page\u202f40* |\n| **Purpose** | Meeting, conference, client site visit, etc. | Supports the \u201cordinary and necessary\u201d test | *irs_publication_334_tax_guide_small_business.pdf, page\u202f40* |\n| **Transportation method and cost** | Airfare, train fare, bus fare, rental\u2011car bill, mileage & rate | Needed to calculate the deduction for travel | *irs_publication_334_tax_guide_small_business.pdf, page\u202f41* \u2013 \u201cTransportation. You can deduct the cost of travel by airplane, train, bus, or car \u2026\u201d |\n| **Meal cost** | Itemized meal receipts | Supporting 50\u202f% meal deduction | *irs_publication_334_tax_guide_small_business.pdf, page\u202f41* \u2013 \u201c\u2026you can deduct the cost of meals and lodging \u2026 in most cases you can deduct only 50% of your meal expenses.\u201d |\n| **Lodging cost** | Hotel bill | Supports lodging deduction | *irs_publication_334_tax_guide_small_business.pdf, page\u202f41* |\n| **Parking & tolls** | Receipt or log | Deductible separately if using standard mileage rate | *irs_publication_334_tax_guide_small_business.pdf, page\u202f35* \u2013 \u201cIf you use your vehicle for both business and personal purposes \u2026 you can deduct business\u2011related parking fees and tolls.\u201d |\n| **Taxi / shuttle / limousine** | Itemized receipt | Deductible as transportation | *irs_publication_334_tax_guide_small_business.pdf, page\u202f41* |\n| **Mileage log (if using mileage rate)** | Starting and ending odometer, business mileage | Needed to compute deduction and verify business use | *irs_publication_334_tax_guide_small_business.pdf, page\u202f35* \u2013 \u201cStandard mileage rate ... 70 cents a mile (for 2025).\u201d |\n\n**How to keep the records**\n\n1. **Attach receipts to a log or ledger** \u2013 keep each receipt next to the entry that shows the amount, date, and business purpose.  \n2. **Separate personal & business expenses** \u2013 for mixed\u2011use items (e.g., a car or cell phone), keep a clear split of mileage or usage.  \n3. **Maintain a dedicated file or digital folder** for each tax year so you can produce the records if the IRS asks.  \n4. **Store electronic copies** \u2013 if kept electronically, ensure they are archived permanently in a format the IRS can read (e.g., PDF, scanned images).  \n5. **Keep for the minimum required time** \u2013 at least 4\u202fyears for most business records, longer for assets or if the limitation period for a particular claim has expired.  \n\nBy tracking these items and keeping the documentation organized, you\u2019ll be able to substantiate all deductions for taxes and travel expenses and comply with the IRS record\u2011keeping requirements.",
+      "cited": [],
+      "failures": [
+        "did not cite: irs_publication_583_starting_a_business.pdf p[11]; irs_publication_334_tax_guide_small_business.pdf p[34]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 20,
+      "question": "do i need an ein and what accounting method comes with it",
+      "answer": "You **do need an EIN**\u202fif your business:\n- plans to pay wages to one or more employees, **or**  \n- must file pension or excise\u2011tax returns.  \n  (IRS\u202fPublic\u202f583,\u202fpage\u202f4)  \n\nEven if you have no employees, most corporations, partnerships, and LLCs are required to obtain an EIN in order to file taxes and to keep proper records.  \n\nThe EIN itself does **not** determine which accounting method you use.  \nWhen you file your first income\u2011tax return that includes a Schedule\u202fC (Form\u202f1040), you must **choose an accounting method**: either the cash method or the accrual method (or a special/combination method if needed).  \nChoosing the method is independent of obtaining the EIN, although the EIN is required to identify your business on that return.  \n(IRS\u202fPublic\u202f583,\u202fpage\u202f5; IRS\u202fPublic\u202f334,\u202fpage\u202f14)",
+      "cited": [],
+      "failures": [
+        "did not cite: irs_publication_583_starting_a_business.pdf p[4, 5]",
+        "missing required text: 'employer identification number'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 21,
+      "question": "what forms do i keep for injuries and how long do i keep them",
+      "answer": "The OSHA small\u2011business handbook tells you exactly which injury records you must keep and for how long:\n\n* **Forms you must keep**  \n  \u2013 OSHA\u202fForm\u202f300 (Log of Work\u2011Related Injuries and Illnesses)  \n  \u2013 OSHA\u202fForm\u202f301 (Injury and Illness Incident Report) \u2013 a supplemental record for each recordable case  \n  \u2013 OSHA\u202fForm\u202f300A (Summary of Work\u2011Related Injuries and\u202fIllnesses) \u2013 an annual summary at the end of each calendar year  \n\n* **Retention period**  \n  \u201cInjury and illness records (OSHA\u202f300,\u202f300A, and\u202f301) are kept at the worksite for **at least five years**.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=15)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 15
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true
+    },
+    {
+      "id": 22,
+      "question": "how many paid vacation days do employees get",
+      "answer": "I couldn\u2019t find any passage in the company\u2019s documents that states how many paid vacation days employees receive. The available documents discuss general payroll, taxes, safety, and other administrative matters, but they do not cover vacation or leave policies.",
+      "cited": [],
+      "failures": [],
+      "kind": "refusal",
+      "passed": true
+    },
+    {
+      "id": 23,
+      "question": "what is the canadian gst rate",
+      "answer": "The documents provided do not include any information about the Canadian GST rate. They cover U.S. tax matters, OSHA safety guidance, and small\u2011business planning, but do not address Canadian taxes.",
+      "cited": [],
+      "failures": [],
+      "kind": "refusal",
+      "passed": true
+    },
+    {
+      "id": 24,
+      "question": "how do i register a trademark",
+      "answer": "I\u2019m sorry, but none of the documents in this collection cover how to register a trademark. The available files are:\n\n- sba_business_planning_guide.pdf\n- osha_small_business_handbook.pdf\n- irs_publication_583_starting_a_business.pdf\n- irs_publication_334_tax_guide_small_business.pdf\n- ada_guide_small_business.pdf\n\nThese documents discuss business planning, workplace safety, tax matters, and accessibility, but they do not contain information on trademark registration.",
+      "cited": [],
+      "failures": [
+        "did not cite: sba_business_planning_guide.pdf p[10]",
+        "missing required text: 'state level'",
+        "missing required text: 'federal level'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    },
+    {
+      "id": 26,
+      "question": "what do i do if we have a data breach",
+      "answer": "I\u2019m sorry, but the documents available for this company do not contain any coverage on data\u2011breach response procedures. The materials I searched include OSHA\u2019s small\u2011business handbook, various IRS publications, the SBA business\u2011planning guide, and an ADA guide, but none provide guidance or rules about handling a data breach.",
+      "cited": [],
+      "failures": [],
+      "kind": "refusal",
+      "passed": true
+    },
+    {
+      "id": 25,
+      "question": "what health insurance plan should i buy for my staff",
+      "answer": "I\u2019m sorry, but the documents in the company\u2019s reference library do not contain a recommendation for a specific health\u2011insurance product to purchase for your staff.  \n\nThe available guidance tells you what types of coverage are typically available and how they are treated for tax purposes, but it does not name a particular plan, carrier, or policy. For example, IRS Publication\u202f334 states that:\n\n> \u201cGroup hospitalization and medical insurance for employees, including long\u2011term care insurance\u2026 is deductible\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=37)  \n\nNo other document in the library offers a detailed recommendation on which plan to choose or how to select a carrier.  If you need more specific product advice, you would need to consult an insurance broker or other external resource.\n\n\n\n**Sources:**\n1. [irs_publication_334_tax_guide_small_business.pdf (Page 37)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=37)",
+      "cited": [
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 37
+        }
+      ],
+      "failures": [],
+      "kind": "refusal",
+      "passed": true
+    }
+  ]
+}
