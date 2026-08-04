@@ -563,6 +563,38 @@ An agent loop makes that worse rather than better: many model round trips per
 job, each paying the same tax. Own the box, or keep a hosted endpoint until you
 do, but do not route an agent through cold starts.
 
+**Order of work, corrected 2026-08-03. Tools first, model second.**
+
+The phases below read as though the model swap comes first. It does not, and
+doing it first teaches us nothing: with no tools defined, Hermes 4 behaves
+exactly like what we run today, because the only thing it adds is the ability to
+ask for tools we have not written.
+
+The right order, and the reason for each step:
+
+1. **Build the tool layer against the endpoint we already have.** Verified
+   2026-08-03: the current endpoint (`openai-gpt-oss-20b`) already accepts a
+   `tools` array and returns well-formed `tool_calls`. A probe asking it to
+   search documents came back with `search_documents({"query": "refund
+   policy"})` on the first try. So the whole agent loop can be built and
+   debugged for zero extra cost, on infrastructure that already works.
+2. **Run the loop beside the current pipeline, not instead of it.** Both answer
+   the same 20 benchmark questions. Compare citation correctness first.
+3. **Only then remove the hardcoded retrieval.** This is the step that carries
+   real risk, and it is worth being blunt about why. Today retrieval is
+   deterministic: every question searches, at a 3000-token budget, before the
+   model sees anything. Handing that choice to the model means it may not
+   search, or may search badly, and citation accuracy is the product. Do not
+   delete the deterministic path until the benchmark says the agent matches or
+   beats it. Keep it behind a flag afterwards.
+4. **Then swap the model**, and re-run the same benchmark. Now the comparison
+   means something: it measures tool-calling quality between two models on an
+   identical loop, which is the actual question.
+
+Written down because the tempting order is the reverse. Swapping an endpoint is
+a satisfying afternoon and changes nothing a customer can see. Writing the first
+tool is duller and is the whole feature.
+
 **Phase 1 costs nothing to start, and does not need a GPU (priced 2026-08-03).**
 Hermes 4 70B is served by OpenAI-compatible providers at roughly $0.13 per
 million input tokens and $0.40 per million output. At three seats and a hundred
