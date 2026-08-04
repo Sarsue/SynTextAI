@@ -117,7 +117,7 @@ class QueryAgent:
         message = state.get("message") or ""
         formatted_history = state.get("formatted_history")
 
-        rewritten_query, expanded_terms = rag_pipeline.query_processor.process(message, formatted_history)
+        rewritten_query, expanded_terms = await rag_pipeline.query_processor.process(message, formatted_history)
         logger.info(
             {
                 "event": "query_agent.process_query",
@@ -139,7 +139,7 @@ class QueryAgent:
         rewritten_query = state.get("rewritten_query") or state.get("message") or ""
         expanded_terms = state.get("expanded_terms") or []
 
-        query_embedding = get_text_embedding(rewritten_query)
+        query_embedding = await get_text_embedding(rewritten_query)
 
         # Retrieval is scoped by workspace, not by uploader. Without this an
         # invited staff member matched zero chunks, because the documents belong
@@ -161,7 +161,7 @@ class QueryAgent:
         additional_results: List[Dict[str, Any]] = []
         for term in (expanded_terms[:3] if expanded_terms else []):
             try:
-                term_embedding = get_text_embedding(term)
+                term_embedding = await get_text_embedding(term)
                 term_results = await self._store.file_repo.hybrid_search(
                     user_id=user_id,
                     query=term,
@@ -259,7 +259,7 @@ class QueryAgent:
         language = state.get("language") or "English"
         comprehension_level = state.get("comprehension_level") or "beginner"
 
-        response = self._syntext.query_pipeline(
+        response = await self._syntext.query_pipeline(
             message,
             formatted_history,
             context_chunks,

@@ -123,7 +123,11 @@ async def shutdown_event():
     logger.info("Executing shutdown event: Cleaning up database resources...")
     from .repositories.async_base_repository import cleanup_shared_db_resources
     await cleanup_shared_db_resources()
-    logger.info("Database resources cleaned up successfully.")
+    # The inference client pools connections for the life of the process, so it
+    # holds sockets open until told otherwise.
+    from .services.llm_service import aclose_client
+    await aclose_client()
+    logger.info("Database and inference resources cleaned up successfully.")
 
 from .models.async_db import get_database_url
 

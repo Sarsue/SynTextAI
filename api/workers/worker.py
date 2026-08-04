@@ -380,7 +380,12 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                 return
 
             try:
-                formatted_history = await store.chat_repo.format_user_chat_history(int(history_id), int(user_id))
+                accessible_ids = None
+                if not workspace_id:
+                    accessible_ids = await store.workspace_repo.accessible_workspace_ids(int(user_id))
+                formatted_history = await store.chat_repo.format_user_chat_history(
+                    int(history_id), int(user_id), accessible_workspace_ids=accessible_ids
+                )
                 result = await run_query_pipeline(
                     user_id=int(user_id),
                     message=str(message),
@@ -703,6 +708,8 @@ async def main():
         logger.info("Cleaning up shared database resources...")
         from api.repositories.async_base_repository import cleanup_shared_db_resources
         await cleanup_shared_db_resources()
+        from api.services.llm_service import aclose_client
+        await aclose_client()
 
         logger.info("SynText AI Worker shutdown complete")
 

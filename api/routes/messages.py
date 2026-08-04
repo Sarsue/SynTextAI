@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Header, Background
 from typing import List
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
-from ..services.llm_service import get_text_embedding
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
 import logging
 from typing import Dict

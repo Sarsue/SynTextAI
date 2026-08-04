@@ -194,7 +194,7 @@ class DocumentTools:
         chunks = await self._store.file_repo.hybrid_search(
             user_id=self._user_id,
             query=query,
-            query_embedding=get_text_embedding(query),
+            query_embedding=await get_text_embedding(query),
             workspace_id=self._workspace_id,
             file_id=self._file_id,
             top_k=MAX_SEARCH_RESULTS,

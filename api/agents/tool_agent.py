@@ -135,7 +135,7 @@ class ToolAgent:
         searches = 0
         reads = 0
         for turn in range(self._max_turns):
-            reply = chat_with_tools(messages, tools=TOOL_SCHEMAS)
+            reply = await chat_with_tools(messages, tools=TOOL_SCHEMAS)
             if not reply:
                 logger.error({"event": "tool_agent.no_reply", "turn": turn})
                 break

@@ -44,67 +44,11 @@ class RAGPipeline:
         
         logger.info("RAG pipeline initialized")
         
-    def process(self, 
-                query: str, 
-                vector_results: List[Dict] = None,
-                keyword_results: List[Dict] = None,
-                conversation_history: Optional[str] = None,
-                token_budget: int = 3000,
-                top_k: int = 5,
-                **kwargs) -> Dict[str, Any]:
-        """
-        Process a query through the complete RAG pipeline.
-        
-        Args:
-            query: User query
-            vector_results: Pre-fetched vector search results (optional)
-            keyword_results: Pre-fetched keyword search results (optional)
-            conversation_history: Optional conversation history for context
-            token_budget: Maximum tokens for context selection
-            top_k: Number of search results to consider for context
-            **kwargs: Additional configuration parameters
-            
-        Returns:
-            dict: Results from the RAG pipeline including:
-                - processed_query: The processed query
-                - expanded_terms: Additional search terms
-                - search_results: Combined search results
-                - selected_chunks: Final chunks selected for the LLM
-        """
-        results = {}
-        
-        try:
-            # Step 1: Process and expand the query
-            processed_query, expanded_terms = self.query_processor.process(
-                query, conversation_history=conversation_history
-            )
-            results['processed_query'] = processed_query
-            results['expanded_terms'] = expanded_terms
-            
-            # Step 2: Hybrid search (if results provided)
-            if vector_results is not None and keyword_results is not None:
-                search_results = self.search_engine.search(
-                    processed_query, vector_results, keyword_results, **kwargs
-                )
-                results['search_results'] = search_results
-            else:
-                # No search results provided, we can't continue the pipeline
-                logger.warning("No search results provided, cannot continue RAG pipeline")
-                return results
-            
-            # Step 3: Select chunks for context. Ranking is whatever the
-            # search engine produced; there is no rerank stage, because the one
-            # that lived here re-embedded a 600-character prefix of each chunk
-            # with the same bi-encoder that produced the score it was meant to
-            # improve on.
-            selected_chunks = self.chunk_selector.select(
-                search_results[:top_k], processed_query, token_budget=token_budget
-            )
-            results['selected_chunks'] = selected_chunks
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error in RAG pipeline: {e}", exc_info=True)
-            # Return whatever results we have so far
-            return results
+    # There was a `process()` here that ran the whole pipeline end to end. It
+    # was never called by anything: both real callers reach in for
+    # query_processor and chunk_selector directly and do their own retrieval.
+    # It also referenced self.search_engine, a component nothing constructs any
+    # more. Once the query processor became async it was calling a coroutine
+    # without awaiting it, so the dead code was now dead and wrong. Deleted
+    # rather than repaired, because repairing an uncalled method only makes the
+    # next reader believe it works.

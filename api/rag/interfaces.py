@@ -11,7 +11,7 @@ class QueryProcessorInterface(ABC):
     """Interface for query processing components."""
     
     @abstractmethod
-    def process(self, query: str, conversation_history: Optional[str] = None) -> Tuple[str, List[str]]:
+    async def process(self, query: str, conversation_history: Optional[str] = None) -> Tuple[str, List[str]]:
         """
         Process a query to improve retrieval quality.
         

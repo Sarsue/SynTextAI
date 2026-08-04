@@ -294,7 +294,7 @@ async def run_query_pipeline(
             }
         )
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="fallback") as ctx:
-            query_embedding = get_text_embedding(message)
+            query_embedding = await get_text_embedding(message)
             # Same workspace-first scoping as the agent path, so the fallback
             # does not silently return nothing for invited staff.
             accessible_ids = None
@@ -310,7 +310,7 @@ async def run_query_pipeline(
                 accessible_workspace_ids=accessible_ids,
             )
             ctx["chunks"] = len(topK_chunks or [])
-            response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
+            response = await syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
         return {
             "response": response,
             "context_chunks": topK_chunks,
@@ -334,7 +334,12 @@ async def process_query_data(
         raise HTTPException(status_code=400, detail="Missing user_id or history_id for query processing")
     try:
         # Get conversation history in formatted form
-        formatted_history = await store.chat_repo.format_user_chat_history(history_id, id)
+        accessible_ids = None
+        if workspace_id is None:
+            accessible_ids = await store.workspace_repo.accessible_workspace_ids(id)
+        formatted_history = await store.chat_repo.format_user_chat_history(
+            history_id, id, accessible_workspace_ids=accessible_ids
+        )
 
         result = await run_query_pipeline(
             user_id=id,

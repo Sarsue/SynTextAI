@@ -100,7 +100,7 @@ class SyntextAgent:
         formatted_context = "\n\n".join(context_parts)
         return formatted_context, source_targets
     
-    def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
+    async def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
         """
         Enhanced main pipeline using large context: formats context, prompts LLM to cite sources precisely, 
         appends detailed source map.
@@ -114,7 +114,7 @@ class SyntextAgent:
                 if convo_history and len(convo_history) > 1500:  # If history is long
                     try:
                         summarization_prompt = f"Summarize this conversation history briefly, focusing on the most important points and context needed to answer follow-up questions:\n\n{convo_history}"
-                        history_summary = generate_explanation(summarization_prompt, language=language, comprehension_level=comprehension_level)
+                        history_summary = await generate_explanation(summarization_prompt, language=language, comprehension_level=comprehension_level)
                         history_prompt = f"\n\nPrevious Conversation Summary:\n{history_summary}\n\n"
                     except Exception as e:
                         logger.warning(f"Failed to summarize conversation history: {e}")
@@ -232,7 +232,7 @@ class SyntextAgent:
                         )
 
                 # Step 7: Call the LLM with the combined context and instructions
-                llm_answer_with_citations = generate_explanation(
+                llm_answer_with_citations = await generate_explanation(
                     full_prompt,
                     language=language,
                     comprehension_level=comprehension_level,
@@ -271,7 +271,7 @@ class SyntextAgent:
                             "word INSUFFICIENT and nothing else.\n\n"
                             + full_prompt
                         )
-                        retry = generate_explanation(
+                        retry = await generate_explanation(
                             retry_prompt,
                             language=language,
                             comprehension_level=comprehension_level,

@@ -330,12 +330,28 @@ class AsyncChatRepository(AsyncBaseRepository):
                 logger.error(f"Error deleting chat histories: {e}", exc_info=True)
                 return False
 
-    async def format_user_chat_history(self, chat_history_id: int, user_id: int) -> List[Dict[str, str]]:
+    async def format_user_chat_history(
+        self,
+        chat_history_id: int,
+        user_id: int,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> List[Dict[str, str]]:
         """Format chat history in a way suitable for LLM context.
+
+        The workspace guard below referenced `accessible_workspace_ids` while
+        the signature never took it, so every call raised NameError, was caught
+        by the handler at the bottom, and returned an empty list. Conversation
+        history has therefore never reached the model: every question was
+        answered as if it were the first, and a follow-up like "what about for
+        injuries?" had nothing to resolve "that" against.
 
         Args:
             chat_history_id: ID of the chat history
             user_id: ID of the user
+            accessible_workspace_ids: Restrict to conversations in these
+                workspaces. Optional, because a caller that has not resolved
+                them still gets the user_id check, which is the guard that
+                keeps one customer out of another's conversations.
 
         Returns:
             List[Dict]: List of messages formatted as {"role": "user"|"assistant", "content": "message"}

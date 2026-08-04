@@ -21,7 +21,7 @@ from ..services.llm_service import gradient_chat
 MIN_COMPLETION_TOKENS = 500
 
 
-def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:
+async def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:
     """Single-shot prompt used for query expansion and rewriting.
 
     This previously imported a `prompt_llm` from llm_service that has never
@@ -35,7 +35,7 @@ def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:
     retrieval worse than not expanding at all.
     """
     try:
-        return gradient_chat(text, max_tokens=max(max_tokens, MIN_COMPLETION_TOKENS)) or ""
+        return await gradient_chat(text, max_tokens=max(max_tokens, MIN_COMPLETION_TOKENS)) or ""
     except Exception as e:
         logger.warning(f"Query-processing prompt failed, continuing without it: {e}")
         return ""
@@ -46,7 +46,7 @@ class DefaultQueryProcessor(QueryProcessorInterface):
     Default implementation of query processing with expansion and reformulation.
     """
 
-    def process(self, query: str, conversation_history: Optional[str] = None) -> Tuple[str, List[str]]:
+    async def process(self, query: str, conversation_history: Optional[str] = None) -> Tuple[str, List[str]]:
         """
         Process and expand the query to improve retrieval quality.
         
@@ -63,11 +63,11 @@ class DefaultQueryProcessor(QueryProcessorInterface):
             
         try:
             # Query expansion with synonyms and related terms
-            expanded_terms = self._expand_query(query)
+            expanded_terms = await self._expand_query(query)
             
             # For complex queries with context, try reformulation
             if conversation_history and len(query.split()) > 5:
-                rewritten_query = self._rewrite_query(query, conversation_history)
+                rewritten_query = await self._rewrite_query(query, conversation_history)
             else:
                 rewritten_query = query
                 
@@ -76,7 +76,7 @@ class DefaultQueryProcessor(QueryProcessorInterface):
             logger.error(f"Error in query processing: {e}", exc_info=True)
             return query, []  # Fallback to original query
             
-    def _expand_query(self, query: str) -> List[str]:
+    async def _expand_query(self, query: str) -> List[str]:
         """Generate expanded search terms for the query."""
         expansion_prompt = f"""
         For the following question, provide 3-5 additional relevant search terms or phrases that would help retrieve relevant information.
@@ -87,7 +87,7 @@ class DefaultQueryProcessor(QueryProcessorInterface):
         Related search terms:"""
         
         try:
-            expanded_terms_text = prompt_llm(expansion_prompt)
+            expanded_terms_text = await prompt_llm(expansion_prompt)
             if not expanded_terms_text.strip():
                 return []
             terms = [t.strip() for t in expanded_terms_text.split(',') if t.strip()]
@@ -101,7 +101,7 @@ class DefaultQueryProcessor(QueryProcessorInterface):
             logger.error(f"Query expansion failed: {e}", exc_info=True)
             return []
             
-    def _rewrite_query(self, query: str, conversation_history: str) -> str:
+    async def _rewrite_query(self, query: str, conversation_history: str) -> str:
         """Rewrite query using conversation context."""
         # "Comprehensive" invited keyword stuffing: a follow-up about a late
         # filing penalty was rewritten into thirty words of loosely related
@@ -123,7 +123,7 @@ Latest question: {query}
 Standalone search query:"""
         
         try:
-            rewritten = prompt_llm(reformulation_prompt).strip()
+            rewritten = (await prompt_llm(reformulation_prompt)).strip()
             # Only accept a plausible search query. An empty response, or a
             # model that answers the question or explains itself instead of
             # rewriting, must not become the thing we search for.

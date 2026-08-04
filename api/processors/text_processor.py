@@ -167,7 +167,7 @@ class TextProcessor(FileProcessor):
 
                 try:
                     logger.info(f"Generating embeddings for {len(chunk_texts)} chunks...")
-                    chunk_embeddings = get_text_embeddings_in_batches(chunk_texts, batch_size=50)
+                    chunk_embeddings = await get_text_embeddings_in_batches(chunk_texts, batch_size=50)
                 except Exception as e:
                     logger.error(f"Embedding generation failed for batch: {e}")
                     raise ValueError(f"Failed to generate embeddings: {e}")
