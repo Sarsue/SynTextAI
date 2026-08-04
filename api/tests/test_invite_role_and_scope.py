@@ -116,3 +116,76 @@ async def test_a_workspace_scope_with_no_workspaces_means_the_whole_company(stor
     members = await store.org_repo.list_members(tenant.org)
     theirs = next(m for m in members if m["user_id"] == uid)
     assert theirs["scope"] == "organization"
+
+
+# --- changing an existing member, which is a different code path -------------
+
+async def test_an_admin_can_be_narrowed_to_workspaces(store, tenant):
+    """The GUI offered this and the backend refused it.
+
+    set_member_access rejected owners and admins alike, on the reasoning that
+    narrowing an administrator leaves somebody who manages a company without
+    seeing it. That mistook admin for a second kind of owner, and it failed
+    silently: the picker appeared, the change was sent, false came back.
+    """
+    finance = await tenant.workspace("Finance")
+    payroll = await tenant.workspace("Payroll")
+    uid = await _accept(
+        store, tenant, "narrow-me@example.com", role="admin", scope="organization",
+    )
+
+    assert await store.org_repo.set_member_access(tenant.org, uid, "workspace", [finance])
+
+    reachable = await store.workspace_repo.accessible_workspace_ids(
+        uid, organization_id=tenant.org
+    )
+    assert finance in reachable
+    assert payroll not in reachable
+
+
+async def test_narrowing_an_admin_does_not_demote_them(store, tenant):
+    """Narrowing is about how far, never about what.
+
+    The assignment row is what the workspace role check reads, and it was
+    written as 'staff' regardless, so an admin kept the badge in the members
+    list and lost the ability to upload into the workspace just given to them.
+    """
+    finance = await tenant.workspace("Finance")
+    uid = await _accept(
+        store, tenant, "still-admin@example.com", role="admin", scope="organization",
+    )
+
+    await store.org_repo.set_member_access(tenant.org, uid, "workspace", [finance])
+
+    assert await store.org_repo.get_role(tenant.org, uid) == "admin"
+    assert await store.workspace_repo.get_user_role_in_workspace(finance, uid) == "admin"
+
+
+async def test_changing_role_follows_into_workspace_assignments(store, tenant):
+    """Promotion and demotion have to reach the row that decides.
+
+    A workspace-scoped member promoted to admin kept 'staff' on every
+    assignment, so the badge moved and the behaviour did not. Demotion had the
+    mirror problem: the badge said staff and they kept uploading.
+    """
+    finance = await tenant.workspace("Finance")
+    uid = await _accept(
+        store, tenant, "promote-me@example.com",
+        role="staff", scope="workspace", workspace_ids=[finance],
+    )
+    assert await store.workspace_repo.get_user_role_in_workspace(finance, uid) == "staff"
+
+    assert await store.org_repo.set_member_role(tenant.org, uid, "admin")
+    assert await store.workspace_repo.get_user_role_in_workspace(finance, uid) == "admin"
+
+    assert await store.org_repo.set_member_role(tenant.org, uid, "staff")
+    assert await store.workspace_repo.get_user_role_in_workspace(finance, uid) == "staff"
+
+
+async def test_an_owner_still_cannot_be_narrowed(store, tenant):
+    """The company is theirs. Scoping an owner would strand the person who pays."""
+    finance = await tenant.workspace("Finance")
+
+    assert not await store.org_repo.set_member_access(
+        tenant.org, tenant.owner, "workspace", [finance]
+    )

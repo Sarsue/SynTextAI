@@ -282,9 +282,16 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
         later. scope='workspace' limits them to workspace_ids, replacing
         whatever they had.
 
-        Refuses to touch an owner or admin: their reach comes from
-        administering the tenant, and narrowing it here would produce a member
-        who can manage the organization but not see it.
+        Refuses to touch an owner, whose reach is the company itself.
+
+        Admins can be scoped. This refused them too, on the reasoning that
+        narrowing an administrator would leave somebody who manages the
+        organization without seeing it — which mistook admin for a second kind
+        of owner. Admin says what you may do inside a workspace: upload, delete,
+        assign staff. How many workspaces that covers is a separate question,
+        and it is the owner's to answer. The refusal made "an admin for the
+        Dentist workspace only" impossible to express, and it did so silently:
+        the picker appeared, the change was sent, and the answer came back false.
         """
         from ..models.orm_models import WorkspaceMember
 
@@ -302,9 +309,9 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )).scalar_one_or_none()
                 if not member:
                     return False
-                if member.role in ("owner", "admin"):
+                if member.role == "owner":
                     logger.warning(
-                        f"Refusing to scope user {user_id}, who is {member.role} of org {organization_id}"
+                        f"Refusing to scope user {user_id}, who owns org {organization_id}"
                     )
                     return False
 
@@ -336,10 +343,23 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 else:
                     for wid in have.keys() - requested:
                         await session.delete(have[wid])
+                    # The assignment carries the role they hold in the company.
+                    #
+                    # Hardcoding "staff" here demoted an admin the moment their
+                    # reach was narrowed: they kept the admin badge in the
+                    # members list and lost the ability to upload into the very
+                    # workspace they had just been given, because the assignment
+                    # row is what the workspace role check reads. Narrowing is
+                    # about how far, never about what.
                     for wid in requested - have.keys():
                         session.add(WorkspaceMember(
-                            workspace_id=wid, user_id=user_id, role="staff"
+                            workspace_id=wid, user_id=user_id, role=member.role
                         ))
+                    # And keep the ones they already had in step, for the same
+                    # reason: a member promoted to admin while workspace-scoped
+                    # would otherwise stay staff everywhere it counts.
+                    for wid in requested & have.keys():
+                        have[wid].role = member.role
 
                 await session.commit()
                 logger.info(
@@ -387,8 +407,34 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                     return False
 
                 member.role = role
+
+                # Their workspace assignments carry the role too, so promoting
+                # a workspace-scoped member actually promotes them.
+                #
+                # The workspace role check reads the assignment row, not the
+                # organization one, for anybody confined to a set of
+                # workspaces. Left behind, a staff member promoted to admin
+                # kept the admin badge in the members list and still could not
+                # upload anywhere, and an admin demoted to staff kept
+                # uploading. The badge and the behaviour have to move together.
+                from ..models.orm_models import WorkspaceMember
+
+                assignments = (await session.execute(
+                    select(WorkspaceMember)
+                    .join(WorkspaceORM, WorkspaceORM.id == WorkspaceMember.workspace_id)
+                    .where(
+                        WorkspaceMember.user_id == user_id,
+                        WorkspaceORM.organization_id == organization_id,
+                    )
+                )).scalars().all()
+                for assignment in assignments:
+                    assignment.role = role
+
                 await session.commit()
-                logger.info(f"User {user_id} is now {role} in org {organization_id}")
+                logger.info(
+                    f"User {user_id} is now {role} in org {organization_id} "
+                    f"({len(assignments)} workspace assignment(s) updated)"
+                )
                 return True
             except Exception as e:
                 await session.rollback()

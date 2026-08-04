@@ -993,8 +993,16 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                                     for them and this whole block is absent.
                                                     Somebody who should be held to two
                                                     workspaces is staff. */}
+                                                {/* Describes this row, not the branch it sits in.
+                                                    This said "Reads and asks questions" for
+                                                    everybody, because only staff could reach here
+                                                    when it was written. Admins can be scoped now,
+                                                    so an admin was told they change nothing while
+                                                    holding the controls that prove otherwise. */}
                                                 <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>
-                                                    Reads and asks questions. Changes nothing.
+                                                    {m.role === 'admin'
+                                                        ? 'Uploads, deletes, and manages people, in the workspaces below.'
+                                                        : 'Reads and asks questions. Changes nothing.'}
                                                 </div>
                                                 {/* Checkboxes, not one-of-many: access is a
                                                     set. Somebody can belong to three of five
