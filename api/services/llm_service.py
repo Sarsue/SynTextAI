@@ -26,6 +26,66 @@ except ValueError:
     MAX_TOKENS_CONTEXT = 120000
 
 
+def chat_with_tools(
+    messages: List[Dict[str, Any]],
+    tools: List[Dict[str, Any]] | None = None,
+    max_tokens: int = 1500,
+) -> Dict[str, Any]:
+    """One turn of an OpenAI-compatible chat, with tool calling.
+
+    Returns the assistant message as the server sent it, so the caller can see
+    both `content` and `tool_calls` and decide whether the turn was an answer or
+    a request to run something. Returns {} on failure, which the caller must
+    treat as "no turn happened" rather than as an empty answer.
+
+    Separate from gradient_chat because that one takes a single prompt string
+    and returns a single string. A tool loop needs the whole message list, since
+    every tool result has to be appended and sent back for the next turn.
+    """
+    if not MODEL_ACCESS_KEY:
+        logger.error("MODEL_ACCESS_KEY not configured for chat")
+        return {}
+
+    url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+    }
+    data: Dict[str, Any] = {
+        "model": CHAT_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
+    }
+    if tools:
+        data["tools"] = tools
+        data["tool_choice"] = "auto"
+
+    last_err: Exception | None = None
+    delay = 1
+    for attempt in range(1, 4):
+        try:
+            resp = requests.post(url, headers=headers, json=data, timeout=120)
+            resp.raise_for_status()
+            choices = resp.json().get("choices") or []
+            if not choices:
+                last_err = ValueError("no_choices")
+            else:
+                message = choices[0].get("message") or {}
+                # A turn that only asks for tools has no content, and that is a
+                # valid turn. Emptiness alone is not a failure here.
+                if message:
+                    return message
+                last_err = ValueError("empty_message")
+        except Exception as e:
+            last_err = e
+
+        time.sleep(delay)
+        delay *= 2
+
+    logger.error(f"Tool chat completion error after retries: {last_err}")
+    return {}
+
+
 def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
     """Generate text using OpenAI-compatible chat completions over HTTP."""
     if not MODEL_ACCESS_KEY:

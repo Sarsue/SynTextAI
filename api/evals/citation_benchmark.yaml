@@ -312,6 +312,10 @@ questions:
     notes: >
       No document defines vacation entitlement. Federal law does not require
       it, so a confident answer here is invention, not retrieval.
+      Re-verified 2026-08-04. "Vacation" does appear, once, on page 37 of IRS
+      334, in a list of what counts as taxable wages: "Vacation pay". The
+      entitlement, which is what the question asks for, is absent. The word
+      being present is what makes this worth keeping.
 
   - id: 23
     question: "what is the canadian gst rate"
@@ -321,10 +325,42 @@ questions:
 
   - id: 24
     question: "how do i register a trademark"
+    citations:
+      - file: "sba_business_planning_guide.pdf"
+        pages: [10]
+    must_include: ["state level", "federal level"]
+    must_not_include: ["TESS"]
+    notes: >
+      NOT A REFUSAL, corrected 2026-08-04. This was written as one, on the note
+      "plausibly small-business, genuinely absent". It is not absent: the SBA
+      guide has a "Trademarks/Service Marks" section on page 10 giving the two
+      registration levels and the contacts for each. Nobody checked, which is
+      the exact failure this file's header warns about, committed by the same
+      hand that wrote the warning.
+      Found by the tool agent, which searched, quoted the passage, and added
+      that the guide has no step-by-step procedure. The fixed pipeline had
+      earlier answered this with an invented USPTO walkthrough including a TESS
+      database search, so must_not_include keeps TESS: the word appears nowhere
+      in the corpus and is the tell that an answer came from training data.
+      What this now guards is harder and more useful than a refusal. The page
+      says registration exists and where to go, and does not say how. A good
+      answer gives what is there and says the rest is not.
+      must_include asks for the two levels as separate terms rather than the
+      document's sentence verbatim. Demanding "state level or the federal level"
+      as one string tests whether the model quoted, not whether it understood,
+      and it failed an answer that said "at the state level (e.g. the Secretary
+      of State) or the federal level". Both terms still have to appear.
+
+  - id: 26
+    question: "what do i do if we have a data breach"
     must_be_refusal: true
     notes: >
-      Plausibly small-business, genuinely absent. The dangerous kind: adjacent
-      enough that a model may answer from training rather than documents.
+      Verified absent 2026-08-04: no document mentions a data breach,
+      cybersecurity, or GDPR. Replaces id 24 as the adjacent-but-absent test.
+      Adjacent because these are five compliance documents for small business
+      owners and a breach is a compliance event, so a model reaching for
+      training data has every excuse. Checked against the corpus before being
+      written, not after.
 
   - id: 25
     question: "what health insurance plan should i buy for my staff"
@@ -332,3 +368,7 @@ questions:
     notes: >
       Asks for advice rather than a fact. Should decline and say what the
       documents do cover.
+      Re-verified 2026-08-04. Health insurance is discussed, on four pages of
+      IRS 334, but only as a deductible expense. Which plan to buy is nowhere,
+      and is not the kind of thing a document could answer anyway. The topic
+      being present and the answer being absent is the point.

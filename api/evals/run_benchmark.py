@@ -360,6 +360,25 @@ def main() -> int:
     for run_index in range(1, args.repeat + 1):
         if args.repeat > 1:
             print(f"\n--- run {run_index} of {args.repeat} ---")
+
+        # A Firebase ID token lasts an hour, and a --repeat 3 run outlives one.
+        # Expiry used to surface as every question failing to cite, which reads
+        # exactly like a catastrophic regression: a full three-run sweep scored
+        # 0/26 and the cause was an expired token, not the pipeline. Ask one
+        # cheap authenticated question first and stop if the answer is no.
+        try:
+            client.list_files()
+        except requests.HTTPError as e:
+            code = e.response.status_code if e.response is not None else "?"
+            if code in (401, 403):
+                print(
+                    f"\nthe token is not valid ({code}). Mint a fresh one; scores from "
+                    "an expired token are all zero and mean nothing.",
+                    file=sys.stderr,
+                )
+                return 2
+            raise
+
         print(f"\nasking {len(questions)} questions\n")
         results = []
         for q in questions:
