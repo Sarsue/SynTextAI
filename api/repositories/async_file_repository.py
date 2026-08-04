@@ -531,11 +531,20 @@ class AsyncFileRepository(AsyncBaseRepository):
                 sql = text(
                     """
                     WITH query AS (
-                      SELECT 
+                      SELECT
                         CAST(:embedding AS vector) AS embedding,
-                        plainto_tsquery('simple', :keywords) AS keywords
+                        -- 'english' stems and drops stopwords; 'simple' did
+                        -- neither, so "what goes in an executive summary"
+                        -- became 'what'&'goes'&'in'&'an'&'executive'&'summary'
+                        -- and matched zero rows in the whole workspace. The
+                        -- replace turns the AND that plainto_tsquery builds
+                        -- into an OR, so a question ranks by how many of its
+                        -- terms a page contains instead of needing all of them.
+                        REPLACE(
+                          plainto_tsquery('english', :keywords)::text, ' & ', ' | '
+                        )::tsquery AS keywords
                     )
-                    SELECT 
+                    SELECT
                       c.id AS id,
                       c.file_id AS file_id,
                       c.segment_id AS segment_id,
@@ -545,8 +554,17 @@ class AsyncFileRepository(AsyncBaseRepository):
                       s.page_number AS page_number,
                       s.meta_data AS meta_data,
                       (
-                        :vector_weight * (1 - (c.embedding <-> q.embedding)) +
-                        :bm25_weight * ts_rank_cd(to_tsvector('simple', COALESCE(s.content, '')), q.keywords)
+                        -- <=> is cosine distance. This was <->, Euclidean, so
+                        -- "1 - distance" produced negative similarities on
+                        -- unrelated pages and a score that could not be weighed
+                        -- against a text rank on any shared scale.
+                        :vector_weight * (1 - (c.embedding <=> q.embedding)) +
+                        -- Normalisation 32 is rank/(rank+1), which bounds the
+                        -- text score to [0,1) so the 0.7/0.3 blend means what it
+                        -- says. Unbounded, the keyword half was noise.
+                        :bm25_weight * ts_rank_cd(
+                          to_tsvector('english', COALESCE(s.content, '')), q.keywords, 32
+                        )
                       ) AS hybrid_score
                     FROM chunks c
                     JOIN files f ON f.id = c.file_id

@@ -171,10 +171,15 @@ questions:
       - file: "osha_small_business_handbook.pdf"
         pages: [15]
     must_include: ["8 hours"]
-    must_not_include: ["24 hours"]
     notes: >
       Deaths are 8 hours, hospitalisations 24, and both sit in the same
       sentence. The classic adjacent-value error.
+      must_not_include: ["24 hours"] was removed on 2026-08-04. It punished the
+      best answer in the first baseline, which said deaths are 8 hours and then
+      correctly added that hospitalisations and amputations are 24. Naming the
+      neighbouring value is what a careful answer does. Pairing this with id 12
+      already catches a model that has the two the wrong way round: getting one
+      right and the other wrong is the tell, and neither substring can see that.
 
   - id: 12
     question: "when do i report an amputation to osha"
@@ -182,10 +187,10 @@ questions:
       - file: "osha_small_business_handbook.pdf"
         pages: [15]
     must_include: ["24 hours"]
-    must_not_include: ["8 hours"]
     notes: >
       The same sentence read the other way round. Passing one of 11 or 12 while
-      failing the other means the model is pattern-matching, not reading.
+      failing the other means the model is pattern-matching, not reading. See
+      id 11 for why the mirrored must_not_include was dropped.
 
   - id: 13
     question: "am i exempt from injury recordkeeping"
@@ -202,7 +207,7 @@ questions:
     citations:
       - file: "osha_small_business_handbook.pdf"
         pages: [15]
-    must_include: ["five years"]
+    must_include: [["five years", "five (5) years", "5 years"]]
     must_not_include: ["3 years"]
     notes: >
       Retention appears in two documents with different answers, five years
@@ -219,7 +224,9 @@ questions:
         pages: [15, 16]
       - file: "osha_small_business_handbook.pdf"
         pages: [15]
-    must_include: ["3 years", "five years"]
+    must_include:
+      - ["3 years", "three years"]
+      - ["five years", "five (5) years", "5 years"]
     notes: >
       Two regimes, two documents, two different retention periods. The failure
       to watch for is collapsing both into one number.
@@ -283,10 +290,17 @@ questions:
     citations:
       - file: "osha_small_business_handbook.pdf"
         pages: [14, 15]
-    must_include: ["OSHA 300", "five years"]
+    must_include:
+      - "Form 300"
+      - ["five years", "five (5) years", "5 years"]
     notes: >
       Cross-page within one document, where the form name and the retention
       period are separated.
+      Corrected 2026-08-04. This asked for the literal "OSHA 300", which the
+      handbook never writes: it says "Form 300, 300A, and 301". The first
+      baseline named all three forms and the five-year period and was scored
+      wrong twice, once for a form name the source does not use and once for
+      writing "five (5) years". Both now accept the document's own wording.
 
   #
   # ---------- Refusals ----------

@@ -19,6 +19,22 @@ rag_pipeline = RAGPipeline(config={"search_engine": {"default_alpha": 0.7}})
 _CITATION_RE = re.compile(r"\[Segments?\s*(\d+(?:\s*,\s*\d+)*)[^\]]*\]", re.IGNORECASE)
 
 
+_NO_ANSWER = (
+    "I couldn't find enough evidence in your documents to answer that confidently. "
+    "Please rephrase your question or ask about a more specific section."
+)
+
+
+def _declined(text: str) -> bool:
+    """Did the model use the word it was told to use when it has no answer?
+
+    Matched against the opening of the reply rather than anywhere in it, so an
+    answer that happens to discuss insufficient rainfall is not read as a
+    refusal.
+    """
+    return (text or "").strip().upper().lstrip("*#_ ").startswith("INSUFFICIENT")
+
+
 def _cited_segments(text: str) -> List[int]:
     """Segment numbers referenced by the answer, in order of first appearance."""
     seen: List[int] = []
@@ -107,16 +123,38 @@ class SyntextAgent:
                 else:
                     history_prompt = f"\n\nPrevious Conversation History:\n{convo_history}\n\n" if convo_history else ""
                 
-                # Step 3: Enhanced citation instructions with confidence and precision guidelines
+                # Step 3: Grounding contract first, then citation mechanics.
+                #
+                # The grounding rule used to sit at item 4 of a numbered list
+                # about formatting, after three rules about where to put
+                # brackets. Retrieval always returns its best twenty-five pages,
+                # because a search ranks, it does not judge, and a question about
+                # registering a trademark scores higher against a shelf of
+                # small-business guidance than several questions the documents
+                # genuinely answer. Asked that, the model wrote a confident
+                # USPTO walkthrough that appears nowhere in the customer's
+                # documents. Nothing in the retrieved text can prevent that. Only
+                # this instruction can, so it goes first and it is concrete.
                 citation_instruction = (
-                    "When using information from the provided context segments in your answer: \n" 
-                    "1. ALWAYS cite the segment number using [Segment N] format immediately after the information.\n" 
-                    "2. For information from multiple segments, cite all relevant segments: [Segment N, M, P].\n" 
+                    "Answer ONLY from the numbered context segments below.\n\n"
+                    "FIRST, decide whether the segments actually answer the question that "
+                    "was asked. Being about the same broad subject is not enough: segments "
+                    "about running a small business do not answer a question about "
+                    "registering a trademark. If the specific answer is not in the "
+                    "segments, reply with the single word INSUFFICIENT and nothing else. "
+                    "Do not fill the gap from anything you know outside the segments, and "
+                    "do not offer general guidance instead.\n\n"
+                    "If the segments DO answer it, answer in full. Being strict about "
+                    "grounding is not a reason to be brief: give the specific figures, "
+                    "deadlines and terms the documents themselves use, and draw on every "
+                    "segment that bears on the question rather than the first one that "
+                    "fits.\n"
+                    "1. ALWAYS cite the segment number using [Segment N] format immediately after the information.\n"
+                    "2. For information from multiple segments, cite all relevant segments: [Segment N, M, P].\n"
                     "3. If directly quoting text, use quotation marks and include page or timestamp: \"quoted text\" [Segment N, timestamp 3:45].\n"
-                    "4. If the context doesn't contain sufficient information to answer fully, clearly state what's missing.\n"
+                    "4. If the segments answer part of the question but not all of it, answer that part and say plainly which part they do not cover.\n"
                     "5. When citing timestamps or page numbers, be precise and only reference what actually appears in the context.\n"
-                    "IMPORTANT: Base your answer ONLY on the provided context segments and conversation history.\n"
-                    "Do NOT add information from your general knowledge that is not in the provided segments."
+                    "6. If the question has several parts, cover every part the segments support, and cite the source of each."
                 )
 
                 # Step 4: Adapt detail level based on comprehension level
@@ -163,7 +201,12 @@ class SyntextAgent:
                         token_budget=available_context_tokens,
                     )
                     formatted_context, source_targets = self._format_context_and_sources(reduced_chunks)
-                    
+                    # Reduction renumbers the segments from 1, so the range the
+                    # citation check validates against has to shrink with it.
+                    # Left at the original count, [Segment 20] passed validation
+                    # against a prompt that only ever showed six.
+                    top_k_results = reduced_chunks
+
                     # Rebuild prompt with reduced context
                     full_prompt = (
                         f"{citation_instruction}\n\n"
@@ -176,68 +219,108 @@ class SyntextAgent:
                         f"------------------------\n\n"
                         f"Answer:"
                     )
-                    # Re-check token count after reduction (iterative if needed)
                     prompt_tokens = token_count(full_prompt)
                     if prompt_tokens > MAX_TOKENS_CONTEXT:
-                        logger.error(f"Prompt still exceeds token limit after reduction ({prompt_tokens}/{MAX_TOKENS_CONTEXT}). Truncating further.")
-                        full_prompt = full_prompt[:MAX_TOKENS_CONTEXT * 4]  # Rough character approximation
+                        # generate_explanation enforces the budget in tokens, so
+                        # this only needs to say that reduction was not enough.
+                        # It used to cut at MAX_TOKENS_CONTEXT * 4 characters,
+                        # a number four times the real window that could never
+                        # bring an over-long prompt back inside it.
+                        logger.error(
+                            f"Prompt still exceeds the token limit after reduction "
+                            f"({prompt_tokens}/{MAX_TOKENS_CONTEXT}); it will be truncated."
+                        )
 
                 # Step 7: Call the LLM with the combined context and instructions
                 llm_answer_with_citations = generate_explanation(
                     full_prompt,
                     language=language,
                     comprehension_level=comprehension_level,
-                    max_context_length=MAX_TOKENS_CONTEXT
+                    max_context_tokens=MAX_TOKENS_CONTEXT
                 )
 
                 if not llm_answer_with_citations:
                     logger.error("No response generated from LLM")
                     return "Sorry, I couldn't generate a response. Please try again."
 
+                if _declined(llm_answer_with_citations):
+                    # It read the pages and said they do not answer the question.
+                    # Take it at its word instead of pressing for an answer: the
+                    # retry path exists for a missing citation marker, not for a
+                    # verdict already given.
+                    logger.info("Model declined: retrieved context does not answer the question")
+                    return _NO_ANSWER
+
                 # Step 7.5: Validate citation format. If we provided context, we require at least
                 # one valid [Segment N] citation, and N must refer to an existing segment.
                 num_segments = len(top_k_results)
                 cited = _cited_segments(llm_answer_with_citations)
+                uncited_answer = False
                 if num_segments > 0:
                     if not cited:
-                        # The model answered but omitted the citation markers. That
-                        # is a formatting lapse, not absent evidence, and refusing
-                        # outright told the user their documents lacked an answer
-                        # that had in fact been found. Ask once more, with the
-                        # requirement stated plainly, before giving up.
+                        # The model answered but omitted the citation markers.
+                        # Ask once more, requirement first this time: appending
+                        # the reminder to the end of a prompt already holding
+                        # twenty-five pages buried it.
                         logger.info("LLM response missing citations; retrying once with an explicit reminder")
                         retry_prompt = (
-                            full_prompt
-                            + "\n\nIMPORTANT: your previous answer omitted citations and was rejected. "
+                            "Your previous answer was rejected because it carried no citations.\n"
                             "Rewrite it so that every factual claim is followed by the marker of the "
-                            "segment it came from, written exactly as [Segment N]. Use only the segments "
-                            "provided above. If none of them support an answer, reply with the single "
-                            "word: INSUFFICIENT."
+                            "segment it came from, written exactly as [Segment N], using only the "
+                            "segments below. If none of them support an answer, reply with the single "
+                            "word INSUFFICIENT and nothing else.\n\n"
+                            + full_prompt
                         )
                         retry = generate_explanation(
                             retry_prompt,
                             language=language,
                             comprehension_level=comprehension_level,
-                            max_context_length=MAX_TOKENS_CONTEXT,
+                            max_context_tokens=MAX_TOKENS_CONTEXT,
                         ) or ""
-                        cited = _cited_segments(retry)
-                        if cited and "INSUFFICIENT" not in retry.upper():
+                        retry_cited = _cited_segments(retry)
+                        if _declined(retry):
+                            # The model read the pages and judged that none of
+                            # them answer the question. That is the one case
+                            # where saying so is true.
+                            logger.info("Model judged the retrieved context insufficient")
+                            return _NO_ANSWER
+                        elif retry_cited:
                             llm_answer_with_citations = retry
+                            cited = retry_cited
                         else:
-                            logger.info("Still no citations after retry; refusing to answer without evidence")
-                            return (
-                                "I couldn't find enough evidence in your documents to answer that confidently. "
-                                "Please rephrase your question or ask about a more specific section."
-                            )
+                            # An answer with no markers, twice. Discarding it and
+                            # reporting no evidence told customers their document
+                            # did not contain something that was sitting at the
+                            # top of the retrieved set, which is the worst thing
+                            # this pipeline can say. Keep the answer, and be
+                            # straight about what we could not establish rather
+                            # than attaching page links it never claimed.
+                            logger.info("Answer has no citation markers after retry; returning it unattributed")
+                            uncited_answer = True
 
+                    # Out-of-range markers used to void the whole answer. Drop
+                    # just those; an answer citing segments 2 and 99 still has
+                    # segment 2 behind it.
                     invalid = [idx for idx in cited if idx < 1 or idx > num_segments]
-
                     if invalid:
-                        logger.info(f"LLM response has invalid citations (out of range): {invalid}")
-                        return (
-                            "I couldn't validate the citations for that answer against your documents. "
-                            "Please rephrase your question or ask for a direct quote from the document."
-                        )
+                        logger.info(f"Dropping out-of-range citations: {invalid}")
+                        cited = [idx for idx in cited if idx not in invalid]
+                        if not cited:
+                            uncited_answer = True
+
+                if uncited_answer:
+                    consulted = []
+                    for idx in range(1, min(num_segments, 3) + 1):
+                        entry = source_targets.get(idx)
+                        if entry and entry[1] not in [c[1] for c in consulted]:
+                            consulted.append(entry)
+                    pages = "\n".join(f"- [{text}]({target})" for text, target in consulted)
+                    return (
+                        llm_answer_with_citations
+                        + "\n\n_I could not tie each statement above to a specific page. "
+                        "These are the pages I searched, so you can check it yourself:_\n"
+                        + pages
+                    )
 
                 # Step 8: Replace the internal markers with citations a reader
                 # can act on. [Segment 2] means nothing to a dental practice;

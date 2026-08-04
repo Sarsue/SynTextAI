@@ -35,6 +35,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
@@ -66,18 +67,45 @@ REFUSAL_MARKERS = (
     "do not cover", "don't cover", "does not cover", "doesn't cover",
     "no information", "not provide", "unable to find", "not found in",
     "outside the scope", "do not say", "don't say", "does not say",
+    # Added after the first baseline: the pipeline declined the health-insurance
+    # question correctly, in the words "doesn't give any details about", and was
+    # scored as having answered it. The marker list was short, not the refusal.
+    "does not give", "doesn't give", "do not give", "don't give",
+    "no details", "does not detail", "not discuss",
+    "does not include", "doesn't include", "do not include", "don't include",
+    "does not offer", "doesn't offer", "not available in",
 )
 
 
 def normalise(text: str) -> str:
-    """Whitespace-insensitive comparison text.
+    """Whitespace- and punctuation-insensitive comparison text.
 
     PDFs are full of non-breaking spaces: the OSHA handbook writes
     "24\\xa0hours", so a naive substring check for "24 hours" fails on a page
     that plainly says it. The model will write an ordinary space, so compare on
     normalised text rather than making every question encode the PDF's quirks.
+
+    Models reach for typographic punctuation the same way. The first baseline
+    scored a correct answer wrong because it wrote "self\\u2011inspection" with a
+    non-breaking hyphen, and read a citation as absent because the marker came
+    back as "[Segment\\u202f1]" with a narrow no-break space. Fold the lookalikes
+    to ASCII so the benchmark measures the answer and not the typography.
     """
-    return re.sub(r"\s+", " ", text or "").lower()
+    t = unicodedata.normalize("NFKC", text or "")
+    t = t.translate(_LOOKALIKES)
+    return re.sub(r"\s+", " ", t).lower()
+
+
+# NFKC leaves these alone: they are distinct characters, not compatibility
+# forms. U+2011 non-breaking hyphen, the dashes, the typographic quotes, and
+# U+202F narrow no-break space (which NFKC maps to U+0020 only sometimes,
+# depending on the Python build, so it is listed rather than assumed).
+_LOOKALIKES = {ord(c): r for c, r in {
+    "‐": "-", "‑": "-", "‒": "-", "–": "-",
+    "—": "-", "―": "-", "−": "-",
+    "‘": "'", "’": "'", "“": '"', "”": '"',
+    " ": " ", " ": " ", " ": " ", " ": " ",
+}.items()}
 
 
 def parse_citations(answer: str) -> List[Tuple[str, int]]:
@@ -267,12 +295,20 @@ def score(q: Dict[str, Any], answer: str) -> Dict[str, Any]:
         result["failures"].append("did not cite: " + "; ".join(missing_sources))
 
     for term in q.get("must_include", []):
-        if normalise(term) not in body:
+        # A list is "any of these will do". The document says "five years" and
+        # the model wrote "five (5) years", which is the same fact and was
+        # scored as a miss; requiring one exact spelling of a number measures
+        # phrasing, not grounding. Facts still have to appear, just not in one
+        # blessed form.
+        options = term if isinstance(term, list) else [term]
+        if not any(normalise(o) in body for o in options):
             result["failures"].append(f"missing required text: {term!r}")
 
     for term in q.get("must_not_include", []):
-        if normalise(term) in body:
-            result["failures"].append(f"contains excluded text: {term!r}")
+        options = term if isinstance(term, list) else [term]
+        hit = next((o for o in options if normalise(o) in body), None)
+        if hit is not None:
+            result["failures"].append(f"contains excluded text: {hit!r}")
 
     result["passed"] = not result["failures"]
     result["cited_correctly"] = not missing_sources

@@ -44,24 +44,6 @@ class SearchEngineInterface(ABC):
         pass
 
 
-class ReRankerInterface(ABC):
-    """Interface for re-ranking components."""
-    
-    @abstractmethod
-    def rerank(self, query: str, candidates: List[Dict], top_k: int = 5) -> List[Dict]:
-        """
-        Re-rank candidate documents based on relevance to query.
-        
-        Args:
-            query: User query
-            candidates: List of candidate documents from initial retrieval
-            top_k: Number of top results to return
-            
-        Returns:
-            list: Re-ranked list of documents
-        """
-        pass
-
 
 class ChunkSelectorInterface(ABC):
     """Interface for chunk selection components."""

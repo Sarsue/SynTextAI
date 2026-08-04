@@ -8,13 +8,11 @@ from typing import Dict, Any, Optional, Type
 from .interfaces import (
     QueryProcessorInterface, 
     SearchEngineInterface,
-    ReRankerInterface,
     ChunkSelectorInterface
 )
 
 from .query_processor import DefaultQueryProcessor
 from .search_engine import HybridSearchEngine
-from .reranker import CrossEncoderReRanker
 from .chunk_selector import SmartChunkSelector
 
 logger = logging.getLogger(__name__)
@@ -37,7 +35,6 @@ class RAGFactory:
         # Default component classes
         self._query_processor_class = DefaultQueryProcessor
         self._search_engine_class = HybridSearchEngine
-        self._reranker_class = CrossEncoderReRanker
         self._chunk_selector_class = SmartChunkSelector
         
     def create_query_processor(self) -> QueryProcessorInterface:
@@ -60,16 +57,6 @@ class RAGFactory:
         engine_config = self.config.get('search_engine', {})
         return self._search_engine_class(**engine_config)
         
-    def create_reranker(self) -> ReRankerInterface:
-        """
-        Create a reranker instance.
-        
-        Returns:
-            ReRankerInterface: Configured reranker
-        """
-        reranker_config = self.config.get('reranker', {})
-        return self._reranker_class(**reranker_config)
-        
     def create_chunk_selector(self) -> ChunkSelectorInterface:
         """
         Create a chunk selector instance.
@@ -90,7 +77,6 @@ class RAGFactory:
         pipeline = {
             'query_processor': self.create_query_processor(),
             'search_engine': self.create_search_engine(),
-            'reranker': self.create_reranker(),
             'chunk_selector': self.create_chunk_selector()
         }
         
@@ -104,10 +90,6 @@ class RAGFactory:
     def set_search_engine_class(self, cls: Type[SearchEngineInterface]) -> None:
         """Set custom search engine implementation."""
         self._search_engine_class = cls
-        
-    def set_reranker_class(self, cls: Type[ReRankerInterface]) -> None:
-        """Set custom reranker implementation."""
-        self._reranker_class = cls
         
     def set_chunk_selector_class(self, cls: Type[ChunkSelectorInterface]) -> None:
         """Set custom chunk selector implementation."""

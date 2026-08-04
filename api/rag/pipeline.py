@@ -8,7 +8,6 @@ from typing import List, Dict, Any, Tuple, Optional
 from .interfaces import (
     QueryProcessorInterface, 
     SearchEngineInterface,
-    ReRankerInterface,
     ChunkSelectorInterface
 )
 
@@ -25,7 +24,6 @@ class RAGPipeline:
     def __init__(self, 
                  query_processor: Optional[QueryProcessorInterface] = None,
                  search_engine: Optional[SearchEngineInterface] = None,
-                 reranker: Optional[ReRankerInterface] = None,
                  chunk_selector: Optional[ChunkSelectorInterface] = None,
                  config: Dict[str, Any] = None):
         """
@@ -34,7 +32,6 @@ class RAGPipeline:
         Args:
             query_processor: Query processor component
             search_engine: Search engine component
-            reranker: Reranker component
             chunk_selector: Chunk selector component
             config: Configuration dictionary for components
         """
@@ -43,7 +40,6 @@ class RAGPipeline:
         
         self.query_processor = query_processor or factory.create_query_processor()
         self.search_engine = search_engine or factory.create_search_engine()
-        self.reranker = reranker or factory.create_reranker()
         self.chunk_selector = chunk_selector or factory.create_chunk_selector()
         
         logger.info("RAG pipeline initialized")
@@ -65,7 +61,7 @@ class RAGPipeline:
             keyword_results: Pre-fetched keyword search results (optional)
             conversation_history: Optional conversation history for context
             token_budget: Maximum tokens for context selection
-            top_k: Number of top results to return after reranking
+            top_k: Number of search results to consider for context
             **kwargs: Additional configuration parameters
             
         Returns:
@@ -73,7 +69,6 @@ class RAGPipeline:
                 - processed_query: The processed query
                 - expanded_terms: Additional search terms
                 - search_results: Combined search results
-                - reranked_results: Results after reranking
                 - selected_chunks: Final chunks selected for the LLM
         """
         results = {}
@@ -97,15 +92,13 @@ class RAGPipeline:
                 logger.warning("No search results provided, cannot continue RAG pipeline")
                 return results
             
-            # Step 3: Rerank results
-            reranked_results = self.reranker.rerank(
-                processed_query, search_results, top_k=top_k
-            )
-            results['reranked_results'] = reranked_results
-            
-            # Step 4: Select chunks for context
+            # Step 3: Select chunks for context. Ranking is whatever the
+            # search engine produced; there is no rerank stage, because the one
+            # that lived here re-embedded a 600-character prefix of each chunk
+            # with the same bi-encoder that produced the score it was meant to
+            # improve on.
             selected_chunks = self.chunk_selector.select(
-                reranked_results, processed_query, token_budget=token_budget
+                search_results[:top_k], processed_query, token_budget=token_budget
             )
             results['selected_chunks'] = selected_chunks
             

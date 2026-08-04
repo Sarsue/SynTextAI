@@ -87,7 +87,7 @@ def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
 def token_count(content: str, model: str = None) -> int:
     return max(1, int(len(content.split()) * 1.5))
 
-def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_length: int = 2000) -> str:
+def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_tokens: int = None) -> str:
     """Generates an explanation/answer for a prompt via the real LLM (gradient_chat).
 
     Previously routed through a DSPy predictor that was never actually
@@ -99,12 +99,31 @@ def generate_explanation(text_chunk: str, language: str = "English", comprehensi
     was actually in the documents. `language`/`comprehension_level` are kept
     as parameters for call-site compatibility; the main caller (query_pipeline)
     already bakes both directly into the prompt text.
+
+    The budget is in tokens and is enforced in tokens. It used to be named
+    max_context_length and applied as `text_chunk[:max_context_length]`, a
+    character slice against a number every caller passed in tokens. Callers
+    handing it MAX_TOKENS_CONTEXT got a window roughly four times smaller than
+    they asked for, and every caller that passed nothing got the 2000-character
+    default: a prompt cut off inside its own instructions, long before any
+    document text. Defaults to MAX_TOKENS_CONTEXT so leaving it out is safe.
     """
     if not text_chunk:
         logging.warning("generate_explanation called with empty text_chunk.")
         return ""
 
-    truncated_chunk = text_chunk[:max_context_length] if max_context_length else text_chunk
+    budget = MAX_TOKENS_CONTEXT if max_context_tokens is None else int(max_context_tokens)
+    if token_count(text_chunk) > budget:
+        # token_count approximates 1.5 tokens per whitespace word, so convert
+        # back through the same ratio rather than inventing a second one.
+        logging.warning(
+            "Prompt of ~%d tokens exceeds the %d-token budget; truncating.",
+            token_count(text_chunk), budget,
+        )
+        words = text_chunk.split()
+        truncated_chunk = " ".join(words[: max(1, int(budget / 1.5))])
+    else:
+        truncated_chunk = text_chunk
 
     try:
         response = gradient_chat(truncated_chunk, max_tokens=1500)
