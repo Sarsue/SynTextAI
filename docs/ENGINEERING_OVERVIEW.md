@@ -420,6 +420,58 @@ closes HIPAA and privilege-sensitive deals, is impossible while inference leaves
 the building. Serving our own models is the enabling step, which is why phase 1
 comes first.
 
+**Hermes: what we take and what we leave (researched 2026-08-03).**
+
+Hermes is two things with one name, both from Nous Research.
+
+1. **Hermes 4** is a set of open models. You download them and run them yourself.
+2. **Hermes Agent** is a program that runs an agent. MIT licensed. Lots of parts
+   already built: skills, memory, 60+ tools, MCP, and adapters for Slack, Teams,
+   WhatsApp and about twenty other places.
+
+**Decision: take the models, leave the program.**
+
+Here is the whole reason, in one sentence. Hermes Agent puts everybody's memory
+in one pile.
+
+Their own open issue says it plainly: *"one agent = one tenant. Memory is
+global, sessions don't scope by tenant, and there is no isolation between
+groups, channels, or users."* Memory reads and writes skip the hook system, so
+a plugin cannot fix it. You would have to fork the project and then own that
+fork forever, as a one-person company with paying customers.
+
+That one pile is the exact thing we sell against. A dental practice's records
+must never be readable by a law firm. Making that true is what 2026-08-01 to
+2026-08-03 was spent on. Putting our agent on a component that does not have it
+would throw that away. The same issue thread records an agent reading one
+customer's competitor notes and publishing them in a public article, and the
+operator nearly being sued.
+
+The official workaround is one process per customer. That throws away the job
+queue, per-tenant fairness and lease reclaim, and it does not fit one box.
+
+What we take:
+
+| From Hermes | What we get | Cost to us |
+|---|---|---|
+| Hermes 4 open weights | A model built for tool calling, run on our hardware | Two env vars, then the benchmark |
+| Its tool-call format | vLLM and SGLang already parse it (`--tool-call-parser hermes`) | Nothing. No parser to write |
+| The idea of skills | Named procedures over tools, per vertical | We build it inside our own worker |
+| MCP support | A standard way to plug in tools instead of a bespoke one | Adopt the protocol, not their runtime |
+
+What we do not take: the agent runtime, its memory, its sessions, its adapters.
+We keep our own tenancy, our own queue, and our own membership model, because
+those are correct and theirs are not.
+
+**When to look again.** If a `memory:scope` hook lands and the maintainers
+commit to real tenant isolation, reassess. The issue is currently labelled
+`needs-decision`. Until then this is settled, so do not reopen it without new
+evidence from that thread.
+
+Sources, so this can be checked rather than trusted:
+`github.com/NousResearch/hermes-agent/issues/34352` (the multi-tenant issue),
+`hermes-agent.nousresearch.com/docs`, `huggingface.co/NousResearch/Hermes-4-70B`.
+
 **Still true, and still the gate on quality:** the 20-question citation benchmark
 below. An agent that calls five tools and cites the wrong page is worse than a
 single retrieval that cites the right one. Capture the baseline against the
