@@ -1086,6 +1086,29 @@ answer that with fair-use limits rather than repricing everyone.
   authenticated request and the tool schemas have no field for it, so an
   instruction hidden inside an uploaded PDF has nothing to address.
 
+  **The obvious explanation was tested and is wrong.** The tool agent sees 8
+  passages per search where the pipeline puts 25 in front of the model at
+  once, so the gap looked like context width rather than architecture. Raising
+  `TOOL_SEARCH_RESULTS` to 20:
+
+  ```
+    per search   citations        refusals
+      8          13-14/22 (13.5)   3-4/4
+     20          12-13/22 (12.5)   2/4
+  ```
+
+  Slightly worse on citations and clearly worse on refusals, which matches
+  what the fixed pipeline showed earlier: more context makes a 20B model more
+  willing to answer from adjacent material. The default stays 8. **The
+  remaining gap is the loop, not the width of what it sees**, so the next
+  attempt has to change how the model decides, not how much it is handed.
+
+  A concrete lead: asked whether a shop must be wheelchair accessible, it
+  cited ADA page 8, accessible parking, rather than page 6, where "readily
+  achievable" is defined. It takes the first passage matching a phrase instead
+  of the page that defines the concept. `read_page` exists to fix exactly that
+  and the model is not reaching for it.
+
   **Extraction was never the problem.** IRS Table 3 extracts cleanly, header
   and all. The only unicode fault was in the scorer.
 
