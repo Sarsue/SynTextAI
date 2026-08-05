@@ -38,6 +38,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.agents.document_tools import TOOL_SCHEMAS, DocumentTools
@@ -60,6 +61,9 @@ MAX_TURNS = int(os.getenv("TOOL_MAX_TURNS", "8"))
 # ranked block and scores 17.0; this is the agent's equivalent, and the
 # ordering is the part that matters rather than the number.
 EVIDENCE_LIMIT = int(os.getenv("TOOL_EVIDENCE_LIMIT", "25"))
+
+# Tries to get structured output from the classifier before giving up on it.
+SELECTOR_ATTEMPTS = int(os.getenv("TOOL_SELECTOR_ATTEMPTS", "3"))
 
 SYSTEM_PROMPT = """You answer questions about a specific company's own documents.
 
@@ -110,6 +114,40 @@ _CITE_RE = re.compile(
 )
 
 
+SELECT_PROMPT = """You are building the evidence for an answer. You are not
+writing the answer.
+
+Read the question and work out what separate things it asks for. Call each one
+an information need. "What should I track for taxes and for travel expenses" is
+two needs; "how long do I keep tax records" is one.
+
+Then go through the passages below and, for each need, pick the passages that
+actually answer it. For every one you pick, give:
+
+  need   which need it answers, by number
+  file   the file name exactly as shown
+  page   the page number
+  claim  what this passage says about that need, in one sentence
+  span   one to three CONSECUTIVE sentences copied EXACTLY from the passage,
+         word for word, that support the claim
+
+The span is copied, never paraphrased or shortened with dots. It is checked
+against the passage and thrown away if it does not appear there verbatim.
+
+Pick a passage only if it answers a need. Being about the same broad subject is
+not enough: a passage saying "this publication explains business taxes" is not
+evidence about how long to keep records. If nothing answers a need, leave that
+need out; if nothing answers any need, return an empty claims list. An empty
+list is a correct and useful answer.
+
+Reply with JSON only, in exactly this shape:
+
+{"needs": ["...", "..."],
+ "claims": [{"need": 1, "file": "x.pdf", "page": 12,
+             "claim": "...", "span": "..."}]}
+"""
+
+
 ANSWER_PROMPT = """You are writing the final answer from evidence that has already
 been gathered. You cannot search. Everything you may use is below, ordered with
 the strongest evidence first.
@@ -138,6 +176,82 @@ and a passage marked as matching several searches is stronger still. Where two
 passages say similar things, prefer the higher one unless the lower one is more
 specific to the question.
 """
+
+
+
+
+def _normalise(text: str) -> str:
+    """Comparison form for checking a span really came from a passage.
+
+    Models reproduce text with the punctuation they prefer, so a span copied
+    faithfully still fails a naive substring test when the PDF used a
+    non-breaking hyphen and the model wrote an ordinary one. The benchmark
+    scorer learned this the same way, marking a correct answer wrong for
+    writing self-inspection with U+2011.
+    """
+    t = unicodedata.normalize("NFKC", text or "")
+    t = t.translate(_LOOKALIKES)
+    # Hyphens are deleted, not normalised, because PDFs break words across
+    # lines with them. The ADA guide is set in narrow columns and stores
+    # "technical assis-\ntance"; the model reads that as "assistance", which is
+    # the correct reading and does not appear in the stored text. 166 of this
+    # corpus's 316 segments contain at least one such break.
+    #
+    # Deleting rather than joining also handles the opposite case: a real
+    # compound like "self-inspection" broken at its own hyphen. Both forms
+    # collapse to the same comparison string, and since this form is only ever
+    # used to check that a span came from a passage, nothing displayed changes.
+    t = re.sub(r"[-\u2010-\u2015]\s*", "", t)
+    return re.sub(r"\s+", " ", t).strip().lower()
+
+
+_LOOKALIKES = {ord(c): r for c, r in {
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-",
+    "\u2014": "-", "\u2015": "-", "\u2212": "-",
+    "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+    "\u00a0": " ", "\u202f": " ", "\u2009": " ", "\u200a": " ",
+}.items()}
+
+
+def _key_of(tools: DocumentTools, item: Dict[str, Any]) -> Any:
+    """The evidence key for an item, now that identity is the segment."""
+    for k, v in tools.evidence.items():
+        if v is item:
+            return k
+    return None
+
+
+def _no_evidence_message(tools: DocumentTools) -> str:
+    """Said when nothing survived selection, naming what was there instead."""
+    files = sorted({f for f, _ in tools.evidence})
+    covered = ("Your documents cover " + ", ".join(files) + ".") if files else ""
+    return (
+        "I couldn't find anything in your documents that answers that. "
+        + covered
+        + " Try asking about a more specific part of it."
+    ).strip()
+
+
+def _json_object(text: str) -> Optional[Dict[str, Any]]:
+    """The first JSON object in a reply, however the model wrapped it."""
+    if not text:
+        return None
+    body = re.sub(r"^\s*```(?:json)?|```\s*$", "", text.strip(), flags=re.M)
+    start = body.find("{")
+    while start != -1:
+        depth = 0
+        for i in range(start, len(body)):
+            if body[i] == "{":
+                depth += 1
+            elif body[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(body[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+        start = body.find("{", start + 1)
+    return None
 
 
 class ToolAgent:
@@ -215,9 +329,35 @@ class ToolAgent:
                 # ranked evidence set and nothing else. No tool history, no
                 # search transcript, no chance to keep searching.
                 if tools.evidence:
-                    answer = await self._answer_from_evidence(message, tools)
+                    selection = await self._select_evidence(message, tools)
+                    if selection and selection.get("status") == "unparsable":
+                        # Fall back to ranked evidence rather than refusing: a
+                        # classifier that failed to speak has said nothing about
+                        # whether the documents answer the question.
+                        answer = await self._answer_from_evidence(message, tools)
+                        if answer:
+                            return self._finish(answer, tools, searches, reads, outlines,
+                                                turn + 1, selection=selection)
+                    if selection is not None and selection.get("status") == "ok" \
+                            and not selection["claims"]:
+                        # Nothing survived. That is a fact about the evidence,
+                        # not a judgement the model had to volunteer, which is
+                        # the whole reason refusals regressed when answering was
+                        # split off from searching: a ranked list always looks
+                        # like evidence.
+                        logger.info({
+                            "event": "tool_agent.no_evidence",
+                            "needs": selection["needs_total"],
+                        })
+                        return self._finish(
+                            _no_evidence_message(tools), tools,
+                            searches, reads, outlines, turn + 1,
+                            selection=selection,
+                        )
+                    answer = await self._answer_from_evidence(message, tools, selection)
                     if answer:
-                        return self._finish(answer, tools, searches, reads, outlines, turn + 1)
+                        return self._finish(answer, tools, searches, reads, outlines,
+                                            turn + 1, selection=selection)
                 answer = (reply.get("content") or "").strip()
                 if answer:
                     return self._finish(answer, tools, searches, reads, outlines, turn + 1)
@@ -271,7 +411,119 @@ class ToolAgent:
             "diagnosis": {"stopped": "ran out of turns"},
         }
 
-    async def _answer_from_evidence(self, question: str, tools: DocumentTools) -> str:
+
+    async def _select_evidence(
+        self, question: str, tools: DocumentTools
+    ) -> Optional[Dict[str, Any]]:
+        """Turn the evidence set into verified claims, or None if that fails.
+
+        None means "carry on as before". A selector that cannot produce usable
+        output must not be able to make the product worse than not having one,
+        so every failure path here falls back to answering from ranked evidence.
+        """
+        groups = tools.clustered_evidence(limit=EVIDENCE_LIMIT)
+        if not groups:
+            return None
+        for g in groups:
+            for e in g["pages"]:
+                tools.advance((e["file_name"], e["page_number"]), "clustered")
+
+        blocks = []
+        for g in groups:
+            for e in g["pages"]:
+                blocks.append(
+                    f"--- {e['file_name']}, page {e['page_number']} ---\n{e['content']}"
+                )
+        prompt = (
+            f"{SELECT_PROMPT}\n\nQUESTION: {question}\n\nPASSAGES:\n\n"
+            + "\n\n".join(blocks)
+        )
+        parsed = None
+        for attempt in range(SELECTOR_ATTEMPTS):
+            raw = await generate_explanation(prompt, max_context_tokens=MAX_TOKENS_CONTEXT)
+            parsed = _json_object(raw)
+            if parsed and isinstance(parsed.get("needs"), list):
+                break
+            # Measured at 17% of questions on the benchmark corpus, which is
+            # enough to make a run evaluate two different systems at once: the
+            # ones the classifier handled and the ones that bypassed it. The
+            # same shape as the empty-content retry in llm_service, and the
+            # same fix, because the failure is a model that did not answer
+            # rather than a model that answered wrongly.
+            logger.info({"event": "tool_agent.selector_retry", "attempt": attempt + 1})
+            prompt = (
+                "Your previous reply could not be read. Reply with a single JSON "
+                "object and nothing else: no explanation, no code fence, no text "
+                "before or after it.\n\n" + prompt
+            )
+        if not parsed or not isinstance(parsed.get("needs"), list):
+            # Counted, not silently absorbed. This path used to return None and
+            # fall back to answering from ranked evidence, so a benchmark run
+            # was silently evaluating two different systems at once: some
+            # questions went through the classifier and some bypassed it, and
+            # the aggregate could not tell you which. It also inflated
+            # "answers no information need", because a question the classifier
+            # never ran on looked identical to one where it rejected everything.
+            logger.warning({"event": "tool_agent.selector_unparsable"})
+            return {"status": "unparsable", "needs": [], "claims": [],
+                    "needs_total": 0, "needs_covered": 0, "sufficient": False}
+
+        needs = [str(n) for n in parsed.get("needs") or []]
+        verified: List[Dict[str, Any]] = []
+        for c in parsed.get("claims") or []:
+            try:
+                key = (str(c["file"]).strip(), int(c["page"]))
+            except Exception:
+                continue
+            # A page can hold more than one segment, so the span is checked
+            # against every segment on it. Checking only one is how IRS 334
+            # page 14 failed: its cash-versus-accrual text lives in a different
+            # segment from its tax-year text.
+            candidates = tools.segments_on_page(key[0], key[1])
+            if not candidates:
+                continue
+            span = str(c.get("span") or "")
+            if not span.strip():
+                continue
+            wanted = _normalise(span)
+            hit = next(
+                (e for e in candidates if wanted and wanted in _normalise(e["content"])),
+                None,
+            )
+            if hit is None:
+                for e in candidates:
+                    tools.reject(_key_of(tools, e), "span not found in the passage")
+                continue
+            hit_key = _key_of(tools, hit)
+            tools.advance(hit_key, "verified")
+            tools.advance(hit_key, "selected")
+            verified.append({
+                "need": c.get("need"), "claim": str(c.get("claim") or "").strip(),
+                "span": span.strip(), "file_name": key[0], "page_number": key[1],
+                "file_url": hit.get("file_url"),
+            })
+
+        for key, e in tools.evidence.items():
+            if (e.get("stage") or "retrieved") in ("retrieved", "clustered") \
+                    and not e.get("rejected_because"):
+                tools.reject(key, "answers no information need")
+
+        # Coverage is counted, not asked for. A need with no verified claim is
+        # a gap whether or not the model would have admitted to one.
+        covered = {c["need"] for c in verified if c.get("need") is not None}
+        return {
+            "status": "ok",
+            "needs": needs,
+            "claims": verified,
+            "needs_total": len(needs),
+            "needs_covered": len(covered),
+            "sufficient": bool(needs) and len(covered) >= len(needs),
+        }
+
+    async def _answer_from_evidence(
+        self, question: str, tools: DocumentTools,
+        selection: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Write the answer from the ranked evidence set alone.
 
         One model, one job. The search loop decided what to look for; this
@@ -279,11 +531,25 @@ class ToolAgent:
         the fixed pipeline had and the agent had lost: a single ordered list of
         evidence in front of the model at the moment it writes.
         """
-        prompt = (
-            f"{ANSWER_PROMPT}\n\n"
-            f"QUESTION: {question}\n\n"
-            f"{tools.render_evidence(header='Evidence gathered', limit=EVIDENCE_LIMIT)}"
-        )
+        if selection and selection.get("claims"):
+            lines = []
+            for c in selection["claims"]:
+                lines.append(
+                    f"--- {c['file_name']}, page {c['page_number']} ---\n"
+                    f"[cite this passage as: ({c['file_name']}, page {c['page_number']})]\n"
+                    f"{c['span']}"
+                )
+            gaps = ""
+            if not selection.get("sufficient"):
+                gaps = ("\n\nThe evidence does not cover every part of the question. "
+                        "Answer the parts it covers and say plainly which parts the "
+                        "documents do not address.")
+            body = ("Verified evidence. Each span below was checked against the "
+                    "document it came from.\n\n" + "\n\n".join(lines) + gaps)
+        else:
+            body = tools.render_evidence(header="Evidence gathered", limit=EVIDENCE_LIMIT)
+
+        prompt = f"{ANSWER_PROMPT}\n\nQUESTION: {question}\n\n{body}"
         out = await generate_explanation(prompt, max_context_tokens=MAX_TOKENS_CONTEXT)
         if not out:
             return ""
@@ -321,7 +587,7 @@ class ToolAgent:
 
     def _finish(
         self, answer: str, tools: DocumentTools, searches: int, reads: int,
-        outlines: int, turns: int
+        outlines: int, turns: int, selection: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         answer, used = self._verify_citations(answer, tools)
         source_map = "\n".join(
@@ -359,6 +625,9 @@ class ToolAgent:
             "outlines": outlines,
             "trace": tools.trace,
             "diagnosis": diagnosis,
+            "selection": {
+                k: v for k, v in (selection or {}).items() if k != "claims"
+            } or None,
         }
 
     def _verify_citations(

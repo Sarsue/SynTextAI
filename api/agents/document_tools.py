@@ -58,6 +58,17 @@ MAX_PAGE_CHARS = 6000
 STAGES = ("retrieved", "clustered", "verified", "selected", "used", "cited")
 
 
+def _best_per_page(items) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    for e in items:
+        key = f"{e['file_name']} p{e['page_number']}"
+        stage = e.get("stage") or "retrieved"
+        prev = out.get(key)
+        if prev is None or STAGES.index(stage) > STAGES.index(prev["stage"]):
+            out[key] = {"stage": stage, "why": e.get("rejected_because")}
+    return out
+
+
 def _cite_header(file_name: str, page: Any) -> str:
     """The heading above every passage, carrying the citation to copy.
 
@@ -234,7 +245,21 @@ class DocumentTools:
         # changed nothing. More unranked material either way.
         self.evidence: Dict[tuple, Dict[str, Any]] = {}
 
-    def _add_evidence(self, key: tuple, rank: int, chunk: Dict[str, Any], query: str) -> int:
+    def segments_on_page(self, file_name: str, page: int) -> List[Dict[str, Any]]:
+        """Every segment stored for one page of one document.
+
+        A page is not one passage. IRS 334 page 14 is two segments, one about
+        tax years and one about cash versus accrual, and keying evidence on
+        (file, page) let the second silently overwrite the first. Which one
+        survived depended on retrieval order, so the same question could return
+        different text on different runs and look like model nondeterminism.
+        """
+        return [
+            e for e in self.evidence.values()
+            if e["file_name"] == file_name and e["page_number"] == page
+        ]
+
+    def _add_evidence(self, key: Any, rank: int, chunk: Dict[str, Any], query: str) -> int:
         """Fold one search result into the evidence set. Returns its global rank.
 
         Scored by reciprocal rank, summed over the searches that found it. Same
@@ -249,7 +274,7 @@ class DocumentTools:
         item = self.evidence.get(key)
         if item is None:
             item = {
-                "file_name": key[0], "page_number": key[1],
+                "file_name": chunk.get("file_name"), "page_number": chunk.get("page_number"),
                 "file_url": chunk.get("file_url"),
                 "content": (chunk.get("content") or "").strip(),
                 "score": 0.0, "hits": 0, "queries": [],
@@ -347,12 +372,25 @@ class DocumentTools:
             why = e.get("rejected_because")
             if why:
                 reasons[why] = reasons.get(why, 0) + 1
-        return {"reached": reached, "rejected_because": reasons}
+        return {
+            "reached": reached,
+            "rejected_because": reasons,
+            # Per page, not just totals. Counts say 83% was discarded; they
+            # cannot say whether the page that answers the question was in the
+            # 83%. Since the benchmark knows the right page for every question,
+            # this turns every miss into exactly one bucket: never retrieved,
+            # retrieved then rejected, selected then unused, or used wrongly.
+            # Keyed by page because that is what a citation names and what the
+            # benchmark's gold answers are written in. A page holding two
+            # segments reports the furthest either of them got, so a page counts
+            # as cited when any of its segments was.
+            "pages": _best_per_page(self.evidence.values()),
+        }
 
-    def rank_of(self, key: tuple) -> int:
-        ordered = sorted(self.evidence.values(), key=lambda e: e["score"], reverse=True)
-        for i, e in enumerate(ordered, start=1):
-            if (e["file_name"], e["page_number"]) == key:
+    def rank_of(self, key: Any) -> int:
+        ordered = sorted(self.evidence.items(), key=lambda kv: kv[1]["score"], reverse=True)
+        for i, (k, _e) in enumerate(ordered, start=1):
+            if k == key:
                 return i
         return len(ordered)
 
@@ -467,10 +505,14 @@ class DocumentTools:
         for rank, c in enumerate(chunks, start=1):
             file_name = c.get("file_name") or "unknown"
             page = c.get("page_number")
-            key = (file_name, page)
             self._remember(file_name, page, c.get("file_url"))
-            self._add_evidence(key, rank, c, query)
-            pages.append(key)
+            # Identity is the segment. Two segments can share a page, and
+            # keying on the page threw one of them away.
+            self._add_evidence(
+                c.get("segment_id") or c.get("chunk_id") or (file_name, page, rank),
+                rank, c, query,
+            )
+            pages.append((file_name, page))
 
         self._record(tool_name, {"query": query, "file_name": only_file}, pages)
 
@@ -500,17 +542,21 @@ class DocumentTools:
         if not segments:
             return f"{file_name} has no page {page_num}."
 
-        key = (match.get("file_name"), page_num)
+        page_key = (match.get("file_name"), page_num)
         self._remember(match.get("file_name"), page_num, match.get("file_url"))
         # A page the model chose to open deliberately is strong evidence, so it
-        # enters the set as though it were a top-ranked search hit.
-        self._add_evidence(
-            key, 1,
-            {"file_url": match.get("file_url"),
-             "content": "\n".join((seg.get("content") or "").strip() for seg in segments)},
-            f"read_page {file_name} p{page_num}",
-        )
-        self._record("read_page", {"file_name": file_name, "page": page_num}, [key])
+        # enters the set as though it were a top-ranked search hit. One entry
+        # per segment, so a two-segment page contributes both.
+        for seg in segments:
+            self._add_evidence(
+                seg.get("id") or f"page:{match.get('file_name')}:{page_num}",
+                1,
+                {"file_name": match.get("file_name"), "page_number": page_num,
+                 "file_url": match.get("file_url"),
+                 "content": (seg.get("content") or "").strip()},
+                f"read_page {file_name} p{page_num}",
+            )
+        self._record("read_page", {"file_name": file_name, "page": page_num}, [page_key])
         body = "\n".join((s.get("content") or "").strip() for s in segments)
         header = _cite_header(match.get("file_name"), page_num)
         return f"{header}\n{body[:MAX_PAGE_CHARS]}"

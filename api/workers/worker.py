@@ -292,7 +292,12 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
     keep = {
         k: result.get(k)
         for k in ("mode", "turns", "searches", "reads", "outlines",
-                  "rewritten_query", "expanded_terms", "trace", "diagnosis", "error")
+                  "rewritten_query", "expanded_terms", "trace", "diagnosis",
+                  # Whitelisted late, and its absence cost a whole experiment:
+                  # needs-covered and sufficiency were computed on every query
+                  # and thrown away here, so the one number the selector exists
+                  # to produce never reached storage.
+                  "selection", "error")
         if result.get(k) is not None
     }
     keep["context_chunks"] = len(result.get("context_chunks") or [])
