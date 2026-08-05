@@ -158,6 +158,7 @@ async def chat_with_tools(
         "model": CHAT_MODEL,
         "messages": messages,
         "max_tokens": max_tokens,
+        "temperature": TEMPERATURE,
     }
     if tools:
         data["tools"] = tools
@@ -173,6 +174,27 @@ async def chat_with_tools(
     # A turn that only asks for tools has no content, and that is a valid turn.
     # Emptiness alone is not a failure here.
     return choices[0].get("message") or {}
+
+
+# Sampling temperature. Never set until 2026-08-05, so every call in the
+# product ran at the endpoint's default, which samples.
+#
+# That is the right default for writing prose and the wrong one for this. The
+# benchmark showed it: four runs of identical code scored between 12 and 18 of
+# 22 on citations, with fifteen of twenty-two questions changing verdict
+# between runs. A customer asking the same question twice was getting
+# materially different pages back, and no change smaller than six citations
+# could be measured at all.
+#
+# It compounds in the agent loop, where every turn is a fresh sampling
+# decision about which tool to call and with what query, so the paths diverge
+# early and never reconverge.
+#
+# Not zero. Zero is greedy decoding, which on a reasoning model can lock it
+# into a degenerate loop, and this endpoint gives no seed to make runs
+# genuinely reproducible anyway. Low enough to be near-deterministic in
+# practice, and overridable for anything that ever wants variety.
+TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
 
 
 # The configured chat model reasons before it answers, and that reasoning is
@@ -202,6 +224,7 @@ async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
         "model": CHAT_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
+        "temperature": TEMPERATURE,
     }
 
     body = await _post_json(url, headers, data, accept=_has_content)
