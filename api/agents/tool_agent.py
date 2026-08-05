@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,9 +45,12 @@ from api.services.llm_service import chat_with_tools
 
 logger = logging.getLogger(__name__)
 
-# Enough turns to search twice, read a page to check a figure, and answer.
+# Enough turns to consult the contents pages, search a document or two, read a
+# page to check a figure, and answer. Raised from 6 after the workspace map
+# went in: with somewhere to navigate, questions spanning two documents began
+# running out of turns mid-answer and returning nothing.
 # Unbounded loops are how an agent turns one question into a bill.
-MAX_TURNS = 6
+MAX_TURNS = int(os.getenv("TOOL_MAX_TURNS", "8"))
 
 SYSTEM_PROMPT = """You answer questions about a specific company's own documents.
 
@@ -124,7 +128,26 @@ class ToolAgent:
             file_id=file_id,
         )
 
-        messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Hand over the contents pages rather than waiting to be asked for
+        # them. See DocumentTools.workspace_map.
+        system = SYSTEM_PROMPT
+        try:
+            workspace_map = await tools.workspace_map()
+            if workspace_map:
+                system = (
+                    f"{SYSTEM_PROMPT}\n\n"
+                    "WHAT IS IN THIS WORKSPACE\n\n"
+                    "These are the documents and their contents pages. Use them to "
+                    "decide which document and which section should hold the answer, "
+                    "then search_within that document or read_page that page. A page "
+                    "listed under a heading that names the rule is the page to cite, "
+                    "not a page that happens to repeat the words.\n\n"
+                    f"{workspace_map}"
+                )
+        except Exception as e:
+            logger.warning({"event": "tool_agent.no_workspace_map", "error": str(e)})
+
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
         if formatted_history:
             messages.append({
                 "role": "user",
@@ -134,6 +157,7 @@ class ToolAgent:
 
         searches = 0
         reads = 0
+        outlines = 0
         for turn in range(self._max_turns):
             reply = await chat_with_tools(messages, tools=TOOL_SCHEMAS)
             if not reply:
@@ -144,7 +168,7 @@ class ToolAgent:
             if not calls:
                 answer = (reply.get("content") or "").strip()
                 if answer:
-                    return self._finish(answer, tools, searches, reads, turn + 1)
+                    return self._finish(answer, tools, searches, reads, outlines, turn + 1)
                 # No content and no calls is a wasted turn. Ask once for an
                 # answer rather than returning silence.
                 messages.append(reply)
@@ -158,10 +182,16 @@ class ToolAgent:
             for call in calls:
                 fn = (call.get("function") or {})
                 name = fn.get("name") or ""
-                if name == "search_documents":
+                # search_within counts as a search. It was added later and the
+                # counter did not know about it, so a run that searched three
+                # times reported zero and looked like the workspace map had
+                # replaced retrieval rather than directed it.
+                if name in ("search_documents", "search_within"):
                     searches += 1
                 elif name == "read_page":
                     reads += 1
+                elif name == "outline":
+                    outlines += 1
                 output = await tools.run(name, fn.get("arguments") or "{}")
                 messages.append({
                     "role": "tool",
@@ -183,10 +213,13 @@ class ToolAgent:
             "mode": "tools",
             "turns": self._max_turns,
             "searches": searches,
+            "reads": reads,
+            "outlines": outlines,
         }
 
     def _finish(
-        self, answer: str, tools: DocumentTools, searches: int, reads: int, turns: int
+        self, answer: str, tools: DocumentTools, searches: int, reads: int,
+        outlines: int, turns: int
     ) -> Dict[str, Any]:
         answer, used = self._verify_citations(answer, tools)
         source_map = "\n".join(
@@ -204,7 +237,7 @@ class ToolAgent:
         logger.info({
             "event": "tool_agent.answered",
             "turns": turns, "searches": searches, "reads": reads,
-            "citations": len(used),
+            "outlines": outlines, "citations": len(used),
         })
         return {
             "response": answer + ("\n\n" + source_map if used else ""),
@@ -213,6 +246,7 @@ class ToolAgent:
             "turns": turns,
             "searches": searches,
             "reads": reads,
+            "outlines": outlines,
         }
 
     def _verify_citations(

@@ -254,6 +254,10 @@ class File(Base):
         index=True
     )
     file_size_bytes = Column(Integer, nullable=True)  # Size of the original source file in bytes
+    # [{level, title, page}] taken from the document at upload: its own table of
+    # contents where it has one, headings inferred from type size where it does
+    # not. What lets a model navigate to a section instead of guessing words.
+    outline = Column(JSON, nullable=True)
     
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")

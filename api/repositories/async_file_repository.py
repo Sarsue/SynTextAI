@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, text
 from sqlalchemy.exc import IntegrityError
 
+import json
 import os
 import requests
 
@@ -658,6 +659,32 @@ class AsyncFileRepository(AsyncBaseRepository):
                 return out
             except Exception as e:
                 logger.error(f"Error performing hybrid_search: {e}", exc_info=True)
+                return []
+
+    async def set_outline(self, file_id: int, outline: List[Dict[str, Any]]) -> bool:
+        """Store what the document says it contains."""
+        async with self.get_async_session() as session:
+            try:
+                await session.execute(
+                    text("UPDATE files SET outline = CAST(:outline AS jsonb) WHERE id = :fid"),
+                    {"outline": json.dumps(outline), "fid": int(file_id)},
+                )
+                await session.commit()
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Could not store outline for file {file_id}: {e}")
+                return False
+
+    async def get_outline(self, file_id: int) -> List[Dict[str, Any]]:
+        async with self.get_async_session() as session:
+            try:
+                row = (await session.execute(
+                    text("SELECT outline FROM files WHERE id = :fid"), {"fid": int(file_id)}
+                )).first()
+                return list(row[0]) if row and row[0] else []
+            except Exception as e:
+                logger.error(f"Could not read outline for file {file_id}: {e}")
                 return []
 
     async def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:

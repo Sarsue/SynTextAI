@@ -132,6 +132,49 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "outline",
+            "description": (
+                "Show a document's table of contents: its section headings and "
+                "the page each one starts on. This is how to find where a rule "
+                "is DEFINED rather than where it happens to be mentioned. If a "
+                "search result uses a term without defining it, look here for "
+                "the section that names it, then read_page that page and cite "
+                "it. Prefer this over guessing more search phrasings."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_name": {
+                        "type": "string",
+                        "description": "Exactly as it appears in list_documents or a search result.",
+                    }
+                },
+                "required": ["file_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_within",
+            "description": (
+                "Search inside one named document. Use it once you know which "
+                "document should hold the answer, so results are not crowded "
+                "out by a longer document that merely uses the same words."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_name": {"type": "string", "description": "Exactly as listed."},
+                    "query": {"type": "string", "description": "What to look for."},
+                },
+                "required": ["file_name", "query"],
+            },
+        },
+    },
 ]
 
 
@@ -179,24 +222,61 @@ class DocumentTools:
                 )
             if name == "list_documents":
                 return await self._list_documents()
+            if name == "outline":
+                return await self._outline(str(args.get("file_name") or "").strip())
+            if name == "search_within":
+                return await self._search(
+                    str(args.get("query") or "").strip(),
+                    only_file=str(args.get("file_name") or "").strip(),
+                )
         except Exception as e:
             logger.error(f"tool {name} failed: {e}", exc_info=True)
             return f"The {name} tool failed. Try a different approach."
 
         return f"There is no tool called {name}."
 
-    async def _search(self, query: str) -> str:
+    async def _resolve(self, file_name: str):
+        """A file the caller can already see, found by name. None otherwise.
+
+        By name rather than by id: ids are guessable and belong to a global
+        sequence, a name is only meaningful against this caller's own listing.
+        """
+        listing = await self._files()
+        return next(
+            (f for f in listing if (f.get("file_name") or "").lower() == file_name.lower()),
+            None,
+        )
+
+    async def _outline(self, file_name: str) -> str:
+        if not file_name:
+            return "outline needs a file_name."
+        match = await self._resolve(file_name)
+        if not match:
+            available = ", ".join(sorted({f.get("file_name") or "" for f in await self._files()}))
+            return f"There is no document called {file_name}. Available: {available or 'none'}"
+        entries = await self._store.file_repo.get_outline(match["id"])
+        from api.services.outline import render
+        return render(entries, match.get("file_name") or file_name)
+
+    async def _search(self, query: str, only_file: str = "") -> str:
         if not query:
-            return "search_documents needs a query."
+            return "A search needs a query."
 
         from api.services.llm_service import get_text_embedding
+
+        scope_file_id = self._file_id
+        if only_file:
+            match = await self._resolve(only_file)
+            if not match:
+                return f"There is no document called {only_file}."
+            scope_file_id = match["id"]
 
         chunks = await self._store.file_repo.hybrid_search(
             user_id=self._user_id,
             query=query,
             query_embedding=await get_text_embedding(query),
             workspace_id=self._workspace_id,
-            file_id=self._file_id,
+            file_id=scope_file_id,
             top_k=MAX_SEARCH_RESULTS,
             accessible_workspace_ids=self._accessible_workspace_ids,
         )
@@ -221,14 +301,10 @@ class DocumentTools:
         except (TypeError, ValueError):
             return "read_page needs a whole number for page."
 
-        listing = await self._files()
-        match = next(
-            (f for f in listing if (f.get("file_name") or "").lower() == file_name.lower()),
-            None,
-        )
+        match = await self._resolve(file_name)
         if not match:
-            available = ", ".join(sorted({f.get("file_name") or "" for f in listing})) or "none"
-            return f"There is no document called {file_name}. Available: {available}"
+            available = ", ".join(sorted({f.get("file_name") or "" for f in await self._files()}))
+            return f"There is no document called {file_name}. Available: {available or 'none'}"
 
         segments = await self._store.file_repo.get_segments_for_page(match["id"], page_num)
         if not segments:
@@ -238,6 +314,43 @@ class DocumentTools:
         body = "\n".join((s.get("content") or "").strip() for s in segments)
         header = _cite_header(match.get("file_name"), page_num)
         return f"{header}\n{body[:MAX_PAGE_CHARS]}"
+
+    async def workspace_map(self, max_chars: int = 12000) -> str:
+        """Every document and its contents page, ready to put in a prompt.
+
+        The `outline` tool exists and the model does not call it, exactly as it
+        did not call read_page when told to. Two prompt revisions failed to
+        change that, so this stops asking. At SMB scale the whole navigation
+        index is small enough to hand over: five documents and 281 headings is
+        about four thousand tokens against a window of a hundred and twenty
+        thousand. A model that can already see where things are does not have to
+        decide to go and look.
+
+        Bounded, because a customer with four hundred documents is a different
+        problem, and there the model has list_documents and outline to work
+        with instead.
+        """
+        from api.services.outline import render
+
+        listing = await self._files()
+        if not listing:
+            return ""
+
+        parts: List[str] = []
+        used = 0
+        for f in listing:
+            name = f.get("file_name") or ""
+            entries = await self._store.file_repo.get_outline(f["id"])
+            block = render(entries, name) if entries else f"{name} (no contents page)"
+            if used + len(block) > max_chars:
+                parts.append(
+                    f"...and {len(listing) - len(parts)} more documents. "
+                    "Use list_documents and outline to see them."
+                )
+                break
+            parts.append(block)
+            used += len(block)
+        return "\n\n".join(parts)
 
     async def _list_documents(self) -> str:
         listing = await self._files()
