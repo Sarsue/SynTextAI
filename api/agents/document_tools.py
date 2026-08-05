@@ -208,6 +208,78 @@ class DocumentTools:
         # look at.
         self.trace: List[Dict[str, Any]] = []
         self._recorded_pages: set = set()
+        # The evidence set: every passage retrieved, with a score accumulated
+        # across every search that returned it.
+        #
+        # This is the thing the agent was missing. The fixed pipeline hands the
+        # model ONE globally ranked list, and that ordering is information the
+        # model uses. The agent called the same search more times and then threw
+        # the ordering away: each search returned its own top eight, ranked
+        # within itself, and nothing related search one's third result to search
+        # four's first. Asked what to track for taxes and travel, it had both
+        # required pages and cited four of their neighbours instead.
+        #
+        # It also explains two results that looked unrelated: raising results
+        # per search from 8 to 20 made things worse, and searching more often
+        # changed nothing. More unranked material either way.
+        self.evidence: Dict[tuple, Dict[str, Any]] = {}
+
+    def _add_evidence(self, key: tuple, rank: int, chunk: Dict[str, Any], query: str) -> int:
+        """Fold one search result into the evidence set. Returns its global rank.
+
+        Scored by reciprocal rank, summed over the searches that found it. Same
+        principle the SQL uses to fuse the vector and keyword lists, applied one
+        level up to fuse the agent's own searches. A page that two different
+        queries both rank highly is stronger evidence than one that a single
+        query happened to return, and summing is what says so.
+
+        Raw scores could not be compared across searches: each query produces
+        its own distribution. Ranks can.
+        """
+        item = self.evidence.get(key)
+        if item is None:
+            item = {
+                "file_name": key[0], "page_number": key[1],
+                "file_url": chunk.get("file_url"),
+                "content": (chunk.get("content") or "").strip(),
+                "score": 0.0, "hits": 0, "queries": [],
+            }
+            self.evidence[key] = item
+        item["score"] += 1.0 / (60 + rank)
+        item["hits"] += 1
+        if query and query not in item["queries"]:
+            item["queries"].append(query)
+        return self.rank_of(key)
+
+    def render_evidence(self, header: str = "Evidence so far", limit: int = 20) -> str:
+        """The evidence set as the model should read it: ranked, once."""
+        items = self.ranked_evidence(limit)
+        if not items:
+            return "No passages found yet."
+        out = [f"{header}. {len(self.evidence)} passages found, best first."]
+        for i, e in enumerate(items, start=1):
+            found_by = (
+                f"  [matched {e['hits']} of your searches]" if e["hits"] > 1 else ""
+            )
+            out.append(
+                f"\n--- {i}. {e['file_name']}, page {e['page_number']}{found_by} ---\n"
+                f"[cite this passage as: ({e['file_name']}, page {e['page_number']})]\n"
+                f"{e['content']}"
+            )
+        return "\n".join(out)
+
+    def rank_of(self, key: tuple) -> int:
+        ordered = sorted(self.evidence.values(), key=lambda e: e["score"], reverse=True)
+        for i, e in enumerate(ordered, start=1):
+            if (e["file_name"], e["page_number"]) == key:
+                return i
+        return len(ordered)
+
+    def ranked_evidence(self, limit: int = 25) -> List[Dict[str, Any]]:
+        """Everything found so far, best first. One list, one ordering."""
+        return sorted(
+            self.evidence.values(), key=lambda e: e["score"], reverse=True
+        )[:limit]
 
     def _record(self, tool: str, args: Dict[str, Any], pages: List[tuple], note: str = "") -> None:
         before = len(self.seen)
@@ -310,18 +382,25 @@ class DocumentTools:
             self._record(tool_name, {"query": query, "file_name": only_file}, [], "no matches")
             return "No passages matched that query."
 
-        lines = []
         pages: List[tuple] = []
-        for c in chunks:
+        for rank, c in enumerate(chunks, start=1):
             file_name = c.get("file_name") or "unknown"
             page = c.get("page_number")
+            key = (file_name, page)
             self._remember(file_name, page, c.get("file_url"))
-            pages.append((file_name, page))
-            lines.append(
-                f"{_cite_header(file_name, page)}\n{(c.get('content') or '').strip()}"
-            )
+            self._add_evidence(key, rank, c, query)
+            pages.append(key)
+
         self._record(tool_name, {"query": query, "file_name": only_file}, pages)
-        return "\n\n".join(lines)
+
+        # Return the whole evidence set in its global order, not this search's
+        # eight in theirs. The model asked one more question; what it gets back
+        # is everything known so far, best first, so a page found by two
+        # searches sits above one found by neither.
+        return self.render_evidence(
+            header=f"Evidence after searching for \"{query}\""
+                   + (f" in {only_file}" if only_file else "")
+        )
 
     async def _read_page(self, file_name: str, page: Any) -> str:
         if not file_name:
@@ -340,9 +419,17 @@ class DocumentTools:
         if not segments:
             return f"{file_name} has no page {page_num}."
 
+        key = (match.get("file_name"), page_num)
         self._remember(match.get("file_name"), page_num, match.get("file_url"))
-        self._record("read_page", {"file_name": file_name, "page": page_num},
-                     [(match.get("file_name"), page_num)])
+        # A page the model chose to open deliberately is strong evidence, so it
+        # enters the set as though it were a top-ranked search hit.
+        self._add_evidence(
+            key, 1,
+            {"file_url": match.get("file_url"),
+             "content": "\n".join((seg.get("content") or "").strip() for seg in segments)},
+            f"read_page {file_name} p{page_num}",
+        )
+        self._record("read_page", {"file_name": file_name, "page": page_num}, [key])
         body = "\n".join((s.get("content") or "").strip() for s in segments)
         header = _cite_header(match.get("file_name"), page_num)
         return f"{header}\n{body[:MAX_PAGE_CHARS]}"

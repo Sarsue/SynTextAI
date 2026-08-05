@@ -41,7 +41,11 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.agents.document_tools import TOOL_SCHEMAS, DocumentTools
-from api.services.llm_service import chat_with_tools
+from api.services.llm_service import (
+    MAX_TOKENS_CONTEXT,
+    chat_with_tools,
+    generate_explanation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,11 @@ logger = logging.getLogger(__name__)
 # running out of turns mid-answer and returning nothing.
 # Unbounded loops are how an agent turns one question into a bill.
 MAX_TURNS = int(os.getenv("TOOL_MAX_TURNS", "8"))
+
+# How many passages the answer step sees. The pipeline shows 25 in one
+# ranked block and scores 17.0; this is the agent's equivalent, and the
+# ordering is the part that matters rather than the number.
+EVIDENCE_LIMIT = int(os.getenv("TOOL_EVIDENCE_LIMIT", "25"))
 
 SYSTEM_PROMPT = """You answer questions about a specific company's own documents.
 
@@ -99,6 +108,36 @@ _CITE_RE = re.compile(
     r"\(\s*([\w\-. ]+?\.(?:pdf|docx|txt|md))\s*,\s*(?:page|p\.?|pg\.?)\s*(\d+)\s*\)",
     re.I,
 )
+
+
+ANSWER_PROMPT = """You are writing the final answer from evidence that has already
+been gathered. You cannot search. Everything you may use is below, ordered with
+the strongest evidence first.
+
+Work in two steps.
+
+STEP 1. List the passages that actually support an answer to the question, by
+file name and page, in the form:
+
+    USING: (file.pdf, page 12), (other.pdf, page 3)
+
+Include only passages that genuinely answer what was asked. Being about the
+same broad subject is not enough. If none of them answer it, write
+USING: NONE and then say plainly that the documents do not cover it, naming
+what they do cover.
+
+STEP 2. Write the answer using only those passages, citing each one as
+(file.pdf, page 12) immediately after the claim it supports. Use the full file
+name with its extension every time. Give the specific figures, deadlines and
+terms the documents use rather than paraphrasing them away. If the question has
+several parts, answer every part the evidence supports and say which parts it
+does not.
+
+The ordering above is meaningful: earlier passages matched the searches better,
+and a passage marked as matching several searches is stronger still. Where two
+passages say similar things, prefer the higher one unless the lower one is more
+specific to the question.
+"""
 
 
 class ToolAgent:
@@ -166,6 +205,19 @@ class ToolAgent:
 
             calls = reply.get("tool_calls") or []
             if not calls:
+                # The search phase is over. The prose this turn produced is
+                # discarded: it was written while the evidence was scattered
+                # across four tool messages in four different orderings, which
+                # is the condition that had it citing p12, p13 and p14 while
+                # the page it needed, p11, sat unmentioned in the first search.
+                #
+                # The answer is written again, by a separate call that sees one
+                # ranked evidence set and nothing else. No tool history, no
+                # search transcript, no chance to keep searching.
+                if tools.evidence:
+                    answer = await self._answer_from_evidence(message, tools)
+                    if answer:
+                        return self._finish(answer, tools, searches, reads, outlines, turn + 1)
                 answer = (reply.get("content") or "").strip()
                 if answer:
                     return self._finish(answer, tools, searches, reads, outlines, turn + 1)
@@ -218,6 +270,27 @@ class ToolAgent:
             "trace": tools.trace,
             "diagnosis": {"stopped": "ran out of turns"},
         }
+
+    async def _answer_from_evidence(self, question: str, tools: DocumentTools) -> str:
+        """Write the answer from the ranked evidence set alone.
+
+        One model, one job. The search loop decided what to look for; this
+        decides what the answer is. Splitting them is what restores the thing
+        the fixed pipeline had and the agent had lost: a single ordered list of
+        evidence in front of the model at the moment it writes.
+        """
+        prompt = (
+            f"{ANSWER_PROMPT}\n\n"
+            f"QUESTION: {question}\n\n"
+            f"{tools.render_evidence(header='Evidence gathered', limit=EVIDENCE_LIMIT)}"
+        )
+        out = await generate_explanation(prompt, max_context_tokens=MAX_TOKENS_CONTEXT)
+        if not out:
+            return ""
+        # The USING: line is scaffolding that made the model commit to its
+        # sources before writing prose. The customer does not need to read it.
+        cleaned = re.sub(r"(?im)^\s*(STEP\s*[12][.:]?|USING:).*$", "", out).strip()
+        return cleaned or out.strip()
 
     @staticmethod
     def _diagnose(tools: DocumentTools, used: List[Dict[str, Any]]) -> Dict[str, Any]:
