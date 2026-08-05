@@ -5,7 +5,6 @@ Query processing module for enhancing RAG queries.
 import logging
 from typing import List, Tuple, Optional
 
-from .interfaces import QueryProcessorInterface
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ async def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:
         return ""
 
 
-class DefaultQueryProcessor(QueryProcessorInterface):
+class DefaultQueryProcessor:
     """
     Default implementation of query processing with expansion and reformulation.
     """

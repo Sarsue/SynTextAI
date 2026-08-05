@@ -1,25 +1,16 @@
-"""
-Retrieval Augmented Generation (RAG) package for SynTextAI.
-This package provides modular components for building RAG pipelines.
-"""
+"""Two pieces of retrieval plumbing.
 
-from .interfaces import (
-    QueryProcessorInterface,
-    SearchEngineInterface,
-    ChunkSelectorInterface
-)
+There were seven modules here: a pipeline, a factory, an interfaces file, a
+search engine and a reranker, wrapped around a query processor and a chunk
+selector. The pipeline existed to hold the two useful classes, the factory
+existed to build the pipeline, and the interfaces declared abstract methods
+with exactly one implementation each and no prospect of a second.
 
-from .query_processor import DefaultQueryProcessor
-from .search_engine import HybridSearchEngine
+Nothing called the pipeline's own process() method. The search engine was
+imported by nothing at all. The reranker actively made retrieval worse and was
+deleted separately. What is left is what was ever used.
+"""
 from .chunk_selector import SmartChunkSelector
-from .factory import RAGFactory
+from .query_processor import DefaultQueryProcessor
 
-__all__ = [
-    'QueryProcessorInterface',
-    'SearchEngineInterface',
-    'ChunkSelectorInterface',
-    'DefaultQueryProcessor',
-    'HybridSearchEngine',
-    'SmartChunkSelector',
-    'RAGFactory'
-]
+__all__ = ["SmartChunkSelector", "DefaultQueryProcessor"]

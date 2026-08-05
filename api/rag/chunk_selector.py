@@ -5,12 +5,11 @@ Chunk selection components for RAG systems.
 import logging
 from typing import List, Dict, Any
 
-from .interfaces import ChunkSelectorInterface
 
 logger = logging.getLogger(__name__)
 
 
-class SmartChunkSelector(ChunkSelectorInterface):
+class SmartChunkSelector:
     """
     Smart chunk selector that optimizes for relevance and diversity within token constraints.
     """

@@ -5,8 +5,6 @@ from typing import Optional, List, Dict, Any
 import logging
 from ..core.utils import sanitize_extracted_text
 import asyncio
-import numpy as np
-from scipy.spatial.distance import cosine, euclidean
 
 from .async_base_repository import AsyncBaseRepository
 from ..models import File as FileORM, Chunk as ChunkORM
@@ -409,78 +407,13 @@ class AsyncFileRepository(AsyncBaseRepository):
                     logger.error(error_msg, exc_info=True)
                     return False
 
-    async def query_chunks_by_embedding(
-        self,
-        user_id: int,
-        query_embedding: List[float],
-        top_k: int = 5,
-        similarity_type: str = 'l2'
-    ) -> List[Dict]:
-        """Retrieves chunks with the highest similarity to the query embedding.
-
-        Args:
-            user_id: ID of the user
-            query_embedding: Embedding of the user's query
-            top_k: Number of top results to return
-            similarity_type: Type of similarity calculation ('l2', 'cosine')
-
-        Returns:
-            List[Dict]: List of chunks with similarity scores
-        """
-        async with self.get_async_session() as session:
-            try:
-                # Get all files for the user
-                stmt = select(FileORM).where(FileORM.user_id == user_id)
-                result = await session.execute(stmt)
-                files = result.scalars().all()
-
-                if not files:
-                    return []
-
-                file_ids = [file.id for file in files]
-
-                # Get chunks with embeddings and their linked segments for text
-                stmt = (
-                    select(ChunkORM, SegmentORM)
-                    .outerjoin(SegmentORM, SegmentORM.id == ChunkORM.segment_id)
-                    .where(and_(ChunkORM.file_id.in_(file_ids), ChunkORM.embedding != None))
-                    .limit(1000)
-                )
-                result = await session.execute(stmt)
-                rows = result.all()
-
-                if not rows:
-                    return []
-
-                # Calculate similarity scores
-                results = []
-                query_embedding_np = np.array(query_embedding)
-
-                for chunk, segment in rows:
-                    chunk_embedding = np.array(chunk.embedding)
-                    if similarity_type.lower() == 'cosine':
-                        similarity = 1 - cosine(query_embedding_np, chunk_embedding)
-                    else:
-                        distance = euclidean(query_embedding_np, chunk_embedding)
-                        similarity = 1 / (1 + distance)
-
-                    results.append({
-                        'chunk_id': chunk.id,
-                        'file_id': chunk.file_id,
-                        'segment_id': chunk.segment_id,
-                        'content': (segment.content if segment is not None else ''),
-                        'page_number': (segment.page_number if segment is not None else None),
-                        'meta_data': (segment.meta_data if (segment is not None and segment.meta_data is not None) else {}),
-                        'similarity': float(similarity)
-                    })
-
-                # Sort by similarity and get top_k results
-                results.sort(key=lambda x: x['similarity'], reverse=True)
-                return results[:top_k]
-
-            except Exception as e:
-                logger.error(f"Error querying chunks by embedding: {e}", exc_info=True)
-                return []
+    # query_chunks_by_embedding used to live here. Nothing called it. It
+    # predated pgvector: it selected every chunk belonging to a user, pulled all
+    # of their embeddings into Python, and computed cosine distance in a loop
+    # with scipy. hybrid_search does the same job in the database, against an
+    # index, scoped by workspace rather than by uploader. Deleting it also took
+    # numpy and scipy out of the API's dependencies, which were carried solely
+    # for those four lines.
 
     # --- Hybrid Search (vector + BM25 via Postgres full text) ---
     DEFAULT_VECTOR_WEIGHT = 0.7

@@ -5,13 +5,18 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from api.rag.pipeline import RAGPipeline
+from api.rag.chunk_selector import SmartChunkSelector
+from api.rag.query_processor import DefaultQueryProcessor
 from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
 
 logger = logging.getLogger(__name__)
 
 
-rag_pipeline = RAGPipeline(config={"search_engine": {"default_alpha": 0.7}})
+# The two pieces this agent actually uses. They used to be reached through
+# a RAGPipeline that existed only to hold them, built by a factory that
+# existed only to build it, behind interfaces with one implementation each.
+query_processor = DefaultQueryProcessor()
+chunk_selector = SmartChunkSelector()
 
 # Room for the retrieved pages, leaving the rest of the window for the
 # instructions, the conversation history and the generated answer. Fifteen
@@ -117,7 +122,7 @@ class QueryAgent:
         message = state.get("message") or ""
         formatted_history = state.get("formatted_history")
 
-        rewritten_query, expanded_terms = await rag_pipeline.query_processor.process(message, formatted_history)
+        rewritten_query, expanded_terms = await query_processor.process(message, formatted_history)
         logger.info(
             {
                 "event": "query_agent.process_query",
@@ -237,7 +242,7 @@ class QueryAgent:
         # chunks reached the model and the rest were discarded for no reason.
         # Leave headroom for the citation instructions, the history and the
         # answer itself; query_pipeline reduces again if it still overruns.
-        context_chunks = rag_pipeline.chunk_selector.select(
+        context_chunks = chunk_selector.select(
             candidates,
             rewritten_query,
             token_budget=CONTEXT_TOKEN_BUDGET,

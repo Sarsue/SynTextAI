@@ -3,13 +3,13 @@ import logging
 from typing import List, Dict, Any, Tuple
 
 from api.services.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation
-from api.rag.pipeline import RAGPipeline
+from api.rag.chunk_selector import SmartChunkSelector
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-rag_pipeline = RAGPipeline(config={"search_engine": {"default_alpha": 0.7}})
+chunk_selector = SmartChunkSelector()
 
 # The prompt permits [Segment 2], [Segment 2, 3] and [Segment 2, timestamp 3:45],
 # but only the first form was ever matched: a combined marker passed validation
@@ -195,7 +195,7 @@ class SyntextAgent:
                     available_context_tokens = MAX_TOKENS_CONTEXT - non_context_tokens - 100  # 100 token buffer
                     
                     # Smart truncation targeting most relevant segments
-                    reduced_chunks = rag_pipeline.chunk_selector.select(
+                    reduced_chunks = chunk_selector.select(
                         top_k_results,
                         query,
                         token_budget=available_context_tokens,

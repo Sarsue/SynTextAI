@@ -25,9 +25,6 @@ posthog>=3.5.0
 
 # RAG / tokenization
 langgraph>=0.2.0
-numpy>=1.24.0
-scipy>=1.10.0
-scikit-learn>=1.4.0  # cosine_similarity in rag/search_engine.py and rag/reranker.py
 tiktoken>=0.6.0
 tenacity>=8.3.0
 
