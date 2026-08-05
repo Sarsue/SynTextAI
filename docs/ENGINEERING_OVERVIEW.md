@@ -1002,6 +1002,74 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-05 (backend modernization: six items, three surprises):** A review
+  of the backend found six things worth changing. Doing them found three
+  things nobody was looking for.
+
+  **The event loop was never concurrent.** `llm_service` used `requests` and
+  `time.sleep` while every caller was an `async def`. The worker declares
+  `asyncio.Semaphore(QUERY_CONCURRENCY=4)` and starts a task per query, so it
+  believed it ran four at a time; a blocking POST with a 120-second timeout
+  stopped the loop, so it ran one, and nothing else on that loop ran either.
+  Now `httpx.AsyncClient` end to end: **2.6x on four concurrent calls**,
+  measured warm so the figure is not just TLS setup.
+
+  **There was no vector index.** None: the only entry on `chunks` was its
+  primary key. Every question scanned every chunk and re-tokenised every
+  segment. Adding an index alone would have done nothing, because
+  `ORDER BY 0.7*vector + 0.3*text` is not a distance and no index describes
+  it. The query was reshaped into two indexed searches fused by reciprocal
+  rank: **140-204ms → 10-20ms, and recall 18/21 → 19/21.**
+
+  **There has never been a temperature.** Every call ran at the endpoint's
+  sampling default. Four runs of identical code scored 12-18 of 22. At 0.1 the
+  spread halves to 13-16 with the mean unchanged, which is the expected shape.
+  A customer asking the same question twice was getting different pages.
+
+  Also: `format_user_chat_history` had raised `NameError` on every call since
+  `fafc428`, swallowed by its own handler, so **conversation history has never
+  reached the model** and every question was answered as if it were the first.
+
+  **What did not work, and is recorded so it is not tried again.**
+  Contextual retrieval, the highest-expected-value item on the list, measured
+  neutral to slightly negative here (@5: 17/21 without, 16/21 with). The
+  reason says when to revisit: the gains come from restoring context that
+  chunking destroyed, and our chunker almost never fires, so a chunk is a
+  whole page already coherent under its own heading. It belongs with small
+  chunks. Kept behind `CONTEXTUALIZE_CHUNKS`, off, with a backfill and a
+  `--strip` that undoes it, because a change to ingestion that cannot be
+  turned off cannot be tested.
+
+  **Deleted:** `rag/` scaffolding (a pipeline holding two classes, a factory
+  building the pipeline, interfaces with one implementation each, a search
+  engine imported by nothing), and `query_chunks_by_embedding`, a
+  pre-pgvector search that pulled every one of a user's embeddings into Python
+  to loop over. Those four lines were the only reason the API depended on
+  numpy, scipy and scikit-learn; all three are gone from requirements.
+
+- **2026-08-05 (the model would not navigate, so it was handed the map):**
+  Extraction opened every PDF with fitz, read its pages, and closed it without
+  asking what it contained. Three of five benchmark documents carry a real
+  embedded table of contents, 118 entries in one. All discarded.
+
+  That absence is why the ADA failure survived three retrieval levers: asked
+  whether a shop must be wheelchair accessible, retrieval returned page 8,
+  which uses "readily achievable" while explaining parking, rather than page
+  6, where the rule is defined. Both contain the phrase and no ranking
+  function can tell which is the section about it.
+
+  Outlines are now extracted at upload, from the document's own contents where
+  it has one and from type size where it does not, with a backfill for
+  documents already uploaded. `outline()` and `search_within()` are tools.
+
+  **The model then ignored them: zero calls, exactly as it ignored
+  `read_page`.** That is three prompt revisions that changed nothing. So the
+  contents pages of every document now go into the system prompt instead. At
+  SMB scale that is affordable and at web scale it is not, which is the point:
+  five documents and 281 headings is about 4k tokens against a 120k window. It
+  matches the finding from the literature that small open models want more
+  structure, not more freedom.
+
 - **2026-08-04 (the pipeline was broken, not badly tuned):** The first
   benchmark baseline scored 10/25 with 11/21 citations, and three questions
   answered *"I couldn't find enough evidence in your documents"*. Running
