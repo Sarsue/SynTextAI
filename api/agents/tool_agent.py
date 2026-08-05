@@ -304,6 +304,9 @@ class ToolAgent:
         wasted = [t for t in searches if t["returned"] and not t["new_pages"]]
         cited = {(c["file_name"], c["page_number"]) for c in used}
         return {
+            # How far each passage got between being found and being cited,
+            # with a reason on every drop.
+            "lifecycle": tools.lifecycle(),
             # Retrieval showed it these pages and the answer used none of them.
             # High means retrieval was fine and the answer ignored it.
             "pages_seen": len(tools.seen),
@@ -333,6 +336,13 @@ class ToolAgent:
         # whether a change to the instructions changed the behaviour. An
         # instruction telling the model to search twice is worth nothing if it
         # still searches once, and the number is the only way to tell.
+        for c in used:
+            tools.advance((c["file_name"], c["page_number"]), "cited")
+        # Everything the answer step was shown and did not use. This is the
+        # 63% bucket: pages retrieval delivered and the answer walked past.
+        for key, e in tools.evidence.items():
+            if (e.get("stage") or "retrieved") != "cited" and not e.get("rejected_because"):
+                tools.reject(key, "shown to the answer step, not cited")
         diagnosis = self._diagnose(tools, used)
         logger.info({
             "event": "tool_agent.answered",

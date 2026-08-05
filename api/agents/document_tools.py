@@ -47,6 +47,16 @@ logger = logging.getLogger(__name__)
 MAX_SEARCH_RESULTS = int(os.getenv("TOOL_SEARCH_RESULTS", "8"))
 MAX_PAGE_CHARS = 6000
 
+# What happens to a passage between being found and being cited. Every drop is
+# recorded with a reason, so a regression lands in exactly one place instead of
+# showing up as "the score went down".
+#
+# Today only the first and last are reachable. The middle stages exist because
+# the selector is about to be built, and without them a change that turns
+# "cited the wrong page" into "rejected the right page" would look like an
+# improvement: both leave the page uncited and the score identical.
+STAGES = ("retrieved", "clustered", "verified", "selected", "used", "cited")
+
 
 def _cite_header(file_name: str, page: Any) -> str:
     """The heading above every passage, carrying the citation to copy.
@@ -246,10 +256,48 @@ class DocumentTools:
             }
             self.evidence[key] = item
         item["score"] += 1.0 / (60 + rank)
+        item.setdefault("stage", "retrieved")
+        item.setdefault("rejected_because", None)
         item["hits"] += 1
         if query and query not in item["queries"]:
             item["queries"].append(query)
         return self.rank_of(key)
+
+    def clustered_evidence(self, limit: int = 25) -> List[Dict[str, Any]]:
+        """The evidence set grouped into runs of consecutive pages.
+
+        A question about record retention pulls back IRS 583 pages 11, 12, 13
+        and 14, all from the same section, and the model spends its judgement
+        choosing between four near-identical candidates instead of choosing
+        between three documents. Grouping them turns that into one decision.
+
+        Pages keep their own identity inside the group. They have to: a citation
+        is a page, because a page is what the reader opens, and two benchmark
+        questions legitimately need adjacent pages rather than one of them.
+        Collapsing a run into a single citable unit would trade a selection
+        problem for a granularity problem.
+        """
+        items = self.ranked_evidence(limit)
+        by_file: Dict[str, List[Dict[str, Any]]] = {}
+        for e in items:
+            by_file.setdefault(e["file_name"], []).append(e)
+
+        groups: List[Dict[str, Any]] = []
+        for file_name, pages in by_file.items():
+            pages.sort(key=lambda e: e["page_number"] or 0)
+            run: List[Dict[str, Any]] = []
+            for e in pages:
+                if run and (e["page_number"] or 0) - (run[-1]["page_number"] or 0) > 1:
+                    groups.append({"file_name": file_name, "pages": run})
+                    run = []
+                run.append(e)
+            if run:
+                groups.append({"file_name": file_name, "pages": run})
+
+        # Strongest group first, by its best page, so the global ordering the
+        # answer step depends on survives the grouping.
+        groups.sort(key=lambda g: max(e["score"] for e in g["pages"]), reverse=True)
+        return groups
 
     def render_evidence(self, header: str = "Evidence so far", limit: int = 20) -> str:
         """The evidence set as the model should read it: ranked, once."""
@@ -267,6 +315,39 @@ class DocumentTools:
                 f"{e['content']}"
             )
         return "\n".join(out)
+
+    def advance(self, key: tuple, stage: str) -> None:
+        """Record that a passage got as far as `stage`."""
+        item = self.evidence.get(key)
+        if item is None or stage not in STAGES:
+            return
+        if STAGES.index(stage) > STAGES.index(item.get("stage") or "retrieved"):
+            item["stage"] = stage
+
+    def reject(self, key: tuple, reason: str) -> None:
+        """Record that a passage was dropped, and why.
+
+        The reason is the point. "Rejected" tells you a page did not make it;
+        "rejected: no verifiable quote" and "rejected: duplicate of p12" and
+        "rejected: answers no information need" are three different bugs.
+        """
+        item = self.evidence.get(key)
+        if item is not None:
+            item["rejected_because"] = reason
+
+    def lifecycle(self) -> Dict[str, Any]:
+        """How far each passage got, and why the rest stopped."""
+        reached: Dict[str, int] = {st: 0 for st in STAGES}
+        reasons: Dict[str, int] = {}
+        for e in self.evidence.values():
+            stage = e.get("stage") or "retrieved"
+            # Counted cumulatively: something that was cited was also selected.
+            for st in STAGES[: STAGES.index(stage) + 1]:
+                reached[st] += 1
+            why = e.get("rejected_because")
+            if why:
+                reasons[why] = reasons.get(why, 0) + 1
+        return {"reached": reached, "rejected_because": reasons}
 
     def rank_of(self, key: tuple) -> int:
         ordered = sorted(self.evidence.values(), key=lambda e: e["score"], reverse=True)
