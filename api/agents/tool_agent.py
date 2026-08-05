@@ -65,6 +65,10 @@ EVIDENCE_LIMIT = int(os.getenv("TOOL_EVIDENCE_LIMIT", "25"))
 # Tries to get structured output from the classifier before giving up on it.
 SELECTOR_ATTEMPTS = int(os.getenv("TOOL_SELECTOR_ATTEMPTS", "3"))
 
+# Off in production, on when measuring. See the strict branch below for why a
+# silent fallback and an experiment do not belong in the same run.
+SELECTOR_STRICT = os.getenv("TOOL_SELECTOR_STRICT", "false").lower() == "true"
+
 SYSTEM_PROMPT = """You answer questions about a specific company's own documents.
 
 You cannot see any document until you search for it. Use search_documents.
@@ -331,6 +335,21 @@ class ToolAgent:
                 if tools.evidence:
                     selection = await self._select_evidence(message, tools)
                     if selection and selection.get("status") == "unparsable":
+                        if SELECTOR_STRICT:
+                            # For an experiment, a silent fallback is worse than
+                            # a failure. It made a benchmark run measure
+                            # 0.83 x selector + 0.17 x baseline and report one
+                            # number, and no conclusion about either system
+                            # could survive that. In production the fallback is
+                            # the right behaviour; while measuring, it hides the
+                            # thing being measured.
+                            logger.error({"event": "tool_agent.selector_failed_strict"})
+                            return self._finish(
+                                "__SELECTOR_FAILED__ the evidence classifier "
+                                "produced no usable output.",
+                                tools, searches, reads, outlines, turn + 1,
+                                selection=selection,
+                            )
                         # Fall back to ranked evidence rather than refusing: a
                         # classifier that failed to speak has said nothing about
                         # whether the documents answer the question.
@@ -439,7 +458,9 @@ class ToolAgent:
             + "\n\n".join(blocks)
         )
         parsed = None
+        attempts_used = 0
         for attempt in range(SELECTOR_ATTEMPTS):
+            attempts_used = attempt + 1
             raw = await generate_explanation(prompt, max_context_tokens=MAX_TOKENS_CONTEXT)
             parsed = _json_object(raw)
             if parsed and isinstance(parsed.get("needs"), list):
@@ -466,7 +487,8 @@ class ToolAgent:
             # never ran on looked identical to one where it rejected everything.
             logger.warning({"event": "tool_agent.selector_unparsable"})
             return {"status": "unparsable", "needs": [], "claims": [],
-                    "needs_total": 0, "needs_covered": 0, "sufficient": False}
+                    "needs_total": 0, "needs_covered": 0, "sufficient": False,
+                    "attempts": attempts_used}
 
         needs = [str(n) for n in parsed.get("needs") or []]
         verified: List[Dict[str, Any]] = []
@@ -513,6 +535,11 @@ class ToolAgent:
         covered = {c["need"] for c in verified if c.get("need") is not None}
         return {
             "status": "ok",
+            # How many tries it took to get structured output. If most failures
+            # disappear on the second attempt the retry is enough; if they
+            # persist, the fix is a stronger constraint than asking again, and
+            # this is the number that says which.
+            "attempts": attempts_used,
             "needs": needs,
             "claims": verified,
             "needs_total": len(needs),

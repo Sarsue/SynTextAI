@@ -118,6 +118,9 @@ services:
       # quietly change what every local query does.
       - AGENT_MODE=${AGENT_MODE:-pipeline}
       - TOOL_SEARCH_RESULTS=${TOOL_SEARCH_RESULTS:-8}
+      # On while measuring, so a classifier that fails to answer is a
+      # recorded failure rather than a silent fallback to the baseline.
+      - TOOL_SELECTOR_STRICT=${TOOL_SELECTOR_STRICT:-false}
       - QUERY_CONCURRENCY=4
       - INGEST_CONCURRENCY=2
       - MAX_RUNS_PER_USER=3
