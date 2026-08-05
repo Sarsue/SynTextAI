@@ -141,6 +141,7 @@ class Client:
         self.base = base_url.rstrip("/")
         self.headers = {"Authorization": f"Bearer {token}"}
         self.workspace_id = workspace_id
+        self.last_history_id: Optional[int] = None
 
     def upload(self, path: Path) -> Optional[int]:
         with path.open("rb") as fh:
@@ -216,6 +217,10 @@ class Client:
         between them, which would make results depend on the order they ran in.
         """
         history_id = self.new_history(question)
+        # Remembered so a trace can be tied back to the question that produced
+        # it. Without this the traces exist and there is no way to know which
+        # one belongs to "how long do i keep tax records".
+        self.last_history_id = history_id
         before = len(self.messages(history_id))
 
         r = requests.post(
@@ -387,6 +392,7 @@ def main() -> int:
             except Exception as e:  # a transport failure is a failed question
                 answer = f"__ERROR__ {e}"
             r = score(q, answer)
+            r["history_id"] = getattr(client, "last_history_id", None)
             results.append(r)
             mark = "pass" if r["passed"] else "FAIL"
             print(f"  {r['id']:>3}  {mark:4}  {q['question'][:52]:54}", end="")

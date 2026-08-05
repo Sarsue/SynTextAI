@@ -275,6 +275,30 @@ async def _acquire_slot(run_type: str, payload: Dict[str, Any]):
             yield
 
 
+def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
+    """What is worth keeping about a query run.
+
+    Not the whole result. context_chunks carries the full text of every
+    retrieved page, so storing the result verbatim wrote something like fifty
+    kilobytes of duplicated document text into agent_runs.result for every
+    question asked, none of which anything ever read back.
+
+    What is worth keeping is the trace: which queries the model issued, what
+    came back, and how much of it was new. That is the difference between "the
+    query was bad", "retrieval was fine and the answer ignored it", "it stopped
+    too early" and "it asked the same thing three times", which are four
+    different fixes that look identical from the answer alone.
+    """
+    keep = {
+        k: result.get(k)
+        for k in ("mode", "turns", "searches", "reads", "outlines",
+                  "rewritten_query", "expanded_terms", "trace", "diagnosis", "error")
+        if result.get(k) is not None
+    }
+    keep["context_chunks"] = len(result.get("context_chunks") or [])
+    return keep
+
+
 async def process_agent_run(run_id: uuid.UUID) -> None:
     store = get_repository_manager()
 
@@ -416,7 +440,7 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                 await update_agent_run(
                     run_id,
                     status="succeeded",
-                    result=result,
+                    result=_run_record(result),
                     finished_at=datetime.utcnow(),
                 )
                 return

@@ -1,0 +1,289 @@
+{
+  "label": "trace-check",
+  "when": "20260805-150709",
+  "base_url": "http://127.0.0.1:3000",
+  "workspace": 4219,
+  "repeat": 1,
+  "spread": {
+    "citations_correct": [
+      1
+    ],
+    "passed": [
+      1
+    ]
+  },
+  "totals": {
+    "questions": 4,
+    "passed": 1,
+    "grounded": 4,
+    "citations_correct": 1,
+    "refusals": 0,
+    "refusals_honoured": 0
+  },
+  "results": [
+    {
+      "id": 9,
+      "question": "do i have to make my shop wheelchair accessible",
+      "answer": "Yes.  Because a shop that serves the public is a **public accommodation** under the ADA, you are required to remove \u201cbarriers that are readily achievable.\u201d  The ADA specifically says that private businesses that provide goods or services to the public are covered by its public\u2011accommodation provisions, and that existing facilities must be made accessible when doing so is *readily achievable* (the determination is based on the size and resources of the business).  \n\n- The handbook states that a private business that serves the public is a public accommodation and must remove barriers that are readily achievable:  \n  *[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=6)*\n\n- The same section explains that existing facilities are **not exempt** from these requirements and that barriers such as doors, ramps, and other physical features must be made accessible if it can be done with reasonable effort.  \n  *[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=6)*\n\n- For a shop, this means at least one entrance must be accessible and an accessible route must be provided to the interior.  If a shop has only one public entrance, that entrance must be made accessible; if it has two entrances, at least one must be accessible.  In addition, the shop must provide accessible routes to goods and services.  \n  *[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)*\n\nSo, if making your shop wheelchair\u2011accessible is *readily achievable* for you (e.g., you can install or modify a door, create a ramp, or otherwise remove the barrier without excessive cost or difficulty), you are required to do so to comply with the ADA.\n\n\n\n**Sources:**\n1. [ada_guide_small_business.pdf (Page 6)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=6)\n2. [ada_guide_small_business.pdf (Page 10)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)",
+      "cited": [
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 6
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 10
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 1097
+    },
+    {
+      "id": 17,
+      "question": "what do i need to do to keep employees safe and my premises accessible",
+      "answer": "To keep your workers safe **and** make the premises accessible, the handbook offers two sets of guidance:\n\n**1. Workplace safety (OSHA)**  \n\n| What to do | Where it\u2019s stated | Why it matters |\n|------------|-------------------|----------------|\n| Develop a written safety\u2011and\u2011health program that sets out management leadership, worker participation, hazard identification, hazard control, training, and program evaluation | *Implementing a Safety and Health Program* [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=7) | The program is the foundation for all other safety actions. |\n| Conduct regular self\u2011inspections to spot hazards, verify controls, and keep records | *Workplace Self\u2011Inspection* [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8) | Self\u2011inspections let you keep hazards under control before they cause injury. |\n| Put a written emergency action plan in place that defines roles, communications, and medical\u2011assistance procedures | *Emergency Action Plans* [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=25) | An emergency plan is required when any OSHA standard requires one, and it protects workers when an incident happens. |\n| Follow the \u201cGeneral Duty Clause\u201d that obligates every employer to provide a work environment free from recognized hazards that could cause death or serious harm | *General Duty Clause* [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=91) | This is the core OSHA requirement; any hazard that isn\u2019t covered by a specific OSHA standard must still be eliminated. |\n\n**2. Premises accessibility (ADA)**  \n\n| What to do | Where it\u2019s stated | Key figures or deadlines |\n|------------|-------------------|--------------------------|\n| Install an accessible entrance (e.g., ramp, turnstile replacement, or alternate door) that has a slope no steeper than 1:12, handrails whenever the slope is steeper than 1:20 and the vertical rise is >\u202f6\u202fin. | *Accessible Entrance* [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10) | \u201cThe slope of the ramp should be \u2026 not more than 1:12\u201d and \u201chandrails \u2026 when the slope is more that\u202f1:20 and the vertical rise is greater than 6\u202fin.\u201d |\n| Add a sign that points to the accessible entrance if another entrance is not accessible; the sign must be \u2264\u202f48\u202fin. high to accommodate users. | *Accessible Entrance* [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10) | \u201cThe alternate entrance must be open\u2026 If the alternative accessible entrance is not left unlocked \u2026 you must provide an accessible way for notifying staff to open the door, such as a buzzer or bell.  The buzzer or call bell must be \u2026 at a height generally not more than 48\u202fin above ground.\u201d |\n| Provide accessible parking spaces that are at least 8\u202fft. wide, have an access aisle 5\u202fft. (cars) or 8\u202fft. (vans) wide, and are located on level ground close to the accessible entrance. | *Accessible Parking* [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8) | \u201cAn accessible parking space must have \u2026 an access aisle \u2026 5\u202fft. wide for cars\u2026 8\u202fft. wide for vans.\u201d |\n| Ensure all sales and service counters are no higher than 36\u202fin. and at least 36\u202fin. long, with a clear floor space 30\u202fin. \u00d7\u202f48\u202fin. in front of them. | *Sales and Service Counters* [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=15) | \u201cAccessible counter is at least 36\" long and not more than 36\" above the floor\u2026 Provide a 30\" by 48\" space in front of the sales or service counter.\u201d |\n| Use accessible door hardware (lever handle or thumb\u2011latch disabled) instead of round knobs or tight\u2011grasp knobs. | *Doors at Entrances to Businesses* [[8]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=12) | \u201cA round door knob\u2026 requires the user to tightly grasp\u2026 A lever handle is accessible because it can be operated without tight grasping, pinching or twisting.\u201d |\n| Remove or replace narrow turnstiles or security gates with an accessible passage, gate, or a manually operated door. | *Turning Stiles and Security Gates* [[9]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=13) | \u201cIf an inaccessible turnstile \u2026 no accessible gate\u2026 it must be replaced or removed or an alternative accessible entrance provided, if doing so is readily achievable.\u201d |\n\n**Putting it all together**\n\n1. Write a safety\u2011and\u2011health program (page\u202f7), and perform routine self\u2011inspections (page\u202f8).  \n2. Draft an emergency action plan (page\u202f25) and maintain the General Duty Clause baseline (page\u202f91).  \n3. Make the building physically accessible: install a ramp or alternate door (page\u202f10), post directional signage (page\u202f10), add accessible parking (page\u202f8), set up accessible counters (page\u202f15), and fit usable door hardware (page\u202f12).  \n\nFollow each passage exactly as written, and you\u2019ll satisfy both OSHA safety requirements and ADA accessibility mandates.\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=7)\n2. [osha_small_business_handbook.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n3. [osha_small_business_handbook.pdf (Page 25)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=25)\n4. [osha_small_business_handbook.pdf (Page 91)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=91)\n5. [ada_guide_small_business.pdf (Page 10)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)\n6. [ada_guide_small_business.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8)\n7. [ada_guide_small_business.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=15)\n8. [ada_guide_small_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=12)\n9. [ada_guide_small_business.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=13)",
+      "cited": [
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 7
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 8
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 25
+        },
+        {
+          "file": "osha_small_business_handbook.pdf",
+          "page": 91
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 10
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 8
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 15
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 12
+        },
+        {
+          "file": "ada_guide_small_business.pdf",
+          "page": 13
+        }
+      ],
+      "failures": [
+        "did not cite: ada_guide_small_business.pdf p[6]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 1098
+    },
+    {
+      "id": 19,
+      "question": "what should i track for taxes and for travel expenses",
+      "answer": "**What you should keep in your books for tax\u2011related records**\n\n| What to keep | Why it matters | Document\u00ad\u2011source |\n|--------------|----------------|-----------------|\n| **Receipts, invoices, bills and canceled checks** for every purchase, sale, payroll, rent, loan, insurance, and other deductible expense. These are the primary documents that prove a transaction occurred and how much you paid. | The IRS requires that each deduction on your return be supported by \u201csource documents.\u201d | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13) |\n| **Bank statements and deposit slips** that show the money that entered or left your business account. | They confirm the amounts recorded in your books and help you reconcile monthly cash receipts. | [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12) |\n| **Daily summaries of cash receipts and a monthly cash\u2011receipt book** (if you keep a cash\u2011based system). | They provide a quick audit trail for all cash inflows during the year. | [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14) |\n| **Monthly check\u2011disbursement journals** and a ledger that totals each expense category. | They keep a clean record of each payment and the purpose of every dollar spent. | (irs_publication_583_starting_a_business.pdf, page 15\u201117) |\n| **Depreciation worksheets** (or the equivalent for any fixed assets you own). | Depreciation is a major deductible expense; the worksheet provides the details the IRS wants for the deduction. | [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=17) |\n| **Payroll records** (if you have employees): hours worked, wages, wages withheld, employment\u2011tax payments, and the related W\u20112/W\u20113 or other wage statements. | Employment taxes are separate from income\u2011tax deductions, so you must keep these for at least four years. | (irs_publication_583_starting_a_business.pdf, page 13\u201116) |\n| **A copy of your most recent tax return** (Form\u202f1040, Schedule\u202fC, etc.) and the supporting schedules that contain the amounts you claimed for business expenses. | The IRS can request these when reviewing your return. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13) |\n\nIf you use a cash\u2011based (single\u2011entry) system, a simple journal and ledger with the items above is enough. If you use an accrual\u2011or double\u2011entry system, you would also keep a chart of accounts and the journal/ledger entries that are posted from your journals to the ledger. Either way, the documents above give the IRS the evidence it requests.\n\n**What you should keep for travel (business\u2011trip) expenses**\n\n| Item | Why you need to keep it | Document\u00ad\u2011source |\n|------|------------------------|-------------------|\n| **Mileage log** (date, purpose, destination, business miles, personal miles). | If you claim the **standard mileage rate** for a car or truck, the IRS wants a log to show the miles were truly business miles. | [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=35) |\n| **Receipts for airfare, train, bus, or car rental**. | These are the actual expense amounts you can deduct. | [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40) |\n| **Receipts or invoices for taxis, ridesharing, or a commuter bus** between the airport or station and your hotel, or between the hotel and your work location away from home. | They are taxable expense categories  | [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40) |\n| **Receipts for baggage or freight charges** when you send baggage or display material to a temporary work location. | These are deductible as transportation expenses. | [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40) |\n| **Receipts for lodging and room\u2011service** at your hotel when traveling away from home. | Lodging is a deductible expense on a business trip that is overnight or long enough that you need to sleep or rest. | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **Receipts for meals** (including a note on the type of meal: business discussion, client meeting, etc.). | The IRS usually allows you to deduct **50\u202f%** of the cost of business meals.  | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **Receipts for phone calls (if the expense is listed)** and email or fax charges that are used for business while traveling. | They can be deducted as a travel expense if they are necessary for the trip. | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **Receipts for tips** (e.g., for hotel staff or transportation carriers). | Tips you give for business travel services are deductible. | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **A calendar or itineraries** that show the scheduling of your trip and the business reasons for each location visited. | Helps prove the trip is \u201cordinary and necessary\u201d for your business. | (irs_publication\n\n\n\n**Sources:**\n1. [irs_publication_583_starting_a_business.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13)\n2. [irs_publication_583_starting_a_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)\n3. [irs_publication_583_starting_a_business.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14)\n4. [irs_publication_583_starting_a_business.pdf (Page 17)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=17)\n5. [irs_publication_334_tax_guide_small_business.pdf (Page 35)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=35)\n6. [irs_publication_334_tax_guide_small_business.pdf (Page 40)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40)\n7. [irs_publication_334_tax_guide_small_business.pdf (Page 41)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)",
+      "cited": [
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 13
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 12
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 14
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 17
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 35
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 40
+        },
+        {
+          "file": "irs_publication_334_tax_guide_small_business.pdf",
+          "page": 41
+        }
+      ],
+      "failures": [
+        "did not cite: irs_publication_583_starting_a_business.pdf p[11]; irs_publication_334_tax_guide_small_business.pdf p[34]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 1099
+    },
+    {
+      "id": 24,
+      "question": "how do i register a trademark",
+      "answer": "The documents in this workspace do not contain any information about how to register a trademark.  \n\nThey cover topics such as:\n\n* Small\u2011business planning and operations \u2013 **sba_business_planning_guide.pdf**  \n* Workplace safety and health programs \u2013 **osha_small_business_handbook.pdf**  \n* Tax and record\u2011keeping guidance \u2013 **irs_publication_583_starting_a_business.pdf** and **irs_publication_334_tax_guide_small_business.pdf**  \n* Accessibility and compliance with the Americans with Disabilities Act \u2013 **ada_guide_small_business.pdf**",
+      "cited": [],
+      "failures": [
+        "did not cite: sba_business_planning_guide.pdf p[10]",
+        "missing required text: 'state level'",
+        "missing required text: 'federal level'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 1100
+    }
+  ],
+  "runs": [
+    [
+      {
+        "id": 9,
+        "question": "do i have to make my shop wheelchair accessible",
+        "answer": "Yes.  Because a shop that serves the public is a **public accommodation** under the ADA, you are required to remove \u201cbarriers that are readily achievable.\u201d  The ADA specifically says that private businesses that provide goods or services to the public are covered by its public\u2011accommodation provisions, and that existing facilities must be made accessible when doing so is *readily achievable* (the determination is based on the size and resources of the business).  \n\n- The handbook states that a private business that serves the public is a public accommodation and must remove barriers that are readily achievable:  \n  *[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=6)*\n\n- The same section explains that existing facilities are **not exempt** from these requirements and that barriers such as doors, ramps, and other physical features must be made accessible if it can be done with reasonable effort.  \n  *[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=6)*\n\n- For a shop, this means at least one entrance must be accessible and an accessible route must be provided to the interior.  If a shop has only one public entrance, that entrance must be made accessible; if it has two entrances, at least one must be accessible.  In addition, the shop must provide accessible routes to goods and services.  \n  *[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)*\n\nSo, if making your shop wheelchair\u2011accessible is *readily achievable* for you (e.g., you can install or modify a door, create a ramp, or otherwise remove the barrier without excessive cost or difficulty), you are required to do so to comply with the ADA.\n\n\n\n**Sources:**\n1. [ada_guide_small_business.pdf (Page 6)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=6)\n2. [ada_guide_small_business.pdf (Page 10)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)",
+        "cited": [
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 6
+          },
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 10
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 1097
+      },
+      {
+        "id": 17,
+        "question": "what do i need to do to keep employees safe and my premises accessible",
+        "answer": "To keep your workers safe **and** make the premises accessible, the handbook offers two sets of guidance:\n\n**1. Workplace safety (OSHA)**  \n\n| What to do | Where it\u2019s stated | Why it matters |\n|------------|-------------------|----------------|\n| Develop a written safety\u2011and\u2011health program that sets out management leadership, worker participation, hazard identification, hazard control, training, and program evaluation | *Implementing a Safety and Health Program* [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=7) | The program is the foundation for all other safety actions. |\n| Conduct regular self\u2011inspections to spot hazards, verify controls, and keep records | *Workplace Self\u2011Inspection* [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8) | Self\u2011inspections let you keep hazards under control before they cause injury. |\n| Put a written emergency action plan in place that defines roles, communications, and medical\u2011assistance procedures | *Emergency Action Plans* [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=25) | An emergency plan is required when any OSHA standard requires one, and it protects workers when an incident happens. |\n| Follow the \u201cGeneral Duty Clause\u201d that obligates every employer to provide a work environment free from recognized hazards that could cause death or serious harm | *General Duty Clause* [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=91) | This is the core OSHA requirement; any hazard that isn\u2019t covered by a specific OSHA standard must still be eliminated. |\n\n**2. Premises accessibility (ADA)**  \n\n| What to do | Where it\u2019s stated | Key figures or deadlines |\n|------------|-------------------|--------------------------|\n| Install an accessible entrance (e.g., ramp, turnstile replacement, or alternate door) that has a slope no steeper than 1:12, handrails whenever the slope is steeper than 1:20 and the vertical rise is >\u202f6\u202fin. | *Accessible Entrance* [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10) | \u201cThe slope of the ramp should be \u2026 not more than 1:12\u201d and \u201chandrails \u2026 when the slope is more that\u202f1:20 and the vertical rise is greater than 6\u202fin.\u201d |\n| Add a sign that points to the accessible entrance if another entrance is not accessible; the sign must be \u2264\u202f48\u202fin. high to accommodate users. | *Accessible Entrance* [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10) | \u201cThe alternate entrance must be open\u2026 If the alternative accessible entrance is not left unlocked \u2026 you must provide an accessible way for notifying staff to open the door, such as a buzzer or bell.  The buzzer or call bell must be \u2026 at a height generally not more than 48\u202fin above ground.\u201d |\n| Provide accessible parking spaces that are at least 8\u202fft. wide, have an access aisle 5\u202fft. (cars) or 8\u202fft. (vans) wide, and are located on level ground close to the accessible entrance. | *Accessible Parking* [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8) | \u201cAn accessible parking space must have \u2026 an access aisle \u2026 5\u202fft. wide for cars\u2026 8\u202fft. wide for vans.\u201d |\n| Ensure all sales and service counters are no higher than 36\u202fin. and at least 36\u202fin. long, with a clear floor space 30\u202fin. \u00d7\u202f48\u202fin. in front of them. | *Sales and Service Counters* [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=15) | \u201cAccessible counter is at least 36\" long and not more than 36\" above the floor\u2026 Provide a 30\" by 48\" space in front of the sales or service counter.\u201d |\n| Use accessible door hardware (lever handle or thumb\u2011latch disabled) instead of round knobs or tight\u2011grasp knobs. | *Doors at Entrances to Businesses* [[8]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=12) | \u201cA round door knob\u2026 requires the user to tightly grasp\u2026 A lever handle is accessible because it can be operated without tight grasping, pinching or twisting.\u201d |\n| Remove or replace narrow turnstiles or security gates with an accessible passage, gate, or a manually operated door. | *Turning Stiles and Security Gates* [[9]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=13) | \u201cIf an inaccessible turnstile \u2026 no accessible gate\u2026 it must be replaced or removed or an alternative accessible entrance provided, if doing so is readily achievable.\u201d |\n\n**Putting it all together**\n\n1. Write a safety\u2011and\u2011health program (page\u202f7), and perform routine self\u2011inspections (page\u202f8).  \n2. Draft an emergency action plan (page\u202f25) and maintain the General Duty Clause baseline (page\u202f91).  \n3. Make the building physically accessible: install a ramp or alternate door (page\u202f10), post directional signage (page\u202f10), add accessible parking (page\u202f8), set up accessible counters (page\u202f15), and fit usable door hardware (page\u202f12).  \n\nFollow each passage exactly as written, and you\u2019ll satisfy both OSHA safety requirements and ADA accessibility mandates.\n\n\n\n**Sources:**\n1. [osha_small_business_handbook.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=7)\n2. [osha_small_business_handbook.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=8)\n3. [osha_small_business_handbook.pdf (Page 25)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=25)\n4. [osha_small_business_handbook.pdf (Page 91)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/319-osha_small_business_handbook.pdf#page=91)\n5. [ada_guide_small_business.pdf (Page 10)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=10)\n6. [ada_guide_small_business.pdf (Page 8)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=8)\n7. [ada_guide_small_business.pdf (Page 15)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=15)\n8. [ada_guide_small_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=12)\n9. [ada_guide_small_business.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/316-ada_guide_small_business.pdf#page=13)",
+        "cited": [
+          {
+            "file": "osha_small_business_handbook.pdf",
+            "page": 7
+          },
+          {
+            "file": "osha_small_business_handbook.pdf",
+            "page": 8
+          },
+          {
+            "file": "osha_small_business_handbook.pdf",
+            "page": 25
+          },
+          {
+            "file": "osha_small_business_handbook.pdf",
+            "page": 91
+          },
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 10
+          },
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 8
+          },
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 15
+          },
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 12
+          },
+          {
+            "file": "ada_guide_small_business.pdf",
+            "page": 13
+          }
+        ],
+        "failures": [
+          "did not cite: ada_guide_small_business.pdf p[6]"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 1098
+      },
+      {
+        "id": 19,
+        "question": "what should i track for taxes and for travel expenses",
+        "answer": "**What you should keep in your books for tax\u2011related records**\n\n| What to keep | Why it matters | Document\u00ad\u2011source |\n|--------------|----------------|-----------------|\n| **Receipts, invoices, bills and canceled checks** for every purchase, sale, payroll, rent, loan, insurance, and other deductible expense. These are the primary documents that prove a transaction occurred and how much you paid. | The IRS requires that each deduction on your return be supported by \u201csource documents.\u201d | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13) |\n| **Bank statements and deposit slips** that show the money that entered or left your business account. | They confirm the amounts recorded in your books and help you reconcile monthly cash receipts. | [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12) |\n| **Daily summaries of cash receipts and a monthly cash\u2011receipt book** (if you keep a cash\u2011based system). | They provide a quick audit trail for all cash inflows during the year. | [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14) |\n| **Monthly check\u2011disbursement journals** and a ledger that totals each expense category. | They keep a clean record of each payment and the purpose of every dollar spent. | (irs_publication_583_starting_a_business.pdf, page 15\u201117) |\n| **Depreciation worksheets** (or the equivalent for any fixed assets you own). | Depreciation is a major deductible expense; the worksheet provides the details the IRS wants for the deduction. | [[4]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=17) |\n| **Payroll records** (if you have employees): hours worked, wages, wages withheld, employment\u2011tax payments, and the related W\u20112/W\u20113 or other wage statements. | Employment taxes are separate from income\u2011tax deductions, so you must keep these for at least four years. | (irs_publication_583_starting_a_business.pdf, page 13\u201116) |\n| **A copy of your most recent tax return** (Form\u202f1040, Schedule\u202fC, etc.) and the supporting schedules that contain the amounts you claimed for business expenses. | The IRS can request these when reviewing your return. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13) |\n\nIf you use a cash\u2011based (single\u2011entry) system, a simple journal and ledger with the items above is enough. If you use an accrual\u2011or double\u2011entry system, you would also keep a chart of accounts and the journal/ledger entries that are posted from your journals to the ledger. Either way, the documents above give the IRS the evidence it requests.\n\n**What you should keep for travel (business\u2011trip) expenses**\n\n| Item | Why you need to keep it | Document\u00ad\u2011source |\n|------|------------------------|-------------------|\n| **Mileage log** (date, purpose, destination, business miles, personal miles). | If you claim the **standard mileage rate** for a car or truck, the IRS wants a log to show the miles were truly business miles. | [[5]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=35) |\n| **Receipts for airfare, train, bus, or car rental**. | These are the actual expense amounts you can deduct. | [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40) |\n| **Receipts or invoices for taxis, ridesharing, or a commuter bus** between the airport or station and your hotel, or between the hotel and your work location away from home. | They are taxable expense categories  | [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40) |\n| **Receipts for baggage or freight charges** when you send baggage or display material to a temporary work location. | These are deductible as transportation expenses. | [[6]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40) |\n| **Receipts for lodging and room\u2011service** at your hotel when traveling away from home. | Lodging is a deductible expense on a business trip that is overnight or long enough that you need to sleep or rest. | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **Receipts for meals** (including a note on the type of meal: business discussion, client meeting, etc.). | The IRS usually allows you to deduct **50\u202f%** of the cost of business meals.  | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **Receipts for phone calls (if the expense is listed)** and email or fax charges that are used for business while traveling. | They can be deducted as a travel expense if they are necessary for the trip. | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **Receipts for tips** (e.g., for hotel staff or transportation carriers). | Tips you give for business travel services are deductible. | [[7]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41) |\n| **A calendar or itineraries** that show the scheduling of your trip and the business reasons for each location visited. | Helps prove the trip is \u201cordinary and necessary\u201d for your business. | (irs_publication\n\n\n\n**Sources:**\n1. [irs_publication_583_starting_a_business.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=13)\n2. [irs_publication_583_starting_a_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)\n3. [irs_publication_583_starting_a_business.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=14)\n4. [irs_publication_583_starting_a_business.pdf (Page 17)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=17)\n5. [irs_publication_334_tax_guide_small_business.pdf (Page 35)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=35)\n6. [irs_publication_334_tax_guide_small_business.pdf (Page 40)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=40)\n7. [irs_publication_334_tax_guide_small_business.pdf (Page 41)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/317-irs_publication_334_tax_guide_small_business.pdf#page=41)",
+        "cited": [
+          {
+            "file": "irs_publication_583_starting_a_business.pdf",
+            "page": 13
+          },
+          {
+            "file": "irs_publication_583_starting_a_business.pdf",
+            "page": 12
+          },
+          {
+            "file": "irs_publication_583_starting_a_business.pdf",
+            "page": 14
+          },
+          {
+            "file": "irs_publication_583_starting_a_business.pdf",
+            "page": 17
+          },
+          {
+            "file": "irs_publication_334_tax_guide_small_business.pdf",
+            "page": 35
+          },
+          {
+            "file": "irs_publication_334_tax_guide_small_business.pdf",
+            "page": 40
+          },
+          {
+            "file": "irs_publication_334_tax_guide_small_business.pdf",
+            "page": 41
+          }
+        ],
+        "failures": [
+          "did not cite: irs_publication_583_starting_a_business.pdf p[11]; irs_publication_334_tax_guide_small_business.pdf p[34]"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 1099
+      },
+      {
+        "id": 24,
+        "question": "how do i register a trademark",
+        "answer": "The documents in this workspace do not contain any information about how to register a trademark.  \n\nThey cover topics such as:\n\n* Small\u2011business planning and operations \u2013 **sba_business_planning_guide.pdf**  \n* Workplace safety and health programs \u2013 **osha_small_business_handbook.pdf**  \n* Tax and record\u2011keeping guidance \u2013 **irs_publication_583_starting_a_business.pdf** and **irs_publication_334_tax_guide_small_business.pdf**  \n* Accessibility and compliance with the Americans with Disabilities Act \u2013 **ada_guide_small_business.pdf**",
+        "cited": [],
+        "failures": [
+          "did not cite: sba_business_planning_guide.pdf p[10]",
+          "missing required text: 'state level'",
+          "missing required text: 'federal level'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 1100
+      }
+    ]
+  ],
+  "stability": {
+    "9": 1,
+    "17": 0,
+    "19": 0,
+    "24": 0
+  }
+}

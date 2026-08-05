@@ -215,6 +215,32 @@ class ToolAgent:
             "searches": searches,
             "reads": reads,
             "outlines": outlines,
+            "trace": tools.trace,
+            "diagnosis": {"stopped": "ran out of turns"},
+        }
+
+    @staticmethod
+    def _diagnose(tools: DocumentTools, used: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """The questions a final answer cannot answer on its own.
+
+        Was retrieval good and the reasoning poor, or was retrieval bad? Did it
+        stop too early? Did it ask the same thing twice? Each of these is a
+        different fix, and all four look identical from the outside.
+        """
+        searches = [t for t in tools.trace if t["tool"].startswith("search")]
+        wasted = [t for t in searches if t["returned"] and not t["new_pages"]]
+        cited = {(c["file_name"], c["page_number"]) for c in used}
+        return {
+            # Retrieval showed it these pages and the answer used none of them.
+            # High means retrieval was fine and the answer ignored it.
+            "pages_seen": len(tools.seen),
+            "pages_cited": len(cited),
+            # A search that returned only pages already seen cost a round trip
+            # and taught it nothing.
+            "repeat_searches": len(wasted),
+            "queries": [t["args"].get("query") for t in searches if t["args"].get("query")],
+            "documents_touched": len({f for f, _ in tools.seen}),
+            "documents_cited": len({f for f, _ in cited}),
         }
 
     def _finish(
@@ -234,10 +260,11 @@ class ToolAgent:
         # whether a change to the instructions changed the behaviour. An
         # instruction telling the model to search twice is worth nothing if it
         # still searches once, and the number is the only way to tell.
+        diagnosis = self._diagnose(tools, used)
         logger.info({
             "event": "tool_agent.answered",
             "turns": turns, "searches": searches, "reads": reads,
-            "outlines": outlines, "citations": len(used),
+            "outlines": outlines, "citations": len(used), **diagnosis,
         })
         return {
             "response": answer + ("\n\n" + source_map if used else ""),
@@ -247,6 +274,8 @@ class ToolAgent:
             "searches": searches,
             "reads": reads,
             "outlines": outlines,
+            "trace": tools.trace,
+            "diagnosis": diagnosis,
         }
 
     def _verify_citations(

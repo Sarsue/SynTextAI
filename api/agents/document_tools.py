@@ -200,6 +200,30 @@ class DocumentTools:
         # reporting which page it used is not evidence that it read that page;
         # this is the record of what it was actually given.
         self.seen: Dict[tuple, Dict[str, Any]] = {}
+        # What the model asked for, in order, and what came back. Kept because
+        # a final answer cannot distinguish between the four ways this loop
+        # fails: a bad query, good retrieval the answer then ignored, stopping
+        # too early, or searching the same thing three times. Three separate
+        # wrong conclusions were drawn today from having only the answer to
+        # look at.
+        self.trace: List[Dict[str, Any]] = []
+        self._recorded_pages: set = set()
+
+    def _record(self, tool: str, args: Dict[str, Any], pages: List[tuple], note: str = "") -> None:
+        before = len(self.seen)
+        new = [p for p in pages if p not in self._recorded_pages]
+        self._recorded_pages.update(pages)
+        self.trace.append({
+            "step": len(self.trace) + 1,
+            "tool": tool,
+            "args": {k: (str(v)[:120]) for k, v in (args or {}).items()},
+            "returned": [f"{f} p{pg}" for f, pg in pages],
+            # New pages are the point. A search that returns eight passages the
+            # model has already seen has cost a round trip and taught it
+            # nothing, and that is invisible in a count of searches.
+            "new_pages": [f"{f} p{pg}" for f, pg in new],
+            "note": note,
+        })
 
     async def run(self, name: str, arguments: str | Dict[str, Any]) -> str:
         """Run one tool call and return its result as text for the model.
@@ -255,6 +279,7 @@ class DocumentTools:
             available = ", ".join(sorted({f.get("file_name") or "" for f in await self._files()}))
             return f"There is no document called {file_name}. Available: {available or 'none'}"
         entries = await self._store.file_repo.get_outline(match["id"])
+        self._record("outline", {"file_name": file_name}, [], f"{len(entries)} headings")
         from api.services.outline import render
         return render(entries, match.get("file_name") or file_name)
 
@@ -280,17 +305,22 @@ class DocumentTools:
             top_k=MAX_SEARCH_RESULTS,
             accessible_workspace_ids=self._accessible_workspace_ids,
         )
+        tool_name = "search_within" if only_file else "search_documents"
         if not chunks:
+            self._record(tool_name, {"query": query, "file_name": only_file}, [], "no matches")
             return "No passages matched that query."
 
         lines = []
+        pages: List[tuple] = []
         for c in chunks:
             file_name = c.get("file_name") or "unknown"
             page = c.get("page_number")
             self._remember(file_name, page, c.get("file_url"))
+            pages.append((file_name, page))
             lines.append(
                 f"{_cite_header(file_name, page)}\n{(c.get('content') or '').strip()}"
             )
+        self._record(tool_name, {"query": query, "file_name": only_file}, pages)
         return "\n\n".join(lines)
 
     async def _read_page(self, file_name: str, page: Any) -> str:
@@ -311,6 +341,8 @@ class DocumentTools:
             return f"{file_name} has no page {page_num}."
 
         self._remember(match.get("file_name"), page_num, match.get("file_url"))
+        self._record("read_page", {"file_name": file_name, "page": page_num},
+                     [(match.get("file_name"), page_num)])
         body = "\n".join((s.get("content") or "").strip() for s in segments)
         header = _cite_header(match.get("file_name"), page_num)
         return f"{header}\n{body[:MAX_PAGE_CHARS]}"
@@ -354,6 +386,7 @@ class DocumentTools:
 
     async def _list_documents(self) -> str:
         listing = await self._files()
+        self._record("list_documents", {}, [], f"{len(listing)} documents")
         if not listing:
             return "There are no documents in this workspace."
         return "\n".join(f"- {f.get('file_name')}" for f in listing)
