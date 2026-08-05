@@ -12,13 +12,10 @@ logger = logging.getLogger(__name__)
 from ..services.llm_service import gradient_chat
 
 
-# The configured chat model is a reasoning model: it spends tokens thinking
-# before emitting any content, so a small budget is consumed entirely by
-# reasoning and the response comes back with an empty content field. Measured on
-# 2026-07-30: 120 tokens returned nothing for these prompts regardless of how
-# tersely they were written, while 400 was reliable. Enforce a floor here rather
-# than trusting each caller to pick a survivable number.
-MIN_COMPLETION_TOKENS = 500
+# The floor that keeps a reasoning model from spending its whole budget
+# thinking and returning nothing. Defined in llm_service, which enforces it for
+# every caller; imported here because this module names it in a signature.
+from ..services.llm_service import MIN_COMPLETION_TOKENS
 
 
 async def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:

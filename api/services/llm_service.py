@@ -22,7 +22,7 @@ rather than per call. Close it on shutdown with `aclose_client()`.
 """
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 import httpx
 import os
 from dotenv import load_dotenv
@@ -80,12 +80,23 @@ async def aclose_client() -> None:
 
 
 async def _post_json(
-    url: str, headers: Dict[str, str], payload: Dict[str, Any], attempts: int = 3
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    attempts: int = 3,
+    accept: Optional[Callable[[Dict[str, Any]], bool]] = None,
 ) -> Optional[Dict[str, Any]]:
     """POST with exponential backoff, yielding the loop between attempts.
 
     The backoff used to be time.sleep, which stops every other query on this
     worker as well as the one being retried.
+
+    `accept` decides whether a 200 is actually a useful answer. It exists
+    because this endpoint returns HTTP 200 with an empty content field often
+    enough to matter: the reasoning model sometimes spends its whole budget
+    thinking. Without it, retrying only on transport errors made a flaky call
+    look like a deterministic failure, and the chunk contextualiser lost 46% of
+    its work to responses that a second attempt would have satisfied.
     """
     client = await get_client()
     delay = 1.0
@@ -94,13 +105,28 @@ async def _post_json(
         try:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            return resp.json()
+            body = resp.json()
+            if accept is None or accept(body):
+                return body
+            last_err = ValueError("response rejected by caller's accept()")
         except Exception as e:
             last_err = e
         await asyncio.sleep(delay)
         delay *= 2
     logger.error(f"Inference request to {url} failed after {attempts} attempts: {last_err}")
     return None
+
+
+def _has_content(body: Dict[str, Any]) -> bool:
+    """True when a chat response carries usable text, not just a shell."""
+    choices = body.get("choices") or []
+    if not choices:
+        return False
+    first = choices[0]
+    content = (first.get("message") or {}).get("content") or first.get("text")
+    if isinstance(content, list):
+        content = "".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
+    return bool(content and str(content).strip())
 
 
 async def chat_with_tools(
@@ -149,6 +175,18 @@ async def chat_with_tools(
     return choices[0].get("message") or {}
 
 
+# The configured chat model reasons before it answers, and that reasoning is
+# spent from the same budget as the reply. Ask for too few tokens and the whole
+# allowance goes on thinking, leaving content empty: measured 2026-07-30, 120
+# returned nothing however tersely the prompt was written, 400 was reliable.
+#
+# The floor lives here rather than in each caller because a caller that has not
+# read this comment picks a number that looks generous for one sentence and
+# gets silence. That is exactly what happened to the chunk contextualiser,
+# which asked for 200, and had 308 of 316 chunks come back empty.
+MIN_COMPLETION_TOKENS = 500
+
+
 async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
     """Generate text using OpenAI-compatible chat completions over HTTP."""
     if not MODEL_ACCESS_KEY:
@@ -163,10 +201,10 @@ async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
     data = {
         "model": CHAT_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
+        "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
     }
 
-    body = await _post_json(url, headers, data)
+    body = await _post_json(url, headers, data, accept=_has_content)
     if not body:
         return ""
 

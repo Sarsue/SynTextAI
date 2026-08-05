@@ -152,11 +152,13 @@ class AsyncFileRepository(AsyncBaseRepository):
 
                     meta = {
                         k: v for k, v in unit.items()
-                        if k not in ('text', 'content', 'page_num', 'page_number', 'embedding', 'chunks')
+                        if k not in ('text', 'content', 'page_num', 'page_number',
+                                     'embedding', 'chunks', 'context')
                     }
                     segment = SegmentORM(
                         file_id=file.id,
                         content=content,
+                        context=(unit.get('context') or None),
                         page_number=unit.get('page_num') or unit.get('page_number'),
                     )
                     if meta:
