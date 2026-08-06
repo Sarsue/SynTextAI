@@ -1,10 +1,12 @@
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from api.agents.evidence import EvidenceSet
 from api.rag.chunk_selector import SmartChunkSelector
 from api.rag.query_processor import DefaultQueryProcessor
 from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
@@ -36,6 +38,12 @@ CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
 # the slots, and lost at every top_k, so there is none: room, not rationing.
 RETRIEVAL_TOP_K = 25
 
+# How many times one question may retrieve, in total. Most questions use one
+# and behave exactly as this pipeline did before the loop existed.
+MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "3"))
+# Attempts at a single need before accepting that the documents do not cover it.
+COVERAGE_ATTEMPTS = int(os.getenv("COVERAGE_ATTEMPTS", "2"))
+
 
 class QueryAgentState(TypedDict, total=False):
     user_id: int
@@ -53,6 +61,17 @@ class QueryAgentState(TypedDict, total=False):
     unique_results: List[Dict[str, Any]]
     context_chunks: List[Dict[str, Any]]
 
+    # The evidence set is the state of this graph. Retrieval adds to it, the
+    # coverage check reads it, the answer is written from it.
+    evidence: Any
+    information_needs: List[str]
+    need_attempts: Dict[str, int]
+    covered_needs: List[str]
+    retrievals: int
+    next_query: str
+    last_query: str
+    last_added: int
+
     response: str
     mode: str
 
@@ -69,6 +88,7 @@ class QueryAgent:
         workflow.add_node("process_query", self._process_query)
         workflow.add_node("retrieve", self._retrieve)
         workflow.add_node("dedupe_and_normalize", self._dedupe_and_normalize)
+        workflow.add_node("check_coverage", self._check_coverage)
         workflow.add_node("select_context", self._select_context)
         workflow.add_node("generate", self._generate)
 
@@ -82,7 +102,17 @@ class QueryAgent:
         # character 2460 of the page, and the first 600 characters are a block
         # of phone numbers, so the one page holding the answer was scored on
         # text that does not contain it and pushed out of the context.
-        workflow.add_edge("dedupe_and_normalize", "select_context")
+        workflow.add_edge("dedupe_and_normalize", "check_coverage")
+        # The only loop, and the only thing that distinguishes what used to be
+        # two architectures. A question whose needs are all covered by the first
+        # retrieval goes straight on and behaves exactly as this pipeline did
+        # before, which is most questions. One with a need nothing has answered
+        # yet searches again for that need specifically.
+        workflow.add_conditional_edges(
+            "check_coverage",
+            self._needs_more_evidence,
+            {"retrieve": "retrieve", "answer": "select_context"},
+        )
         workflow.add_edge("select_context", "generate")
         workflow.add_edge("generate", END)
 
@@ -115,7 +145,10 @@ class QueryAgent:
             "context_chunks": final_state.get("context_chunks", []),
             "rewritten_query": final_state.get("rewritten_query", message),
             "expanded_terms": final_state.get("expanded_terms", []),
-            "mode": final_state.get("mode", "enhanced"),
+            "mode": "pipeline",
+            "information_needs": final_state.get("information_needs", []),
+            "covered_needs": final_state.get("covered_needs", []),
+            "retrievals": final_state.get("retrievals", 1),
         }
 
     async def _process_query(self, state: QueryAgentState) -> QueryAgentState:
@@ -131,9 +164,17 @@ class QueryAgent:
                 "expanded_terms_count": len(expanded_terms or []),
             }
         )
+        needs = await query_processor.information_needs(message)
+        logger.info({"event": "query_agent.information_needs", "needs": needs})
         return {
             "rewritten_query": rewritten_query,
             "expanded_terms": expanded_terms or [],
+            "information_needs": needs,
+            "need_attempts": {},
+            "covered_needs": [],
+            "retrievals": 0,
+            "evidence": EvidenceSet(),
+            "next_query": "",
         }
 
     async def _retrieve(self, state: QueryAgentState) -> QueryAgentState:
@@ -141,8 +182,16 @@ class QueryAgent:
         workspace_id = state.get("workspace_id")
         file_id = state.get("file_id")
 
-        rewritten_query = state.get("rewritten_query") or state.get("message") or ""
-        expanded_terms = state.get("expanded_terms") or []
+        # First pass searches the question; later passes search whichever need
+        # nothing has answered yet.
+        rewritten_query = (
+            state.get("next_query")
+            or state.get("rewritten_query")
+            or state.get("message")
+            or ""
+        )
+        # Expansion is worth its round trips once, on the question itself.
+        expanded_terms = state.get("expanded_terms") or [] if not state.get("next_query") else []
 
         query_embedding = await get_text_embedding(rewritten_query)
 
@@ -197,7 +246,11 @@ class QueryAgent:
             }
         )
 
-        return {"retrieved_results": all_results}
+        return {
+            "retrieved_results": all_results,
+            "retrievals": int(state.get("retrievals") or 0) + 1,
+            "last_query": rewritten_query,
+        }
 
     async def _dedupe_and_normalize(self, state: QueryAgentState) -> QueryAgentState:
         all_results = state.get("retrieved_results") or []
@@ -223,19 +276,99 @@ class QueryAgent:
             else:
                 r["similarity_score"] = 0.0
 
+        evidence: EvidenceSet = state.get("evidence") or EvidenceSet()
+        added = evidence.add(unique_results, state.get("last_query") or "")
+
         logger.info(
             {
-                "event": "query_agent.dedupe_and_normalize",
+                "event": "query_agent.accumulate",
                 "input_results": len(all_results),
                 "unique_results": len(unique_results),
+                "new_passages": len(added),
+                "evidence_total": len(evidence),
             }
         )
+        return {
+            "unique_results": unique_results,
+            "evidence": evidence,
+            "last_added": len(added),
+        }
 
-        return {"unique_results": unique_results}
+    async def _check_coverage(self, state: QueryAgentState) -> QueryAgentState:
+        """Which needs have evidence, decided by retrieval rather than judgement.
+
+        A need counts as covered when a search aimed at it contributed passages
+        the set did not already hold. No model decides that. The retriever is
+        the judge, which is the component that has actually been measured to
+        work, and the alternative was a classifier that regressed the agent
+        from 16.2 to 11.2 while looking perfectly reasonable on four questions.
+
+        Two attempts before a need is written off, because one search finding
+        nothing is as often a badly phrased query as an absent answer: asked
+        how to register a trademark, one search found nothing and the SBA guide
+        covers it on page 10.
+        """
+        needs = list(state.get("information_needs") or [])
+        attempts = dict(state.get("need_attempts") or {})
+        covered = set(state.get("covered_needs") or [])
+        added = int(state.get("last_added") or 0)
+        searched = state.get("last_query") or ""
+
+        # Coverage is ensured by construction, not inferred. Crediting the
+        # first broad search with covering every need is what the first version
+        # did, and it meant a two-need question never got its second search:
+        # the loop existed and could not fire.
+        #
+        # So every need gets a search aimed at it. A question with one need is
+        # already served by the first search and never loops, which is most
+        # questions and exactly the pipeline this replaces. A question with two
+        # needs gets a second retrieval, which is the case a single ranked list
+        # cannot serve and the reason any of this exists.
+        if state.get("next_query"):
+            attempts[searched] = attempts.get(searched, 0) + 1
+            if added > 0:
+                covered.add(searched)
+        elif len(needs) <= 1:
+            # The broad search was that need's search.
+            for n in needs:
+                attempts[n] = attempts.get(n, 0) + 1
+                if added > 0:
+                    covered.add(n)
+
+        pending = [
+            n for n in needs
+            if n not in covered and attempts.get(n, 0) < COVERAGE_ATTEMPTS
+        ]
+        logger.info({
+            "event": "query_agent.coverage",
+            "needs": len(needs), "covered": len(covered),
+            "pending": pending[:3], "retrievals": state.get("retrievals"),
+        })
+        return {
+            "need_attempts": attempts,
+            "covered_needs": sorted(covered),
+            "next_query": pending[0] if pending else "",
+        }
+
+    def _needs_more_evidence(self, state: QueryAgentState) -> str:
+        """Search again, or answer. Bounded on total retrievals, not per need.
+
+        Per-need bounding lets four needs times two attempts become eight
+        searches on one question. The ceiling is on the whole question so the
+        worst case stays near the cost of the pipeline this replaces.
+        """
+        if not state.get("next_query"):
+            return "answer"
+        if int(state.get("retrievals") or 0) >= MAX_RETRIEVALS:
+            logger.info({"event": "query_agent.retrieval_cap_reached"})
+            return "answer"
+        return "retrieve"
 
     async def _select_context(self, state: QueryAgentState) -> QueryAgentState:
         rewritten_query = state.get("rewritten_query") or state.get("message") or ""
-        candidates = state.get("unique_results") or []
+        evidence: EvidenceSet = state.get("evidence") or EvidenceSet()
+        # One ranked list, however many retrievals produced it.
+        candidates = evidence.as_chunks() or (state.get("unique_results") or [])
 
         # The budget used to be the selector's 3000-token default while
         # MAX_TOKENS_CONTEXT is 120000, so roughly six of fifteen retrieved
