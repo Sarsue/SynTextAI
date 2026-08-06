@@ -385,7 +385,7 @@ def chunk_text(
     text: str,
     content_type: str = None,
     max_chunks_per_section: int = 5,
-    target_chunk_tokens: int = 200
+    target_chunk_tokens: int = 400
 ) -> List[Dict[str, Any]]:
     """
     Universal text chunker using LlamaIndex RecursiveTextSplitter for semantic splitting.
@@ -406,11 +406,18 @@ def chunk_text(
         def count_tokens(content: str) -> int:
             return len(tiktoken_enc.encode(content))
 
-        # Configure splitter
+        # chunk_size is in tokens. It used to be multiplied by four for PDFs,
+        # so the splitter fired at 800 tokens against pages averaging about 520
+        # and almost never fired: a chunk became a page, which nobody chose and
+        # which every measurement about chunking was then really about.
+        #
+        # 400 with 20% overlap, the same for every format. A page becomes two or
+        # three retrieval units instead of one, and the page is still what gets
+        # cited because that is what a reader opens.
         separators = ["\n\n", "\n", ".", " ", ""]  # Recursive splitting
         splitter = RecursiveTextSplitter(
-            chunk_size=target_chunk_tokens * 4 if content_type == "pdf" else target_chunk_tokens,
-            chunk_overlap=int(target_chunk_tokens * 0.2)
+            chunk_size=target_chunk_tokens,
+            chunk_overlap=int(target_chunk_tokens * 0.2),
         )
 
         split_chunks = splitter.split_text(text)

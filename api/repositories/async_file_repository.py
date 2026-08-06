@@ -138,47 +138,79 @@ class AsyncFileRepository(AsyncBaseRepository):
                 # chunk and the text from the segment, so each unit must produce
                 # exactly one of each.
                 expected = 0
+                # Grouped by page, because the page is the citation unit and
+                # the chunks under it are the retrieval units. These used to be
+                # the same object: one segment and one chunk per unit, so a
+                # page-sized chunk was cited and retrieved as one thing. The
+                # 400-token splitter now produces two or three chunks per page,
+                # and all of them must hang off that page's single segment or a
+                # citation would name a fragment rather than something a reader
+                # can open.
+                by_page: Dict[Any, List[Dict[str, Any]]] = {}
+                order: List[Any] = []
                 for unit in extracted_data:
-                    # Sanitized here as well as at extraction: any processor
-                    # can produce a byte Postgres will not take, and one such
-                    # byte fails the whole transaction and marks a perfectly
-                    # good document as failed.
-                    content = sanitize_extracted_text(
-                        unit.get('text') or unit.get('content') or ''
+                    key = unit.get('page_num') or unit.get('page_number')
+                    if key not in by_page:
+                        by_page[key] = []
+                        order.append(key)
+                    by_page[key].append(unit)
+
+                for page_key in order:
+                    units = by_page[page_key]
+                    # Sanitized here as well as at extraction: any processor can
+                    # produce a byte Postgres will not take, and one such byte
+                    # fails the whole transaction and marks a perfectly good
+                    # document as failed.
+                    #
+                    # The page's own text where the processor supplied it.
+                    # Joining the chunks back together would repeat their
+                    # overlap, so the page would read with duplicated sentences
+                    # everywhere a chunk boundary fell.
+                    page_text = sanitize_extracted_text(
+                        units[0].get('page_text')
+                        or "\n".join(u.get('text') or u.get('content') or '' for u in units)
                     )
-                    if not content.strip():
+                    chunk_units = [
+                        u for u in units
+                        if sanitize_extracted_text(u.get('text') or u.get('content') or '').strip()
+                    ]
+                    if not page_text.strip() or not chunk_units:
                         continue
 
                     meta = {
-                        k: v for k, v in unit.items()
+                        k: v for k, v in units[0].items()
                         if k not in ('text', 'content', 'page_num', 'page_number',
-                                     'embedding', 'chunks', 'context')
+                                     'embedding', 'chunks', 'context', 'page_text')
                     }
                     segment = SegmentORM(
                         file_id=file.id,
-                        content=content,
-                        context=(unit.get('context') or None),
-                        page_number=unit.get('page_num') or unit.get('page_number'),
+                        content=page_text,
+                        context=(units[0].get('context') or None),
+                        page_number=page_key,
                     )
                     if meta:
                         segment.meta_data = meta
                     session.add(segment)
                     await session.flush()
 
-                    embedding = unit.get('embedding')
-                    if embedding is None:
-                        # A segment with no vector can never be retrieved, so it
-                        # is not a silent partial success.
-                        logger.error(f"Chunk for {filename} has no embedding; aborting store")
-                        await session.rollback()
-                        return False
+                    for u in chunk_units:
+                        embedding = u.get('embedding')
+                        if embedding is None:
+                            # A chunk with no vector can never be retrieved, so
+                            # it is not a silent partial success.
+                            logger.error(f"Chunk for {filename} has no embedding; aborting store")
+                            await session.rollback()
+                            return False
 
-                    session.add(ChunkORM(
-                        file_id=file.id,
-                        segment_id=segment.id,
-                        embedding=embedding,
-                    ))
-                    expected += 1
+                        session.add(ChunkORM(
+                            file_id=file.id,
+                            segment_id=segment.id,
+                            content=sanitize_extracted_text(
+                                u.get('text') or u.get('content') or ''
+                            ),
+                            embedding=embedding,
+                        ))
+                        expected += 1
 
                 await session.commit()
 
@@ -505,13 +537,15 @@ class AsyncFileRepository(AsyncBaseRepository):
                     ),
                     txt AS (
                       SELECT c.id AS chunk_id,
-                             ROW_NUMBER() OVER (ORDER BY ts_rank_cd(s.tsv, q.keywords, 32) DESC) AS rank
+                             ROW_NUMBER() OVER (
+                               ORDER BY ts_rank_cd(COALESCE(c.tsv, s.tsv), q.keywords, 32) DESC
+                             ) AS rank
                       FROM segments s
                       JOIN chunks c ON c.segment_id = s.id
                       JOIN files f ON f.id = s.file_id
                       CROSS JOIN query q
-                      WHERE """ + where_sql + """ AND s.tsv @@ q.keywords
-                      ORDER BY ts_rank_cd(s.tsv, q.keywords, 32) DESC
+                      WHERE """ + where_sql + """ AND COALESCE(c.tsv, s.tsv) @@ q.keywords
+                      ORDER BY ts_rank_cd(COALESCE(c.tsv, s.tsv), q.keywords, 32) DESC
                       LIMIT :candidates
                     ),
                     -- Reciprocal rank fusion. Ranks are comparable across the
@@ -540,7 +574,11 @@ class AsyncFileRepository(AsyncBaseRepository):
                       c.id AS id,
                       c.file_id AS file_id,
                       c.segment_id AS segment_id,
-                      COALESCE(s.content, '') AS content,
+                      -- The chunk's own text, falling back to the page for
+                      -- rows written before chunks had any. Without the
+                      -- fallback every document uploaded before chunk-level
+                      -- retrieval would return empty passages.
+                      COALESCE(NULLIF(c.content, ''), s.content, '') AS content,
                       f.file_name AS file_name,
                       f.file_url AS file_url,
                       s.page_number AS page_number,
