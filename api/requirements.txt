@@ -4,6 +4,9 @@ pydantic>=2.6.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.9  # required by FastAPI's UploadFile/File for multipart parsing (no direct import)
 requests>=2.31.0
+# The inference client. Async, because every model call happens on the worker's
+# event loop and a blocking one stops every other query on that worker.
+httpx>=0.27.0
 
 # DB / migrations
 SQLAlchemy>=2.0.0
@@ -22,9 +25,6 @@ posthog>=3.5.0
 
 # RAG / tokenization
 langgraph>=0.2.0
-numpy>=1.24.0
-scipy>=1.10.0
-scikit-learn>=1.4.0  # cosine_similarity in rag/search_engine.py and rag/reranker.py
 tiktoken>=0.6.0
 tenacity>=8.3.0
 

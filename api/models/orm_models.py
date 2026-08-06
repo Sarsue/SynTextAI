@@ -254,6 +254,10 @@ class File(Base):
         index=True
     )
     file_size_bytes = Column(Integer, nullable=True)  # Size of the original source file in bytes
+    # [{level, title, page}] taken from the document at upload: its own table of
+    # contents where it has one, headings inferred from type size where it does
+    # not. What lets a model navigate to a section instead of guessing words.
+    outline = Column(JSON, nullable=True)
     
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
@@ -267,6 +271,10 @@ class Segment(Base):
     id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
     page_number = Column(Integer)  # This represents the page number within the file
     content = Column(String)  # Content of the segment/page (optional, or could be derived from chunks)
+    # A sentence written at ingestion saying what this passage is and where it
+    # sits in its document. Embedded and indexed with the content, never shown
+    # in place of it. See services/contextualizer.py.
+    context = Column(String, nullable=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
     meta_data = Column(JSON, nullable=True) 
     

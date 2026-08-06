@@ -403,6 +403,20 @@ which is where the vertical focus pays: "check this invoice against the contract
 for accounting, "find every clause about termination" for legal. Orchestration is
 the model deciding which to use and in what order, then composing a cited answer.
 
+**Status, measured 2026-08-04: the tool layer is built and it is losing.**
+`AGENT_MODE=tools` exists, works, and scores **13-14/22** on citations against
+the fixed pipeline's **16-18/22**, on the same corpus with two runs each. It
+defaults to off. Two things it does are genuinely better and neither is a
+number the pipeline can reach by tuning: refusals hit 4/4, and a question
+spanning two documents cites both, because the model searched twice.
+
+Read that as a schedule, not a verdict. The pipeline has had a day of defect
+fixes behind it and the tool loop has had one. But the ordering stands: **the
+tool layer only replaces the pipeline when it beats it on citations**, and
+"the architecture is more interesting" is not a reason to ship it. The
+benchmark decides, and it now knows its own noise, so the decision is
+checkable rather than argued.
+
 **The job queue is not part of that, and must not be absorbed into it.** This is
 the one boundary to hold. The worker's tenant scoping, per-user fairness, lease
 reclaim and separated query/ingest budgets exist because a naive loop got all of
@@ -987,6 +1001,184 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-05 (backend modernization: six items, three surprises):** A review
+  of the backend found six things worth changing. Doing them found three
+  things nobody was looking for.
+
+  **The event loop was never concurrent.** `llm_service` used `requests` and
+  `time.sleep` while every caller was an `async def`. The worker declares
+  `asyncio.Semaphore(QUERY_CONCURRENCY=4)` and starts a task per query, so it
+  believed it ran four at a time; a blocking POST with a 120-second timeout
+  stopped the loop, so it ran one, and nothing else on that loop ran either.
+  Now `httpx.AsyncClient` end to end: **2.6x on four concurrent calls**,
+  measured warm so the figure is not just TLS setup.
+
+  **There was no vector index.** None: the only entry on `chunks` was its
+  primary key. Every question scanned every chunk and re-tokenised every
+  segment. Adding an index alone would have done nothing, because
+  `ORDER BY 0.7*vector + 0.3*text` is not a distance and no index describes
+  it. The query was reshaped into two indexed searches fused by reciprocal
+  rank: **140-204ms → 10-20ms, and recall 18/21 → 19/21.**
+
+  **There has never been a temperature.** Every call ran at the endpoint's
+  sampling default. Four runs of identical code scored 12-18 of 22. At 0.1 the
+  spread halves to 13-16 with the mean unchanged, which is the expected shape.
+  A customer asking the same question twice was getting different pages.
+
+  Also: `format_user_chat_history` had raised `NameError` on every call since
+  `fafc428`, swallowed by its own handler, so **conversation history has never
+  reached the model** and every question was answered as if it were the first.
+
+  **What did not work, and is recorded so it is not tried again.**
+  Contextual retrieval, the highest-expected-value item on the list, measured
+  neutral to slightly negative here (@5: 17/21 without, 16/21 with). The
+  reason says when to revisit: the gains come from restoring context that
+  chunking destroyed, and our chunker almost never fires, so a chunk is a
+  whole page already coherent under its own heading. It belongs with small
+  chunks. Kept behind `CONTEXTUALIZE_CHUNKS`, off, with a backfill and a
+  `--strip` that undoes it, because a change to ingestion that cannot be
+  turned off cannot be tested.
+
+  **Deleted:** `rag/` scaffolding (a pipeline holding two classes, a factory
+  building the pipeline, interfaces with one implementation each, a search
+  engine imported by nothing), and `query_chunks_by_embedding`, a
+  pre-pgvector search that pulled every one of a user's embeddings into Python
+  to loop over. Those four lines were the only reason the API depended on
+  numpy, scipy and scikit-learn; all three are gone from requirements.
+
+- **2026-08-05 (the model would not navigate, so it was handed the map):**
+  Extraction opened every PDF with fitz, read its pages, and closed it without
+  asking what it contained. Three of five benchmark documents carry a real
+  embedded table of contents, 118 entries in one. All discarded.
+
+  That absence is why the ADA failure survived three retrieval levers: asked
+  whether a shop must be wheelchair accessible, retrieval returned page 8,
+  which uses "readily achievable" while explaining parking, rather than page
+  6, where the rule is defined. Both contain the phrase and no ranking
+  function can tell which is the section about it.
+
+  Outlines are now extracted at upload, from the document's own contents where
+  it has one and from type size where it does not, with a backfill for
+  documents already uploaded. `outline()` and `search_within()` are tools.
+
+  **The model then ignored them: zero calls, exactly as it ignored
+  `read_page`.** That is three prompt revisions that changed nothing. So the
+  contents pages of every document now go into the system prompt instead. At
+  SMB scale that is affordable and at web scale it is not, which is the point:
+  five documents and 281 headings is about 4k tokens against a 120k window. It
+  matches the finding from the literature that small open models want more
+  structure, not more freedom.
+
+- **2026-08-04 (the pipeline was broken, not badly tuned):** The first
+  benchmark baseline scored 10/25 with 11/21 citations, and three questions
+  answered *"I couldn't find enough evidence in your documents"*. Running
+  `hybrid_search` by hand for those three put the correct page at rank 1,
+  rank 4 and rank 1. Retrieval had found them. Every stage after it threw
+  them away.
+
+  Six defects, none of them a tuning knob:
+
+  | what | effect |
+  |---|---|
+  | `CrossEncoderReRanker` re-embedded `content[:600]` with the same bi-encoder that made the score it claimed to improve | deleted correct pages; the ADA guide states its 15-employee threshold at character 2460, and the first 600 are phone numbers |
+  | `chunk_selector.select()` ran on its 3000-token default | ~6 of 15 chunks reached a 120,000-token window |
+  | `plainto_tsquery('simple', …)` ANDed stopwords | matched **zero rows**; the keyword half of "hybrid search" had never worked |
+  | `1 - (emb <-> emb)` used Euclidean under a cosine formula | negative scores, two halves with no shared scale |
+  | `text_chunk[:max_context_length]` | a token budget slicing characters |
+  | the citation gate | told customers their document was empty when the answer was at rank 1 |
+
+  Result: citations **11/21 → 16-18/22**. The reranker is deleted, not fixed.
+
+  **A per-document cap was built, measured, and thrown away.** A 98-page
+  handbook was taking 14 of 15 slots, so capping its share looked obviously
+  right. Swept at top_k 15/25/40 against caps of off, /3 and /4, uncapped won
+  or tied at every single point. `top_k` went to 25 instead. Room, not
+  rationing. The sweep is in the commit; the cap is not in the code.
+
+- **2026-08-04 (the benchmark had to be made honest before it could be used):**
+  Three things were wrong with the instrument, and each one had already
+  produced a false conclusion.
+
+  **It could not see its own noise.** Two runs of identical code scored 17/25
+  and 16/25, five questions flipping. Three prompt variants had already been
+  compared at one run each and reported as improvements and regressions; none
+  of those comparisons could see what they claimed. `--repeat N` now reports
+  the range and states outright how large a change has to be to count.
+
+  **It was wrong about its own corpus.** Question 24, "how do i register a
+  trademark", was written as a refusal on the note *"plausibly small-business,
+  genuinely absent"*. The SBA guide has a `Trademarks/Service Marks` section on
+  page 10. Nobody checked, which is the exact failure the file's own header
+  warns about. Found by the tool agent, which searched, quoted the passage, and
+  added that the guide gives no step-by-step procedure. Only one of the four
+  refusal questions had ever been verified; all four now are, and the new one
+  was checked against the corpus before being written.
+
+  **It scored typography.** A correct answer failed for writing
+  `self‑inspection` with U+2011, and a citation was read as absent because the
+  marker came back as `[Segment 1]` with U+202F. Rescoring the original
+  baseline answers with the fixed scorer gives 14/25 rather than 10/25 with
+  citations unchanged at 11/21, which is the point: **the scorer fix bought no
+  product improvement and is not counted as one.**
+
+  It also scored an expired Firebase token as a catastrophic regression: a full
+  three-run sweep returned 0/26 because every request was a 401. One cheap
+  authenticated call now runs first.
+
+- **2026-08-04 (tools: built, measured, switched off):** `AGENT_MODE=tools`
+  gives the model `search_documents`, `read_page` and `list_documents` and lets
+  it decide how often to call them. Same benchmark, same corpus, two runs each:
+
+  ```
+                        citations        refusals   overall
+    fixed pipeline      16-18/22 (17.0)   3/4       18-20/26
+    tool agent          13-14/22 (13.5)   3-4/4     13/26
+  ```
+
+  The pipeline wins by more than either side's noise, so the flag defaults to
+  `pipeline` and this ships off. It is kept because two things it does are new:
+  refusals reached **4/4** for the first time, and question 17 cites both OSHA
+  and the ADA guide where the fixed pipeline retrieves fourteen OSHA chunks and
+  one ADA chunk.
+
+  **Citations are verified, not trusted.** The model names a page; the code
+  checks that claim against the passages the tools actually returned and drops
+  any citation to a page it was never shown. The first run scored 8/22 because
+  the model wrote "Publication 583, page 12", which names no file and cannot
+  become a link, so every citation was discarded **in silence**. Each passage
+  now carries the exact string to copy, and drops are counted and logged. That
+  one fix moved citations from 8 to 13-14.
+
+  **The model never names a workspace.** Scope is bound once from the
+  authenticated request and the tool schemas have no field for it, so an
+  instruction hidden inside an uploaded PDF has nothing to address.
+
+  **The obvious explanation was tested and is wrong.** The tool agent sees 8
+  passages per search where the pipeline puts 25 in front of the model at
+  once, so the gap looked like context width rather than architecture. Raising
+  `TOOL_SEARCH_RESULTS` to 20:
+
+  ```
+    per search   citations        refusals
+      8          13-14/22 (13.5)   3-4/4
+     20          12-13/22 (12.5)   2/4
+  ```
+
+  Slightly worse on citations and clearly worse on refusals, which matches
+  what the fixed pipeline showed earlier: more context makes a 20B model more
+  willing to answer from adjacent material. The default stays 8. **The
+  remaining gap is the loop, not the width of what it sees**, so the next
+  attempt has to change how the model decides, not how much it is handed.
+
+  A concrete lead: asked whether a shop must be wheelchair accessible, it
+  cited ADA page 8, accessible parking, rather than page 6, where "readily
+  achievable" is defined. It takes the first passage matching a phrase instead
+  of the page that defines the concept. `read_page` exists to fix exactly that
+  and the model is not reaching for it.
+
+  **Extraction was never the problem.** IRS Table 3 extracts cleanly, header
+  and all. The only unicode fault was in the scorer.
 
 - **2026-08-03, later (an invite says what somebody will be):** Every invite
   produced an organization-wide staff member, because that is what the accept

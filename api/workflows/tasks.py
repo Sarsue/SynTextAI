@@ -18,6 +18,7 @@ from api.models.async_db import get_database_url
 from api.processors.factory import FileProcessingFactory
 from urllib.parse import urlparse
 from api.agents.query_agent import QueryAgent
+from api.agents.tool_agent import ToolAgent
 from api.agents.ingestion_agent import IngestionAgent
 
 # Load environment variables
@@ -49,6 +50,13 @@ DATABASE_URL = get_database_url()
 store = RepositoryManager(database_url=DATABASE_URL)
 syntext = SyntextAgent()
 query_agent = QueryAgent(store=store, syntext=syntext)
+tool_agent = ToolAgent(store=store)
+
+# Which path answers a question. "tools" lets the model run the search itself,
+# as many times as the question needs; anything else keeps the fixed pipeline
+# that retrieves once. Both are measured by the same benchmark, and the flag
+# exists so they can be compared on the same corpus rather than argued about.
+AGENT_MODE = os.getenv("AGENT_MODE", "pipeline").strip().lower()
 
 class FileUtils:
     """Utility class for file-related operations."""
@@ -259,9 +267,14 @@ async def run_query_pipeline(
 ) -> Dict[str, Any]:
     """Run retrieval + generation for a single query without persisting chat messages."""
     try:
-        logger.info({"event": "run_query_pipeline.agent_start", "message": message})
-        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="agent") as ctx:
-            result = await query_agent.run(
+        logger.info({
+            "event": "run_query_pipeline.agent_start",
+            "message": message,
+            "agent_mode": AGENT_MODE,
+        })
+        agent = tool_agent if AGENT_MODE == "tools" else query_agent
+        with stage("query", user_id=user_id, workspace_id=workspace_id, mode=AGENT_MODE) as ctx:
+            result = await agent.run(
                 user_id=user_id,
                 message=message,
                 language=language,
@@ -281,7 +294,7 @@ async def run_query_pipeline(
             }
         )
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="fallback") as ctx:
-            query_embedding = get_text_embedding(message)
+            query_embedding = await get_text_embedding(message)
             # Same workspace-first scoping as the agent path, so the fallback
             # does not silently return nothing for invited staff.
             accessible_ids = None
@@ -297,7 +310,7 @@ async def run_query_pipeline(
                 accessible_workspace_ids=accessible_ids,
             )
             ctx["chunks"] = len(topK_chunks or [])
-            response = syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
+            response = await syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
         return {
             "response": response,
             "context_chunks": topK_chunks,
@@ -321,7 +334,12 @@ async def process_query_data(
         raise HTTPException(status_code=400, detail="Missing user_id or history_id for query processing")
     try:
         # Get conversation history in formatted form
-        formatted_history = await store.chat_repo.format_user_chat_history(history_id, id)
+        accessible_ids = None
+        if workspace_id is None:
+            accessible_ids = await store.workspace_repo.accessible_workspace_ids(id)
+        formatted_history = await store.chat_repo.format_user_chat_history(
+            history_id, id, accessible_workspace_ids=accessible_ids
+        )
 
         result = await run_query_pipeline(
             user_id=id,

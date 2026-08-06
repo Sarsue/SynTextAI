@@ -18,6 +18,8 @@ import fitz  # PyMuPDF
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.services.llm_service import get_text_embeddings_in_batches
+from api.services.contextualizer import add_context, embedding_text
+from api.services.outline import extract_pdf_outline
 from api.core.utils import chunk_text
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,16 @@ class PDFProcessor(FileProcessor):
         # Extract text from PDF with page numbers
         page_data = self.extract_text_with_page_numbers(file_data)
         logger.info(f"PDF extraction complete. Pages: {len(page_data)}")
+
+        # And what the document says it contains. Cheap, one call on a document
+        # already being opened, and the only thing that lets an answer cite the
+        # section that defines a rule rather than a page that mentions it.
+        try:
+            outline = extract_pdf_outline(file_data)
+            if outline:
+                await self.store.file_repo.set_outline(int(file_id), outline)
+        except Exception as outline_error:
+            logger.warning(f"Outline extraction skipped for {filename}: {outline_error}")
         
         if not page_data:
             logger.error(f"Failed to extract content from PDF: {filename}")
@@ -84,7 +96,7 @@ class PDFProcessor(FileProcessor):
             await self.store.file_repo.update_file_status(int(file_id), "embedding")
         except Exception:
             logger.debug("Non-fatal: could not update status to 'embedding'")
-        processed_data = await self.process_pages(page_data)
+        processed_data = await self.process_pages(page_data, file_name=filename)
         logger.info(f"Completed processing pages: generated {len(processed_data.get('chunks', []))} chunks")
         
         # Update the database with chunks and embeddings
@@ -126,7 +138,7 @@ class PDFProcessor(FileProcessor):
             }
         }
     
-    async def process_pages(self, page_data: List[Dict]) -> Dict[str, Any]:
+    async def process_pages(self, page_data: List[Dict], file_name: str = "") -> Dict[str, Any]:
         """
         Process PDF pages: chunk text and generate embeddings incrementally.
         Processes pages in batches to manage memory efficiently.
@@ -170,13 +182,24 @@ class PDFProcessor(FileProcessor):
                 except Exception as e:
                     logger.error(f"Error processing page {page_item.get('page_num', 'unknown')}: {e}")
 
+            # Give each chunk a sentence of context before embedding it, so a
+            # page is searchable by what it is about and not only by the words
+            # that happen to be on it. No-op unless CONTEXTUALIZE_CHUNKS is on,
+            # and never fatal: a document with no context is merely harder to
+            # find, a document that failed to ingest is not there at all.
+            if batch_chunks:
+                try:
+                    await add_context(batch_chunks, file_name)
+                except Exception as ctx_error:
+                    logger.warning(f"Contextualisation skipped: {ctx_error}")
+
             # Generate embeddings for this batch
             if batch_chunks:
-                chunk_texts = [chunk['text'] for chunk in batch_chunks]
+                chunk_texts = [embedding_text(chunk) for chunk in batch_chunks]
                 
                 try:
                     logger.info(f"Generating embeddings for {len(chunk_texts)} chunks...")
-                    chunk_embeddings = get_text_embeddings_in_batches(chunk_texts, batch_size=50)
+                    chunk_embeddings = await get_text_embeddings_in_batches(chunk_texts, batch_size=50)
                 except Exception as e:
                     logger.error(f"Embedding generation failed for batch: {e}")
                     raise ValueError(f"Failed to generate embeddings: {e}")

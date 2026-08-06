@@ -113,6 +113,14 @@ services:
       # and the message appears to vanish. Present in docker-compose.yml,
       # missing here.
       - API_BASE_URL=http://syntextaiapp:3000
+      # Which agent answers. Set to "tools" to let the model run the search
+      # itself. Defaults to the fixed pipeline so a stray shell export cannot
+      # quietly change what every local query does.
+      - AGENT_MODE=${AGENT_MODE:-pipeline}
+      - TOOL_SEARCH_RESULTS=${TOOL_SEARCH_RESULTS:-8}
+      # On while measuring, so a classifier that fails to answer is a
+      # recorded failure rather than a silent fallback to the baseline.
+      - TOOL_SELECTOR_STRICT=${TOOL_SELECTOR_STRICT:-false}
       - QUERY_CONCURRENCY=4
       - INGEST_CONCURRENCY=2
       - MAX_RUNS_PER_USER=3

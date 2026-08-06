@@ -5,8 +5,6 @@ from typing import Optional, List, Dict, Any
 import logging
 from ..core.utils import sanitize_extracted_text
 import asyncio
-import numpy as np
-from scipy.spatial.distance import cosine, euclidean
 
 from .async_base_repository import AsyncBaseRepository
 from ..models import File as FileORM, Chunk as ChunkORM
@@ -17,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, text
 from sqlalchemy.exc import IntegrityError
 
+import json
 import os
 import requests
 
@@ -152,11 +151,13 @@ class AsyncFileRepository(AsyncBaseRepository):
 
                     meta = {
                         k: v for k, v in unit.items()
-                        if k not in ('text', 'content', 'page_num', 'page_number', 'embedding', 'chunks')
+                        if k not in ('text', 'content', 'page_num', 'page_number',
+                                     'embedding', 'chunks', 'context')
                     }
                     segment = SegmentORM(
                         file_id=file.id,
                         content=content,
+                        context=(unit.get('context') or None),
                         page_number=unit.get('page_num') or unit.get('page_number'),
                     )
                     if meta:
@@ -406,83 +407,22 @@ class AsyncFileRepository(AsyncBaseRepository):
                     logger.error(error_msg, exc_info=True)
                     return False
 
-    async def query_chunks_by_embedding(
-        self,
-        user_id: int,
-        query_embedding: List[float],
-        top_k: int = 5,
-        similarity_type: str = 'l2'
-    ) -> List[Dict]:
-        """Retrieves chunks with the highest similarity to the query embedding.
-
-        Args:
-            user_id: ID of the user
-            query_embedding: Embedding of the user's query
-            top_k: Number of top results to return
-            similarity_type: Type of similarity calculation ('l2', 'cosine')
-
-        Returns:
-            List[Dict]: List of chunks with similarity scores
-        """
-        async with self.get_async_session() as session:
-            try:
-                # Get all files for the user
-                stmt = select(FileORM).where(FileORM.user_id == user_id)
-                result = await session.execute(stmt)
-                files = result.scalars().all()
-
-                if not files:
-                    return []
-
-                file_ids = [file.id for file in files]
-
-                # Get chunks with embeddings and their linked segments for text
-                stmt = (
-                    select(ChunkORM, SegmentORM)
-                    .outerjoin(SegmentORM, SegmentORM.id == ChunkORM.segment_id)
-                    .where(and_(ChunkORM.file_id.in_(file_ids), ChunkORM.embedding != None))
-                    .limit(1000)
-                )
-                result = await session.execute(stmt)
-                rows = result.all()
-
-                if not rows:
-                    return []
-
-                # Calculate similarity scores
-                results = []
-                query_embedding_np = np.array(query_embedding)
-
-                for chunk, segment in rows:
-                    chunk_embedding = np.array(chunk.embedding)
-                    if similarity_type.lower() == 'cosine':
-                        similarity = 1 - cosine(query_embedding_np, chunk_embedding)
-                    else:
-                        distance = euclidean(query_embedding_np, chunk_embedding)
-                        similarity = 1 / (1 + distance)
-
-                    results.append({
-                        'chunk_id': chunk.id,
-                        'file_id': chunk.file_id,
-                        'segment_id': chunk.segment_id,
-                        'content': (segment.content if segment is not None else ''),
-                        'page_number': (segment.page_number if segment is not None else None),
-                        'meta_data': (segment.meta_data if (segment is not None and segment.meta_data is not None) else {}),
-                        'similarity': float(similarity)
-                    })
-
-                # Sort by similarity and get top_k results
-                results.sort(key=lambda x: x['similarity'], reverse=True)
-                return results[:top_k]
-
-            except Exception as e:
-                logger.error(f"Error querying chunks by embedding: {e}", exc_info=True)
-                return []
+    # query_chunks_by_embedding used to live here. Nothing called it. It
+    # predated pgvector: it selected every chunk belonging to a user, pulled all
+    # of their embeddings into Python, and computed cosine distance in a loop
+    # with scipy. hybrid_search does the same job in the database, against an
+    # index, scoped by workspace rather than by uploader. Deleting it also took
+    # numpy and scipy out of the API's dependencies, which were carried solely
+    # for those four lines.
 
     # --- Hybrid Search (vector + BM25 via Postgres full text) ---
     DEFAULT_VECTOR_WEIGHT = 0.7
     DEFAULT_BM25_WEIGHT = 0.3
     DEFAULT_TOP_K = 10
+    # How deep each of the two searches goes before the results are fused. Has
+    # to exceed top_k by enough that a chunk ranked well by one search and
+    # poorly by the other still survives to be fused.
+    CANDIDATE_POOL = 100
 
     async def hybrid_search(
         self,
@@ -531,11 +471,72 @@ class AsyncFileRepository(AsyncBaseRepository):
                 sql = text(
                     """
                     WITH query AS (
-                      SELECT 
+                      SELECT
                         CAST(:embedding AS vector) AS embedding,
-                        plainto_tsquery('simple', :keywords) AS keywords
+                        -- 'english' stems and drops stopwords; 'simple' did
+                        -- neither, so "what goes in an executive summary"
+                        -- became 'what'&'goes'&'in'&'an'&'executive'&'summary'
+                        -- and matched zero rows in the whole workspace. The
+                        -- replace turns the AND that plainto_tsquery builds
+                        -- into an OR, so a question ranks by how many of its
+                        -- terms a page contains instead of needing all of them.
+                        REPLACE(
+                          plainto_tsquery('english', :keywords)::text, ' & ', ' | '
+                        )::tsquery AS keywords
+                    ),
+                    -- Two searches, each in the shape its index can answer,
+                    -- rather than one blended expression no index can.
+                    --
+                    -- The previous version ordered by
+                    --   0.7 * (1 - cosine) + 0.3 * ts_rank_cd(...)
+                    -- which is not a distance, so Postgres had no choice but to
+                    -- scan every chunk in the workspace, recompute to_tsvector
+                    -- over text that had not changed since upload, and sort the
+                    -- lot: 171ms for 316 chunks, and linear from there.
+                    vec AS (
+                      SELECT c.id AS chunk_id,
+                             ROW_NUMBER() OVER (ORDER BY c.embedding <=> q.embedding) AS rank
+                      FROM chunks c
+                      JOIN files f ON f.id = c.file_id
+                      CROSS JOIN query q
+                      WHERE """ + where_sql + """
+                      ORDER BY c.embedding <=> q.embedding
+                      LIMIT :candidates
+                    ),
+                    txt AS (
+                      SELECT c.id AS chunk_id,
+                             ROW_NUMBER() OVER (ORDER BY ts_rank_cd(s.tsv, q.keywords, 32) DESC) AS rank
+                      FROM segments s
+                      JOIN chunks c ON c.segment_id = s.id
+                      JOIN files f ON f.id = s.file_id
+                      CROSS JOIN query q
+                      WHERE """ + where_sql + """ AND s.tsv @@ q.keywords
+                      ORDER BY ts_rank_cd(s.tsv, q.keywords, 32) DESC
+                      LIMIT :candidates
+                    ),
+                    -- Reciprocal rank fusion. Ranks are comparable across the
+                    -- two lists in a way the raw scores never were: a cosine
+                    -- similarity and a ts_rank_cd share no scale, and the old
+                    -- 0.7/0.3 blend of them was arithmetic on incomparable
+                    -- units. Position is the only thing both lists agree on.
+                    -- The constant 60 is the usual one; it stops the top result
+                    -- of either list dominating the other outright.
+                    fused AS (
+                      SELECT chunk_id, SUM(weight / (60 + rank)) AS hybrid_score
+                      FROM (
+                        -- Cast explicitly: asyncpg sends a bare parameter as
+                        -- text, and "text / bigint" is not an operator, so the
+                        -- fusion failed at runtime while working fine in psql
+                        -- where the same expression had a literal in it.
+                        SELECT chunk_id, rank,
+                               CAST(:vector_weight AS double precision) AS weight FROM vec
+                        UNION ALL
+                        SELECT chunk_id, rank,
+                               CAST(:bm25_weight AS double precision) AS weight FROM txt
+                      ) ranked
+                      GROUP BY chunk_id
                     )
-                    SELECT 
+                    SELECT
                       c.id AS id,
                       c.file_id AS file_id,
                       c.segment_id AS segment_id,
@@ -544,16 +545,12 @@ class AsyncFileRepository(AsyncBaseRepository):
                       f.file_url AS file_url,
                       s.page_number AS page_number,
                       s.meta_data AS meta_data,
-                      (
-                        :vector_weight * (1 - (c.embedding <-> q.embedding)) +
-                        :bm25_weight * ts_rank_cd(to_tsvector('simple', COALESCE(s.content, '')), q.keywords)
-                      ) AS hybrid_score
-                    FROM chunks c
+                      fused.hybrid_score AS hybrid_score
+                    FROM fused
+                    JOIN chunks c ON c.id = fused.chunk_id
                     JOIN files f ON f.id = c.file_id
                     LEFT JOIN segments s ON s.id = c.segment_id
-                    CROSS JOIN query q
-                    WHERE """ + where_sql + """
-                    ORDER BY hybrid_score DESC
+                    ORDER BY fused.hybrid_score DESC
                     LIMIT :top_k
                     """
                 )
@@ -570,6 +567,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                     "vector_weight": vw,
                     "bm25_weight": bw,
                     "top_k": k,
+                    "candidates": max(self.CANDIDATE_POOL, k * 4),
                     "user_id": user_id,
                     "workspace_id": workspace_id,
                     "file_id": file_id,
@@ -594,6 +592,32 @@ class AsyncFileRepository(AsyncBaseRepository):
                 return out
             except Exception as e:
                 logger.error(f"Error performing hybrid_search: {e}", exc_info=True)
+                return []
+
+    async def set_outline(self, file_id: int, outline: List[Dict[str, Any]]) -> bool:
+        """Store what the document says it contains."""
+        async with self.get_async_session() as session:
+            try:
+                await session.execute(
+                    text("UPDATE files SET outline = CAST(:outline AS jsonb) WHERE id = :fid"),
+                    {"outline": json.dumps(outline), "fid": int(file_id)},
+                )
+                await session.commit()
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Could not store outline for file {file_id}: {e}")
+                return False
+
+    async def get_outline(self, file_id: int) -> List[Dict[str, Any]]:
+        async with self.get_async_session() as session:
+            try:
+                row = (await session.execute(
+                    text("SELECT outline FROM files WHERE id = :fid"), {"fid": int(file_id)}
+                )).first()
+                return list(row[0]) if row and row[0] else []
+            except Exception as e:
+                logger.error(f"Could not read outline for file {file_id}: {e}")
                 return []
 
     async def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:

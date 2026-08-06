@@ -5,13 +5,36 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from api.rag.pipeline import RAGPipeline
-from api.services.llm_service import get_text_embedding
+from api.rag.chunk_selector import SmartChunkSelector
+from api.rag.query_processor import DefaultQueryProcessor
+from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
 
 logger = logging.getLogger(__name__)
 
 
-rag_pipeline = RAGPipeline(config={"search_engine": {"default_alpha": 0.7}})
+# The two pieces this agent actually uses. They used to be reached through
+# a RAGPipeline that existed only to hold them, built by a factory that
+# existed only to build it, behind interfaces with one implementation each.
+query_processor = DefaultQueryProcessor()
+chunk_selector = SmartChunkSelector()
+
+# Room for the retrieved pages, leaving the rest of the window for the
+# instructions, the conversation history and the generated answer. Fifteen
+# pages of a US federal PDF run about 7k tokens, so this holds all of them
+# with room to spare rather than cutting the list at six.
+CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
+
+# Measured against the citation benchmark, counting only whether the page a
+# correct answer needs is present at all:
+#
+#   top_k   all expected pages present
+#      15   18/21
+#      25   18/21
+#      40   20/21
+#
+# A per-document cap was tried here to stop a 98-page handbook taking most of
+# the slots, and lost at every top_k, so there is none: room, not rationing.
+RETRIEVAL_TOP_K = 25
 
 
 class QueryAgentState(TypedDict, total=False):
@@ -28,7 +51,6 @@ class QueryAgentState(TypedDict, total=False):
 
     retrieved_results: List[Dict[str, Any]]
     unique_results: List[Dict[str, Any]]
-    reranked_results: List[Dict[str, Any]]
     context_chunks: List[Dict[str, Any]]
 
     response: str
@@ -47,15 +69,20 @@ class QueryAgent:
         workflow.add_node("process_query", self._process_query)
         workflow.add_node("retrieve", self._retrieve)
         workflow.add_node("dedupe_and_normalize", self._dedupe_and_normalize)
-        workflow.add_node("rerank", self._rerank)
         workflow.add_node("select_context", self._select_context)
         workflow.add_node("generate", self._generate)
 
         workflow.set_entry_point("process_query")
         workflow.add_edge("process_query", "retrieve")
         workflow.add_edge("retrieve", "dedupe_and_normalize")
-        workflow.add_edge("dedupe_and_normalize", "rerank")
-        workflow.add_edge("rerank", "select_context")
+        # No rerank stage. What sat here called itself a cross-encoder but
+        # re-embedded content[:600] with the same bi-encoder that produced the
+        # retrieval score, so it could never beat that score and routinely
+        # destroyed it: the ADA guide states its 15-employee threshold at
+        # character 2460 of the page, and the first 600 characters are a block
+        # of phone numbers, so the one page holding the answer was scored on
+        # text that does not contain it and pushed out of the context.
+        workflow.add_edge("dedupe_and_normalize", "select_context")
         workflow.add_edge("select_context", "generate")
         workflow.add_edge("generate", END)
 
@@ -95,7 +122,7 @@ class QueryAgent:
         message = state.get("message") or ""
         formatted_history = state.get("formatted_history")
 
-        rewritten_query, expanded_terms = rag_pipeline.query_processor.process(message, formatted_history)
+        rewritten_query, expanded_terms = await query_processor.process(message, formatted_history)
         logger.info(
             {
                 "event": "query_agent.process_query",
@@ -117,7 +144,7 @@ class QueryAgent:
         rewritten_query = state.get("rewritten_query") or state.get("message") or ""
         expanded_terms = state.get("expanded_terms") or []
 
-        query_embedding = get_text_embedding(rewritten_query)
+        query_embedding = await get_text_embedding(rewritten_query)
 
         # Retrieval is scoped by workspace, not by uploader. Without this an
         # invited staff member matched zero chunks, because the documents belong
@@ -132,14 +159,14 @@ class QueryAgent:
             query_embedding=query_embedding,
             workspace_id=workspace_id,
             file_id=file_id,
-            top_k=15,
+            top_k=RETRIEVAL_TOP_K,
             accessible_workspace_ids=accessible_ids,
         )
 
         additional_results: List[Dict[str, Any]] = []
         for term in (expanded_terms[:3] if expanded_terms else []):
             try:
-                term_embedding = get_text_embedding(term)
+                term_embedding = await get_text_embedding(term)
                 term_results = await self._store.file_repo.hybrid_search(
                     user_id=user_id,
                     query=term,
@@ -206,44 +233,20 @@ class QueryAgent:
 
         return {"unique_results": unique_results}
 
-    async def _rerank(self, state: QueryAgentState) -> QueryAgentState:
-        rewritten_query = state.get("rewritten_query") or state.get("message") or ""
-        unique_results = state.get("unique_results") or []
-
-        try:
-            reranked_results = rag_pipeline.reranker.rerank(rewritten_query, unique_results, top_k=15)
-        except Exception as rerank_error:
-            logger.warning(
-                {
-                    "event": "query_agent.rerank.error",
-                    "error": str(rerank_error),
-                }
-            )
-            reranked_results = unique_results[:15] if len(unique_results) > 15 else unique_results
-
-        for r in reranked_results:
-            if r.get("rerank_score") is not None:
-                r["similarity_score"] = float(r.get("rerank_score") or 0.0)
-            elif r.get("hybrid_score") is not None:
-                r["similarity_score"] = float(r.get("hybrid_score") or 0.0)
-            else:
-                r["similarity_score"] = 0.0
-
-        logger.info(
-            {
-                "event": "query_agent.rerank",
-                "candidates": len(unique_results),
-                "reranked": len(reranked_results),
-            }
-        )
-
-        return {"reranked_results": reranked_results}
-
     async def _select_context(self, state: QueryAgentState) -> QueryAgentState:
         rewritten_query = state.get("rewritten_query") or state.get("message") or ""
-        reranked_results = state.get("reranked_results") or []
+        candidates = state.get("unique_results") or []
 
-        context_chunks = rag_pipeline.chunk_selector.select(reranked_results, rewritten_query)
+        # The budget used to be the selector's 3000-token default while
+        # MAX_TOKENS_CONTEXT is 120000, so roughly six of fifteen retrieved
+        # chunks reached the model and the rest were discarded for no reason.
+        # Leave headroom for the citation instructions, the history and the
+        # answer itself; query_pipeline reduces again if it still overruns.
+        context_chunks = chunk_selector.select(
+            candidates,
+            rewritten_query,
+            token_budget=CONTEXT_TOKEN_BUDGET,
+        )
 
         logger.info(
             {
@@ -261,7 +264,7 @@ class QueryAgent:
         language = state.get("language") or "English"
         comprehension_level = state.get("comprehension_level") or "beginner"
 
-        response = self._syntext.query_pipeline(
+        response = await self._syntext.query_pipeline(
             message,
             formatted_history,
             context_chunks,

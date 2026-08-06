@@ -1,0 +1,37 @@
+{
+  "label": "smoke",
+  "when": "20260804-154104",
+  "base_url": "http://127.0.0.1:3000",
+  "workspace": 4219,
+  "totals": {
+    "questions": 1,
+    "passed": 0,
+    "grounded": 1,
+    "citations_correct": 0,
+    "refusals": 0,
+    "refusals_honoured": 0
+  },
+  "results": [
+    {
+      "id": 1,
+      "question": "how long do i keep tax records",
+      "answer": "**How long you must keep tax records**\n\n| Type of record | Typical retention period | Why it matters | Segment citation |\n|----------------|------------------------|----------------|------------------|\n| **General income\u2011tax records** (e.g., receipts, invoices, bank statements that support a return) | Keep them as long as the *period of limitations* for that return. If you can still amend the return or the IRS could still assess tax, you need the records. | The IRS may amend your return, claim a credit, or impose additional tax within this period. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| **Employment\u2011tax records** (pay\u2011stubs, payroll statements, employment\u2011tax filings) | *At least 4\u202fyears* after the tax becomes due or is paid, whichever is later. | Needed if the IRS audits your payroll taxes or if you have employees. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| **Asset\u2011related records** (depreciation, cost basis, disposition documents) | Keep until the period of limitations expires for the year you **dispose** of the property (sell, trade, etc.). | These records help you calculate gain or loss and depreciation deductions for that year. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| **Records that are no longer needed for tax purposes** | Don\u2019t discard them until you check if you have to retain them longer for **other reasons** (e.g., insurance, creditors). | Some non\u2011tax entities may require a longer hold\u2011time. | [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16) |\n| **Electronic records** | Same retention length as hard\u2011copy books and records, as long as the electronic system remains *material* to the administration of tax law. | The IRS can test your electronic storage system and it must be able to reproduce the records in legible form. | [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12) |\n\n### How the \u201cperiod of limitations\u201d works\n\n* For most income\u2011tax returns, the period is 3\u202fyears from the filing date, unless you file for an extension.  \n* If you file an amended return that changes the tax you owe, the period may stretch to 6\u202fyears.  \n* Different situations (e.g., fraud, failure to file) can trigger an unlimited period.  \n\n(These details are found in the IRS tables, but the key point is that you must keep records until that period ends.)\n\n### Quick checklist\n\n1. **Keep copies of all filed returns**\u2014they help prepare future returns and amended filings.  \n2. **Keep employment\u2011tax papers** for at least 4\u202fyears.  \n3. **Keep asset\u2011related paperwork** until the disposition year\u2019s limitation period ends.  \n4. **Maintain electronic records** just like paper records; destroy the originals only after the electronic system has been verified.  \n5. **Check for other obligations** (insurance, loan agreements, etc.) before discarding anything that might still be required.  \n\nIf you\u2019re unsure which period applies to your specific situation, look at the IRS tables for the type of return (e.g., 1040, Schedule C, payroll) and the year you filed or plan to file. If that information isn\u2019t in the context, let me know and we can add more detail.\n\n\n\n**Sources:**\n1. [irs_publication_583_starting_a_business.pdf (Page 16)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=16)\n2. [irs_publication_583_starting_a_business.pdf (Page 12)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/4219/318-irs_publication_583_starting_a_business.pdf#page=12)",
+      "cited": [
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 16
+        },
+        {
+          "file": "irs_publication_583_starting_a_business.pdf",
+          "page": 12
+        }
+      ],
+      "failures": [
+        "did not cite: irs_publication_583_starting_a_business.pdf p[15]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false
+    }
+  ]
+}
