@@ -186,9 +186,49 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
         />
     );
 
+    // A conversation with no messages rendered an empty div, and nothing else
+    // in this component fills it: the map produces nothing, and the two
+    // notices below are both false. Starting a new chat therefore dropped the
+    // user onto a blank panel with no indication that anything worked or what
+    // to do next. Say what they can ask about, using the documents they
+    // actually have.
+    const ready = files.filter((f) => String(f.status || '').toLowerCase() === 'processed');
+    const messages = history?.messages ?? [];
+    const isEmpty = messages.length === 0;
+
     return (
         <div className={`conversation-view ${darkMode ? 'dark-mode' : ''}`}>
-            {history?.messages.map((message) => {
+            {isEmpty && !awaitingReply && (
+                <div className="conversation-empty">
+                    <h4>Ask a question about your documents</h4>
+                    {ready.length > 0 ? (
+                        <>
+                            <p>
+                                {ready.length === 1
+                                    ? 'One document is ready to answer from:'
+                                    : `${ready.length} documents are ready to answer from:`}
+                            </p>
+                            <ul className="conversation-empty-files">
+                                {ready.slice(0, 5).map((f) => (
+                                    <li key={f.id}>{f.file_name}</li>
+                                ))}
+                                {ready.length > 5 && <li>and {ready.length - 5} more</li>}
+                            </ul>
+                            <p className="conversation-empty-hint">
+                                Every answer cites the page it came from, so you can check it.
+                            </p>
+                        </>
+                    ) : (
+                        <p>
+                            Upload a PDF, DOCX or TXT using the paperclip below. Processing
+                            happens in the background, and files are ready when marked with a
+                            tick.
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {messages.map((message) => {
                 const isBot = message.sender === 'bot';
                 const { body, sources } = isBot
                     ? splitMessageAndSources(message.content)

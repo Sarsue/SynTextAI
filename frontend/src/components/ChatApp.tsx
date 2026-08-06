@@ -672,7 +672,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     timestamp: new Date().toISOString(),
                 });
                 
-                setHistories(prev => ({ ...prev, [newHistory.id]: newHistory }));
+                // Normalised on arrival rather than trusted. A conversation
+                // without a messages array crashes every component that renders
+                // one, and the server is not the only thing that can produce
+                // this shape.
+                setHistories(prev => ({
+                    ...prev,
+                    [newHistory.id]: { ...newHistory, messages: newHistory.messages ?? [] },
+                }));
                 setCurrentHistory(newHistory.id);
                 
                 addToast('New chat started', 'success');
