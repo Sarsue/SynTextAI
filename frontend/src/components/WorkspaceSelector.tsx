@@ -43,6 +43,8 @@ interface Workspace {
     // asking the first one quietly wrong.
     role: string;
     can_manage: boolean;
+    /** How many documents deleting this workspace would destroy. */
+    document_count?: number;
     created_at: string;
     updated_at: string;
 }
@@ -1146,7 +1148,21 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         <p><strong>Are you sure you want to delete "{workspaceToEdit?.name}"?</strong></p>
                         <p>This will permanently delete:</p>
                         <ul>
-                            <li>All files in this workspace</li>
+                            {/* The count, not "all files". Deleting a workspace
+                                destroys every document in it and the stored
+                                objects behind them, and nothing here said how
+                                many, so the warning read the same whether the
+                                workspace held nothing or held everything the
+                                company had uploaded. */}
+                            <li>
+                                {typeof workspaceToEdit?.document_count === 'number'
+                                    ? workspaceToEdit.document_count === 0
+                                        ? 'No documents (this workspace is empty)'
+                                        : workspaceToEdit.document_count === 1
+                                            ? '1 document'
+                                            : `${workspaceToEdit.document_count} documents`
+                                    : 'All files in this workspace'}
+                            </li>
                             <li>Everything extracted from those files for search</li>
                             <li>All chat history related to these files</li>
                         </ul>

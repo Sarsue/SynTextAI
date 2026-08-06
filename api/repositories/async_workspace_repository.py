@@ -10,7 +10,7 @@ from ..models import Workspace as WorkspaceORM
 from ..models.orm_models import WorkspaceMember, WorkspaceInvite, Organization, User as UserORM
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, text
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,79 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
             except Exception as e:
                 logger.error(f"Error counting workspaces for user {user_id}: {e}", exc_info=True)
                 return 0
+
+    async def members_stranded_by_deleting(self, workspace_id: int) -> List[Dict[str, Any]]:
+        """People whose only access is this workspace, so deleting it leaves
+        them with none.
+
+        Deleting a workspace cascades its workspace_members rows away in
+        silence. For anyone whose reach comes from their organization role,
+        owners, admins and organization-scoped staff, that costs nothing: those
+        rows were never what granted their access. For somebody scoped to
+        workspaces it is everything. Delete the only one they were added to and
+        accessible_workspace_ids returns an empty list, so they sign in to a
+        working account that can see nothing, with no error and no way to fix it
+        themselves. Nobody is told, least of all the person who deleted it.
+
+        Returns the people who would be left in that state, so the caller can
+        name them rather than refusing with a shrug.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = text("""
+                    SELECT u.id, COALESCE(NULLIF(u.username, ''), u.email) AS who
+                    FROM workspace_members wm
+                    JOIN users u ON u.id = wm.user_id
+                    JOIN workspaces w ON w.id = wm.workspace_id
+                    JOIN organization_members om
+                      ON om.user_id = wm.user_id
+                     AND om.organization_id = w.organization_id
+                    WHERE wm.workspace_id = :workspace_id
+                      -- Owners and admins administer the tenant and reach every
+                      -- workspace through their role, so a deleted assignment
+                      -- takes nothing from them.
+                      AND om.role NOT IN ('owner', 'admin')
+                      AND om.scope = 'workspace'
+                      -- and this is the only workspace they can reach.
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workspace_members other
+                          WHERE other.user_id = wm.user_id
+                            AND other.workspace_id <> :workspace_id
+                      )
+                    ORDER BY who
+                """)
+                rows = (await session.execute(stmt, {"workspace_id": workspace_id})).all()
+                return [{"user_id": r[0], "name": r[1]} for r in rows]
+            except Exception as e:
+                logger.error(f"Could not check who a workspace deletion would strand: {e}")
+                # Refuse rather than guess. A failure here must not read as
+                # "nobody would be stranded".
+                raise
+
+    async def document_counts(self, workspace_ids: List[int]) -> Dict[int, int]:
+        """How many documents each workspace holds, in one query.
+
+        Deleting a workspace destroys every document in it and the stored
+        objects behind them, and nothing in the interface said how many. One
+        grouped count rather than one per workspace, because this is on the path
+        that renders the workspace list.
+        """
+        if not workspace_ids:
+            return {}
+        async with self.get_async_session() as session:
+            try:
+                rows = (await session.execute(
+                    text("""SELECT workspace_id, count(*) FROM files
+                            WHERE workspace_id = ANY(:ids) GROUP BY workspace_id"""),
+                    {"ids": list(workspace_ids)},
+                )).all()
+                return {int(r[0]): int(r[1]) for r in rows}
+            except Exception as e:
+                logger.error(f"Could not count documents per workspace: {e}")
+                # Zero is honest here: an unknown count must not become a
+                # confident "0 documents will be removed" in a warning, so the
+                # caller treats a missing key as unknown and says nothing.
+                return {}
 
     async def count_workspaces_in_organization(self, organization_id: int) -> int:
         """Return the number of workspaces belonging to an organization.
