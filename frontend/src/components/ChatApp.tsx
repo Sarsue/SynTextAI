@@ -482,7 +482,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         addToast(fileData.message, 'success'); 
                         
                         // Load files list; status updates will stream via WebSocket
-                        await loadUserFiles(1, filePagination.pageSize);
+                        // Scoped to the workspace the file was uploaded into.
+                        // Reloading without it showed every document in the
+                        // organization, including other workspaces'.
+                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId);
                     } else {
                         // Read the body once. A Response can only be consumed
                         // once, so taking .text() here for analytics and then
@@ -672,7 +675,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     timestamp: new Date().toISOString(),
                 });
                 
-                setHistories(prev => ({ ...prev, [newHistory.id]: newHistory }));
+                // Normalised on arrival rather than trusted. A conversation
+                // without a messages array crashes every component that renders
+                // one, and the server is not the only thing that can produce
+                // this shape.
+                setHistories(prev => ({
+                    ...prev,
+                    [newHistory.id]: { ...newHistory, messages: newHistory.messages ?? [] },
+                }));
                 setCurrentHistory(newHistory.id);
                 
                 addToast('New chat started', 'success');
@@ -947,7 +957,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         onSend={handleSend}
                         isSending={isSending}
                         onContentAdded={async () => {
-                            await loadUserFiles(1, filePagination.pageSize);
+                            // Scoped to the workspace the file was uploaded into.
+                        // Reloading without it showed every document in the
+                        // organization, including other workspaces'.
+                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId);
                         }}
                     />
                 </main>

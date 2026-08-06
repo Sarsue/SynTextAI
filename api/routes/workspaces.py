@@ -77,6 +77,9 @@ class WorkspaceResponse(BaseModel):
     # anything it does not name — the route set this and Pydantic removed it on
     # the way out, so the Team button disappeared for the owner of the company.
     can_manage: bool = False
+    # How many documents deleting this would destroy. Declared here or
+    # response_model drops it, exactly as it dropped can_manage.
+    document_count: int = 0
     created_at: str
     updated_at: str
 
@@ -128,6 +131,10 @@ async def list_workspaces(
             user_id, organization_id=organization_id
         )
 
+        counts = await store.workspace_repo.document_counts(
+            [ws["id"] for ws in workspaces]
+        )
+
         # Convert datetime objects to ISO strings
         items = [
             {
@@ -139,6 +146,7 @@ async def list_workspaces(
                 # regardless, and this only decides what the UI offers.
                 "role": ws.get("role", "staff"),
                 "can_manage": ws.get("can_manage", False),
+                "document_count": counts.get(ws["id"], 0),
                 "created_at": ws["created_at"].isoformat() if ws.get("created_at") else None,
                 "updated_at": ws["updated_at"].isoformat() if ws.get("updated_at") else None,
             }
@@ -347,6 +355,27 @@ async def delete_workspace(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot delete the last workspace. Create another one first."
                 )
+
+        # Nobody may be left with nothing. Deleting a workspace cascades its
+        # workspace_members rows away in silence, and for somebody scoped to
+        # workspaces rather than to the organization those rows are the whole of
+        # their access. They would sign in to a working account that can see no
+        # documents at all, with no error and no way to fix it themselves.
+        #
+        # Named rather than counted, because "this workspace has members" does
+        # not tell the owner the thing they need to act on, and members who keep
+        # access elsewhere are not a reason to refuse anything.
+        stranded = await store.workspace_repo.members_stranded_by_deleting(workspace_id)
+        if stranded:
+            names = ", ".join(m["name"] for m in stranded)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Deleting this workspace would leave {names} with no workspace "
+                    "at all. Give them access to another workspace, or remove them "
+                    "from the company, then delete this one."
+                ),
+            )
 
         # Delete the workspace (files will cascade delete)
         success = await store.workspace_repo.delete_workspace(workspace_id)

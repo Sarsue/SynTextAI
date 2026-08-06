@@ -115,7 +115,14 @@ interface UserContextType {
     setIsLoadingFiles: Dispatch<SetStateAction<boolean>>;
     fileError: string | null;
     setFileError: Dispatch<SetStateAction<string | null>>;
-    loadUserFiles: (page: number, pageSize: number, workspaceId?: number | null) => Promise<void>;
+    /**
+     * workspaceId is required, and null means "the whole organization" as a
+     * deliberate choice rather than an oversight. It was optional, and the two
+     * callers that forgot it reloaded the list unscoped after an upload: the
+     * file went into the right workspace and the panel then showed every
+     * document in the company.
+     */
+    loadUserFiles: (page: number, pageSize: number, workspaceId: number | null) => Promise<void>;
     deleteFileFromContext: (fileId: number) => Promise<void>;
     pollFileStatus: () => Promise<void>; // Trigger immediate status check
     authLoading: boolean;
@@ -224,11 +231,11 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [user]);
 
-    const loadUserFiles = useCallback(async (page: number, pageSize: number, workspaceId?: number | null) => {
+    const loadUserFiles = useCallback(async (page: number, pageSize: number, workspaceId: number | null) => {
         setIsLoadingFiles(true);
         setFileError(null);
         let url = `/api/v1/files?page=${page}&page_size=${pageSize}`;
-        if (workspaceId !== null && workspaceId !== undefined) {
+        if (workspaceId !== null) {
             url += `&workspace_id=${workspaceId}`;
         } else if (activeOrganizationId) {
             // Without a workspace filter, keep results inside the organization
@@ -570,7 +577,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (response?.ok) {
             addToast('File deleted successfully!', 'success');
             // After deletion, reload the files to get an updated list from the server
-            await loadUserFiles(filePagination.page, filePagination.pageSize);
+            // No workspace is selected during a refresh triggered from here, so
+            // the organization filter is the correct scope rather than a fallback.
+            await loadUserFiles(filePagination.page, filePagination.pageSize, null);
         } else {
             addToast('Failed to delete file.', 'error');
         }
@@ -630,7 +639,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 await registerUserInBackend(fbUser, intent);
                 setUser(fbUser);
                 await fetchSubscriptionStatus();
-                await loadUserFiles(1, 10);
+                // Runs before any workspace has been chosen.
+                await loadUserFiles(1, 10, null);
             } else {
                 setUser(null);
                 setFiles([]);

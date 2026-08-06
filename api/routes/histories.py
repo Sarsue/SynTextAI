@@ -60,7 +60,17 @@ async def create_history(
         history_id = await store.chat_repo.add_chat_history(title, user_id, workspace_id)
         if not history_id:
             raise HTTPException(status_code=500, detail="Could not create chat history")
-        return {"id": history_id, "title": title, "workspace_id": workspace_id}
+        # messages must be present and empty, not absent. The client renders a
+        # conversation with history.messages.map(...), so a payload without the
+        # key threw "Cannot read properties of undefined" inside
+        # ConversationView, React unmounted the tree, and clicking "New chat"
+        # left the user on a blank screen with no error shown anywhere.
+        return {
+            "id": history_id,
+            "title": title,
+            "workspace_id": workspace_id,
+            "messages": [],
+        }
     except HTTPException:
         raise
     except Exception as e:

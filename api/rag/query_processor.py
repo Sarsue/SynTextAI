@@ -3,6 +3,7 @@ Query processing module for enhancing RAG queries.
 """
 
 import logging
+import re
 from typing import List, Tuple, Optional
 
 
@@ -72,6 +73,49 @@ class DefaultQueryProcessor:
             logger.error(f"Error in query processing: {e}", exc_info=True)
             return query, []  # Fallback to original query
             
+    async def information_needs(self, query: str) -> List[str]:
+        """The separate things a question asks for.
+
+        "What should I track for taxes and for travel expenses" is two; "how
+        long do I keep tax records" is one. This is what the coverage check
+        counts against, and it is asked here rather than after retrieval
+        because it is a question about the question: short input, no evidence
+        attached, and a much easier judgement than sorting twenty-five passages
+        by which need they answer. That harder version was tried and regressed
+        the agent from 16.2 to 11.2.
+
+        One need on failure, which makes the graph behave exactly as it did
+        before this existed.
+        """
+        # Asked only when the question actually joins two things. Measured on
+        # the citation benchmark: all five multi-document questions contain a
+        # coordinating conjunction, and only three of seventeen single-document
+        # ones do. Without this guard the model split "how long do i keep tax
+        # records" into "how long" and "keep tax records", which is one
+        # question, and turned a single lookup into three retrievals.
+        #
+        # Deterministic, and it skips a model call on most questions rather
+        # than adding one.
+        if not re.search(r"\b(and|or|plus|as well as)\b", query, re.I):
+            return [query]
+
+        prompt = (
+            "Break this question into the separate things it asks for. Most "
+            "questions ask for one thing; some ask for two or three. Reply with "
+            "one short phrase per line, nothing else, no numbering.\n\n"
+            f"Question: {query}"
+        )
+        try:
+            out = await prompt_llm(prompt)
+            needs = [
+                line.strip(" -*\t") for line in (out or "").splitlines() if line.strip()
+            ]
+            needs = [n for n in needs if 2 <= len(n.split()) <= 12][:4]
+            return needs or [query]
+        except Exception as e:
+            logger.warning(f"Could not split the question into needs: {e}")
+            return [query]
+
     async def _expand_query(self, query: str) -> List[str]:
         """Generate expanded search terms for the query."""
         expansion_prompt = f"""

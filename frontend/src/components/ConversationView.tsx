@@ -186,9 +186,16 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
         />
     );
 
+    // A conversation with no messages renders nothing, deliberately. The blank
+    // screen this used to produce was a crash, not an empty state: the API
+    // returned a new conversation without a messages array and
+    // history.messages.map threw, unmounting the tree. That is fixed at the
+    // source and guarded here; the panel staying empty is the intended look.
+    const messages = history?.messages ?? [];
+
     return (
         <div className={`conversation-view ${darkMode ? 'dark-mode' : ''}`}>
-            {history?.messages.map((message) => {
+            {messages.map((message) => {
                 const isBot = message.sender === 'bot';
                 const { body, sources } = isBot
                     ? splitMessageAndSources(message.content)

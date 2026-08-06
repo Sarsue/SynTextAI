@@ -302,6 +302,109 @@ questions:
       wrong twice, once for a form name the source does not use and once for
       writing "five (5) years". Both now accept the document's own wording.
 
+
+  #
+  # ---------- Multi-document synthesis, second set (added 2026-08-06) ----------
+  #
+  # Five was too thin. Two confident conclusions were drawn from that sample
+  # during the agent work and neither survived four runs: a multi-document
+  # advantage that turned out to be a two-run artifact, and a 4/4 refusal score
+  # that was one lucky run. A metric you intend to optimise against needs
+  # enough questions that a single flip cannot move it 20%.
+  #
+  # Each of these was built by reading the documents first and writing the
+  # question after, and every must_include string below was checked against the
+  # page it is claimed on before being written down. Two were caught that way:
+  # "workers' compensation" does not appear on IRS 334 page 37, which writes it
+  # with a typographic apostrophe, while the SBA guide writes "Worker's
+  # Compensation" in the singular; and OSHA page 6 stores "3. 6 million" with a
+  # space after the point. Both would have failed a correct answer.
+
+  - id: 27
+    question: "do i need workers comp insurance and can i deduct it"
+    citations:
+      - file: "sba_business_planning_guide.pdf"
+        pages: [9]
+      - file: "irs_publication_334_tax_guide_small_business.pdf"
+        pages: [37]
+    must_include:
+      - ["workers' compensation", "worker's compensation", "workers compensation",
+         "workers\u2019 compensation"]
+      - "deduct"
+    notes: >
+      The same subject in two documents saying two different things about it:
+      the SBA guide recommends carrying it, IRS 334 lists it among deductible
+      premiums. An answer from either document alone is half an answer, and the
+      half it gives sounds complete, which is what makes this worth testing.
+      The spelling differs between the two documents, so must_include accepts
+      either apostrophe and the plural or singular form. That is not a
+      concession: the fact is the coverage, not the punctuation.
+
+  - id: 28
+    question: "what do i file for my employees and what state taxes do i owe for them"
+    citations:
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [9]
+      - file: "sba_business_planning_guide.pdf"
+        pages: [9]
+    must_include: ["W-2", "unemployment"]
+    notes: >
+      Federal filing and state contribution, one in each document, and neither
+      mentions the other. A single ranked list tends to return one regime and
+      stop, because both halves score well on "employees" and "taxes".
+
+  - id: 29
+    question: "what if a customer cannot get through my front door and what if someone is hurt on site"
+    citations:
+      - file: "ada_guide_small_business.pdf"
+        pages: [11]
+      - file: "osha_small_business_handbook.pdf"
+        pages: [15]
+    must_include: [["curbside", "take-out", "home delivery"], "8 hours"]
+    notes: >
+      Two unrelated obligations a shop owner genuinely holds at once. The ADA
+      page gives the alternative service required when an entrance cannot be
+      made accessible; the OSHA page gives the reporting deadline.
+      UNANSWERABLE IN ONE RETRIEVAL, measured 2026-08-06:
+        whole question             osha p15 not in the top 25
+        second half alone          osha p15 at rank 18
+        second half as a need      osha p15 at rank 2
+      The accessibility half dominates the ranking and buries the other
+      entirely, so the passage never reaches the answer step at all. No amount
+      of fusion, reranking or answer-side work recovers a page that was never
+      returned. This is the one question in the set that a second retrieval is
+      demonstrably required for rather than plausibly helpful, which makes it
+      the test to watch when MAX_RETRIEVALS is raised above one.
+
+  - id: 30
+    question: "how much cash before i have to report it and do i need a licence to serve food"
+    citations:
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [9]
+      - file: "sba_business_planning_guide.pdf"
+        pages: [8]
+    must_include: [["Form 8300", "8300"], ["food license", "Health Department"]]
+    notes: >
+      A caf\u00e9 owner's question, and the two halves live in documents that share
+      almost no vocabulary. The tax half is a federal reporting form; the
+      licence half is a state health inspection. Retrieval that spreads across
+      documents finds both; retrieval that ranks globally on one query finds
+      whichever half the question's wording favours.
+
+  - id: 31
+    question: "why should i bother with a safety program and what records do i need to keep"
+    citations:
+      - file: "osha_small_business_handbook.pdf"
+        pages: [6]
+      - file: "irs_publication_583_starting_a_business.pdf"
+        pages: [11]
+    must_include: [["safety and health program", "safety program"], "records"]
+    notes: >
+      Deliberately vague on the second half. "Records" could mean injury
+      records or tax records, and the honest answer covers what the documents
+      actually say rather than picking one. Guards against an answer that
+      resolves an ambiguous question by silently narrowing it.
+
   #
   # ---------- Refusals ----------
   #

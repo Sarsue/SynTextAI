@@ -43,8 +43,33 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     <AlertDialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
         <AlertDialogContent>
             <AlertDialogHeader>
-                <AlertDialogTitle>{title}</AlertDialogTitle>
-                {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
+                {/* Titles carry file names, and a file name has no spaces to
+                    wrap at: "Delete
+                    irs_publication_334_tax_guide_small_business.pdf?" ran 49px
+                    outside a panel 304px wide.
+
+                    max-w-full is the part that matters, and it is not obvious.
+                    These are grid children, so the box is sized to its content
+                    and never learns the panel's width; overflow-wrap alone
+                    changed nothing because there was no constraint to wrap
+                    against. Measured in the browser at 1280x800, overflow past
+                    the panel edge:
+
+                        as shipped                        +49px
+                        break-words only                  +49px
+                        max-w-full                        -15px
+
+                    overflow-wrap:anywhere stays so the break can happen mid-word
+                    once the width is constrained, since a file name offers
+                    nowhere else to break. */}
+                <AlertDialogTitle className="max-w-full [overflow-wrap:anywhere]">
+                    {title}
+                </AlertDialogTitle>
+                {description && (
+                    <AlertDialogDescription className="max-w-full [overflow-wrap:anywhere]">
+                        {description}
+                    </AlertDialogDescription>
+                )}
             </AlertDialogHeader>
             <AlertDialogFooter>
                 <AlertDialogCancel onClick={onCancel}>{cancelLabel}</AlertDialogCancel>
