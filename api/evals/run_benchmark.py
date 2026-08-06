@@ -381,7 +381,18 @@ def main() -> int:
                     "an expired token are all zero and mean nothing.",
                     file=sys.stderr,
                 )
-                return 2
+                if not passes:
+                    return 2
+                # Runs already finished are still worth having. A --repeat 4
+                # that lost its token on the fourth pass used to throw away
+                # three complete runs, which is an hour of inference, because
+                # the fourth could not start.
+                print(
+                    f"keeping the {len(passes)} run(s) that completed before the "
+                    "token expired.",
+                    file=sys.stderr,
+                )
+                break
             raise
 
         print(f"\nasking {len(questions)} questions\n")

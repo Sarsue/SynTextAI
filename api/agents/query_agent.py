@@ -38,9 +38,26 @@ CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
 # the slots, and lost at every top_k, so there is none: room, not rationing.
 RETRIEVAL_TOP_K = 25
 
-# How many times one question may retrieve, in total. Most questions use one
-# and behave exactly as this pipeline did before the loop existed.
-MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "3"))
+# How many times one question may retrieve, in total.
+#
+# ONE, which makes this exactly the pipeline that scores 17.0, with the loop
+# built and dormant. Measured on the citation benchmark:
+#
+#                       citations /22   single /17   multi /5   refusals /4
+#     one retrieval      17.0 (15-18)  15.2 (13-16)  1.8 (1-2)   3.8 (3-4)
+#     up to three        15.3 (13-18)  14.0 (12-16)  1.3 (1-2)   4.0 (4-4)
+#
+# The spread is wide enough that the difference is not resolvable, but the
+# multi-document column is the one the loop exists for and it went down, not
+# up. A second retrieval aimed at an information need adds passages that
+# compete with the ones already found, and the answer step has to choose among
+# more material rather than better material.
+#
+# Left at one until the benchmark can tell the difference. Five multi-document
+# questions is too thin a target to steer by: two confident claims were drawn
+# from that sample during this work and neither survived four runs. Raise this
+# when there are ten or fifteen of them, written from the documents outward.
+MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "1"))
 # Attempts at a single need before accepting that the documents do not cover it.
 COVERAGE_ATTEMPTS = int(os.getenv("COVERAGE_ATTEMPTS", "2"))
 
@@ -164,8 +181,14 @@ class QueryAgent:
                 "expanded_terms_count": len(expanded_terms or []),
             }
         )
-        needs = await query_processor.information_needs(message)
-        logger.info({"event": "query_agent.information_needs", "needs": needs})
+        # Only worth asking when something can act on the answer. With the
+        # retrieval cap at one, splitting the question costs a model call and
+        # changes nothing, and it switches itself back on the moment the cap is
+        # raised rather than needing to be remembered.
+        needs = [message]
+        if MAX_RETRIEVALS > 1:
+            needs = await query_processor.information_needs(message)
+            logger.info({"event": "query_agent.information_needs", "needs": needs})
         return {
             "rewritten_query": rewritten_query,
             "expanded_terms": expanded_terms or [],
