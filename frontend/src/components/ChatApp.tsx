@@ -482,7 +482,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         addToast(fileData.message, 'success'); 
                         
                         // Load files list; status updates will stream via WebSocket
-                        await loadUserFiles(1, filePagination.pageSize);
+                        // Scoped to the workspace the file was uploaded into.
+                        // Reloading without it showed every document in the
+                        // organization, including other workspaces'.
+                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId);
                     } else {
                         // Read the body once. A Response can only be consumed
                         // once, so taking .text() here for analytics and then
@@ -954,7 +957,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         onSend={handleSend}
                         isSending={isSending}
                         onContentAdded={async () => {
-                            await loadUserFiles(1, filePagination.pageSize);
+                            // Scoped to the workspace the file was uploaded into.
+                        // Reloading without it showed every document in the
+                        // organization, including other workspaces'.
+                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId);
                         }}
                     />
                 </main>
