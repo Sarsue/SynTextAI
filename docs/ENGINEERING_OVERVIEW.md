@@ -1002,6 +1002,64 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-05, later (one pipeline that sometimes loops):** There were two
+  systems calling the same `hybrid_search` and scoring 17.0 and 16.2.
+  Everything separating them was the code around it, and three of the
+  session's regressions came from that code drifting apart:
+
+  | | |
+  |---|---|
+  | citations 8/22 | the agent transcribed `file.pdf, page 15` while the pipeline emits `[Segment N]` and resolves it in code |
+  | ranking lost | the agent accumulated retrieval its own way and discarded the global ordering the pipeline gets for free |
+  | 0.83 / 0.17 | a silent fallback made a benchmark run measure a mixture of two systems and report one number |
+
+  The graph is now one path with an optional loop:
+
+  ```
+  question -> needs? -> retrieve -> accumulate -> coverage -+- gap  -> retrieve
+                                                            +- done -> answer
+  ```
+
+  A single-need question takes exactly the path the shipped pipeline takes.
+  A question joining two things gets a retrieval aimed at each.
+
+  **Coverage is ensured, not inferred.** The first attempt credited the broad
+  opening search with covering every need, so the loop existed and could never
+  fire. No model decides whether a need is satisfied: that judgement was tried
+  as an evidence selector and regressed the agent from 16.2 to 11.2 while
+  looking perfectly reasonable on a four-question spot check.
+
+  **Decomposition is gated by regex before any model is asked.** Without it the
+  model split "how long do i keep tax records" into two needs and turned one
+  lookup into three retrievals. All five multi-document benchmark questions
+  contain a coordinating conjunction; only three of seventeen single-document
+  ones do. The guard removes a model call rather than adding one.
+
+  Deleted: `tool_agent.py`, `document_tools.py`, `AGENT_MODE`, and the
+  duplicate citation and answer paths. Net 804 lines fewer.
+
+- **2026-08-05 (what the measurements were actually worth):** Several
+  conclusions reported during this work were wrong, and the corrections are
+  worth more than the conclusions.
+
+  Three prompt variants were compared at one run each before anyone checked
+  whether the benchmark could see a difference that small. Identical code then
+  scored 17/25 and 16/25 with five questions flipping. `--repeat N` now reports
+  the spread and states how large a change has to be to count.
+
+  A per-document diversity cap looked obviously right and lost at all nine
+  settings it was swept at. Contextual retrieval, the highest-expected-value
+  item from the literature, measured neutral to slightly negative here, because
+  its gains restore context that chunking destroys and our chunker almost never
+  fires: a chunk is a whole page already.
+
+  The agent's multi-document advantage, reported twice as the strongest
+  argument for the direction, was a two-run artifact. At four runs it is 1.8
+  against the pipeline's 1.8.
+
+  **Five multi-document questions is too thin a sample to steer by.** Two
+  confident claims came from it and neither survived four runs.
+
 - **2026-08-05 (backend modernization: six items, three surprises):** A review
   of the backend found six things worth changing. Doing them found three
   things nobody was looking for.
