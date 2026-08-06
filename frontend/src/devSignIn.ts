@@ -31,13 +31,21 @@ declare global {
 /**
  * Nothing is defined anywhere but a developer's own machine.
  *
- * Three guards now stand between this and a real domain, and they fail in
- * different ways on purpose. The file is only on develop, so a release cannot
- * carry it. The import sits behind `import.meta.env.DEV`, so a production build
- * eliminates it. Both of those are guarantees about process and build
- * configuration, and configuration drifts: a `vite build --mode development`, a
- * refactor that lifts the import out of its guard, a CI change made a year from
- * now. Any of those ships it quietly and nothing would say so.
+ * Two guards now stand between this and a real domain, and they fail in
+ * different ways on purpose.
+ *
+ * There were three. The first was that this file lived only on develop, so a
+ * release could not carry it, and that one is gone: develop was merged to
+ * master on 2026-08-06 and the file came with it. Rather than leave a comment
+ * claiming a guarantee that no longer holds, it is written down here.
+ *
+ * What remains. The import sits behind `import.meta.env.DEV`, so a production
+ * build eliminates it: verified on the build shipped that day, where
+ * `grep __syntextDevSignIn frontend/build/assets/*.js` found nothing. That is
+ * a guarantee about build configuration, and configuration drifts: a
+ * `vite build --mode development`, a refactor that lifts the import out of its
+ * guard, a CI change made a year from now. Any of those ships it quietly and
+ * nothing would say so.
  *
  * This last check does not depend on anything staying correct. It is evaluated
  * where the page is actually running.
