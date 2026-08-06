@@ -324,21 +324,43 @@ class DocumentTools:
         groups.sort(key=lambda g: max(e["score"] for e in g["pages"]), reverse=True)
         return groups
 
-    def render_evidence(self, header: str = "Evidence so far", limit: int = 20) -> str:
-        """The evidence set as the model should read it: ranked, once."""
+    def render_evidence(
+        self, header: str = "Evidence so far", limit: int = 20,
+        full_text_for: Optional[set] = None,
+    ) -> str:
+        """The evidence set, ranked, with full text only where it is new.
+
+        This used to return every passage in full on every search. Each search
+        therefore repeated the whole set into the conversation again: twenty
+        passages of about two thousand characters, three searches, and the
+        model was reading the same forty thousand characters three times over.
+        46% of questions then ran out of turns without producing an answer.
+
+        The bug was latent while evidence was keyed on (file, page), because
+        collisions kept the set artificially small. Fixing identity is what
+        made it big enough to matter, which is a useful reminder that a
+        correctness fix can expose a performance bug rather than cause one.
+
+        Ordering is what the model needs from the whole set; the text it only
+        needs once. Passages it has already been shown appear as a ranked index
+        line, so position survives without the bytes.
+        """
         items = self.ranked_evidence(limit)
         if not items:
             return "No passages found yet."
         out = [f"{header}. {len(self.evidence)} passages found, best first."]
         for i, e in enumerate(items, start=1):
-            found_by = (
-                f"  [matched {e['hits']} of your searches]" if e["hits"] > 1 else ""
-            )
-            out.append(
-                f"\n--- {i}. {e['file_name']}, page {e['page_number']}{found_by} ---\n"
-                f"[cite this passage as: ({e['file_name']}, page {e['page_number']})]\n"
-                f"{e['content']}"
-            )
+            key = (e["file_name"], e["page_number"])
+            found_by = f"  [matched {e['hits']} of your searches]" if e["hits"] > 1 else ""
+            head = f"{i}. {e['file_name']}, page {e['page_number']}{found_by}"
+            if full_text_for is None or key in full_text_for:
+                out.append(
+                    f"\n--- {head} ---\n"
+                    f"[cite this passage as: ({e['file_name']}, page {e['page_number']})]\n"
+                    f"{e['content']}"
+                )
+            else:
+                out.append(f"   {head}  (shown earlier)")
         return "\n".join(out)
 
     def advance(self, key: tuple, stage: str) -> None:
@@ -497,6 +519,7 @@ class DocumentTools:
             accessible_workspace_ids=self._accessible_workspace_ids,
         )
         tool_name = "search_within" if only_file else "search_documents"
+        before = {(e["file_name"], e["page_number"]) for e in self.evidence.values()}
         if not chunks:
             self._record(tool_name, {"query": query, "file_name": only_file}, [], "no matches")
             return "No passages matched that query."
@@ -520,9 +543,13 @@ class DocumentTools:
         # eight in theirs. The model asked one more question; what it gets back
         # is everything known so far, best first, so a page found by two
         # searches sits above one found by neither.
+        new_pages = {
+            (e["file_name"], e["page_number"]) for e in self.evidence.values()
+        } - before
         return self.render_evidence(
             header=f"Evidence after searching for \"{query}\""
-                   + (f" in {only_file}" if only_file else "")
+                   + (f" in {only_file}" if only_file else ""),
+            full_text_for=new_pages,
         )
 
     async def _read_page(self, file_name: str, page: Any) -> str:
