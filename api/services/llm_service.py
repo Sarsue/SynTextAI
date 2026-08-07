@@ -129,53 +129,6 @@ def _has_content(body: Dict[str, Any]) -> bool:
     return bool(content and str(content).strip())
 
 
-async def chat_with_tools(
-    messages: List[Dict[str, Any]],
-    tools: List[Dict[str, Any]] | None = None,
-    max_tokens: int = 1500,
-) -> Dict[str, Any]:
-    """One turn of an OpenAI-compatible chat, with tool calling.
-
-    Returns the assistant message as the server sent it, so the caller can see
-    both `content` and `tool_calls` and decide whether the turn was an answer or
-    a request to run something. Returns {} on failure, which the caller must
-    treat as "no turn happened" rather than as an empty answer.
-
-    Separate from gradient_chat because that one takes a single prompt string
-    and returns a single string. A tool loop needs the whole message list, since
-    every tool result has to be appended and sent back for the next turn.
-    """
-    if not MODEL_ACCESS_KEY:
-        logger.error("MODEL_ACCESS_KEY not configured for chat")
-        return {}
-
-    url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
-    }
-    data: Dict[str, Any] = {
-        "model": CHAT_MODEL,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": TEMPERATURE,
-    }
-    if tools:
-        data["tools"] = tools
-        data["tool_choice"] = "auto"
-
-    body = await _post_json(url, headers, data)
-    if not body:
-        return {}
-    choices = body.get("choices") or []
-    if not choices:
-        logger.warning("Tool chat returned no choices")
-        return {}
-    # A turn that only asks for tools has no content, and that is a valid turn.
-    # Emptiness alone is not a failure here.
-    return choices[0].get("message") or {}
-
-
 # Sampling temperature. Never set until 2026-08-05, so every call in the
 # product ran at the endpoint's default, which samples.
 #

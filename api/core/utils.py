@@ -76,18 +76,18 @@ def canonical_gcs_url(object_path: str) -> str:
 def object_path_from_url(file_url: str) -> Optional[str]:
     """Recover the bucket-relative object path from a stored file_url.
 
-    Tolerates the historical shapes: the storage.googleapis.com form written
-    today and the appspot.com virtual-host form some older rows carry.
+    One shape, the one canonical_gcs_url writes. Two older forms were accepted
+    here for rows that might still carry them; no row does, checked before they
+    were removed, so they were dead branches rather than live compatibility.
+
+    Unquoted on the way back because the path is percent-encoded going out, and
+    the object's real name in storage is the decoded one.
     """
     if not file_url:
         return None
-    for prefix in (
-        f"{GCS_PUBLIC_HOST}/{bucket_name}/",
-        f"https://{bucket_name}.storage.googleapis.com/",
-        f"https://storage.cloud.google.com/{bucket_name}/",
-    ):
-        if file_url.startswith(prefix):
-            return unquote(urlparse(file_url[len(prefix):]).path)
+    prefix = f"{GCS_PUBLIC_HOST}/{bucket_name}/"
+    if file_url.startswith(prefix):
+        return unquote(urlparse(file_url[len(prefix):]).path)
     return None
 
 
@@ -149,21 +149,6 @@ def get_user_id(token):
     except Exception as e:
         logger.error(f"Error extracting user ID: {e}")
         return False, {'error': str(e)}
-
-def format_timestamp(seconds: float) -> str:
-    """Converts seconds to SRT timestamp format (hh:mm:ss, SSS)."""
-    try:
-        logger.debug(f"Formatting timestamp for {seconds} seconds...")
-        mins, secs = divmod(seconds, 60)
-        hrs, mins = divmod(mins, 60)
-        ms = int((secs - int(secs)) * 1000)
-        formatted_time = f"{int(hrs):02}:{int(mins):02}:{int(secs):02}:{int(ms):03}"
-        logger.info(f"Formatted timestamp: {formatted_time}")
-        return formatted_time
-    except Exception as e:
-        logger.error(f"Error formatting timestamp: {e}")
-        raise
-
 
 def workspace_object_path(workspace_id: int, file_id: int, filename: str) -> str:
     """Where a document lives: under its workspace, keyed by its row.
@@ -426,7 +411,6 @@ def chunk_text(
         # 400 with 20% overlap, the same for every format. A page becomes two or
         # three retrieval units instead of one, and the page is still what gets
         # cited because that is what a reader opens.
-        separators = ["\n\n", "\n", ".", " ", ""]  # Recursive splitting
         splitter = RecursiveTextSplitter(
             chunk_size=target_chunk_tokens,
             chunk_overlap=int(target_chunk_tokens * 0.2),

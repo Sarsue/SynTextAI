@@ -59,27 +59,6 @@ class AsyncChatRepository(AsyncBaseRepository):
                 logger.error(f"Error creating chat history: {e}", exc_info=True)
                 return None
 
-    async def get_latest_chat_history_id(self, user_id: int) -> Optional[int]:
-        """Get the ID of the most recent chat history for a user.
-
-        Args:
-            user_id: ID of the user
-
-        Returns:
-            int: The ID of the most recent chat history, or None if not found
-        """
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(ChatHistoryORM).where(
-                    ChatHistoryORM.user_id == user_id
-                ).order_by(desc(ChatHistoryORM.id)).limit(1)
-                result = await session.execute(stmt)
-                chat_history = result.scalar_one_or_none()
-                return chat_history.id if chat_history else None
-            except Exception as e:
-                logger.error(f"Error getting latest chat history for user {user_id}: {e}", exc_info=True)
-                return None
-
     async def add_message(self, content: str, sender: str, user_id: int, chat_history_id: Optional[int] = None) -> Optional[int]:
         """Add a new message to a chat history.
 

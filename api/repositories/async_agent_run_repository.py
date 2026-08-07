@@ -63,14 +63,3 @@ class AsyncAgentRunRepository(AsyncBaseRepository):
                 logger.error(f"Error enqueuing agent run: {e}", exc_info=True)
                 return None
 
-    async def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
-        async with self.get_async_session() as session:
-            try:
-                run_uuid = uuid.UUID(str(run_id))
-                stmt = select(AgentRunORM).where(AgentRunORM.id == run_uuid)
-                res = await session.execute(stmt)
-                run = res.scalars().first()
-                return run.to_dict() if run else None
-            except Exception as e:
-                logger.error(f"Error fetching agent run {run_id}: {e}", exc_info=True)
-                return None

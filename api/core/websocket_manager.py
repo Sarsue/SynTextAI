@@ -45,14 +45,4 @@ class WebSocketManager:
         else:
             logger.debug(f"No active WebSocket connection for user {user_id}")
 
-    def is_connected(self, user_id: str) -> bool:
-        """Check if user has an active WebSocket connection"""
-        if user_id in self.active_connections:
-            websocket = self.active_connections[user_id]
-            try:
-                return websocket.client_state and websocket.client_state.name == 'CONNECTED'
-            except:
-                return False
-        return False
-
 websocket_manager = WebSocketManager()
