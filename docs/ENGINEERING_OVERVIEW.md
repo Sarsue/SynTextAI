@@ -1002,6 +1002,83 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-07 (guardrails: what an uploaded document can reach):** A customer's
+  document is untrusted input. Tested rather than assumed, by uploading one.
+
+  **Structurally safe already.** Retrieval is scoped by `workspace_id` in SQL and
+  the answer path has no tools, so injected text cannot widen a WHERE clause or
+  call anything. Cross-tenant leakage by injection is not possible.
+
+  **Not safe.** A document written to read like a legitimate 2026 policy revision
+  made the pipeline answer 90 days where the real document says 30, enumerate the
+  workspace's document names unprompted, and reproduce an attacker URL. A crude
+  `SYSTEM: ignore all previous instructions` injection failed; the one that looked
+  like a document succeeded. That is the realistic threat: a vendor PDF, a
+  contract, something forwarded by someone who did not write it.
+
+  Answers may now only link to hosts we serve documents from. Everything else
+  becomes `[link removed]`, counted and logged, because a rise in that count means
+  something in a customer's documents is trying to put links in front of people.
+  Bare URLs too, since `remark-gfm` autolinks them. Hostname-parsed, so
+  `storage.googleapis.com.evil.example` is rejected rather than passing a
+  substring test.
+
+  **Deliberately still open: content poisoning.** A document asserting a false
+  refund window is still quoted as a source, and no code can decide which of two
+  customer documents is honest. The defence is provenance, which already works,
+  since the answer cites the document that said it.
+
+- **2026-08-07 (customer questions were leaking):** For a dental or legal
+  practice the question is the most sensitive string in the request. Seven log
+  sites carried it, five at INFO, and they now carry a fingerprint and a length,
+  `q8920cefa len=63`, stable enough to correlate two lines and one-way so a log
+  archive is not a transcript.
+
+  The larger one was not a log line. The question travelled as a query parameter,
+  so it reached the access log and would reach any proxy log, CDN log, browser
+  history, and `Referer` header sent onward. It now goes in the request body. The
+  route still accepts the query parameter so a tab open on the old bundle survives
+  a deploy; **that fallback is what makes the deploy safe and what keeps the leak
+  reachable, and should be removed once the access log shows nothing using it.**
+
+  A grep audit found three of the seven sites and missed the URL entirely. Asking
+  a question with a name in it and searching the container's log stream found all
+  of them.
+
+- **2026-08-07 (extraction was never chunking):** `chunk_text` targets tokens and
+  multiplied by four for PDFs, so the splitter fired at 800 against pages
+  averaging about 520 and almost never fired.
+
+  ```
+    before   316 segments, 316 chunks, 1.00 per page
+    after    227 segments, 540 chunks, 2.38 per page, mean 310 tokens
+  ```
+
+  A chunk was a page by arithmetic rather than by anyone's decision, so **every
+  measurement this codebase had made about chunking was really about page-sized
+  chunks**. Segments falling to 227 is the other half: that is the true page
+  count, and the surplus was pages torn up by a splitter firing inconsistently,
+  which is also why `(file, page)` was not a unique key.
+
+  Retrieval units and citation units are now separate. A chunk is retrieved; a
+  page is cited, because a page is what a reader opens. Old rows keep a null chunk
+  content and fall back to the segment, so they keep working until re-ingested.
+
+  Measured, three runs each: **18.0 → 19.0 of 27**, and with retrieval per
+  information need on re-chunked documents, **21.0**. That last setting stays off
+  by default: the same loop measured 15.3 against 17.0 on page-sized units, and
+  every document uploaded before this is still page-sized. Raise `MAX_RETRIEVALS`
+  to 3 per deployment once its documents have been re-ingested.
+
+  **A regression shipped in the middle of this.** Adding `page_text` to the three
+  processors used the PDF processor's variable name in all three; the other two
+  call it `section_content`. Every section of every `.docx` and `.txt` raised
+  `NameError`, was caught per section as designed, and the file was marked
+  processed with zero chunks. It looked ready in the list and answered nothing.
+  The verification that missed it used PDFs only. A processor that extracts
+  nothing now fails the file, because this shape had shipped twice and both times
+  the only trace was a log line nobody reads.
+
 - **2026-08-05, later (one pipeline that sometimes loops):** There were two
   systems calling the same `hybrid_search` and scoring 17.0 and 16.2.
   Everything separating them was the code around it, and three of the
