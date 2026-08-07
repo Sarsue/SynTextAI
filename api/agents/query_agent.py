@@ -1,4 +1,6 @@
 import logging
+
+from api.core.log_safety import safe_text
 import os
 from typing import Any, Dict, List, Optional
 
@@ -223,8 +225,8 @@ class QueryAgent:
         logger.info(
             {
                 "event": "query_agent.process_query",
-                "message": message,
-                "rewritten_query": rewritten_query,
+                "message": safe_text(message),
+                "rewritten_query": safe_text(rewritten_query, "r"),
                 "expanded_terms_count": len(expanded_terms or []),
             }
         )
@@ -235,7 +237,14 @@ class QueryAgent:
         needs = [message]
         if MAX_RETRIEVALS > 1:
             needs = await query_processor.information_needs(message)
-            logger.info({"event": "query_agent.information_needs", "needs": needs})
+            # Counted, not named. An information need is a fragment of the
+            # customer's question and carries the same PHI or privilege the
+            # question does.
+            logger.info({
+                "event": "query_agent.information_needs",
+                "count": len(needs),
+                "needs": [safe_text(n, "n") for n in needs],
+            })
         return {
             "rewritten_query": rewritten_query,
             "expanded_terms": expanded_terms or [],
@@ -309,7 +318,7 @@ class QueryAgent:
         logger.info(
             {
                 "event": "query_agent.retrieve",
-                "rewritten_query": rewritten_query,
+                "rewritten_query": safe_text(rewritten_query, "r"),
                 "vector_results": len(vector_results or []),
                 "additional_results": len(additional_results),
                 "combined_results": len(all_results),
@@ -412,7 +421,8 @@ class QueryAgent:
         logger.info({
             "event": "query_agent.coverage",
             "needs": len(needs), "covered": len(covered),
-            "pending": pending[:3], "retrievals": state.get("retrievals"),
+            "pending": [safe_text(n, "n") for n in pending[:3]],
+            "retrievals": state.get("retrievals"),
         })
         return {
             "need_attempts": attempts,

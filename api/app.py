@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 from .core.firebase_setup import initialize_firebase
 import os
 import logging
+
+from api.core.log_safety import safe_text
 from .core.utils import decode_firebase_token
 # Load environment variables
 load_dotenv()
@@ -190,7 +192,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
             try:
                 message = await websocket.receive_text()
                 # Handle incoming messages if needed
-                logger.debug(f"Received message from user {user_id}: {message}")
+                logger.debug(f"Received message from user {user_id}: {safe_text(message)}")
             except Exception as e:
                 logger.warning(f"Error receiving WebSocket message from user {user_id}: {str(e)}")
                 break

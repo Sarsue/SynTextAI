@@ -604,13 +604,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }
 
         const target = historyId as number;
-        const workspaceIdParam = currentWorkspaceId != null
-            ? `&workspace_id=${encodeURIComponent(currentWorkspaceId)}`
-            : '';
-        const response = await callApiWithToken(
-            `api/v1/messages?message=${encodeURIComponent(message)}&history_id=${encodeURIComponent(target)}&language=english${workspaceIdParam}`,
-            'POST'
-        );
+        // The question goes in the body, never the URL. As a query parameter it
+        // landed in the access log in full, and a URL travels further than a log
+        // does: the reverse proxy, the CDN, the browser's own history, and the
+        // Referer header sent to any third party the page talks to afterwards.
+        // For a dental or legal practice the question is usually the most
+        // sensitive string in the whole request.
+        const response = await callApiWithToken('api/v1/messages', 'POST', {
+            message,
+            history_id: target,
+            language: 'english',
+            ...(currentWorkspaceId != null ? { workspace_id: currentWorkspaceId } : {}),
+        });
 
         if (!response?.ok) {
             addToast('Could not send your message.', 'error');
