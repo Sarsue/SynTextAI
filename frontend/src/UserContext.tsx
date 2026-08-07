@@ -123,7 +123,12 @@ interface UserContextType {
      * document in the company.
      */
     loadUserFiles: (page: number, pageSize: number, workspaceId: number | null) => Promise<void>;
-    deleteFileFromContext: (fileId: number, workspaceId?: number | null) => Promise<void>;
+    // workspaceId is required, not optional. It defaulted to null, and a
+    // default is what let this go wrong twice: the refresh fell through to the
+    // organization filter and a workspace showing 3 documents redrew with 12.
+    // A caller that forgets should fail to compile rather than silently show
+    // somebody every document in the company.
+    deleteFileFromContext: (fileId: number, workspaceId: number | null) => Promise<void>;
     pollFileStatus: () => Promise<void>; // Trigger immediate status check
     authLoading: boolean;
 }
@@ -571,7 +576,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, []);
 
-    const deleteFileFromContext = useCallback(async (fileId: number, workspaceId: number | null = null) => {
+    const deleteFileFromContext = useCallback(async (fileId: number, workspaceId: number | null) => {
         const url = `/api/v1/files/${fileId}`;
         const response = await _callApiWithTokenInternal(url, 'DELETE');
         if (response?.ok) {
