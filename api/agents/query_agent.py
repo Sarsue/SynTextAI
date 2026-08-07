@@ -58,37 +58,43 @@ CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
 #        40             25/27    17.7 (16-19)
 #
 # Two more questions arrived with every source they needed, and fewer were
-# answered correctly. That is the fourth experiment in a row to find this
-# model doing worse as context grows: eight passages beat twenty, one
-# retrieval beat three, the evidence selector's extra stage lost, and now
-# better recall loses.
+# answered correctly. So recall is not the binding constraint here and buying
+# more of it costs something. Twenty-five stays.
 #
-# So recall is not the binding constraint and buying more of it costs
-# something. Twenty-five stays. The six questions that arrive with correct
-# evidence and are still answered wrong are not failing for want of retrieval,
-# and no retrieval setting will fix them.
+# This looked at the time like a fifth instance of one pattern: eight passages
+# beat twenty, the evidence selector's extra stage lost, and better recall
+# lost. The loop then won on chunk-sized units, 21.0 against 19.0, which
+# separates the two things that had been conflated. Adding more of the SAME
+# ranked list hurts, every time it has been tried. Adding a list aimed at a
+# different information need helps. The lever is aim, not volume, and this
+# constant governs the first kind.
 RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
 
 # How many times one question may retrieve, in total.
 #
-# ONE, which makes this exactly the pipeline that scores 17.0, with the loop
-# built and dormant. Measured on the citation benchmark:
+# THREE. One was the default while the loop was unproven. Measured on
+# chunk-sized retrieval units, three repeats against four:
 #
-#                       citations /22   single /17   multi /5   refusals /4
-#     one retrieval      17.0 (15-18)  15.2 (13-16)  1.8 (1-2)   3.8 (3-4)
-#     up to three        15.3 (13-18)  14.0 (12-16)  1.3 (1-2)   4.0 (4-4)
+#                        citations /27   single /17   multi /10
+#     one retrieval       19.0 (18-21)  15.3 (14-16)  3.7 (2-5)
+#     up to three         21.0 (19-22)  16.2 (14-17)  4.8 (4-5)
 #
-# The spread is wide enough that the difference is not resolvable, but the
-# multi-document column is the one the loop exists for and it went down, not
-# up. A second retrieval aimed at an information need adds passages that
-# compete with the ones already found, and the answer step has to choose among
-# more material rather than better material.
+# +2.0 is inside the +/-3 this benchmark moves on its own, so it is not proven
+# by that rule. What supports it is the shape: every one of four loop runs
+# scored at or above the single-retrieval mean, and multi-document, the metric
+# the loop exists for, has a floor above that mean.
 #
-# Left at one until the benchmark can tell the difference. Five multi-document
-# questions is too thin a target to steer by: two confident claims were drawn
-# from that sample during this work and neither survived four runs. Raise this
-# when there are ten or fifteen of them, written from the documents outward.
-MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "1"))
+# It also reconciles four earlier results that all found this model worse with
+# more context. top_k 40 added fifteen chunks from the same ranked list and
+# scored 17.7; this adds a retrieval aimed at a different information need and
+# scores 21.0. Comparable extra context, opposite outcome. The lever is not how
+# much context, it is whether the context was aimed at something.
+#
+# What is NOT understood: the five questions diagnosed as this loop's targets,
+# 16, 17, 28, 30 and 31, did not move. The gain is real and does not come from
+# where it was predicted to, so this number is trusted further than the story
+# behind it.
+MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "3"))
 # Attempts at a single need before accepting that the documents do not cover it.
 COVERAGE_ATTEMPTS = int(os.getenv("COVERAGE_ATTEMPTS", "2"))
 

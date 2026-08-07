@@ -113,6 +113,11 @@ services:
       # and the message appears to vanish. Present in docker-compose.yml,
       # missing here.
       - API_BASE_URL=http://syntextaiapp:3000
+      # How many retrievals one question may make. One is the shipped
+      # behaviour; raise it to measure whether retrieving per information
+      # need is worth the extra context.
+      - MAX_RETRIEVALS=${MAX_RETRIEVALS:-1}
+      - RETRIEVAL_TOP_K=${RETRIEVAL_TOP_K:-25}
       - QUERY_CONCURRENCY=4
       - INGEST_CONCURRENCY=2
       - MAX_RUNS_PER_USER=3
