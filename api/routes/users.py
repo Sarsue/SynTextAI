@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from typing import Dict
 from ..core.utils import decode_firebase_token
+from ..core.auth import authenticate_user, get_store
 from api.workflows.tasks import delete_user_task
 from api.repositories.repository_manager import RepositoryManager
 import logging
@@ -35,30 +36,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI router
 users_router = APIRouter(prefix="/api/v1/users", tags=["users"])
-
-# Dependency to get the store
-def get_store(request: Request):
-    return request.app.state.store
-
-# Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
-    if not authorization or not authorization.startswith("Bearer "):
-        logger.error("Invalid or missing Authorization token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    token = authorization.split("Bearer ")[1]
-    success, user_info = decode_firebase_token(token)
-    if not success:
-        logger.error("Failed to authenticate user with token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
-    if not user_id:
-        logger.error(f"No user ID found for email: {user_info['email']}")
-        raise HTTPException(status_code=404, detail="User not found")
-
-    logger.info(f"Authenticated user_id: {user_id}")
-    return {"user_id": user_id, "user_info": user_info}
 
 async def get_firebase_user_info_from_token(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):

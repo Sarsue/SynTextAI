@@ -17,45 +17,11 @@ from ..core.permissions import (
 )
 from ..core.seats import sync_seats_to_stripe
 from ..core.utils import delete_workspace_objects
+from ..core.auth import authenticate_user, get_store
 
 logger = logging.getLogger(__name__)
 
 workspaces_router = APIRouter(prefix="/api/v1/workspaces", tags=["workspaces"])
-
-
-# Dependency to get the store
-def get_store(request: Request) -> RepositoryManager:
-    return request.app.state.store
-
-
-# Helper function to authenticate user and retrieve user ID
-async def authenticate_user(request: Request, store: RepositoryManager = Depends(get_store)) -> Dict[str, any]:
-    try:
-        from ..core.utils import get_user_id
-        
-        token = request.headers.get('Authorization')
-        if not token:
-            logger.error("Missing Authorization token")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-
-        success, user_info = get_user_id(token)
-        if not success or not user_info:
-            logger.error("Failed to authenticate user with token")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-
-        user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
-        if not user_id:
-            logger.error(f"No user ID found for email: {user_info['email']}")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        logger.info(f"Authenticated user_id: {user_id}")
-        return {"user_id": user_id, "user_info": user_info}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Error during user authentication")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication failed")
 
 
 class WorkspaceCreate(BaseModel):

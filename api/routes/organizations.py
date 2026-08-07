@@ -21,29 +21,12 @@ from ..core.permissions import (
     capabilities_for,
 )
 from ..services.email_service import send_workspace_invite, EmailNotConfigured, app_url
+from ..core.auth import authenticate_user, get_store
 from api.repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
 
 organizations_router = APIRouter(prefix="/api/v1/organizations", tags=["organizations"])
-
-
-def get_store(request: Request):
-    return request.app.state.store
-
-
-async def authenticate_user(
-    authorization: str = Header(None), store: RepositoryManager = Depends(get_store)
-):
-    if not authorization:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    success, user_info = get_user_id(authorization)
-    if not success:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    user_id = await store.user_repo.get_user_id_from_email(user_info["email"])
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return {"user_id": user_id, "user_info": user_info}
 
 
 class OrganizationSummary(BaseModel):

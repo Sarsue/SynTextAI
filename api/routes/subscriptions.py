@@ -12,6 +12,7 @@ from ..core.limits import entitlement_for_organization, resolve_entitlement
 from ..core.plans import PLANS, get_plan, plan_for_price_id
 from ..core.seats import seat_summary, sync_seats_to_stripe
 from ..core.permissions import Capability, assert_organization_capability
+from ..core.auth import authenticate_user, get_store
 from api.repositories.repository_manager import RepositoryManager
 import asyncio
 # Load environment variables
@@ -29,30 +30,6 @@ subscriptions_router = APIRouter(prefix="/api/v1/subscriptions", tags=["subscrip
 # included seats and overage rate.
 stripe.api_key = os.getenv('STRIPE_SECRET')
 endpoint_secret = os.getenv('STRIPE_ENDPOINT_SECRET')
-
-# Dependency to get the store
-def get_store(request: Request):
-    return request.app.state.store
-
-# Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
-    if not authorization:
-        logger.error("Missing Authorization token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    success, user_info = get_user_id(authorization)
-    if not success:
-        logger.error("Failed to authenticate user with token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
-    if not user_id:
-        logger.error(f"No user ID found for email: {user_info['email']}")
-        raise HTTPException(status_code=404, detail="User not found")
-
-    logger.info(f"Authenticated user_id: {user_id}")
-    return {"user_id": user_id, "user_info": user_info}
-
 
 def _read(obj, key, default=None):
     """Read a field off a Stripe object, or a plain dict, without raising.

@@ -25,6 +25,7 @@ from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from pydantic import BaseModel, Field
 from ..models import File
+from ..core.auth import authenticate_user, get_store
 
 class FileResponse(BaseModel):
     id: int
@@ -52,37 +53,6 @@ files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 # Define a standardized API response model
 T = TypeVar('T')
-
-# Dependency to get the store
-def get_store(request: Request) -> RepositoryManager:
-    return request.app.state.store
-
-# Helper function to authenticate user and retrieve user ID
-async def authenticate_user(request: Request, store: RepositoryManager = Depends(get_store)) -> Dict[str, any]:
-    try:
-        token = request.headers.get('Authorization')
-        if not token:
-            logger.error("Missing Authorization token")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-
-        success, user_info = get_user_id(token)
-        if not success or not user_info:
-            logger.error("Failed to authenticate user with token")
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-
-        user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
-        if not user_id:
-            logger.error(f"No user ID found for email: {user_info['email']}")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        logger.info(f"Authenticated user_id: {user_id}, user_gc_id: {user_info['user_id']}")
-        return {"user_id": user_id, "user_gc_id": user_info['user_id']}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Error during user authentication")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication failed")
 
 async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
     """Raise 403 unless the caller may add documents to this workspace.
