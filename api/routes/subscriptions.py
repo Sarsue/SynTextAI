@@ -47,6 +47,31 @@ def _read(obj, key, default=None):
         return default
 
 
+def _client_secret(stripe_subscription) -> Optional[str]:
+    """The secret the browser needs to finish a 3D Secure challenge, if one is owed.
+
+    A card that requires authentication does not decline. Stripe accepts the
+    subscription, leaves it `incomplete`, and waits for the cardholder to pass a
+    challenge in their bank's popup. Nothing else happens until the browser
+    confirms, so a server that only reads `.status` sees "incomplete" and has no
+    way to tell the customer what to do about it.
+
+    WHERE THIS LIVES, AND WHY IT IS NOT WHERE THE INTERNET SAYS
+
+    Every guide reaches for `latest_invoice.payment_intent`. On this account's
+    API version (2026-07-29.dahlia) that field is **null** — it was removed in
+    the Basil-era rewrite of invoices. Expanding it costs nothing, raises
+    nothing, and yields nothing, which is the worst possible failure: the code
+    looks right and silently never finds a secret. Verified against Stripe test
+    mode, not assumed; `latest_invoice.confirmation_secret` is where it is now.
+
+    Returns None when no challenge is owed, which is the normal path.
+    """
+    invoice = _read(stripe_subscription, "latest_invoice")
+    secret = _read(invoice, "confirmation_secret") if invoice is not None else None
+    return _read(secret, "client_secret") if secret is not None else None
+
+
 def _period_end(stripe_subscription) -> Optional[datetime]:
     """When the current billing period ends, as a datetime.
 
@@ -353,6 +378,50 @@ async def create_subscription(
             if subscription.get('status') == 'active':
                 logger.error(f"Request came from an already active subscription: {user_id}")
                 raise HTTPException(status_code=400, detail="Active subscription already exists")
+
+            # An abandoned 3D Secure challenge leaves an unpaid subscription
+            # behind, and the only guard above is on 'active', so every retry
+            # created another one. Stripe expires them after 23 hours, so this
+            # never double-charged, but it left a customer's account holding a
+            # row of dead subscriptions and made their billing history unreadable.
+            #
+            # Ask Stripe before cancelling anything. Our row says what we last
+            # heard, and the whole reason this endpoint exists is that we
+            # sometimes hear late: a customer who passed the challenge while our
+            # webhook was still in flight has an ACTIVE subscription behind an
+            # 'incomplete' row. Cancelling on the strength of that row would end
+            # a paying customer's subscription and charge them again for a new
+            # one. The row is a cache. Stripe is the fact.
+            if subscription.get('status') == 'incomplete' and subscription.get('stripe_subscription_id'):
+                stale_id = subscription['stripe_subscription_id']
+                try:
+                    live = await stripe.Subscription.retrieve_async(stale_id)
+                except Exception as e:
+                    live = None
+                    logger.info("Could not read subscription %s: %s", stale_id, e)
+
+                if live is not None and live.status in {'active', 'trialing'}:
+                    # They already paid. Heal the row instead of selling again.
+                    await store.user_repo.update_subscription(
+                        stripe_customer_id=stripe_customer_id,
+                        stripe_subscription_id=stale_id,
+                        status=live.status,
+                        current_period_end=_period_end(live),
+                    )
+                    logger.info("Subscription %s was already %s; refreshed the stale row", stale_id, live.status)
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This organization already has an active subscription.",
+                    )
+
+                if live is not None and live.status == 'incomplete':
+                    try:
+                        await stripe.Subscription.cancel_async(stale_id)
+                        logger.info("Cleared abandoned incomplete subscription for user %s", user_id)
+                    except Exception as e:
+                        # Already gone or already expired is the common case,
+                        # and neither is a reason to stop somebody paying.
+                        logger.info("Could not clear incomplete subscription for user %s: %s", user_id, e)
    
         # Retrieve the payment method ID from the request
         payment_method_id = payment_method
@@ -400,12 +469,26 @@ async def create_subscription(
                 invoice_settings={'default_payment_method': payment_method_id}
             )
 
-            # Create a new Stripe subscription
+            # Create a new Stripe subscription.
+            #
+            # The expand is load-bearing: without it the confirmation secret is
+            # not in the response at all, and a card that needs 3D Secure leaves
+            # the customer stuck with no way to finish. See _client_secret.
             created_subscription = await stripe.Subscription.create_async(
                 customer=stripe_customer_id,
                 items=[{'price': price_id, 'quantity': member_count}],
-                default_payment_method=payment_method_id
+                default_payment_method=payment_method_id,
+                expand=['latest_invoice.confirmation_secret'],
             )
+            # Only an unpaid subscription owes anybody a challenge. Stripe puts
+            # a confirmation secret on the invoice either way, so the secret's
+            # presence says nothing: a card that sailed through on the first
+            # attempt comes back 'active' with a secret attached. Gating on the
+            # secret alone sent every ordinary customer through a pointless
+            # confirmCardPayment round trip against an intent that had already
+            # succeeded. The status is the thing that distinguishes them.
+            client_secret = _client_secret(created_subscription)
+            requires_action = created_subscription.status == 'incomplete' and bool(client_secret)
 
             # Store the subscription in the database
             await store.user_repo.add_or_update_subscription(
@@ -426,6 +509,10 @@ async def create_subscription(
             return {
                 'message': 'Subscription created successfully',
                 "subscription_status": created_subscription.status,
+                # Decided here rather than in the browser, so there is one
+                # definition of "this customer still has something to do".
+                'requires_action': requires_action,
+                'client_secret': client_secret if requires_action else None,
                 'plan': selected_plan.key,
                 'plan_name': selected_plan.name,
                 'seats_included': selected_plan.included_seats,
@@ -471,6 +558,105 @@ async def create_subscription(
         logger.error(f"Subscription error: {e}", exc_info=True)
         raise HTTPException(status_code=403, detail="Could not process subscription")
 
+@subscriptions_router.post("/confirm", status_code=200)
+async def confirm_subscription(
+    organization_id: Optional[int] = Body(None, embed=True),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
+):
+    """Re-read a subscription from Stripe after the browser passed a challenge.
+
+    WHY THIS EXISTS RATHER THAN JUST WAITING FOR THE WEBHOOK
+
+    Finishing 3D Secure moves the subscription to active, and Stripe does send
+    customer.subscription.updated, which the webhook below already handles. But
+    the webhook is a separate HTTP round trip on Stripe's schedule, and the
+    browser asks "am I in?" the instant the popup closes. Reading the database
+    at that moment usually still says 'incomplete', so the customer who just
+    authenticated successfully gets bounced back to the payment screen and told
+    to subscribe again.
+
+    Stripe is the authority on whether the money moved, so this asks Stripe
+    directly instead of racing its webhook. The webhook stays exactly as it is
+    and remains the thing that catches every later change; this is only the
+    synchronous answer to one question at one moment.
+
+    Idempotent by construction: it writes whatever Stripe currently says. Two
+    calls, or a call that crosses the webhook, converge on the same row.
+    """
+    user_id = user_data["user_id"]
+    try:
+        billing_org_id = await _billing_organization_id(store, user_id, organization_id)
+        if billing_org_id is None:
+            raise HTTPException(status_code=403, detail="No organization to bill.")
+        await assert_organization_capability(
+            store, user_id, billing_org_id, Capability.MANAGE_BILLING
+        )
+
+        subscription_data = await store.user_repo.get_subscription(user_id)
+        if not subscription_data:
+            raise HTTPException(status_code=404, detail="No subscription found")
+        subscription, _ = subscription_data
+        subscription_id = subscription.get('stripe_subscription_id')
+        if not subscription_id:
+            raise HTTPException(status_code=400, detail="Subscription ID is missing")
+
+        fresh = await stripe.Subscription.retrieve_async(subscription_id)
+        await store.user_repo.update_subscription(
+            stripe_customer_id=subscription.get('stripe_customer_id'),
+            stripe_subscription_id=subscription_id,
+            status=fresh.status,
+            current_period_end=_period_end(fresh),
+        )
+        logger.info("Confirmed subscription %s for user %s: %s", subscription_id, user_id, fresh.status)
+        return {"subscription_status": fresh.status}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error confirming subscription for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not confirm subscription")
+
+
+@subscriptions_router.post("/setup-intent", status_code=200)
+async def create_setup_intent(
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store)
+):
+    """A secret the browser needs before it can save a replacement card.
+
+    The card-update form calls stripe.confirmCardSetup(clientSecret), and
+    nothing ever gave it one: the state was declared, never assigned, so the
+    call was made with an empty string and failed on contact. Anybody whose
+    subscription went past_due reached a form that could not work.
+
+    A SetupIntent is the object that authorises storing a card for later, and it
+    runs the same 3D Secure challenge a payment does, which is the other half of
+    why this matters: replacing a card on an EU account needs authentication too.
+    """
+    user_id = user_data["user_id"]
+    try:
+        subscription_data = await store.user_repo.get_subscription(user_id)
+        if not subscription_data:
+            raise HTTPException(status_code=404, detail="No subscription found")
+        subscription, _ = subscription_data
+        stripe_customer_id = subscription.get('stripe_customer_id')
+        if not stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No billing account on file")
+
+        intent = await stripe.SetupIntent.create_async(
+            customer=stripe_customer_id,
+            usage="off_session",
+        )
+        return {"client_secret": intent.client_secret}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating setup intent for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not start card update")
+
+
 # Route to update payment method
 @subscriptions_router.post("/update-payment", status_code=200)
 async def update_payment(
@@ -491,21 +677,46 @@ async def update_payment(
             raise HTTPException(status_code=400, detail="Subscription ID is missing")
 
 
-        payment_method = await stripe.PaymentMethod.retrieve_async(payment_method)
-        await stripe.PaymentMethod.attach_async(payment_method, customer=stripe_customer_id)
-        await  stripe.Subscription.modify_async(subscription_id, default_payment_method=payment_method)
-
-        await store.user_repo.update_subscription(
-            stripe_customer_id=stripe_customer_id,
-            status=subscription.get("status"),  # Or retrieve status from Stripe if required
-            current_period_end=subscription.get("current_period_end"),  # Already a datetime in repo
-            card_last4=payment_method.card.last4,
-            card_type=payment_method.card.brand,
-            exp_month=payment_method.card.exp_month,
-            exp_year=payment_method.card.exp_year
+        # Keep the id and the object apart. This rebound `payment_method` to the
+        # retrieved object and then passed that object where the API takes an
+        # id, so the attach and the modify were both built from the wrong thing.
+        payment_method_id = payment_method
+        card = await stripe.PaymentMethod.retrieve_async(payment_method_id)
+        await stripe.PaymentMethod.attach_async(payment_method_id, customer=stripe_customer_id)
+        await stripe.Subscription.modify_async(
+            subscription_id, default_payment_method=payment_method_id
+        )
+        # A new card on a past_due subscription should also become the customer's
+        # default, or the next invoice retries the card that already failed.
+        await stripe.Customer.modify_async(
+            stripe_customer_id,
+            invoice_settings={'default_payment_method': payment_method_id},
         )
 
-        return {'success': True}
+        # Read the status back from Stripe rather than echoing the row we just
+        # read. Paying an outstanding invoice with the new card moves past_due
+        # to active, and writing back the stale value put the customer's own
+        # database row behind the truth.
+        fresh = await stripe.Subscription.retrieve_async(subscription_id)
+        await store.user_repo.update_subscription(
+            stripe_customer_id=stripe_customer_id,
+            stripe_subscription_id=subscription_id,
+            status=fresh.status,
+            current_period_end=_period_end(fresh),
+            card_last4=card.card.last4,
+            card_type=card.card.brand,
+            exp_month=card.card.exp_month,
+            exp_year=card.card.exp_year
+        )
+
+        return {
+            'success': True,
+            'subscription_status': fresh.status,
+            'card_last4': card.card.last4,
+            'card_brand': card.card.brand,
+            'card_exp_month': card.card.exp_month,
+            'card_exp_year': card.card.exp_year,
+        }
 
     except HTTPException:
         raise

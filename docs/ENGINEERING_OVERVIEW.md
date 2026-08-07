@@ -395,7 +395,16 @@ for it.
    Fixed and verified with a full drift check, see "Recent changes."
 2. ~~Pending invite lost after login~~ — **closed 2026-07-29**, see "Recent changes."
 3. ~~Staff role enforcement missing on the backend~~ — **closed 2026-07-29**, see "Recent changes."
-4. **Stripe reviewed 2026-07-29, real gap found: no 3D Secure / SCA handling.**
+4. ~~Stripe: no 3D Secure / SCA handling~~ — **closed 2026-08-07**, built and
+   verified against Stripe test mode, see "Recent changes". The description
+   below is the original finding, kept because it is still the clearest
+   statement of what was wrong. Two things in it have since been corrected by
+   the build: the secret is on `latest_invoice.confirmation_secret`, not
+   `latest_invoice.payment_intent`, which is null on this API version; and
+   `isCardUpdateRequired` now lists the statuses it means instead of excluding
+   the ones it doesn't.
+
+   **Stripe reviewed 2026-07-29, real gap found: no 3D Secure / SCA handling.**
    `create_subscription` in `subscriptions.py` creates the subscription with a
    payment method directly and just returns whatever status Stripe gives back.
    If a card requires additional authentication (SCA, common on EU/UK cards,
@@ -1075,6 +1084,79 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-07 (3D Secure: the cards that could never pay):** Closes the last
+  open Tier 0 item, found in the 2026-07-29 Stripe review and left alone since
+  because it needed live test-mode iteration rather than a guess.
+
+  **The failure.** A card that requires authentication does not decline. Stripe
+  accepts the subscription, leaves it `incomplete`, and waits for the cardholder
+  to pass their bank's challenge. `create_subscription` returned whatever status
+  Stripe gave it and stopped there, and `PaymentView` classified the card-update
+  branch as *anything that is not one of five known-good statuses*, which swept
+  up `incomplete`. So the customer was shown "your payment method needs to be
+  updated due to an expired card or other issue", entered the same working card,
+  and got the same message. Common on EU and UK cards, and spreading.
+
+  **`latest_invoice.payment_intent` is the wrong field, and fails silently.**
+  Every guide reaches for it. On this account's pinned API version
+  (`2026-07-29.dahlia`, from stripe-python 15.4.0) it is **null** — removed in
+  the Basil-era invoice rewrite. Expanding it costs nothing, raises nothing and
+  yields nothing, so the code would have looked correct and never found a
+  secret. Verified by probing test mode before writing any of this:
+  `latest_invoice.confirmation_secret.client_secret` is where it lives now. This
+  is the single most useful thing on this entry; do not "fix" `_client_secret`
+  back to the documented field.
+
+  **`requires_action` cannot be derived from the secret's presence.** First cut
+  returned `requires_action = bool(client_secret)`, which testing the *ordinary*
+  card immediately disproved: a payment that succeeds outright comes back
+  `active` **with a confirmation secret attached**, so every normal customer was
+  being sent through a `confirmCardPayment` round trip against an intent that had
+  already succeeded. Gated on `status == 'incomplete'` instead. Only found
+  because the non-3DS path was retested after the 3DS path passed.
+
+  **A confirm endpoint, not a wait for the webhook.** `customer.subscription.updated`
+  already carries incomplete → active and the webhook already handles it, but it
+  arrives on Stripe's schedule and the browser asks "am I in?" the instant the
+  popup closes. Reading our own row at that moment still says `incomplete`, so a
+  customer who just authenticated correctly gets bounced back to the payment
+  screen. `POST /subscriptions/confirm` asks Stripe directly. Verified against
+  the real race: Stripe `active`, database `incomplete`, no webhook able to reach
+  localhost, and the endpoint healed the row. Idempotent, since it writes
+  whatever Stripe currently says.
+
+  **The retry guard had to ask Stripe, not the row.** Retrying after an abandoned
+  challenge used to stack another `incomplete` subscription each time, so that got
+  a "cancel the stale one first" guard — which, keyed off our own row, would have
+  cancelled a *paying* customer whose webhook was still in flight and charged them
+  again. The row is a cache; Stripe is the fact. It now retrieves first, and when
+  Stripe says active it refreshes the stale row and refuses the second sale.
+  Tested in exactly that mismatched state: no duplicate, nothing cancelled, row
+  healed.
+
+  **Found while reading: the card-update branch had never worked.** Three
+  independent defects, any one fatal. `clientSecret` was declared and never
+  assigned, so `confirmCardSetup('')` failed on contact and no SetupIntent
+  endpoint existed to give it one. The browser sent `payment_method_id` where the
+  route reads `payment_method`, a 422 before the handler ran. And the route
+  rebound `payment_method` to the retrieved object and passed that object where
+  the API takes an id. Anybody who went `past_due` reached a form that could not
+  work. Fixed all three, added `POST /subscriptions/setup-intent`, and the route
+  now reads status back from Stripe instead of echoing the stale row.
+
+  **What could not be verified here.** Clicking COMPLETE inside Stripe's 3DS
+  challenge iframe: the modal renders correctly (confirmed visually, branded
+  OSAS INC) but synthetic clicks are not trusted by that cross-origin frame, so
+  the challenge was completed server-side by confirming the PaymentIntent with a
+  non-3DS test card, which produces the identical post-challenge state. The
+  browser half of `confirmCardPayment` is therefore exercised up to the popup and
+  not through it. Worth one manual click-through before this reaches real
+  customers.
+
+  **Also noticed, not fixed:** `POST /users?intent=signup` returns 500 "Could not
+  create user." when the display name collides with an existing row, after
+  having already created the user. Pre-existing, unrelated to billing.
 
 - **2026-08-07 (guardrails: what an uploaded document can reach):** A customer's
   document is untrusted input. Tested rather than assumed, by uploading one.
