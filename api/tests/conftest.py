@@ -78,44 +78,31 @@ async def tenant(store):
 async def client(store):
     """An HTTP client for the real app, with authentication stubbed.
 
-    Every router declares its own authenticate_user, so each is overridden
-    separately. What is being tested is what the routes do *after* deciding who
-    you are — the role checks, the workspace checks, the 403s. Firebase token
-    verification is a separate concern and is not exercised here.
+    Authentication is one dependency now, so one override covers every router.
+    What is being tested is what the routes do *after* deciding who you are: the
+    role checks, the workspace checks, the 403s. Firebase token verification is
+    a separate concern and is not exercised here.
 
     app.state.store is set directly because ASGITransport does not run the
     startup event that normally populates it.
     """
     import httpx
     from api.app import app
-    from api.routes import files, histories, messages, organizations, subscriptions, users, workspaces
+    from api.core.auth import authenticate_user, get_store
 
     app.state.store = store
 
-    # The shape each router hands its endpoints differs, so the stubs match.
-    def as_user(user_id: int, module):
-        async def _override():
-            return {
-                "user_id": user_id,
-                "user_info": {"email": f"user{user_id}@test.invalid", "user_id": f"gc-{user_id}"},
-                "user_gc_id": f"gc-{user_id}",
-            }
-        return _override
-
     current = {"user_id": None}
 
-    for module in (files, histories, messages, organizations, subscriptions, users, workspaces):
-        def make(mod):
-            async def _override():
-                uid = current["user_id"]
-                return {
-                    "user_id": uid,
-                    "user_info": {"email": f"user{uid}@test.invalid", "user_id": f"gc-{uid}"},
-                    "user_gc_id": f"gc-{uid}",
-                }
-            return _override
-        app.dependency_overrides[module.authenticate_user] = make(module)
-        app.dependency_overrides[module.get_store] = lambda: store
+    async def _as_current_user():
+        uid = current["user_id"]
+        return {
+            "user_id": uid,
+            "user_info": {"email": f"user{uid}@test.invalid", "user_id": f"gc-{uid}"},
+        }
+
+    app.dependency_overrides[authenticate_user] = _as_current_user
+    app.dependency_overrides[get_store] = lambda: store
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:

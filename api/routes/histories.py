@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from typing import Optional
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
+from ..core.auth import authenticate_user, get_store
 import logging
 from typing import Dict
 # Set up logging
@@ -10,29 +11,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI router
 histories_router = APIRouter(prefix="/api/v1/histories", tags=["histories"])
-
-# Dependency to get the store
-def get_store(request: Request):
-    return request.app.state.store
-
-# Helper function to authenticate user and retrieve user ID
-async def authenticate_user(authorization: str = Header(None), store: RepositoryManager = Depends(get_store)):
-    if not authorization:
-        logger.error("Missing Authorization token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    success, user_info = get_user_id(authorization)
-    if not success:
-        logger.error("Failed to authenticate user with token")
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    user_id = await store.user_repo.get_user_id_from_email(user_info['email'])
-    if not user_id:
-        logger.error(f"No user ID found for email: {user_info['email']}")
-        raise HTTPException(status_code=404, detail="User not found")
-
-    logger.info(f"Authenticated user_id: {user_id}")
-    return {"user_id": user_id, "user_info": user_info}
 
 # Route to create a new chat history
 @histories_router.post("", status_code=201)
