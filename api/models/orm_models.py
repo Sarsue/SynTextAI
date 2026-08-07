@@ -299,8 +299,7 @@ class Chunk(Base):
 
     # The retrieval unit's own text. A chunk is a slice of a page; the page's
     # full text stays on the segment, because a citation names a page and a page
-    # is what a reader opens. Null on rows written before chunk-level retrieval,
-    # and retrieval falls back to the segment's text for those.
+    # is what a reader opens.
     content = Column(Text, nullable=True)
     
     # Relationship to file
