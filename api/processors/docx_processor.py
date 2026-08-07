@@ -80,6 +80,33 @@ class DocxProcessor(FileProcessor):
         processed_data = await self.process_pages(section_data, file_name=filename)
         logger.info(f"Completed processing sections: generated {len(processed_data.get('chunks', []))} chunks")
 
+        # A document that extracted nothing is a failure, not a success. Every
+        # per-item exception here is caught and logged so one bad section cannot
+        # lose a whole document, which is right, but it meant a processor could
+        # catch every section, produce zero chunks, and still mark the file
+        # processed. The file then sits in the list looking ready and answers
+        # nothing, and the only trace is a log line nobody reads.
+        #
+        # This exact shape shipped twice: once when the storage layer read a
+        # structure no processor produced, and again on 2026-08-07 when
+        # page_text was added referring to a variable that exists in the PDF
+        # processor and not in this one. Both were silent.
+        if processed_data is not None and not (processed_data.get("chunks") or []):
+            logger.error(
+                f"No chunks extracted from {filename}; marking it failed rather "
+                f"than leaving a document that looks ready and answers nothing"
+            )
+            try:
+                await self.store.file_repo.update_file_status(int(file_id), "failed")
+            except Exception:
+                logger.debug("Non-fatal: could not update status to 'failed'")
+            return {
+                "success": False,
+                "file_id": file_id,
+                "error": "No content could be extracted from this document",
+                "metadata": {"processor_type": "docx"},
+            }
+
         if processed_data and "chunks" in processed_data:
             logger.info(f"Storing {len(processed_data['chunks'])} chunks in database for file {file_id}")
             try:
@@ -153,7 +180,7 @@ class DocxProcessor(FileProcessor):
                             # chunks. Storage groups by page to build the
                             # citation unit, and joining the chunks back
                             # together would duplicate their overlap.
-                            'page_text': page_content,
+                            'page_text': section_content,
                             'page_num': page_num,
                             'source_type': 'docx'
                         })

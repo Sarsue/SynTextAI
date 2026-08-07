@@ -425,6 +425,46 @@ async def get_file_access_url(
     return {"url": signed, "expires_in": int(SIGNED_URL_TTL.total_seconds())}
 
 
+@files_router.get("/{file_id}/content", response_class=JSONResponse)
+async def get_file_content(
+    file_id: int,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """The text we extracted, page by page, for documents a browser cannot render.
+
+    A PDF opens in an iframe at #page=N and a citation lands where it points. A
+    .docx cannot: no browser renders one, so the viewer fell through to
+    "Unsupported file type" for a format the uploader accepts, the processors
+    handle, and answers are cited from. The document was searchable and
+    unreadable at the same time. .txt was broken the same way and nobody had
+    reported it.
+
+    Serving our own extraction rather than the original file is what makes a
+    citation mean something here. The answer cites page 4; page 4 of a .docx is
+    a section this pipeline defined, and only this pipeline can show it.
+
+    Same authorization as access-url, per request against the document's
+    workspace, because this returns document text and is exactly as sensitive
+    as the file itself.
+    """
+    file_record = await store.file_repo.get_file_by_id(file_id)
+    if not file_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    workspace_id = file_record.get("workspace_id")
+    if workspace_id is not None:
+        await check_can_read_workspace(workspace_id, user_data["user_id"], store)
+    elif file_record.get("user_id") != user_data["user_id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    pages = await store.file_repo.get_file_pages(file_id)
+    return {
+        "file_name": file_record.get("file_name"),
+        "pages": pages,
+    }
+
+
 @files_router.get("/status", response_class=JSONResponse)
 async def get_files_status(
     ids: str = Query(..., description="Comma-separated file IDs"),

@@ -116,3 +116,44 @@
         border-radius: 0;
     }
 }
+
+/* Documents shown from our own extraction rather than from the original file:
+   .docx above all, which no browser renders, plus .txt and .md. The uploader
+   accepts these, the processors handle them and answers cite them, so leaving
+   them at "Unsupported file type" meant a document could be searchable and
+   unreadable at once. */
+.extracted-container {
+    overflow-y: auto;
+    padding: 0 1rem 2rem;
+}
+
+.extracted-page {
+    border-top: 1px solid var(--border, #e5e7eb);
+    padding: 1rem 0;
+}
+
+.extracted-page__label {
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.6;
+    margin-bottom: 0.5rem;
+}
+
+/* The page a citation points at. #page=N cannot drive a browser to a place in
+   a .docx, so the cited page is marked and scrolled to instead. */
+.extracted-page--cited {
+    background: var(--accent-soft, rgba(59, 130, 246, 0.08));
+    border-left: 3px solid var(--accent, #3b82f6);
+    padding-left: 0.75rem;
+    scroll-margin-top: 1rem;
+}
+
+.extracted-page__text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin: 0;
+}
