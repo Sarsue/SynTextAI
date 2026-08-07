@@ -28,14 +28,29 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
     const canUpload = orgContext?.can_manage_documents ?? false;
     const { addToast } = useToast();
 
+    // Exactly what the processor factory can read: pdf, docx, txt and md.
+    //
+    // Not application/msword. The legacy binary .doc format has no processor,
+    // python-docx reads only .docx, so the factory maps 'doc' to None and a
+    // .doc upload was accepted, stored, and never became searchable. Offering
+    // a format we cannot read makes the failure the customer's to discover.
+    //
+    // Matched on extension as well as MIME type because browsers disagree about
+    // markdown: Chrome reports text/markdown, some report text/plain and some
+    // report an empty string, so a MIME check alone rejects a .md file the
+    // backend handles perfectly well.
+    const SUPPORTED_MIME = [
+        'application/pdf',
+        'text/plain',
+        'text/markdown',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
+    const SUPPORTED_EXT = ['pdf', 'docx', 'txt', 'md'];
+
     const isFileSupported = (file: File): boolean => {
-        const supportedTypes = [
-            'application/pdf',
-            'text/plain',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'application/msword',
-        ];
-        return supportedTypes.includes(file.type);
+        if (SUPPORTED_MIME.includes(file.type)) return true;
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        return !!ext && SUPPORTED_EXT.includes(ext);
     };
 
     const handleSendClick = () => {
@@ -70,7 +85,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
         const supported = selected.filter(isFileSupported);
 
         if (supported.length === 0) {
-            addToast('Unsupported file type. Please upload PDF, DOCX, or TXT files.', 'error');
+            addToast('Unsupported file type. Please upload PDF, DOCX, TXT or MD files.', 'error');
         } else {
             if (selected.length > supported.length) {
                 addToast(`${selected.length - supported.length} file(s) skipped — unsupported type.`, 'info');
@@ -140,7 +155,7 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
                                 id="file-upload"
                                 type="file"
                                 multiple
-                                accept=".pdf,.docx,.doc,.txt"
+                                accept=".pdf,.docx,.txt,.md"
                                 onChange={handleAttachment}
                                 disabled={isSending}
                                 aria-label="File upload"
