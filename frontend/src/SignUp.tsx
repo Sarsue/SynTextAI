@@ -1,9 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { useStripe, useElements, CardElement } from '@stripe/react-stripe-js';
 import { useUserContext } from './UserContext';
 import { useToast } from './contexts/ToastContext';
 import { Button } from '@/components/ui/button';
+import { PlanChoices, usePlans } from './components/PlanPicker';
+import { subscribeWithCard } from './services/subscribe';
+import posthog from './services/analytics';
+import './components/PaymentView.css';
 
 /**
  * Starting a company account.
@@ -31,7 +36,20 @@ const SignUp: React.FC = () => {
     const navigate = useNavigate();
     const { user, darkMode, setActiveOrganization, fetchSubscriptionStatus } = useUserContext();
     const { addToast } = useToast();
+    const stripe = useStripe();
+    const elements = useElements();
     const [isWorking, setIsWorking] = useState(false);
+    const [companyName, setCompanyName] = useState('');
+    const [selectedPlan, setSelectedPlan] = useState<string>('starter');
+    const plans = usePlans(setSelectedPlan);
+
+    // The company, once it exists. A card can be declined after the
+    // organization has already been created, and an account owns exactly one
+    // company: posting the name again on the retry returns the existing one
+    // unchanged, so an edited name would be quietly ignored. Remember the id,
+    // skip straight to payment on the retry, and stop pretending the field is
+    // still live.
+    const [createdOrgId, setCreatedOrgId] = useState<number | null>(null);
 
     // Does this account already own a company?
     //
@@ -68,7 +86,7 @@ const SignUp: React.FC = () => {
         return () => { cancelled = true; };
     }, [user]);
 
-    const startOrganization = useCallback(async () => {
+    const startOrganization = useCallback(async (name: string) => {
         const auth = getAuth();
         const current = auth.currentUser;
         if (!current) return null;
@@ -79,7 +97,10 @@ const SignUp: React.FC = () => {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${idToken}`,
             },
-            body: JSON.stringify({ firebase_uid: current.uid, email: current.email }),
+            // The company's name, chosen rather than derived. Everything else
+            // this endpoint needs is in the token; the body used to carry the
+            // uid and email, which it read from the token anyway and ignored.
+            body: JSON.stringify({ company_name: name }),
         });
         if (!response.ok) {
             const data = await response.json().catch(() => ({}));
@@ -88,72 +109,96 @@ const SignUp: React.FC = () => {
         return await response.json();
     }, []);
 
-    const finish = useCallback(async (organizationId: number | null) => {
-        if (!organizationId) {
-            // The organization was created by the auth listener, so its id is
-            // not in hand here. The chooser resolves it, and forwards silently
-            // when there is only one, which after signing up there is.
-            navigate('/select-organization', { replace: true });
+    /** Name the company, pay for it, go in. One submit. */
+    const createAndSubscribe = useCallback(async (e: React.FormEvent) => {
+        e.preventDefault();
+        const card = elements?.getElement(CardElement);
+        if (!stripe || !card) {
+            addToast('Payment system is unavailable. Please refresh the page.', 'error');
             return;
         }
-        await setActiveOrganization(organizationId);
-        await fetchSubscriptionStatus();
-        // Straight to billing: an organization with no subscription is entitled
-        // to nothing, so landing in the app would only show a locked one.
-        navigate('/settings', { replace: true });
-    }, [navigate, setActiveOrganization, fetchSubscriptionStatus]);
+        const name = companyName.trim();
+        if (!name) {
+            addToast('What is your company called?', 'error');
+            return;
+        }
 
-    // Already signed in, as an invited member or otherwise. No second Google
-    // round trip: the account in hand is the one starting the company.
-    const signUpWithCurrentAccount = useCallback(async () => {
         setIsWorking(true);
         try {
-            const data = await startOrganization();
-            await finish(data?.organization_id ?? null);
-        } catch (e) {
-            addToast(e instanceof Error ? e.message : 'Something went wrong', 'error');
+            // Create first, pay second, and both before leaving the screen.
+            // A subscription belongs to an organization, so there is nothing to
+            // charge until one exists. This used to be two screens with a
+            // redirect between them, and the company arrived already named
+            // after the email prefix.
+            let organizationId = createdOrgId;
+            if (!organizationId) {
+                const created = await startOrganization(name);
+                organizationId = created?.organization_id ?? null;
+                if (!organizationId) throw new Error('Could not create your company account.');
+                setCreatedOrgId(organizationId);
+            }
+            await setActiveOrganization(organizationId);
+
+            const { subscriptionStatus, requiredAction } = await subscribeWithCard({
+                stripe,
+                card,
+                email: user?.email || '',
+                name: user?.displayName,
+                plan: selectedPlan,
+                organizationId,
+                getToken: async () => (await getAuth().currentUser?.getIdToken()) || '',
+            });
+
+            posthog.capture('signup_completed', {
+                userId: user?.uid,
+                plan: selectedPlan,
+                subscriptionStatus,
+                requiredAction,
+            });
+
+            // Entitlement lives on the organization and /chat is gated on it,
+            // so resolve it before navigating or the guard sends them back.
+            await fetchSubscriptionStatus();
+            navigate('/chat', { replace: true });
+        } catch (err) {
+            // Deliberately stays on this screen with the company created. The
+            // organization is theirs either way, and settings can take the card
+            // later; throwing it away because a card failed would mean typing
+            // the name again.
+            addToast(err instanceof Error ? err.message : 'Something went wrong', 'error');
         } finally {
             setIsWorking(false);
         }
-    }, [startOrganization, finish, addToast]);
+    }, [
+        stripe, elements, companyName, selectedPlan, user, createdOrgId,
+        startOrganization, setActiveOrganization, fetchSubscriptionStatus, navigate, addToast,
+    ]);
 
     const signUpWithGoogle = useCallback(async () => {
         setIsWorking(true);
         try {
-            // The auth listener does the registering, reading this intent when
-            // Firebase reports the account.
-            //
-            // It used to POST here as well, immediately after the popup closed,
-            // so one click sent two signup requests at once. Each asked whether
-            // this person already owned an organization, both asked before
-            // either had inserted its membership row, and both created one. Two
-            // companies from a single sign-up, with the subscription landing on
-            // whichever the person happened to be standing in afterwards.
-            //
-            // The database refuses a second owned organization now, so this is
-            // no longer the thing holding the rule up. It is still one request
-            // rather than two, because the second never did anything the first
-            // was not already doing.
-            sessionStorage.setItem('auth_intent', 'signup');
+            // Note what is NOT set here: auth_intent. It used to be 'signup',
+            // which made the sign-in listener create the organization the moment
+            // Firebase reported the account, named after the email prefix,
+            // before anybody had been asked what the company is called. The
+            // listener now registers the user and stops, and the form below
+            // creates the organization with the name they chose.
             await signInWithPopup(getAuth(), new GoogleAuthProvider());
-            // The listener resolves the organization; entering it and landing
-            // on billing is the same as for somebody already signed in.
-            await finish(null);
         } catch (e) {
             addToast(e instanceof Error ? e.message : 'Could not sign up', 'error');
         } finally {
             setIsWorking(false);
         }
-    }, [finish, addToast]);
+    }, [addToast]);
 
     return (
         <div className={`auth-page ${darkMode ? 'dark-mode' : ''}`}>
-            <div className="auth-card">
+            <div className={`auth-card ${user && !owned ? 'auth-card-wide' : ''}`}>
                 <h1 className="auth-title">Syntext</h1>
                 <p className="auth-sub">
                     {owned
                         ? 'You already have a company account.'
-                        : 'Start a company account. You will pick a plan and add a card.'}
+                        : 'Name your company, pick a plan, and you are in.'}
                 </p>
 
                 {user && owned === undefined ? (
@@ -190,18 +235,57 @@ const SignUp: React.FC = () => {
                         </p>
                     </>
                 ) : user ? (
-                    <>
+                    // Naming the company and paying for it, on one screen.
+                    // These were two steps with a redirect between them, and the
+                    // company was named for the customer before they were asked.
+                    <form onSubmit={createAndSubscribe}>
                         <p className="auth-hint">
                             Signed in as {user.email}. This creates a company account you own,
                             separate from any you have been invited to.
                         </p>
-                        <Button
-                            className="w-full"
-                            onClick={signUpWithCurrentAccount}
-                            disabled={isWorking}
-                        >
+
+                        <label className="auth-field">
+                            <span className="auth-field-label">Company name</span>
+                            <input
+                                type="text"
+                                className="auth-input"
+                                value={companyName}
+                                onChange={(e) => setCompanyName(e.target.value)}
+                                placeholder="Northgate Dental"
+                                maxLength={100}
+                                autoFocus
+                                required
+                                disabled={createdOrgId !== null}
+                            />
+                        </label>
+                        <p className="auth-hint auth-hint-quiet">
+                            {createdOrgId !== null
+                                ? 'Your company is created. Add a card to finish, or rename it later in settings.'
+                                : 'This is what your team sees, and what your invites say. You can change it later.'}
+                        </p>
+
+                        <PlanChoices plans={plans} selected={selectedPlan} onSelect={setSelectedPlan} />
+
+                        <CardElement
+                            options={{
+                                style: {
+                                    base: {
+                                        color: darkMode ? '#ffffff' : '#000000',
+                                        backgroundColor: darkMode ? '#333' : '#ffffff',
+                                        '::placeholder': { color: darkMode ? '#bbbbbb' : '#888888' },
+                                    },
+                                },
+                            }}
+                        />
+
+                        <Button className="w-full" type="submit" disabled={isWorking || !plans.length}>
                             {isWorking ? 'Setting up...' : 'Create my company account'}
                         </Button>
+                        <p className="billing-note">
+                            Billed monthly. Seats beyond the included allowance are added to your
+                            next invoice as you invite people, and removed as soon as you remove
+                            them.
+                        </p>
                         <p className="auth-hint auth-hint-quiet">
                             <button
                                 type="button"
@@ -211,7 +295,7 @@ const SignUp: React.FC = () => {
                                 Back to the app
                             </button>
                         </p>
-                    </>
+                    </form>
                 ) : (
                     <>
                         <Button

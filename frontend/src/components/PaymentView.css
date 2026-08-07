@@ -16,7 +16,11 @@
     margin-bottom: 12px;
 }
 
-.PaymentView .StripeElement {
+/* Also the signup form, which takes a card on the same screen as the company
+   name. Scoping this to .PaymentView alone left the card field on signup with
+   no border and no padding: mounted, focusable, and invisible. */
+.PaymentView .StripeElement,
+.auth-card .StripeElement {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--border);
@@ -26,7 +30,8 @@
     transition: border-color 0.15s;
 }
 
-.PaymentView .StripeElement--focus {
+.PaymentView .StripeElement--focus,
+.auth-card .StripeElement--focus {
     border-color: var(--text-secondary);
 }
 

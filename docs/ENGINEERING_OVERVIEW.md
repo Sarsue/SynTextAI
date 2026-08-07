@@ -871,14 +871,8 @@ means accept, sign in, and land in the company that invited you, never being
 offered one of your own; an owner can remove a member; a member can delete their
 account freely; an owner must cancel the subscription before deleting theirs.
 
-Everything except the first is built, including role and reach chosen at invite
-time (2026-08-03). What remains is the sign-up screen itself: naming the company
-and paying for it as one flow from the home page, instead of a company named
-after the email prefix followed by a redirect to settings.
-
-Worth doing before real marketing spend, not before the next deploy: the current
-flow works and is honest, it just asks a customer to understand more than it
-should.
+**Closed 2026-08-07.** All of it is built. The sign-up screen now names the
+company and pays for it in one submit; see "Recent changes".
 
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
@@ -1084,6 +1078,56 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-07 (signup names the company and pays for it, on one screen):**
+  Closes Tier 2 item 3, which was held for "before real marketing spend". That
+  condition became true this week.
+
+  **What it was.** Pressing sign up parked `auth_intent=signup`, and the
+  sign-in listener created the organization the moment Firebase reported the
+  account, named `email.split("@")[0] + "'s Organization"`. Then a redirect to
+  settings to pay. So becoming a customer happened on two screens, and the
+  company arrived already named something they never chose but their colleagues
+  would see in the chooser and in every invite email.
+
+  **What it is.** One form: company name, plan, card, one submit. It creates the
+  organization with the chosen name, subscribes it, handles a 3D Secure
+  challenge if the card needs one, and lands in `/chat`. The listener no longer
+  creates anything: `auth_intent` is simply not set on this path, so it
+  registers the user and stops.
+
+  **`POST /users` takes an optional `company_name`.** Optional because the same
+  endpoint is called by the sign-in listener with nothing to say, and the
+  derived name stays as the fallback so a blank field cannot stop somebody
+  buying. `SignUpRequest` is defined at module level, not between the decorator
+  and the handler, which registers the route against the model and crash-loops
+  the app on boot; that has happened here once already.
+
+  **Two things extracted rather than copied.** `services/subscribe.ts` holds the
+  subscribe-and-confirm sequence, because two screens now take a card and the
+  awkward part is 3D Secure: four steps, two failure modes, and a copy on each
+  screen would drift, with the untested screen drifting first and the symptom
+  being a customer told their card was declined when it was not.
+  `components/PlanPicker.tsx` holds the prices, because two copies eventually
+  advertise two different numbers. `PaymentView` now uses both and got shorter.
+
+  **A retry after a declined card would have lied.** The organization is created
+  before the charge, and an account owns exactly one company, so posting the
+  name again returns the existing organization unchanged and an edited name
+  would be silently ignored. The screen now remembers the id, skips creation on
+  the retry, disables the name field and says the company already exists.
+
+  **Found by driving it:** the card field mounted with no border or padding and
+  was invisible, because `PaymentView.css` scoped `.StripeElement` under
+  `.PaymentView` and signup is not inside it. Only a screenshot showed this;
+  every type check passed.
+
+  Verified end to end against Stripe test mode on both paths: signup created
+  "Northgate Dental Group" (the typed name, not the derived one), active on
+  starter, landing in `/chat`; the settings path still subscribes after the
+  refactor; and `POST /users?intent=signup` with no body at all still produces
+  the derived name. 86 tests pass, tsc clean, test data removed from the
+  database, Stripe and Firebase.
 
 - **2026-08-07 (the second John Smith could not sign up):** Found while testing
   the 3D Secure work, not looked for. Two throwaway test accounts happened to
