@@ -36,7 +36,38 @@ CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
 #
 # A per-document cap was tried here to stop a 98-page handbook taking most of
 # the slots, and lost at every top_k, so there is none: room, not rationing.
-RETRIEVAL_TOP_K = 25
+# How many chunks reach the model. 25 was chosen when a chunk was a whole page;
+# chunks are now about 2.4 times smaller, so the same number covered eleven
+# pages instead of twenty-five and the retrieval budget had been cut by more
+# than half without anyone deciding that.
+#
+# Swept against the pages the benchmark knows are correct, with no model in the
+# loop:
+#
+#     top_k   single 17   multi 10   all 27   approx tokens
+#        25          17          6       23           7,750
+#        40          17          8       25          12,400
+#        60          17          8       25          18,600
+#       100          17          8       25          31,000
+#
+# 40 is the knee for recall: it buys everything 100 does. So it was tried, and
+# it made the answers worse:
+#
+#     top_k   retrieval recall   citations (3 runs)
+#        25             23/27    19.0 (18-21)
+#        40             25/27    17.7 (16-19)
+#
+# Two more questions arrived with every source they needed, and fewer were
+# answered correctly. That is the fourth experiment in a row to find this
+# model doing worse as context grows: eight passages beat twenty, one
+# retrieval beat three, the evidence selector's extra stage lost, and now
+# better recall loses.
+#
+# So recall is not the binding constraint and buying more of it costs
+# something. Twenty-five stays. The six questions that arrive with correct
+# evidence and are still answered wrong are not failing for want of retrieval,
+# and no retrieval setting will fix them.
+RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
 
 # How many times one question may retrieve, in total.
 #
