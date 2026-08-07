@@ -8,7 +8,7 @@ from tiktoken import get_encoding
 import json
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import timedelta
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, quote
 
 
 
@@ -57,8 +57,20 @@ def sanitize_extracted_text(text: Optional[str]) -> str:
 
 
 def canonical_gcs_url(object_path: str) -> str:
-    """Stable, unauthenticated-but-unreadable identity for a stored object."""
-    return f"{GCS_PUBLIC_HOST}/{bucket_name}/{object_path}"
+    """Stable, unauthenticated-but-unreadable identity for a stored object.
+
+    The path is percent-encoded. It was interpolated raw, so a document called
+    "Employee Handbook 2026.pdf" produced a URL with literal spaces in it, and a
+    citation to it is written into the answer as markdown. A space inside
+    [text](url) ends the URL, so the link truncated at the first word and landed
+    nowhere. Customer file names have spaces in them constantly; this was not an
+    edge case, it was most of them.
+
+    safe="/" keeps the path separators readable and encodes everything else,
+    including the space, the hash and the question mark that would otherwise be
+    read as a fragment or a query.
+    """
+    return f"{GCS_PUBLIC_HOST}/{bucket_name}/{quote(object_path, safe='/')}"
 
 
 def object_path_from_url(file_url: str) -> Optional[str]:

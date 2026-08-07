@@ -538,14 +538,14 @@ class AsyncFileRepository(AsyncBaseRepository):
                     txt AS (
                       SELECT c.id AS chunk_id,
                              ROW_NUMBER() OVER (
-                               ORDER BY ts_rank_cd(COALESCE(c.tsv, s.tsv), q.keywords, 32) DESC
+                               ORDER BY ts_rank_cd(c.tsv, q.keywords, 32) DESC
                              ) AS rank
                       FROM segments s
                       JOIN chunks c ON c.segment_id = s.id
                       JOIN files f ON f.id = s.file_id
                       CROSS JOIN query q
-                      WHERE """ + where_sql + """ AND COALESCE(c.tsv, s.tsv) @@ q.keywords
-                      ORDER BY ts_rank_cd(COALESCE(c.tsv, s.tsv), q.keywords, 32) DESC
+                      WHERE """ + where_sql + """ AND c.tsv @@ q.keywords
+                      ORDER BY ts_rank_cd(c.tsv, q.keywords, 32) DESC
                       LIMIT :candidates
                     ),
                     -- Reciprocal rank fusion. Ranks are comparable across the
@@ -574,11 +574,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                       c.id AS id,
                       c.file_id AS file_id,
                       c.segment_id AS segment_id,
-                      -- The chunk's own text, falling back to the page for
-                      -- rows written before chunks had any. Without the
-                      -- fallback every document uploaded before chunk-level
-                      -- retrieval would return empty passages.
-                      COALESCE(NULLIF(c.content, ''), s.content, '') AS content,
+                      COALESCE(c.content, '') AS content,
                       f.file_name AS file_name,
                       f.file_url AS file_url,
                       s.page_number AS page_number,

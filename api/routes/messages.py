@@ -1,6 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Request
 from typing import List
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
@@ -51,10 +51,6 @@ class MessageBody(BaseModel):
     to any third party the page later talks to. For a dental or legal practice
     the question is usually the most sensitive string in the request.
 
-    Accepted from the body or, still, from the query string, so a browser tab
-    left open on the old bundle keeps working through the deploy. The body wins
-    when both are present, and the query fallback should come out once no
-    client uses it.
     """
     message: str
     language: str = "English"
@@ -70,26 +66,17 @@ class MessageBody(BaseModel):
 async def create_message(
     request: Request,
     background_tasks: BackgroundTasks,
-    body: MessageBody | None = None,
-    message: str | None = Query(None, description="Deprecated: send in the body"),
-    language: str = Query("English", description="Language of the message"),
-    comprehension_level: str = Query("beginner", description="Comprehension level of the message"),
-    history_id: int | None = Query(None, description="ID of the chat history"),
-    workspace_id: int | None = Query(None, description="Optional workspace ID to scope retrieval"),
-    file_id: int | None = Query(None, description="Optional file ID to scope retrieval"),
+    body: MessageBody,
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
-        # Body first, query second, so the new client stops logging questions
-        # immediately and the old one keeps working until it is gone.
-        if body is not None:
-            message = body.message
-            language = body.language
-            comprehension_level = body.comprehension_level
-            history_id = body.history_id if body.history_id is not None else history_id
-            workspace_id = body.workspace_id if body.workspace_id is not None else workspace_id
-            file_id = body.file_id if body.file_id is not None else file_id
+        message = body.message
+        language = body.language
+        comprehension_level = body.comprehension_level
+        history_id = body.history_id
+        workspace_id = body.workspace_id
+        file_id = body.file_id
         if not message or history_id is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
