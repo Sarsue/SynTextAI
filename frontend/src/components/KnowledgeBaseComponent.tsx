@@ -34,7 +34,7 @@ import {
     SelectItem,
 } from '@/components/ui/select';
 
-import { useUserContext } from '../UserContext';
+import { useUserContext , ALL_WORKSPACES } from '../UserContext';
 
 
 interface KnowledgeBaseComponentProps {
@@ -96,7 +96,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
     // accessChangedAt is bumped when an owner changes what this person may
     // see, so documents in a revoked workspace disappear without a reload.
     useEffect(() => {
-        loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId);
+        loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
     }, [loadUserFiles, filePagination.page, filePagination.pageSize, currentWorkspaceId, accessChangedAt]);
 
     // Fetch workspaces for move menu
@@ -159,7 +159,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
             if (response.ok) {
                 addToast('File moved successfully', 'success');
                 // Reload files to reflect the change
-                await loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId);
+                await loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
             } else {
                 const data = await response.json();
                 addToast(data.detail || 'Failed to move file', 'error');
@@ -178,11 +178,11 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
 
 
     const handlePageChange = useCallback((newPage: number) => {
-        loadUserFiles(newPage, filePagination.pageSize, currentWorkspaceId);
+        loadUserFiles(newPage, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
     }, [loadUserFiles, filePagination.pageSize, currentWorkspaceId]);
 
     const handlePageSizeChange = useCallback((newSize: number) => {
-        loadUserFiles(1, newSize, currentWorkspaceId);
+        loadUserFiles(1, newSize, currentWorkspaceId ?? ALL_WORKSPACES);
     }, [loadUserFiles, currentWorkspaceId]);
 
     const handleFileClick = (file: UploadedFile) => {
@@ -204,12 +204,12 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
             [file.id]: { isDeleting: true }
         }));
 
-        deleteFileFromContext(file.id, currentWorkspaceId);
+        deleteFileFromContext(file.id, currentWorkspaceId ?? ALL_WORKSPACES);
     };
 
     const handleNextPage = () => {
         if (filePagination.page * filePagination.pageSize < filePagination.totalItems) {
-            loadUserFiles(filePagination.page + 1, filePagination.pageSize, currentWorkspaceId);
+            loadUserFiles(filePagination.page + 1, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
         }
     };
 
