@@ -116,12 +116,16 @@ api/
   models/           SQLAlchemy ORM models (orm_models.py) + DB session setup
   agents/           IngestionAgent, QueryAgent — the actual AI work (see "Async jobs"
                      below)
-  rag/              Retrieval pipeline: HybridSearchEngine (semantic + keyword,
-                     weighted), CrossEncoderReRanker, SmartChunkSelector, all wired
-                     together via RAGFactory. Built behind interfaces (interfaces.py) —
-                     swap an implementation without touching callers. This is the
-                     entirety of "AI search" — there is no separate search surface,
-                     it's the same engine chat uses (see "Known gaps").
+  rag/              Two modules: SmartChunkSelector (fits passages to a token
+                     budget) and DefaultQueryProcessor (rewrites and expands a
+                     question, and splits it into information needs).
+                     HybridSearchEngine, CrossEncoderReRanker, RAGFactory and
+                     interfaces.py were deleted on 2026-08-05. The reranker
+                     re-embedded content[:600] with the same bi-encoder that
+                     produced the score it claimed to improve, and was deleting
+                     correct pages; the rest was dependency-injection scaffolding
+                     for two concrete classes with no alternates. Retrieval now
+                     lives in SQL, in async_file_repository.hybrid_search.
   workers/          worker.py — polls the job queue and dispatches to agents
   workflows/        Internal job orchestration (tasks.py) — ingest/query dispatch, NOT
                      customer-facing workflow automation (see "Known gaps").
@@ -173,29 +177,99 @@ by `user_id` in the `WHERE` clause). Some of the learning-content endpoints in
 
 ## How a request actually flows
 
-**Chat query:**
-1. Frontend sends `POST /api/v1/messages` with `history_id`, optional `workspace_id` /
-   `file_id`, and the message text, with a Firebase ID token in the `Authorization`
-   header.
-2. Route re-derives the user from the token, verifies the caller owns `history_id` /
-   `workspace_id` / `file_id`, saves the user message, and enqueues an `AgentRun` row
-   (`run_type="answer_query"`) rather than answering inline.
-3. The worker process (`worker.py`) polls `agent_runs` every 30s (`POLL_INTERVAL`),
-   picks up queued rows (locked via `locked_by`/`locked_at` to avoid double-processing),
-   and dispatches by `run_type` to the right agent.
-4. `QueryAgent` runs retrieval (RAGFactory → HybridSearchEngine → reranker) and calls
-   the LLM, writes the result back to `AgentRun.result`, and the frontend gets notified
-   over the websocket connection (`websocket_manager.py`) rather than polling.
+Rewritten 2026-08-07. The previous version described a RAGFactory, a
+HybridSearchEngine and a reranker, none of which exist any more. Read this one
+against the code before trusting it; a stale flow diagram is worse than none,
+because it is believed.
 
-**File upload / ingestion:** same job-queue pattern — `save_file` in `files.py` uploads
-to GCS, creates a `File` row, and enqueues `run_type="ingest_file"`, which
-`IngestionAgent` picks up: extract → chunk → embed (Voyage AI) → store. Extraction is
-delegated to `FileProcessingFactory` (`api/processors/factory.py`), which picks
-`PDFProcessor` or `DocxProcessor` by file extension.
+### Ingesting a document, once
 
-This decouples the request/response cycle from LLM latency — the API responds fast,
-the actual AI work happens async in the worker. Worth understanding before changing
-how any endpoint that touches files or chat behaves.
+```
+upload -> GCS
+       -> fitz: text per page, plus the table of contents -> files.outline
+       -> chunk_text: 400 tokens, 20% overlap
+       -> embed each chunk (Voyage AI, voyage-3.5-lite, 1024-dim)
+       -> ONE segment per page      the citation unit, a page is what a reader opens
+          N chunks beneath it       the retrieval unit, what gets embedded and searched
+       -> zero chunks means the file is marked FAILED, not processed
+```
+
+`chunks.segment_id` is what ties a retrieved chunk back to the page it is cited
+as. Documents ingested before 2026-08-07 have a null `chunks.content` and
+retrieval falls back to the segment's text for them, so they behave as
+page-sized until re-uploaded.
+
+### Asking a question
+
+```
+POST /api/v1/messages          the question is in the BODY, never the URL
+      |
+      v
+route authorizes, saves the user message, enqueues an AgentRun, returns 201
+      |
+      v
+worker polls agent_runs, dispatches by run_type, runs QueryAgent
+```
+
+The API answers immediately and the model work happens in the worker, so nothing
+is blocked on inference. The browser is told over the websocket rather than
+polling.
+
+### The graph
+
+```
+process_query -> retrieve -> dedupe_and_normalize -> check_coverage
+                    ^                                     |
+                    +-------- gap, under the cap ---------+
+                                                          v
+                                       select_context -> generate -> END
+```
+
+**retrieve** is one SQL statement holding two indexed searches, fused:
+
+```sql
+vec    top 100 by  embedding <=> query      -- HNSW, cosine
+txt    top 100 by  ts_rank_cd(tsv, query)   -- GIN, english
+fused  SUM(weight / (60 + rank))            -- reciprocal rank, 0.7 vector / 0.3 keyword
+       -> top 25
+```
+
+Ranks are fused rather than scores because a cosine similarity and a ts_rank_cd
+share no scale, and the weighted blend of them that this replaced was arithmetic
+on incomparable units.
+
+**check_coverage** decides by retrieval, not by judgement: a need counts as
+covered when a search aimed at it contributed passages the set did not already
+hold. No model is asked. With `MAX_RETRIEVALS` at 1 the loop never fires and this
+is a straight line; see the entry on retrieval per information need for when
+raising it is worth it.
+
+**generate** is a single model call. The grounding contract comes first and the
+citation mechanics after, and the model emits `[Segment N]` rather than writing
+a file name, because an index is a token it cannot get wrong.
+
+### On the way out
+
+```
+citations validated   a citation to a segment the model was not shown is dropped
+links filtered        only hosts we serve documents from stay clickable
+stored, websocket     the browser is notified
+```
+
+### The shape of it
+
+One path. Retrieval happens in SQL rather than in Python. The model has one job,
+which is to read passages and write an answer citing them, and every claim it
+makes about that is checked in code afterwards: which segments it cited, and
+where it is allowed to link. The loop exists in the graph and is capped, so today
+it is a line rather than a cycle.
+
+Settings in force:
+
+```
+openai-gpt-oss-20b   temperature 0.1   window 120k
+MAX_RETRIEVALS 1     RETRIEVAL_TOP_K 25   candidate pool 100   weights 0.7/0.3
+```
 
 ## What's promised vs. what's built
 
