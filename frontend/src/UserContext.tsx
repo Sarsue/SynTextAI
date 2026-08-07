@@ -123,7 +123,7 @@ interface UserContextType {
      * document in the company.
      */
     loadUserFiles: (page: number, pageSize: number, workspaceId: number | null) => Promise<void>;
-    deleteFileFromContext: (fileId: number) => Promise<void>;
+    deleteFileFromContext: (fileId: number, workspaceId?: number | null) => Promise<void>;
     pollFileStatus: () => Promise<void>; // Trigger immediate status check
     authLoading: boolean;
 }
@@ -571,15 +571,19 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, []);
 
-    const deleteFileFromContext = useCallback(async (fileId: number) => {
+    const deleteFileFromContext = useCallback(async (fileId: number, workspaceId: number | null = null) => {
         const url = `/api/v1/files/${fileId}`;
         const response = await _callApiWithTokenInternal(url, 'DELETE');
         if (response?.ok) {
             addToast('File deleted successfully!', 'success');
-            // After deletion, reload the files to get an updated list from the server
-            // No workspace is selected during a refresh triggered from here, so
-            // the organization filter is the correct scope rather than a fallback.
-            await loadUserFiles(filePagination.page, filePagination.pageSize, null);
+            // Reload in the scope the caller was standing in. This passed null,
+            // which falls through to the organization filter, so deleting one
+            // document from a workspace redrew the list with every document in
+            // the company. Same defect as the upload refresh, and the comment
+            // here argued it was correct: "no workspace is selected during a
+            // refresh triggered from here". A workspace is selected. The
+            // context does not hold it, so the caller has to say.
+            await loadUserFiles(filePagination.page, filePagination.pageSize, workspaceId);
         } else {
             addToast('Failed to delete file.', 'error');
         }

@@ -204,7 +204,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
             [file.id]: { isDeleting: true }
         }));
 
-        deleteFileFromContext(file.id);
+        deleteFileFromContext(file.id, currentWorkspaceId);
     };
 
     const handleNextPage = () => {

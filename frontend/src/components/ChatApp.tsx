@@ -842,13 +842,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const handleDeleteFile = useCallback(async (fileId: number) => {
         trackAction(AnalyticsEvents.FILE_DELETE_INITIATED, 'file_management', `file_id: ${fileId}`);
         try {
-            await deleteFileFromContext(fileId);
+            await deleteFileFromContext(fileId, currentWorkspaceId ?? null);
             addToast('File deleted successfully!', 'success');
         } catch (error) {
             addToast('Failed to delete file.', 'error');
             console.error('Error deleting file:', error);
         }
-    }, [deleteFileFromContext, addToast]);
+    }, [deleteFileFromContext, addToast, currentWorkspaceId]);
 
     const handleFileClick = useCallback(async (file: UploadedFile) => {
         trackAction(AnalyticsEvents.FILE_VIEW_CLICKED, 'file_management', `file_id: ${file.id}, name: ${file.file_name}, type: ${file.file_type}`);
