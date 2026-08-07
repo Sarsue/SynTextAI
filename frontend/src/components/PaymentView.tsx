@@ -30,7 +30,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     const stripe = useStripe();
     const elements = useElements();
     const [email, setEmail] = useState(user?.email || '');
-    const [clientSecret, setClientSecret] = useState('');
     const [isRequestPending, setIsRequestPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [plans, setPlans] = useState<PlanOption[]>([]);
@@ -66,8 +65,13 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     // Who still has to pay. Anything that is not a live subscription lands on
     // the subscribe form, including a status that has not loaded yet, because
     // the alternative is a screen with no way forward on it.
+    // 'incomplete' belongs here, not in the card-update branch below. It means
+    // Stripe accepted the subscription and never got paid, which for us is
+    // almost always a 3D Secure challenge the cardholder abandoned. They do not
+    // need to replace a working card; they need to buy again and finish the
+    // popup this time. Stripe expires these on its own after 23 hours.
     const _status = (subscriptionData?.subscription_status || '').toLowerCase();
-    const needsSubscription = ['', 'none', 'canceled', 'cancelled', 'deleted', 'incomplete_expired', 'unpaid'].includes(_status);
+    const needsSubscription = ['', 'none', 'canceled', 'cancelled', 'deleted', 'incomplete', 'incomplete_expired'].includes(_status);
 
     // Validate Stripe and CardElement
     const validateStripeAndCard = () => {
@@ -145,18 +149,57 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             }
 
             const data = await response.json();
-            console.log("Subscription successful:", data);
-            
+
+            // A card that needs 3D Secure does not decline. Stripe accepts the
+            // subscription, leaves it 'incomplete', and waits for the cardholder
+            // to pass their bank's challenge. Treating that as success sends
+            // somebody to /chat with no entitlement; treating it as failure
+            // tells them their card was bad and invites them to re-enter the
+            // same good card. Neither is true. Finish the challenge instead.
+            let finalStatus: string = data.subscription_status;
+            if (data.requires_action && data.client_secret) {
+                posthog.capture('subscription_requires_action', { userId: user?.uid, plan: selectedPlan });
+
+                const { error: actionError } = await stripe.confirmCardPayment(data.client_secret);
+                if (actionError) {
+                    throw new Error(
+                        actionError.message ||
+                        'Your bank did not confirm the payment. Please try again or use another card.'
+                    );
+                }
+
+                // Ask the server to re-read Stripe rather than reading our own
+                // database, which the confirming webhook has probably not
+                // reached yet. See the /confirm route for why.
+                const confirmResponse = await fetch('/api/v1/subscriptions/confirm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${await user?.getIdToken()}`,
+                    },
+                    body: JSON.stringify({ organization_id: activeOrganizationId }),
+                });
+                if (!confirmResponse.ok) {
+                    throw new Error('Your payment went through, but we could not confirm it. Please refresh in a moment.');
+                }
+                finalStatus = (await confirmResponse.json()).subscription_status;
+            }
+
+            if (!['active', 'trialing'].includes((finalStatus || '').toLowerCase())) {
+                throw new Error('Your payment could not be completed. Please try another card.');
+            }
+
             // Track successful subscription
             posthog.capture('subscription_success', {
                 userId: user?.uid,
                 email: email,
-                subscriptionStatus: data.subscription_status,
-                plan: selectedPlan
+                subscriptionStatus: finalStatus,
+                plan: selectedPlan,
+                requiredAction: Boolean(data.requires_action)
             });
 
-            setSubscriptionData(data);
-            setSubscriptionStatus(data.subscription_status);
+            setSubscriptionData({ ...data, subscription_status: finalStatus });
+            setSubscriptionStatus(finalStatus);
             // Entitlement lives on the organization, and /chat is gated on it.
             // Setting local state alone left the organization looking unpaid, so
             // navigating bounced straight back here. Re-resolve before leaving.
@@ -193,7 +236,20 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         setIsRequestPending(true);
         setError(null);
         try {
-            const { setupIntent, error: stripeError } = await stripe.confirmCardSetup(clientSecret, {
+            // Fetched here rather than held in state. A SetupIntent secret is
+            // per-attempt, so a value fetched when the screen mounted is the
+            // wrong one by the second attempt.
+            const token = await user?.getIdToken();
+            const intentResponse = await fetch('/api/v1/subscriptions/setup-intent', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!intentResponse.ok) {
+                throw new Error('Could not start the card update. Please try again.');
+            }
+            const { client_secret: setupSecret } = await intentResponse.json();
+
+            const { setupIntent, error: stripeError } = await stripe.confirmCardSetup(setupSecret, {
                 payment_method: {
                     card: cardElement,
                     billing_details: { email },
@@ -204,14 +260,16 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 throw new Error(stripeError.message || 'Failed to update payment method.');
             }
 
-            console.log("Sending update payment method request...");
+            // The backend reads this as `payment_method`. It was sent as
+            // `payment_method_id`, which FastAPI rejected as a 422 before the
+            // handler ran, so this request had never once succeeded.
             const response = await fetch('/api/v1/subscriptions/update-payment', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    Authorization: `Bearer ${await user?.getIdToken()}`,
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ payment_method_id: setupIntent?.payment_method }),
+                body: JSON.stringify({ payment_method: setupIntent?.payment_method }),
             });
 
             if (!response.ok) {
@@ -296,11 +354,12 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             setIsRequestPending(false);
         }
     };
-    console.log("Subscription status:", subscriptionData?.subscription_status);
-
-    // Determine if the card update is required (expired cards, etc.)
-    const isCardUpdateRequired = subscriptionData?.subscription_status &&
-        !['none', 'active', 'deleted', 'canceled', 'trialing'].includes(subscriptionData.subscription_status);
+    // Named states only. This was written as "anything that is not one of five
+    // known-good statuses", which quietly swept up every status nobody had
+    // thought about — including 'incomplete', where the card is fine and the
+    // customer merely closed their bank's popup. They were told their card had
+    // expired, so they entered the same card and got the same message.
+    const isCardUpdateRequired = ['past_due', 'unpaid'].includes(_status);
 
     return (
         <div className={`PaymentView ${darkMode ? 'dark-mode' : ''}`}>
