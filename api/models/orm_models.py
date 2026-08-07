@@ -19,7 +19,11 @@ class User(Base):
     
     id = Column(Integer, primary_key=True)
     email = Column(String, nullable=False, unique=True, index=True)
-    username = Column(String, nullable=False, unique=True)
+    # Identity is the email. This is the display name off the sign-in token
+    # ("John Smith"), shown to humans and never used to look anybody up, so it
+    # must not be unique: it was, and the second John Smith to sign up got a
+    # 500 and no account. See migration 20260807_username_not_unique.
+    username = Column(String, nullable=False)
     
     # Relationships
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
