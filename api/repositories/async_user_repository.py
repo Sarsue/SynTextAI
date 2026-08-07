@@ -32,6 +32,7 @@ class AsyncUserRepository(AsyncBaseRepository):
         Returns:
             Optional[int]: The ID of the newly created user, or None if creation failed
         """
+        raced = False
         async with self.get_async_session() as session:
             try:
                 user_orm = UserORM(email=email, username=username)
@@ -41,14 +42,39 @@ class AsyncUserRepository(AsyncBaseRepository):
                 await session.commit()
                 logger.info(f"Successfully added user {username} with email {email}")
                 return user_id
-            except IntegrityError:
+            except IntegrityError as e:
                 await session.rollback()
-                logger.error(f"User with email '{email}' or username '{username}' already exists.")
-                return None
+                # Say which constraint, not "email or username". That message
+                # named two possibilities and committed to neither, so the one
+                # bug it was actually reporting stayed invisible: username
+                # carried a UNIQUE constraint it had no business carrying, and
+                # the second person with a given display name could not sign up
+                # at all. Removed in migration 20260807_username_not_unique.
+                constraint = getattr(getattr(e, "orig", None), "constraint_name", None)
+                logger.error(
+                    "Could not add user %s: violated %s",
+                    email, constraint or "an unnamed constraint",
+                )
+                raced = True
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Error adding user {username}: {e}", exc_info=True)
                 return None
+
+        # Outside the block above, deliberately: this opens its own session, and
+        # taking a second connection while still holding the first is how a
+        # pool runs dry under the exact burst that causes the race.
+        #
+        # Two requests for the same new account can race between the caller's
+        # existence check and the insert, and the loser should not be told
+        # signup failed when the account it wanted now exists. Same reasoning,
+        # and the same shape, as _start_organization.
+        if raced:
+            existing = await self.get_user_id_from_email(email)
+            if existing:
+                logger.info("User %s already existed, created concurrently", email)
+                return existing
+        return None
 
     async def get_user_id_from_email(self, email: str) -> Optional[int]:
         """Get user ID from email address.

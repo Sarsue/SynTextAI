@@ -1085,6 +1085,54 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-07 (the second John Smith could not sign up):** Found while testing
+  the 3D Secure work, not looked for. Two throwaway test accounts happened to
+  share a display name and the second signup returned 500.
+
+  **`users.username` is not a username.** Nobody chooses it and nobody types it.
+  It is the `name` claim off the Google sign-in token, a display name, and it
+  carried a UNIQUE constraint. So the second person named John Smith to ever
+  sign up could not. `add_user` hit the constraint, returned None, and
+  `POST /users` turned that into `500 Could not create user.` They saw a generic
+  error, got no account, and no retry helped, because the name comes from their
+  Google profile. Silent, permanent for that person, and more likely with every
+  signup. Live in production the whole time; the cold email campaign starting
+  this week is what made it urgent.
+
+  Reproduced against the real table before changing anything:
+
+      add_user('alice.smith@…', 'John Smith')  -> 7395
+      add_user('bob.smith@…',   'John Smith')  -> None
+
+  **The constraint protected nothing.** Identity is the email, which has its own
+  unique index and is what `get_user_id_from_email` uses to turn a request into
+  a user. `username` is read in exactly one query in the entire codebase, the
+  "who would be stranded" list in `async_workspace_repository`, as a label for a
+  human, already written `COALESCE(NULLIF(u.username, ''), u.email)` because it
+  was never trusted to be meaningful. Dropped in migration
+  `20260807_username_not_unique`. NOT NULL stays: signup substitutes the email
+  when the token carries no name, so the column is always populated.
+
+  **The downgrade will fail if two people now share a name, deliberately.**
+  There is no safe automatic way back, and deleting one of two real accounts to
+  restore a cosmetic index would be worse than a failed downgrade.
+
+  **Two things fixed alongside, because they are why it stayed invisible.** The
+  log line said "User with email X or username Y already exists", naming two
+  possibilities and committing to neither, so the message never pointed at the
+  constraint that was actually firing; it now names the violated constraint. And
+  `add_user` returned None for every IntegrityError, including the race where
+  two requests for the same new account cross between the caller's existence
+  check and the insert; it now re-reads by email and returns the id the winner
+  created, the same shape `_start_organization` already uses. That re-read is
+  deliberately outside the session block, since taking a second connection while
+  holding the first is how the pool runs dry under the exact burst that causes
+  the race.
+
+  Verified end to end through the real route: two Firebase users sharing the
+  display name "John Smith" both signed up, 201, separate users and separate
+  organizations. 86 tests pass, single alembic head.
+
 - **2026-08-07 (3D Secure: the cards that could never pay):** Closes the last
   open Tier 0 item, found in the 2026-07-29 Stripe review and left alone since
   because it needed live test-mode iteration rather than a guess.
@@ -1154,9 +1202,9 @@ answer that with fair-use limits rather than repricing everyone.
   not through it. Worth one manual click-through before this reaches real
   customers.
 
-  **Also noticed, not fixed:** `POST /users?intent=signup` returns 500 "Could not
-  create user." when the display name collides with an existing row, after
-  having already created the user. Pre-existing, unrelated to billing.
+  **Also noticed:** `POST /users?intent=signup` returns 500 "Could not create
+  user." when the display name collides with an existing row. Pre-existing and
+  unrelated to billing, chased down and fixed the same day, see the entry above.
 
 - **2026-08-07 (guardrails: what an uploaded document can reach):** A customer's
   document is untrusted input. Tested rather than assumed, by uploading one.
