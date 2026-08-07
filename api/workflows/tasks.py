@@ -309,54 +309,6 @@ async def run_query_pipeline(
             "error": str(agent_error),
         }
 
-async def process_query_data(
-    message: str,
-    language: str,
-    comprehension_level: str,
-    id: int | None = None,
-    history_id: int | None = None,
-    workspace_id: int | None = None,
-    file_id: int | None = None,
-):
-    """Processes a user query and generates a response using SyntextAgent with enhanced RAG."""
-    if id is None or history_id is None:
-        raise HTTPException(status_code=400, detail="Missing user_id or history_id for query processing")
-    try:
-        # Get conversation history in formatted form
-        accessible_ids = None
-        if workspace_id is None:
-            accessible_ids = await store.workspace_repo.accessible_workspace_ids(id)
-        formatted_history = await store.chat_repo.format_user_chat_history(
-            history_id, id, accessible_workspace_ids=accessible_ids
-        )
-
-        result = await run_query_pipeline(
-            user_id=id,
-            message=message,
-            language=language,
-            comprehension_level=comprehension_level,
-            formatted_history=formatted_history,
-            workspace_id=workspace_id,
-            file_id=file_id,
-        )
-
-        response = result["response"]
-        
-        # Save response and notify user
-        await store.chat_repo.add_message(content=response, sender='bot', user_id=id, chat_history_id=history_id)
-        try:
-            await websocket_manager.send_message(id, "message_received", {"status": "success", "history_id": history_id, "message": response})
-        except Exception as ws_error:
-            logger.warning(f"Failed to send WebSocket notification for successful query processing: {str(ws_error)}")
-    
-    except Exception as e:
-        logger.error(f"Error processing query: {e}")
-        try:
-            await websocket_manager.send_message(id, "message_received", {"status": "error", "error": str(e)})
-        except Exception as ws_error:
-            logger.warning(f"Failed to send WebSocket error notification: {str(ws_error)}")
-        raise HTTPException(status_code=500, detail="Query processing failed")
-
 async def delete_user_task(user_id, user_gc_id: str = None):
     """Deletes a user's account, subscription, and associated files.
 

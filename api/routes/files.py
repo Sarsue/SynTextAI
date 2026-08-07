@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, TypeVar
 from sqlalchemy.orm import Session
 from redis.exceptions import RedisError
 from ..core.utils import (
@@ -18,10 +18,8 @@ import asyncio
 # PRODUCTION: File size limits to prevent OOM and abuse
 MAX_FILE_SIZE_MB = 100  # 100MB max for PDFs
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
-from typing import Dict, List, Optional, TypeVar
 from ..repositories.repository_manager import RepositoryManager
 from fastapi.responses import JSONResponse
-from ..core.dependencies import get_store, authenticate_user
 from ..core.limits import assert_can_create_doc
 from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
@@ -86,19 +84,6 @@ async def authenticate_user(request: Request, store: RepositoryManager = Depends
         logger.exception("Error during user authentication")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication failed")
 
-async def check_ownership(file_id: int, user_id: int, store: RepositoryManager) -> None:
-    """Raise 404 unless file_id exists and belongs to user_id.
-
-    Endpoints keyed off file_id in the URL rely on this to stop one user from
-    reading or writing another user's document by guessing or incrementing the
-    id. Note that reads scoped to a workspace should authorize against the
-    workspace instead, since access follows the tenant rather than the
-    uploader.
-    """
-    file_record = await store.file_repo.get_file_by_id(file_id)
-    if not file_record or file_record.get("user_id") != user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-
 async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
     """Raise 403 unless the caller may add documents to this workspace.
 
@@ -133,7 +118,6 @@ async def save_file(
 ):
     try:
         user_id = user_data["user_id"]
-        user_gc_id = user_data["user_gc_id"]
 
         content_type = request.headers.get("content-type", "")
 

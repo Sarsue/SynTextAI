@@ -364,34 +364,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error summing storage bytes for user {user_id}: {e}", exc_info=True)
                 return 0
 
-    async def count_files_for_workspace(self, workspace_id: int) -> int:
-        """Return the total number of files in a workspace, across all members.
-
-        Free-plan limits apply to the organization, so a shared workspace has one
-        allowance rather than one per member.
-        """
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(func.count(FileORM.id)).where(FileORM.workspace_id == workspace_id)
-                result = await session.execute(stmt)
-                return int(result.scalar() or 0)
-            except Exception as e:
-                logger.error(f"Error counting files for workspace {workspace_id}: {e}", exc_info=True)
-                return 0
-
-    async def total_storage_bytes_for_workspace(self, workspace_id: int) -> int:
-        """Return total recorded storage usage in bytes for a workspace."""
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(func.coalesce(func.sum(FileORM.file_size_bytes), 0)).where(
-                    FileORM.workspace_id == workspace_id
-                )
-                result = await session.execute(stmt)
-                return int(result.scalar() or 0)
-            except Exception as e:
-                logger.error(f"Error summing storage bytes for workspace {workspace_id}: {e}", exc_info=True)
-                return 0
-
     async def delete_file_entry(self, file_id: int) -> bool:
         """Delete a file and all associated data.
 
@@ -643,17 +615,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Could not store outline for file {file_id}: {e}")
                 return False
 
-    async def get_outline(self, file_id: int) -> List[Dict[str, Any]]:
-        async with self.get_async_session() as session:
-            try:
-                row = (await session.execute(
-                    text("SELECT outline FROM files WHERE id = :fid"), {"fid": int(file_id)}
-                )).first()
-                return list(row[0]) if row and row[0] else []
-            except Exception as e:
-                logger.error(f"Could not read outline for file {file_id}: {e}")
-                return []
-
     async def get_file_pages(self, file_id: int) -> List[Dict[str, Any]]:
         """Every page of a document, in order, as extracted.
 
@@ -674,87 +635,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                 ]
             except Exception as e:
                 logger.error(f"Could not read pages for file {file_id}: {e}")
-                return []
-
-    async def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:
-        """Get all segment contents for a specific page of a file.
-
-        Args:
-            file_id: ID of the file
-            page_number: Page number to retrieve segments for
-
-        Returns:
-            List[Dict]: List of segments
-        """
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(SegmentORM).where(
-                    and_(SegmentORM.file_id == file_id, SegmentORM.page_number == page_number)
-                )
-                result = await session.execute(stmt)
-                segments = result.scalars().all()
-
-                result = []
-                for segment in segments:
-                    meta = segment.meta_data or {}
-                    result.append({
-                        'id': segment.id,
-                        'content': segment.content,
-                        'page_number': segment.page_number,
-                        'meta_data': meta
-                    })
-                return result
-            except Exception as e:
-                logger.error(f"Error getting segments for page {page_number}: {e}", exc_info=True)
-                return []
-
-    async def get_segments_for_time_range(
-        self,
-        file_id: int,
-        start_time: float,
-        end_time: Optional[float] = None
-    ) -> List[Dict[str, Any]]:
-        """Get segment contents for a specific time range of a video file.
-
-        Args:
-            file_id: ID of the file
-            start_time: Start time in seconds
-            end_time: End time in seconds (optional)
-
-        Returns:
-            List[Dict]: List of segments within the time range
-        """
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(SegmentORM).where(SegmentORM.file_id == file_id)
-                if end_time:
-                    stmt = stmt.filter(
-                        and_(
-                            SegmentORM.meta_data['start_time'].astext.cast(float) <= end_time,
-                            SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
-                        )
-                    )
-                else:
-                    stmt = stmt.filter(
-                        and_(
-                            SegmentORM.meta_data['start_time'].astext.cast(float) <= start_time,
-                            SegmentORM.meta_data['end_time'].astext.cast(float) >= start_time
-                        )
-                    )
-                result = await session.execute(stmt)
-                segments = result.scalars().all()
-
-                result = []
-                for segment in segments:
-                    meta = segment.meta_data or {}
-                    result.append({
-                        'id': segment.id,
-                        'content': segment.content,
-                        'meta_data': meta
-                    })
-                return result
-            except Exception as e:
-                logger.error(f"Error getting segments for time range: {e}", exc_info=True)
                 return []
 
     async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:

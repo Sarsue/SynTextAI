@@ -320,14 +320,3 @@ async def init_db() -> None:
         raise RuntimeError(f"Database health check failed: {e}")
 
 
-async def close_db() -> None:
-    """Close database connections and clean up resources."""
-    global _engine, _async_session_factory
-
-    if _engine:
-        await _engine.dispose()
-        logger.info("Database engine disposed")
-        _engine = None
-
-    _async_session_factory = None
-    logger.info("Database cleanup complete")

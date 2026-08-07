@@ -912,27 +912,6 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error accepting invite {token}: {e}", exc_info=True)
                 return None
 
-    async def has_pending_invite_for_email(self, email: str) -> bool:
-        """True if this address has an unexpired invite waiting.
-
-        Used at signup to tell "joining a company" apart from "starting one".
-        Reading it from the invite table rather than trusting a client-supplied
-        flag means it cannot be spoofed to dodge creating an organization.
-        """
-        if not email:
-            return False
-        async with self.get_async_session() as session:
-            try:
-                stmt = select(WorkspaceInvite.id).where(
-                    func.lower(WorkspaceInvite.email) == email.strip().lower(),
-                    WorkspaceInvite.status == "pending",
-                    WorkspaceInvite.expires_at > datetime.utcnow(),
-                ).limit(1)
-                return (await session.execute(stmt)).scalar_one_or_none() is not None
-            except Exception as e:
-                logger.error(f"Error checking pending invites for {email}: {e}", exc_info=True)
-                return False
-
     async def list_pending_invites(self, workspace_id: int) -> List[Dict[str, Any]]:
         """Return pending invites for a workspace."""
         async with self.get_async_session() as session:
