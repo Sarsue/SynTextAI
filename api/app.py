@@ -140,10 +140,6 @@ store = RepositoryManager(database_url=DATABASE_URL)
 app.state.store = store
 app.state.websocket_manager = websocket_manager  # ⬅️ Make websocket_manager available in app state
 
-# Dependency to get the store
-def get_store(request: Request):
-    return request.app.state.store
-
 # WebSocket endpoint
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
