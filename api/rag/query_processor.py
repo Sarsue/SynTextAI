@@ -3,6 +3,8 @@ Query processing module for enhancing RAG queries.
 """
 
 import logging
+
+from ..core.log_safety import safe_text
 import re
 from typing import List, Tuple, Optional
 
@@ -173,7 +175,9 @@ Standalone search query:"""
             if not rewritten or len(rewritten.split()) > 16:
                 logger.info(f"Discarding implausible rewrite ({len(rewritten.split())} words), keeping original")
                 return query
-            logger.info(f"Rewrote query: {query!r} -> {rewritten!r}")
+            logger.info(
+                f"Rewrote query: {safe_text(query)} -> {safe_text(rewritten, 'r')}"
+            )
             return rewritten
         except Exception as e:
             logger.error(f"Query reformulation failed: {e}", exc_info=True)

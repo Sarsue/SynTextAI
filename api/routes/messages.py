@@ -1,4 +1,5 @@
 from datetime import datetime
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, BackgroundTasks, Request
 from typing import List
 from ..core.utils import get_user_id
@@ -36,22 +37,65 @@ async def authenticate_user(authorization: str = Header(None), store: Repository
     logger.info(f"Authenticated user_id: {user_id}")
     return {"user_id": user_id, "user_info": user_info}
 
+class MessageBody(BaseModel):
+    """The question, in the body where it belongs.
+
+    It used to arrive as a query parameter, which put every question a customer
+    ever asked into the access log in full:
+
+        POST /api/v1/messages?message=what%20is%20Bolanle%20Okonkwo%20diagnosis
+
+    Redacting application logs does nothing about that, and neither does
+    anything else we control, because a URL is copied into places we never see:
+    the reverse proxy, the CDN, the browser's history, the Referer header sent
+    to any third party the page later talks to. For a dental or legal practice
+    the question is usually the most sensitive string in the request.
+
+    Accepted from the body or, still, from the query string, so a browser tab
+    left open on the old bundle keeps working through the deploy. The body wins
+    when both are present, and the query fallback should come out once no
+    client uses it.
+    """
+    message: str
+    language: str = "English"
+    comprehension_level: str = "beginner"
+    history_id: int | None = None
+    workspace_id: int | None = None
+    file_id: int | None = None
+
+
 # Route to create a new message
 @messages_router.post("", status_code=201)
 @limiter.limit(CHAT_RATE_LIMIT)
 async def create_message(
     request: Request,
     background_tasks: BackgroundTasks,
-    message: str = Query(..., description="The message content"),
+    body: MessageBody | None = None,
+    message: str | None = Query(None, description="Deprecated: send in the body"),
     language: str = Query("English", description="Language of the message"),
     comprehension_level: str = Query("beginner", description="Comprehension level of the message"),
-    history_id: int = Query(..., description="ID of the chat history"),
+    history_id: int | None = Query(None, description="ID of the chat history"),
     workspace_id: int | None = Query(None, description="Optional workspace ID to scope retrieval"),
     file_id: int | None = Query(None, description="Optional file ID to scope retrieval"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store)
 ):
     try:
+        # Body first, query second, so the new client stops logging questions
+        # immediately and the old one keeps working until it is gone.
+        if body is not None:
+            message = body.message
+            language = body.language
+            comprehension_level = body.comprehension_level
+            history_id = body.history_id if body.history_id is not None else history_id
+            workspace_id = body.workspace_id if body.workspace_id is not None else workspace_id
+            file_id = body.file_id if body.file_id is not None else file_id
+        if not message or history_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="message and history_id are required",
+            )
+
         user_id = user_data["user_id"]
 
         # Verify the caller actually owns history_id / workspace_id / file_id before

@@ -1,4 +1,6 @@
 import logging
+
+from api.core.log_safety import safe_text
 import os
 import asyncio
 import time
@@ -259,7 +261,7 @@ async def run_query_pipeline(
 ) -> Dict[str, Any]:
     """Run retrieval + generation for a single query without persisting chat messages."""
     try:
-        logger.info({"event": "run_query_pipeline.agent_start", "message": message})
+        logger.info({"event": "run_query_pipeline.agent_start", "message": safe_text(message)})
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="pipeline") as ctx:
             result = await query_agent.run(
                 user_id=user_id,
