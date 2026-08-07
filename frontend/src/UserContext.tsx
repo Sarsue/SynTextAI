@@ -58,6 +58,26 @@ interface SubscriptionData {
 }
 
 // Define the type for UserContext
+/**
+ * Which files a listing should return.
+ *
+ * A workspace id, or the explicit string for every workspace the user can read.
+ * This used to be `number | null`, where null meant the widest scope the caller
+ * is permitted. That is a value anyone can pass without meaning to, and twice
+ * somebody did: once on the refresh after an upload and once after a delete, so
+ * a workspace showing 3 documents redrew with all 12 in the company. The second
+ * time a comment argued it was correct.
+ *
+ * Nothing here was a data leak. The API filters an unscoped listing through
+ * accessible_workspace_ids, so a user never sees a workspace they cannot read.
+ * It was the wrong list in front of the right person.
+ *
+ * ALL_WORKSPACES has to be typed out, which makes it visible in review and
+ * impossible to arrive at by forgetting something.
+ */
+export const ALL_WORKSPACES = 'all-workspaces' as const;
+export type FileScope = number | typeof ALL_WORKSPACES;
+
 interface UserContextType {
     user: FirebaseUser | null;
     setUser: (user: FirebaseUser | null) => void;
@@ -122,13 +142,13 @@ interface UserContextType {
      * file went into the right workspace and the panel then showed every
      * document in the company.
      */
-    loadUserFiles: (page: number, pageSize: number, workspaceId: number | null) => Promise<void>;
+    loadUserFiles: (page: number, pageSize: number, scope: FileScope) => Promise<void>;
     // workspaceId is required, not optional. It defaulted to null, and a
     // default is what let this go wrong twice: the refresh fell through to the
     // organization filter and a workspace showing 3 documents redrew with 12.
     // A caller that forgets should fail to compile rather than silently show
     // somebody every document in the company.
-    deleteFileFromContext: (fileId: number, workspaceId: number | null) => Promise<void>;
+    deleteFileFromContext: (fileId: number, scope: FileScope) => Promise<void>;
     pollFileStatus: () => Promise<void>; // Trigger immediate status check
     authLoading: boolean;
 }
@@ -236,12 +256,12 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, [user]);
 
-    const loadUserFiles = useCallback(async (page: number, pageSize: number, workspaceId: number | null) => {
+    const loadUserFiles = useCallback(async (page: number, pageSize: number, scope: FileScope) => {
         setIsLoadingFiles(true);
         setFileError(null);
         let url = `/api/v1/files?page=${page}&page_size=${pageSize}`;
-        if (workspaceId !== null) {
-            url += `&workspace_id=${workspaceId}`;
+        if (scope !== ALL_WORKSPACES) {
+            url += `&workspace_id=${scope}`;
         } else if (activeOrganizationId) {
             // Without a workspace filter, keep results inside the organization
             // the user chose, so somebody in two companies never gets both
@@ -576,7 +596,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
     }, []);
 
-    const deleteFileFromContext = useCallback(async (fileId: number, workspaceId: number | null) => {
+    const deleteFileFromContext = useCallback(async (fileId: number, scope: FileScope) => {
         const url = `/api/v1/files/${fileId}`;
         const response = await _callApiWithTokenInternal(url, 'DELETE');
         if (response?.ok) {
@@ -588,7 +608,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // here argued it was correct: "no workspace is selected during a
             // refresh triggered from here". A workspace is selected. The
             // context does not hold it, so the caller has to say.
-            await loadUserFiles(filePagination.page, filePagination.pageSize, workspaceId);
+            await loadUserFiles(filePagination.page, filePagination.pageSize, scope);
         } else {
             addToast('Failed to delete file.', 'error');
         }
@@ -648,8 +668,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 await registerUserInBackend(fbUser, intent);
                 setUser(fbUser);
                 await fetchSubscriptionStatus();
-                // Runs before any workspace has been chosen.
-                await loadUserFiles(1, 10, null);
+                // Runs before any workspace has been chosen, which is the one
+                // place the wide scope is genuinely right.
+                await loadUserFiles(1, 10, ALL_WORKSPACES);
             } else {
                 setUser(null);
                 setFiles([]);

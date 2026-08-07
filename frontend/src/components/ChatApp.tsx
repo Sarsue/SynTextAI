@@ -8,7 +8,7 @@ import HistoryView from './HistoryView';
 import { Message, History } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
-import { useUserContext } from '../UserContext';
+import { useUserContext , ALL_WORKSPACES } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
 import FileViewerComponent from './FileViewerComponent';
@@ -485,7 +485,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         // Scoped to the workspace the file was uploaded into.
                         // Reloading without it showed every document in the
                         // organization, including other workspaces'.
-                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId);
+                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
                     } else {
                         // Read the body once. A Response can only be consumed
                         // once, so taking .text() here for analytics and then
@@ -842,7 +842,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const handleDeleteFile = useCallback(async (fileId: number) => {
         trackAction(AnalyticsEvents.FILE_DELETE_INITIATED, 'file_management', `file_id: ${fileId}`);
         try {
-            await deleteFileFromContext(fileId, currentWorkspaceId ?? null);
+            await deleteFileFromContext(fileId, currentWorkspaceId ?? ALL_WORKSPACES);
             addToast('File deleted successfully!', 'success');
         } catch (error) {
             addToast('Failed to delete file.', 'error');
@@ -965,7 +965,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             // Scoped to the workspace the file was uploaded into.
                         // Reloading without it showed every document in the
                         // organization, including other workspaces'.
-                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId);
+                        await loadUserFiles(1, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
                         }}
                     />
                 </main>
