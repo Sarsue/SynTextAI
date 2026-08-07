@@ -149,6 +149,11 @@ class DocxProcessor(FileProcessor):
                     for chunk_content in non_empty_chunks:
                         batch_chunks.append({
                             'text': chunk_content,
+                            # The whole page, carried alongside each of its
+                            # chunks. Storage groups by page to build the
+                            # citation unit, and joining the chunks back
+                            # together would duplicate their overlap.
+                            'page_text': page_content,
                             'page_num': page_num,
                             'source_type': 'docx'
                         })

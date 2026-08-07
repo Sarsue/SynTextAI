@@ -36,27 +36,74 @@ CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
 #
 # A per-document cap was tried here to stop a 98-page handbook taking most of
 # the slots, and lost at every top_k, so there is none: room, not rationing.
-RETRIEVAL_TOP_K = 25
+# How many chunks reach the model. 25 was chosen when a chunk was a whole page;
+# chunks are now about 2.4 times smaller, so the same number covered eleven
+# pages instead of twenty-five and the retrieval budget had been cut by more
+# than half without anyone deciding that.
+#
+# Swept against the pages the benchmark knows are correct, with no model in the
+# loop:
+#
+#     top_k   single 17   multi 10   all 27   approx tokens
+#        25          17          6       23           7,750
+#        40          17          8       25          12,400
+#        60          17          8       25          18,600
+#       100          17          8       25          31,000
+#
+# 40 is the knee for recall: it buys everything 100 does. So it was tried, and
+# it made the answers worse:
+#
+#     top_k   retrieval recall   citations (3 runs)
+#        25             23/27    19.0 (18-21)
+#        40             25/27    17.7 (16-19)
+#
+# Two more questions arrived with every source they needed, and fewer were
+# answered correctly. So recall is not the binding constraint here and buying
+# more of it costs something. Twenty-five stays.
+#
+# This looked at the time like a fifth instance of one pattern: eight passages
+# beat twenty, the evidence selector's extra stage lost, and better recall
+# lost. The loop then won on chunk-sized units, 21.0 against 19.0, which
+# separates the two things that had been conflated. Adding more of the SAME
+# ranked list hurts, every time it has been tried. Adding a list aimed at a
+# different information need helps. The lever is aim, not volume, and this
+# constant governs the first kind.
+RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
 
 # How many times one question may retrieve, in total.
 #
-# ONE, which makes this exactly the pipeline that scores 17.0, with the loop
-# built and dormant. Measured on the citation benchmark:
+# ONE, and the reason is a condition rather than a result.
 #
-#                       citations /22   single /17   multi /5   refusals /4
-#     one retrieval      17.0 (15-18)  15.2 (13-16)  1.8 (1-2)   3.8 (3-4)
-#     up to three        15.3 (13-18)  14.0 (12-16)  1.3 (1-2)   4.0 (4-4)
+# Measured on chunk-sized retrieval units, three runs against four:
 #
-# The spread is wide enough that the difference is not resolvable, but the
-# multi-document column is the one the loop exists for and it went down, not
-# up. A second retrieval aimed at an information need adds passages that
-# compete with the ones already found, and the answer step has to choose among
-# more material rather than better material.
+#                        citations /27   single /17   multi /10
+#     one retrieval       19.0 (18-21)  15.3 (14-16)  3.7 (2-5)
+#     up to three         21.0 (19-22)  16.2 (14-17)  4.8 (4-5)
 #
-# Left at one until the benchmark can tell the difference. Five multi-document
-# questions is too thin a target to steer by: two confident claims were drawn
-# from that sample during this work and neither survived four runs. Raise this
-# when there are ten or fifteen of them, written from the documents outward.
+# +2.0 is inside the +/-3 this benchmark moves on its own, so it is not proven
+# by that rule. What supports it is the shape: every one of four loop runs
+# scored at or above the single-retrieval mean, and multi-document, the metric
+# the loop exists for, has a floor above that mean.
+#
+# It also reconciles four earlier results that all found this model worse with
+# more context. top_k 40 added fifteen chunks from the same ranked list and
+# scored 17.7; this adds a retrieval aimed at a different information need and
+# scores 21.0. Comparable extra context, opposite outcome. The lever is not how
+# much context, it is whether the context was aimed at something.
+#
+# What is NOT understood: the five questions diagnosed as this loop's targets,
+# 16, 17, 28, 30 and 31, did not move. The gain is real and does not come from
+# where it was predicted to, so the number is trusted further than the story
+# behind it.
+#
+# So why one. The same loop was measured on PAGE-sized units and lost, 15.3
+# against 17.0. Every document uploaded before chunk-level retrieval still has
+# page-sized chunks until it is re-ingested, so turning this on now would apply
+# the loop to exactly the conditions where it has been measured to regress.
+#
+# Raise it to 3 once a workspace's documents have been re-ingested. The setting
+# is per-deployment and the benefit is conditional on the data, which is not a
+# distinction a default can express.
 MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "1"))
 # Attempts at a single need before accepting that the documents do not cover it.
 COVERAGE_ATTEMPTS = int(os.getenv("COVERAGE_ATTEMPTS", "2"))

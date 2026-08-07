@@ -119,10 +119,21 @@ questions:
     question: "can i deduct business travel"
     citations:
       - file: "irs_publication_334_tax_guide_small_business.pdf"
-        pages: [34]
-    must_include: ["transportation"]
+        pages: [40, 41]
+    must_include: ["meals"]
     notes: >
-      "travel" appears on six pages; only this one carries the deduction rules.
+      Corrected 2026-08-06, from page 34. The publication separates two things
+      this question does not: its own index reads "Transportation expenses 34,
+      Travel expenses 40", its contents page reads "Car and Truck Expenses ->
+      34, Travel and Meals -> 40", and page 35 says outright that "business
+      transportation does not include expenses you have while traveling away
+      from home overnight. Those expenses are deductible as travel expenses."
+      Page 34 is local transportation. The question asks about travel.
+
+      The pipeline cited 40 and 41 and was marked wrong for three runs. Checked
+      against the document's index and outline, not conceded because the score
+      was poor: the answer it gave, meals and lodging at 50% with transport to
+      the destination, is what pages 40 and 41 actually say.
 
   - id: 7
     question: "what goes in an executive summary"
@@ -271,10 +282,12 @@ questions:
       - file: "irs_publication_583_starting_a_business.pdf"
         pages: [11]
       - file: "irs_publication_334_tax_guide_small_business.pdf"
-        pages: [34]
-    must_include: ["records", "transportation"]
+        pages: [40, 41]
+    must_include: ["records", "meals"]
     notes: >
       Two IRS documents that overlap heavily. Tests picking the specific one.
+      The travel page was corrected from 34 to 40 on 2026-08-06 for the same
+      reason as question 6: 34 is local transportation, 40 is travel.
 
   - id: 20
     question: "do i need an ein and what accounting method comes with it"
