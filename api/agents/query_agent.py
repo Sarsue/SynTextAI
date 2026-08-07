@@ -72,8 +72,9 @@ RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
 
 # How many times one question may retrieve, in total.
 #
-# THREE. One was the default while the loop was unproven. Measured on
-# chunk-sized retrieval units, three repeats against four:
+# ONE, and the reason is a condition rather than a result.
+#
+# Measured on chunk-sized retrieval units, three runs against four:
 #
 #                        citations /27   single /17   multi /10
 #     one retrieval       19.0 (18-21)  15.3 (14-16)  3.7 (2-5)
@@ -92,9 +93,18 @@ RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
 #
 # What is NOT understood: the five questions diagnosed as this loop's targets,
 # 16, 17, 28, 30 and 31, did not move. The gain is real and does not come from
-# where it was predicted to, so this number is trusted further than the story
+# where it was predicted to, so the number is trusted further than the story
 # behind it.
-MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "3"))
+#
+# So why one. The same loop was measured on PAGE-sized units and lost, 15.3
+# against 17.0. Every document uploaded before chunk-level retrieval still has
+# page-sized chunks until it is re-ingested, so turning this on now would apply
+# the loop to exactly the conditions where it has been measured to regress.
+#
+# Raise it to 3 once a workspace's documents have been re-ingested. The setting
+# is per-deployment and the benefit is conditional on the data, which is not a
+# distinction a default can express.
+MAX_RETRIEVALS = int(os.getenv("MAX_RETRIEVALS", "1"))
 # Attempts at a single need before accepting that the documents do not cover it.
 COVERAGE_ATTEMPTS = int(os.getenv("COVERAGE_ATTEMPTS", "2"))
 
