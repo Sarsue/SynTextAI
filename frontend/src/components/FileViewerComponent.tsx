@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './FileViewerComponent.css';
 import { UploadedFile, ProcessingStatus } from './types';
+import { useUserContext } from '../UserContext';
 import {
     Dialog,
     DialogContent,
@@ -25,6 +26,11 @@ interface FileViewerComponentProps {
 
 const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragment = '', onClose, onError, darkMode }) => {
     const [fileType, setFileType] = useState<string>('unknown');
+    const [pages, setPages] = useState<{ page_number: number | null; content: string }[] | null>(null);
+    const [pagesError, setPagesError] = useState<string | null>(null);
+    // The token is fetched here rather than passed down: ChatApp's
+    // callApiWithToken is a closure over its own state and is not exported.
+    const { user } = useUserContext();
 
     const pdfViewerRef = useRef<HTMLIFrameElement>(null);
     const videoPlayerRef = useRef<HTMLVideoElement>(null);
@@ -46,6 +52,12 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragmen
         if (extension === 'pdf') return 'pdf';
         if (['mp4', 'webm', 'ogg', 'mov'].includes(extension)) return 'video';
         if (['jpg', 'jpeg', 'png', 'gif'].includes(extension)) return 'image';
+        // No browser renders a .docx, so these are shown from the text we
+        // extracted rather than from the original file. The uploader accepts
+        // them, the processors handle them, and answers cite them, so falling
+        // through to "unsupported" left a document searchable and unreadable at
+        // the same time.
+        if (['docx', 'doc', 'txt', 'md'].includes(extension)) return 'extracted';
 
         return null;
     };
@@ -69,6 +81,40 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragmen
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fileUrl, file.file_name]);
+
+    // The page a citation points at, from the same fragment the PDF viewer uses.
+    const citedPage = (() => {
+        const m = /[#&]page=(\d+)/.exec(fragment || '');
+        return m ? parseInt(m[1], 10) : null;
+    })();
+
+    useEffect(() => {
+        if (fileType !== 'extracted') return;
+        let cancelled = false;
+        (async () => {
+            try {
+                if (!user) throw new Error('not signed in');
+                const token = await user.getIdToken();
+                const res = await fetch(`api/v1/files/${file.id}/content`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) throw new Error(`status ${res.status}`);
+                const body = await res.json();
+                if (!cancelled) setPages(body.pages || []);
+            } catch (e) {
+                if (!cancelled) setPagesError('Could not load this document\u2019s text.');
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [fileType, file.id, user]);
+
+    // Scroll the cited page into view once its text is on screen, which is what
+    // #page=N does for a PDF and what a citation into a .docx needs to do too.
+    useEffect(() => {
+        if (!pages || !citedPage) return;
+        const el = document.getElementById(`extracted-page-${citedPage}`);
+        if (el) el.scrollIntoView({ block: 'start' });
+    }, [pages, citedPage]);
 
     const renderFileContent = () => {
         if (!fileType) {
@@ -113,6 +159,36 @@ const FileViewerComponent: React.FC<FileViewerComponentProps> = ({ file, fragmen
             return (
                 <div className="image-container file-content-area">
                     <img src={fileUrl} alt={file.file_name} className="image-viewer" />
+                </div>
+            );
+        } else if (fileType === 'extracted') {
+            if (pagesError) {
+                return <div className="error-message">{pagesError}</div>;
+            }
+            if (!pages) {
+                return <div className="loading-indicator">Loading document…</div>;
+            }
+            if (pages.length === 0) {
+                return <div className="processing-indicator">No text was extracted from this document.</div>;
+            }
+            return (
+                <div className="extracted-container file-content-area">
+                    {pages.map((p, i) => (
+                        <section
+                            key={p.page_number ?? i}
+                            id={`extracted-page-${p.page_number ?? i + 1}`}
+                            className={
+                                citedPage && p.page_number === citedPage
+                                    ? 'extracted-page extracted-page--cited'
+                                    : 'extracted-page'
+                            }
+                        >
+                            <div className="extracted-page__label">
+                                Page {p.page_number ?? i + 1}
+                            </div>
+                            <pre className="extracted-page__text">{p.content}</pre>
+                        </section>
+                    ))}
                 </div>
             );
         } else {

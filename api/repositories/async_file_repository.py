@@ -658,6 +658,28 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Could not read outline for file {file_id}: {e}")
                 return []
 
+    async def get_file_pages(self, file_id: int) -> List[Dict[str, Any]]:
+        """Every page of a document, in order, as extracted.
+
+        The segment is the page, so this is the page text and nothing else: not
+        the chunks, which overlap and would repeat sentences at every boundary.
+        """
+        async with self.get_async_session() as session:
+            try:
+                rows = (await session.execute(
+                    text("""SELECT page_number, content FROM segments
+                            WHERE file_id = :fid
+                            ORDER BY page_number NULLS LAST, id"""),
+                    {"fid": int(file_id)},
+                )).all()
+                return [
+                    {"page_number": r[0], "content": r[1] or ""}
+                    for r in rows
+                ]
+            except Exception as e:
+                logger.error(f"Could not read pages for file {file_id}: {e}")
+                return []
+
     async def get_segments_for_page(self, file_id: int, page_number: int) -> List[Dict[str, Any]]:
         """Get all segment contents for a specific page of a file.
 
