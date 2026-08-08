@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy } from 'lucide-react';
 import './ConversationView.css';
-import { History, Message } from './types';
+import { History, Message, MessageFeedback } from './types';
+import AnswerFeedback from './AnswerFeedback';
 import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
 import { UploadedFile } from './types';
@@ -15,9 +16,11 @@ interface ConversationViewProps {
     /** A question has been queued and its answer has not arrived yet. */
     awaitingReply?: boolean;
     onCopy: (message: Message) => void;
+    /** Records this caller's rating of one answer, or clears it when null. */
+    onFeedbackChange: (messageId: number, feedback: MessageFeedback | null) => void;
 }
 
-const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awaitingReply = false, onCopy }) => {
+const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awaitingReply = false, onCopy, onFeedbackChange }) => {
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     // The whole value of a citation is landing on the cited page. The click
     // handler parsed the URL but kept only the matched file record, whose
@@ -218,14 +221,27 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
                         <div className="message-metadata">
                             <div className="message-timestamp">{message.timestamp}</div>
                             {isBot && (
-                                <Button
-                                    variant="ghost"
-                                    size="icon-sm"
-                                    onClick={() => handleCopy(message)}
-                                    title="Copy answer"
-                                >
-                                    <Copy className="size-3.5" />
-                                </Button>
+                                <>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        onClick={() => handleCopy(message)}
+                                        title="Copy answer"
+                                    >
+                                        <Copy className="size-3.5" />
+                                    </Button>
+                                    {/* Only on answers, and only on ones that
+                                        have been saved: an optimistic message
+                                        still carries a Date.now() placeholder
+                                        id, and rating that would 404. */}
+                                    {message.id < 1e12 && (
+                                        <AnswerFeedback
+                                            messageId={message.id}
+                                            feedback={message.feedback}
+                                            onChange={onFeedbackChange}
+                                        />
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>

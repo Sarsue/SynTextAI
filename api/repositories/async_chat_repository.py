@@ -13,6 +13,8 @@ from .async_base_repository import AsyncBaseRepository
 # Import ORM models from the new models module
 from ..models import ChatHistory as ChatHistoryORM
 from ..models import Message as MessageORM
+from ..models import MessageFeedback as MessageFeedbackORM
+from ..models import AgentRun as AgentRunORM
 
 # Import SQLAlchemy async components
 from sqlalchemy import select, and_, or_, desc, func
@@ -233,13 +235,35 @@ class AsyncChatRepository(AsyncBaseRepository):
                 result = await session.execute(stmt)
                 messages_orm = result.scalars().all()
 
+                # This caller's own ratings, so the thumbs come back pressed
+                # after a reload instead of resetting and inviting a second
+                # rating of the same answer.
+                feedback_stmt = select(MessageFeedbackORM).where(
+                    and_(
+                        MessageFeedbackORM.message_id.in_([m.id for m in messages_orm] or [0]),
+                        MessageFeedbackORM.user_id == user_id,
+                    )
+                )
+                feedback_rows = (await session.execute(feedback_stmt)).scalars().all()
+                by_message = {f.message_id: f for f in feedback_rows}
+
                 result = []
                 for msg in messages_orm:
+                    got = by_message.get(msg.id)
                     message_dict = {
                         "id": msg.id,
                         "content": msg.content,
                         "sender": msg.sender,
-                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None
+                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+                        "feedback": (
+                            {
+                                "rating": got.rating,
+                                "reason": got.reason,
+                                "comment": got.comment,
+                            }
+                            if got
+                            else None
+                        ),
                     }
                     result.append(message_dict)
 
@@ -247,6 +271,227 @@ class AsyncChatRepository(AsyncBaseRepository):
             except Exception as e:
                 logger.error(f"Error getting messages: {e}", exc_info=True)
                 return []
+
+    # --- feedback on an answer ---------------------------------------------
+    #
+    # message_id arrives as an integer off the URL, which is the exact shape of
+    # every access-control bug this codebase has had. So the reach question is
+    # answered the one way it is answered everywhere else: the conversation
+    # must be the caller's, and its workspace must be one they can still see.
+    # Nothing here reads a role string or trusts the client for anything but
+    # the rating itself.
+
+    async def _authorized_message(
+        self,
+        session: AsyncSession,
+        message_id: int,
+        user_id: int,
+        accessible_workspace_ids: Optional[List[int]],
+    ) -> Optional[MessageORM]:
+        """The message, if this caller may act on it. None otherwise.
+
+        Deliberately returns None rather than raising, so the caller answers
+        404 for "not yours" and "not there" alike. Distinguishing them would
+        tell a stranger which message ids exist.
+        """
+        conditions = [
+            MessageORM.id == message_id,
+            ChatHistoryORM.user_id == user_id,
+        ]
+        if accessible_workspace_ids is not None:
+            conditions.append(
+                or_(
+                    ChatHistoryORM.workspace_id.is_(None),
+                    ChatHistoryORM.workspace_id.in_(accessible_workspace_ids),
+                )
+            )
+        stmt = (
+            select(MessageORM)
+            .join(ChatHistoryORM, ChatHistoryORM.id == MessageORM.chat_history_id)
+            .where(and_(*conditions))
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def set_message_feedback(
+        self,
+        message_id: int,
+        user_id: int,
+        rating: int,
+        reason: Optional[str] = None,
+        comment: Optional[str] = None,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Record what somebody thought of an answer. Idempotent.
+
+        Returns the stored feedback, or None if the message is not theirs to
+        rate. Pressing the other thumb replaces the rating rather than adding a
+        second one, which is what the unique constraint is for.
+        """
+        async with self.get_async_session() as session:
+            try:
+                message = await self._authorized_message(
+                    session, message_id, user_id, accessible_workspace_ids
+                )
+                if not message:
+                    return None
+                # Only answers get rated. Rating your own question is a
+                # confused request, not a refusal, so the route says 400.
+                if message.sender != "bot":
+                    return {"error": "not_an_answer"}
+
+                # The run that produced this answer, resolved here rather than
+                # accepted from the client. Null for anything answered before
+                # 20260808_message_feedback added the link.
+                run_stmt = select(AgentRunORM.id).where(AgentRunORM.message_id == message_id)
+                agent_run_id = (await session.execute(run_stmt)).scalar_one_or_none()
+
+                existing_stmt = select(MessageFeedbackORM).where(
+                    and_(
+                        MessageFeedbackORM.message_id == message_id,
+                        MessageFeedbackORM.user_id == user_id,
+                    )
+                )
+                feedback = (await session.execute(existing_stmt)).scalar_one_or_none()
+
+                if feedback is None:
+                    feedback = MessageFeedbackORM(
+                        message_id=message_id, user_id=user_id
+                    )
+                    session.add(feedback)
+
+                feedback.rating = rating
+                # Both cleared on thumbs-up: a reason left over from a previous
+                # thumbs-down would otherwise stay attached to a positive
+                # rating and read as a complaint about an answer they liked.
+                feedback.reason = reason if rating == -1 else None
+                feedback.comment = comment if rating == -1 else None
+                feedback.agent_run_id = agent_run_id
+
+                await session.commit()
+                await session.refresh(feedback)
+                return {
+                    "rating": feedback.rating,
+                    "reason": feedback.reason,
+                    "comment": feedback.comment,
+                }
+            except Exception as e:
+                await session.rollback()
+                # No comment or reason text in the log line: it is customer
+                # content, same as the question.
+                logger.error(
+                    "Error saving feedback on message %s for user %s: %s",
+                    message_id, user_id, e, exc_info=True,
+                )
+                return None
+
+    async def clear_message_feedback(
+        self,
+        message_id: int,
+        user_id: int,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> bool:
+        """Undo a rating. Pressing the same thumb again means "never mind"."""
+        async with self.get_async_session() as session:
+            try:
+                message = await self._authorized_message(
+                    session, message_id, user_id, accessible_workspace_ids
+                )
+                if not message:
+                    return False
+
+                stmt = select(MessageFeedbackORM).where(
+                    and_(
+                        MessageFeedbackORM.message_id == message_id,
+                        MessageFeedbackORM.user_id == user_id,
+                    )
+                )
+                feedback = (await session.execute(stmt)).scalar_one_or_none()
+                if feedback:
+                    await session.delete(feedback)
+                    await session.commit()
+                # Already absent is the state they asked for, so this succeeds.
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(
+                    "Error clearing feedback on message %s for user %s: %s",
+                    message_id, user_id, e, exc_info=True,
+                )
+                return False
+
+    async def feedback_for_report(
+        self, limit: int = 100, rating: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Ratings alongside what produced them.
+
+        This is the whole point of the feature. A rating on its own says three
+        people were unhappy; joined to the run it says what was asked, what was
+        retrieved, whether coverage was satisfied and how much context the model
+        had, which is the input to fixing anything.
+
+        Deliberately unscoped by tenant: this is the operator's view, read from
+        a CLI, never served to a browser. Anything exposing it over HTTP has to
+        answer the reach question first.
+        """
+        async with self.get_async_session() as session:
+            try:
+                conditions = []
+                if rating is not None:
+                    conditions.append(MessageFeedbackORM.rating == rating)
+
+                stmt = (
+                    select(MessageFeedbackORM, MessageORM, AgentRunORM)
+                    .join(MessageORM, MessageORM.id == MessageFeedbackORM.message_id)
+                    .outerjoin(AgentRunORM, AgentRunORM.id == MessageFeedbackORM.agent_run_id)
+                    .order_by(desc(MessageFeedbackORM.created_at))
+                    .limit(limit)
+                )
+                if conditions:
+                    stmt = stmt.where(and_(*conditions))
+
+                rows = (await session.execute(stmt)).all()
+
+                out = []
+                for feedback, answer, run in rows:
+                    payload = (run.payload if run is not None else None) or {}
+                    out.append({
+                        "message_id": feedback.message_id,
+                        "rating": feedback.rating,
+                        "reason": feedback.reason,
+                        "comment": feedback.comment,
+                        "created_at": feedback.created_at,
+                        "agent_run_id": feedback.agent_run_id,
+                        "question": payload.get("message"),
+                        "answer": answer.content,
+                        "workspace_id": payload.get("workspace_id"),
+                        "run": (run.result if run is not None else None) or {},
+                    })
+                return out
+            except Exception as e:
+                logger.error("Error building feedback report: %s", e, exc_info=True)
+                return []
+
+    async def link_run_to_message(self, run_id: Any, message_id: int) -> bool:
+        """Record which answer a run produced.
+
+        Without this a rating can only be matched to a run by timestamp within
+        a conversation, which is a guess. Never raises: the answer has already
+        been delivered, and a missing link must not fail the request that
+        delivered it.
+        """
+        async with self.get_async_session() as session:
+            try:
+                run = await session.get(AgentRunORM, run_id)
+                if not run:
+                    return False
+                run.message_id = message_id
+                await session.commit()
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.warning("Could not link run %s to message %s: %s", run_id, message_id, e)
+                return False
 
     async def delete_chat_history(self, user_id: int, history_id: int) -> bool:
         """Delete a chat history and all associated messages.

@@ -2,7 +2,7 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, UniqueConstraint, TIMESTAMP, text, Enum, Index
+from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, CheckConstraint, UniqueConstraint, TIMESTAMP, text, Enum, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -353,6 +353,49 @@ class Message(Base):
     # Relationships
     user = relationship("User", back_populates="messages")
     chat_history = relationship("ChatHistory", back_populates="messages")
+    feedback = relationship(
+        "MessageFeedback", back_populates="message", cascade="all, delete-orphan"
+    )
+
+
+class MessageFeedback(Base):
+    """What a customer thought of one answer.
+
+    Separate from messages because messages is read in full on every
+    conversation load, and this carries a reason, a comment and a run reference
+    that have no business widening that read. See migration
+    20260808_message_feedback.
+    """
+    __tablename__ = "message_feedback"
+    __table_args__ = (
+        CheckConstraint("rating IN (-1, 1)", name="ck_message_feedback_rating"),
+        # One rating per person per message: pressing the other thumb replaces
+        # rather than accumulating, and a double click cannot leave two rows
+        # that disagree.
+        UniqueConstraint("message_id", "user_id", name="uq_message_feedback_message_user"),
+        Index("idx_message_feedback_rating_created", "rating", "created_at"),
+        Index("idx_message_feedback_user_id", "user_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(
+        Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    rating = Column(SmallInteger, nullable=False)
+    reason = Column(String(32), nullable=True)
+    comment = Column(Text, nullable=True)
+    # Which run produced the answer, so a rating can be read alongside what was
+    # retrieved. SET NULL, not CASCADE: pruning runs must not discard ratings.
+    agent_run_id = Column(
+        UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    message = relationship("Message", back_populates="feedback")
 
 
 class AgentRun(Base):
@@ -394,6 +437,10 @@ class AgentRun(Base):
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=True)
     chat_history_id = Column(Integer, ForeignKey("chat_histories.id", ondelete="CASCADE"), nullable=True)
+    # The answer this run produced, so a rating on that message can be read
+    # next to what was retrieved. Nullable and never backfilled: runs from
+    # before 20260808_message_feedback have no message to point at.
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
 
     attempts = Column(Integer, nullable=False, default=0)
     max_attempts = Column(Integer, nullable=False, default=3)

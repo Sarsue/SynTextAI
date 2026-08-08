@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import ConversationView from './ConversationView';
 import InputArea from './InputArea';
 import HistoryView from './HistoryView';
-import { Message, History } from '../components/types';
+import { Message, History, MessageFeedback } from '../components/types';
 import './ChatApp.css';
 import { User } from 'firebase/auth';
 import { useUserContext , ALL_WORKSPACES } from '../UserContext';
@@ -147,8 +147,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 sender: 'user',
                 content: messageContent,
                 timestamp: new Date().toISOString(),
-                liked: false, 
-                disliked: false,
+                feedback: null,
             };
             const targetHistoryId = historyId || currentHistory || Date.now(); 
             setHistories(prev => ({
@@ -183,8 +182,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             sender: 'bot',
             content: incomingChatMessage.content,
             timestamp: new Date().toISOString(),
-            liked: false,
-            disliked: false,
+            feedback: null,
         };
 
         setHistories(prev => ({
@@ -248,8 +246,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             content: m.content,
                             sender: m.sender,
                             timestamp: m.timestamp,
-                            liked: false,
-                            disliked: false,
+                            feedback: m.feedback ?? null,
                         })),
                     },
                 }));
@@ -410,6 +407,32 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             console.error('Unexpected error calling API:', error);
             addToast('Failed to communicate with the server.', 'error');
             return Promise.reject(error);
+        }
+    };
+
+    /**
+     * Reflect a rating in the conversation the user is looking at.
+     *
+     * The control posts and reverts on failure; this only owns the displayed
+     * state, so the two do not both try to be the source of truth.
+     */
+    const handleFeedbackChange = (messageId: number, feedback: MessageFeedback | null) => {
+        if (currentHistory === null) return;
+        setHistories(prev => {
+            const history = prev[currentHistory];
+            if (!history) return prev;
+            return {
+                ...prev,
+                [currentHistory]: {
+                    ...history,
+                    messages: history.messages.map(m =>
+                        m.id === messageId ? { ...m, feedback } : m
+                    ),
+                },
+            };
+        });
+        if (feedback) {
+            trackAction('answer_feedback', 'message', undefined, feedback.rating);
         }
     };
 
@@ -634,8 +657,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     content: m.content,
                     sender: m.sender === 'bot' ? 'bot' : 'user',
                     timestamp: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString(),
-                    liked: m.is_liked === 1,
-                    disliked: m.is_disliked === 1,
+                    feedback: m.feedback ?? null,
                 }))
             : [];
 
@@ -646,8 +668,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             content: message,
             sender: 'user',
             timestamp: new Date().toISOString(),
-            liked: false,
-            disliked: false,
+            feedback: null,
         }];
 
         setHistories(prev => {
@@ -784,8 +805,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         content: messageData.content,
                         sender: messageData.sender,
                         timestamp: messageData.timestamp,
-                        liked: messageData.is_liked === 1,
-                        disliked: messageData.is_disliked === 1,
+                        feedback: messageData.feedback ?? null,
                     })),
                 };
             });
@@ -957,6 +977,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
                         awaitingReply={awaitingReplyFor !== null && awaitingReplyFor === currentHistory}
                         onCopy={handleCopy}
+                        onFeedbackChange={handleFeedbackChange}
                     />
                     <InputArea
                         onSend={handleSend}
