@@ -1079,6 +1079,37 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-07 (a test for the card-update path):** `api/tests/test_card_update.py`.
+  This is the recovery path for a locked-out paying customer, and since
+  `past_due` now blocks chat as well as uploads it is the whole way back in. It
+  had three independent defects and no coverage, and nobody noticed because
+  nobody reaches that screen until their card fails.
+
+  **It hits Stripe test mode rather than a mock, and defect 3 is the argument.**
+  A mocked `PaymentMethod.attach_async` accepts a PaymentMethod object as
+  happily as an id, so a mocked version of this test would have passed green for
+  months while the real call was malformed. Same reasoning this suite already
+  uses for running against a real Postgres. Module-level guards skip unless
+  `STRIPE_SECRET` starts with `sk_test` and a price id is configured, so a
+  misconfigured environment skips instead of creating customers in live mode.
+
+  **Each test was checked by reintroducing the bug it exists for**, because four
+  passing tests prove nothing on their own:
+
+  | Defect put back | Result |
+  |---|---|
+  | PaymentMethod object passed where an id belongs | 1 failed |
+  | Route reads `payment_method_id`, browser sends `payment_method` | 2 failed |
+  | `/setup-intent` endpoint deleted | 2 failed |
+  | Customer's `invoice_settings` default not updated | 1 failed |
+
+  That last one is the subtle one: setting only the subscription's default
+  leaves Stripe retrying the card that just failed, so the customer replaces
+  their card and is charged on the old one anyway.
+
+  90 tests pass. The file restores to byte-identical after each mutation, and a
+  run leaves nothing behind in Postgres or Stripe.
+
 - **2026-08-07 (settings names the plan):** The billing panel said "Your
   subscription is active" and nothing else, so an owner could not tell Starter
   from Business anywhere in the product, including when working out whether they
