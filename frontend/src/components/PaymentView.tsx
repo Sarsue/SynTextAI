@@ -327,7 +327,20 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             ) : subscriptionData?.subscription_status === 'active' ? (
                 // Subscription is active, show card details and cancel button
                 <>
-                    <p>Your subscription is active.</p>
+                    {/* Which plan, not just that there is one. "Your
+                        subscription is active" left an owner unable to tell
+                        Starter from Business anywhere in the product, including
+                        when deciding whether they had run out of seats. */}
+                    <p>
+                        {subscriptionData?.plan_name
+                            ? <>
+                                You are on <strong>{subscriptionData.plan_name}</strong>
+                                {subscriptionData.seats_included
+                                    ? `, ${subscriptionData.seats_included} seats included.`
+                                    : '.'}
+                              </>
+                            : 'Your subscription is active.'}
+                    </p>
                     {subscriptionData?.current_period_end && (
                         <p>
                             Renews on: {new Date(subscriptionData.current_period_end).toLocaleDateString()}.

@@ -411,6 +411,13 @@ class AsyncUserRepository(AsyncBaseRepository):
                     'trial_end': sub_orm.trial_end,
                     'created_at': sub_orm.created_at,
                     'updated_at': sub_orm.updated_at,
+                    # Which plan, and how many seats it covers. Both were
+                    # written on every subscribe and by the webhook's plan sync,
+                    # and then dropped here, so nothing downstream could tell
+                    # Starter from Business and the settings page could only say
+                    # "your subscription is active".
+                    'plan_key': sub_orm.plan_key,
+                    'seats': sub_orm.seats,
                 }
 
                 # Get card details if they exist

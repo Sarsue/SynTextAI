@@ -1079,6 +1079,32 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-07 (settings names the plan):** The billing panel said "Your
+  subscription is active" and nothing else, so an owner could not tell Starter
+  from Business anywhere in the product, including when working out whether they
+  had run out of seats.
+
+  Nothing needed to be computed. `plan_key` and `seats` were written on every
+  subscribe and by the webhook's plan sync, and `get_subscription` simply did
+  not copy them out of the ORM row, so no caller could see them. Added there,
+  surfaced by `/subscriptions/status` as `plan`, `plan_name` and
+  `seats_included`.
+
+  The name is resolved by the backend through `get_plan`, not mapped from a key
+  in the browser: the names and prices live in `core/plans.py` next to the
+  Stripe price ids they were created from, and a second copy of that mapping in
+  the frontend is how a page ends up naming a plan the customer is not on.
+
+  Reads "You are on Business, 30 seats included." One line rather than two,
+  because the organization section below already shows "1 member of 30 seats"
+  and two numbers saying 30 on one screen is noise.
+
+  Verified against both live subscriptions: org 1 returns starter/Starter/10,
+  org 4358 returns business/Business/30, and the panel renders the Business one.
+  A contradictory "this organization has no plan yet" banner seen alongside it
+  turned out to be an artifact of the dev sign-in harness, which skips
+  organization selection; once the organization resolves the banner is gone.
+
 - **2026-08-07 (an unpaid organization could still ask questions):** Found by
   checking a condition rather than asserting it. The signup flow above keeps the
   company when a card is declined instead of rolling it back, on the grounds

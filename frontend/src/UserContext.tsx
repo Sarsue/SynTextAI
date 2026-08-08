@@ -48,6 +48,10 @@ interface UserSettings {
 // Define the type for SubscriptionData
 interface SubscriptionData {
     subscription_status: string;
+    /** 'starter' | 'business'. Named by the backend, which owns the mapping. */
+    plan?: string | null;
+    plan_name?: string | null;
+    seats_included?: number | null;
     card_last4?: string | null;
     card_brand?: string | null;
     card_exp_month?: number | null;
