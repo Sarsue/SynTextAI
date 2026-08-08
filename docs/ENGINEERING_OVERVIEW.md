@@ -1117,9 +1117,20 @@ answer that with fair-use limits rather than repricing everyone.
   **Comments never reach the logs.** `safe_text` on the write path, same rule
   as questions.
 
-  **Two bugs of my own, caught by driving it.** The chips rendered where the
-  composer covered the comment box, so the form looked like it ended at the
-  chips; it now scrolls itself into view. And the report's summary counted
+  **Four bugs of my own, three of them found by Osas driving it.** The chips
+  rendered where the composer covered the comment box, so the form looked like
+  it ended at the chips; it now scrolls itself into view. The pressed state used
+  `color: var(--primary)`, a token this app never defines, so it fell back to
+  #111 against a resting thumb of rgb(28,31,35): eleven points of grey apart and
+  invisible. A background on the same selector then lost to the button's own
+  utility classes and would have needed an `!important` to win, so the signal is
+  now a filled icon, which needs neither and reads in both themes. Worst of the
+  four: the second press on a pressed thumb cleared the rating, the usual toggle,
+  which here silently destroyed a chip and a comment that are invisible once the
+  form closes. Observed in the logs as `reason=incomplete, comment=len 19`
+  followed by a bare `-1`. Pressing a set thumbs-down now reopens what was said,
+  the comment box is seeded from the stored value, and removing a rating is a
+  deliberate button inside the form. And the report's summary counted
   complaints with no run at all as "a run that had not satisfied the question",
   which would have read as a pipeline failure on the very first report when the
   truth was an answer predating the link.

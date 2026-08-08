@@ -55,6 +55,14 @@ const AnswerFeedback: React.FC<AnswerFeedbackProps> = ({ messageId, feedback, on
 
     const rating = feedback?.rating ?? null;
 
+    // Show them what they already said. The box started empty every time, so
+    // reopening a rating that carried a comment presented a blank field, and
+    // saving from there replaced a real sentence with nothing. Seeded from the
+    // stored value, which also survives a reload.
+    useEffect(() => {
+        setComment(feedback?.comment ?? '');
+    }, [feedback?.comment]);
+
     // The answer being rated is usually the last one, so the form opens right
     // where the composer covers it: the chips showed and the comment box did
     // not, which reads as there being nothing more to say. Scroll it into view
@@ -97,16 +105,28 @@ const AnswerFeedback: React.FC<AnswerFeedbackProps> = ({ messageId, feedback, on
     };
 
     const press = (value: 1 | -1) => {
+        if (rating === -1 && value === -1) {
+            // Reopen what they already said, rather than deleting it.
+            //
+            // This used to clear on a second press, the usual toggle. It was
+            // wrong here because a thumbs-down carries a chip and a comment
+            // that are invisible once the form closes, so the only gesture
+            // available for "let me see what I wrote" silently destroyed it.
+            // Observed exactly that: a chip and a nineteen-character comment
+            // saved, then wiped by the next press. Removing a rating is now a
+            // deliberate button inside the form.
+            setExpanded((open) => !open);
+            return;
+        }
         if (rating === value) {
-            // Same thumb again means "never mind".
+            // Thumbs-up carries nothing, so pressing it again can still mean
+            // "never mind" without losing anything.
             setExpanded(false);
-            setComment('');
             void send(null);
             return;
         }
         if (value === 1) {
             setExpanded(false);
-            setComment('');
             void send({ rating: 1 });
             return;
         }
@@ -117,13 +137,22 @@ const AnswerFeedback: React.FC<AnswerFeedbackProps> = ({ messageId, feedback, on
     };
 
     const chooseChip = (reason: FeedbackReason) => {
-        void send({ rating: -1, reason, comment: comment.trim() || null });
+        // Pressing the selected chip again unsets it: a chip picked by mistake
+        // should be removable without clearing the whole rating.
+        const next = feedback?.reason === reason ? null : reason;
+        void send({ rating: -1, reason: next, comment: comment.trim() || null });
     };
 
     const saveComment = () => {
         const trimmed = comment.trim();
         void send({ rating: -1, reason: feedback?.reason ?? null, comment: trimmed || null });
         setExpanded(false);
+    };
+
+    const removeRating = () => {
+        setExpanded(false);
+        setComment('');
+        void send(null);
     };
 
     return (
@@ -139,7 +168,13 @@ const AnswerFeedback: React.FC<AnswerFeedbackProps> = ({ messageId, feedback, on
                     onClick={() => press(1)}
                     title="Good answer"
                 >
-                    <ThumbsUp className="size-3.5" />
+                    {/* Filled, not tinted. The pressed state used
+                        color: var(--primary), a token this app never defines,
+                        so it fell back to #111 against a resting thumb of
+                        rgb(28,31,35): eleven points of grey apart, which is no
+                        signal at all. A filled shape reads at a glance in
+                        either theme. */}
+                    <ThumbsUp className="size-3.5" fill={rating === 1 ? 'currentColor' : 'none'} />
                 </Button>
                 <Button
                     variant="ghost"
@@ -151,7 +186,7 @@ const AnswerFeedback: React.FC<AnswerFeedbackProps> = ({ messageId, feedback, on
                     onClick={() => press(-1)}
                     title="Bad answer"
                 >
-                    <ThumbsDown className="size-3.5" />
+                    <ThumbsDown className="size-3.5" fill={rating === -1 ? 'currentColor' : 'none'} />
                 </Button>
             </div>
 
@@ -181,9 +216,20 @@ const AnswerFeedback: React.FC<AnswerFeedbackProps> = ({ messageId, feedback, on
                             onKeyDown={(e) => { if (e.key === 'Enter') saveComment(); }}
                         />
                         <Button variant="outline" size="sm" onClick={saveComment} disabled={saving}>
-                            Send
+                            Save
                         </Button>
                     </div>
+                    {/* Deliberate, because the second press on the thumb now
+                        reopens instead of deleting. Without this there would be
+                        no way to take a rating back at all. */}
+                    <button
+                        type="button"
+                        className="answer-feedback-remove"
+                        onClick={removeRating}
+                        disabled={saving}
+                    >
+                        Remove rating
+                    </button>
                 </div>
             )}
         </div>

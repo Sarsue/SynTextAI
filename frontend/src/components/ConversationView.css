@@ -421,9 +421,15 @@
 }
 
 /* A pressed thumb has to be obvious at a glance, since it is the only thing
-   telling somebody they already rated this and need not do it again. */
+   telling somebody they already rated this and need not do it again.
+
+   The signal is the filled icon, set in the component, not a colour here. Two
+   attempts at a colour failed and are worth not repeating: color: var(--primary)
+   resolved to #111 against a resting thumb of rgb(28,31,35), eleven points of
+   grey apart and invisible; and a background on this selector loses to the
+   button's own utility classes, which would take an !important to beat. A
+   filled shape needs neither, and reads in both themes. */
 .answer-feedback-thumbs .is-active {
-    color: var(--primary, #111);
     opacity: 1;
 }
 
@@ -484,4 +490,23 @@
 
 .dark-mode .answer-feedback-comment input {
     border-color: #444;
+}
+
+/* Taking a rating back. Quiet, because it is the rare action: the common one
+   is pressing the thumb, and this only exists because the second press now
+   reopens the form rather than deleting what is in it. */
+.answer-feedback-remove {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.75rem;
+    color: inherit;
+    opacity: 0.6;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.answer-feedback-remove:hover {
+    opacity: 1;
 }
