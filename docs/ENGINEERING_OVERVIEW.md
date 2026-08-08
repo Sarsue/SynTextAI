@@ -1079,6 +1079,39 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-07 (an unpaid organization could still ask questions):** Found by
+  checking a condition rather than asserting it. The signup flow above keeps the
+  company when a card is declined instead of rolling it back, on the grounds
+  that settings can take the card later; Osas accepted that "as long as the
+  unpaid company has no access". It had access.
+
+  **Uploading and creating a workspace both went through `_assert_subscribed`.
+  Asking a question did not.** `create_message` checked who you are and what you
+  own, and nothing else. Verified against a real unpaid tenant, not read off the
+  code: creating a workspace returned 402 `SUBSCRIPTION_REQUIRED`, and the same
+  account posting a message returned 201 and ran the entire pipeline. From the
+  worker's own log, `TIMING {"event": "query", "ms": 7348, "chunks": 0}` — 7.3
+  seconds of retrieval, coverage loop and generation, including the metered
+  model call, for an organization that had never paid.
+
+  **Why it survived this long.** An unpaid tenant looks harmless. It cannot
+  upload, so it has no documents, so every answer is "I couldn't find relevant
+  information in your documents." Nothing leaks and nothing looks broken. It
+  only costs money, quietly, per question, and it means an account that never
+  paid still gets to use the product.
+
+  Closed with `assert_can_ask` in `core/limits.py`, the same shape as
+  `assert_can_create_doc`: the governing organization is the workspace's, not
+  the asker's, so staff stay covered by the company that pays for them. Called
+  after the ownership checks and before anything is written or queued, so a
+  refused caller stores no message and spends no model call. Deliberately not
+  first: a history belonging to somebody else answers 404 whether or not the
+  asker pays, rather than confirming it exists.
+
+  Verified: unpaid asks → 402, and the message count in that history is
+  unchanged after the attempt; the same organization marked active → 201 and the
+  answer runs. 86 tests pass.
+
 - **2026-08-07 (signup names the company and pays for it, on one screen):**
   Closes Tier 2 item 3, which was held for "before real marketing spend". That
   condition became true this week.

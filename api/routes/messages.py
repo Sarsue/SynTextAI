@@ -5,6 +5,7 @@ from typing import List
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
+from ..core.limits import assert_can_ask
 from ..core.auth import authenticate_user, get_store
 import logging
 from typing import Dict
@@ -87,6 +88,13 @@ async def create_message(
             # the owner had put in a workspace they can read.
             if not file_record or file_record.get("workspace_id") not in accessible:
                 raise HTTPException(status_code=404, detail="File not found")
+
+        # Paid for? Checked here, after the ownership checks above and before
+        # anything is written or queued, so an unpaid caller is refused without
+        # storing a message or spending a model call. Deliberately not first: a
+        # history that belongs to somebody else should answer 404 whether or not
+        # the asker is paying, rather than confirming it exists.
+        await assert_can_ask(store, user_id, workspace_id=workspace_id)
 
         # Save the user message to the history
         message_id = await store.chat_repo.add_message(

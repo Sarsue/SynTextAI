@@ -196,3 +196,29 @@ async def assert_can_create_workspace(
 ) -> None:
     """A workspace may be created inside a subscribed organization."""
     await _assert_subscribed(store, user_id, organization_id)
+
+
+async def assert_can_ask(
+    store: RepositoryManager,
+    user_id: int,
+    workspace_id: Optional[int] = None,
+) -> None:
+    """A question may be asked of a workspace whose organization is subscribed.
+
+    This was the hole. Uploading a document and creating a workspace both went
+    through _assert_subscribed; asking a question did not, so an organization
+    that had never paid could still send messages. Every one of them ran the
+    whole pipeline — retrieval, the coverage loop, generation — and the model
+    call at the end is metered and billed to us. Measured on an unpaid tenant:
+    7.3 seconds of work and a generated answer, for free.
+
+    It was easy to miss because the unpaid tenant looks harmless: it cannot
+    upload, so it has no documents, so every answer is "I couldn't find relevant
+    information in your documents." Nothing leaks. It just costs money, quietly,
+    and it means an account that never paid still gets to use the product.
+
+    Same rule as documents: the governing organization is the workspace's, not
+    the asker's, so staff are covered by the company that pays for them.
+    """
+    org_id = await _organization_for_workspace(store, workspace_id)
+    await _assert_subscribed(store, user_id, org_id)
