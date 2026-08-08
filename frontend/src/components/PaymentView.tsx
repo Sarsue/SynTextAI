@@ -6,22 +6,14 @@ import './PaymentView.css';
 import { useUserContext } from '../UserContext'; // Importing the context hook
 import { User } from 'firebase/auth';
 import posthog from '../services/analytics'; // Import PostHog for analytics
+import { subscribeWithCard } from '../services/subscribe';
+import { PlanChoices, usePlans } from './PlanPicker';
 import { Button } from '@/components/ui/button';
 
 interface PaymentViewProps {
     stripePromise: Promise<Stripe | null>;
     user: User | null;
     darkMode: boolean;
-}
-
-interface PlanOption {
-    key: string;
-    name: string;
-    description: string;
-    base_cents: number;
-    included_seats: number;
-    overage_cents: number;
-    available: boolean;
 }
 
 const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode }) => {
@@ -32,7 +24,6 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
     const [email, setEmail] = useState(user?.email || '');
     const [isRequestPending, setIsRequestPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [plans, setPlans] = useState<PlanOption[]>([]);
     const [selectedPlan, setSelectedPlan] = useState<string>('starter');
 
     // Fetch Subscription Status
@@ -40,27 +31,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         if (user) fetchSubscriptionStatus();
     }, [user]);
 
-    // Prices come from the backend, which derives them from the same plan
-    // definition the Stripe prices were created from. Hardcoding them here is
-    // how a page ends up advertising a price the customer is not charged.
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const response = await fetch('/api/v1/subscriptions/plans');
-                if (!response.ok) return;
-                const data = await response.json();
-                if (cancelled || !Array.isArray(data?.plans)) return;
-                const available = data.plans.filter((p: PlanOption) => p.available);
-                setPlans(available);
-                if (available.length) setSelectedPlan(available[0].key);
-            } catch {
-                // Leaves the picker empty and the subscribe button disabled,
-                // which is better than offering a plan we cannot charge for.
-            }
-        })();
-        return () => { cancelled = true; };
-    }, []);
+    const plans = usePlans(setSelectedPlan);
 
     // Who still has to pay. Anything that is not a live subscription lands on
     // the subscribe form, including a status that has not loaded yet, because
@@ -101,105 +72,29 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
         setError(null);
 
         try {
-            console.log("Creating Stripe payment method...");
-            const { paymentMethod, error: stripeError } = await stripe.createPaymentMethod({
-                type: 'card',
+            const { subscriptionStatus, data, requiredAction } = await subscribeWithCard({
+                stripe,
                 card: cardElement,
-                billing_details: {
-                    email,
-                    name: user?.displayName || 'Unknown User',
-                },
-            });
-
-            if (stripeError) {
-                throw new Error(stripeError.message || 'Payment method creation failed.');
-            }
-
-            console.log("Stripe payment method created:", paymentMethod);
-
-            console.log("Sending subscription request...");
-            const response = await fetch('/api/v1/subscriptions/subscribe', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${await user?.getIdToken()}`,
-                },
+                email,
+                name: user?.displayName,
+                plan: selectedPlan,
                 // Which organization is being paid for. Without it the backend
                 // guessed from the membership list and could bill a company the
                 // customer merely administers rather than the one they are in.
-                body: JSON.stringify({
-                    payment_method: paymentMethod?.id,
-                    plan: selectedPlan,
-                    organization_id: activeOrganizationId,
-                }),
+                organizationId: activeOrganizationId,
+                getToken: async () => (await user?.getIdToken()) || '',
             });
 
-            if (!response.ok) {
-                const errorResponse = await response.json();
-                console.error("Server error response:", errorResponse);
-                // FastAPI returns {"detail": ...}, never {"error": ...}, so
-                // reading .error discarded every real message and replaced it
-                // with the generic one — including 'your card was declined'
-                // and the reason a subscription actually failed.
-                const detail = errorResponse?.detail ?? errorResponse?.error;
-                throw new Error(
-                    typeof detail === 'string' ? detail
-                        : detail?.message ?? 'Failed to complete subscription.'
-                );
-            }
-
-            const data = await response.json();
-
-            // A card that needs 3D Secure does not decline. Stripe accepts the
-            // subscription, leaves it 'incomplete', and waits for the cardholder
-            // to pass their bank's challenge. Treating that as success sends
-            // somebody to /chat with no entitlement; treating it as failure
-            // tells them their card was bad and invites them to re-enter the
-            // same good card. Neither is true. Finish the challenge instead.
-            let finalStatus: string = data.subscription_status;
-            if (data.requires_action && data.client_secret) {
-                posthog.capture('subscription_requires_action', { userId: user?.uid, plan: selectedPlan });
-
-                const { error: actionError } = await stripe.confirmCardPayment(data.client_secret);
-                if (actionError) {
-                    throw new Error(
-                        actionError.message ||
-                        'Your bank did not confirm the payment. Please try again or use another card.'
-                    );
-                }
-
-                // Ask the server to re-read Stripe rather than reading our own
-                // database, which the confirming webhook has probably not
-                // reached yet. See the /confirm route for why.
-                const confirmResponse = await fetch('/api/v1/subscriptions/confirm', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${await user?.getIdToken()}`,
-                    },
-                    body: JSON.stringify({ organization_id: activeOrganizationId }),
-                });
-                if (!confirmResponse.ok) {
-                    throw new Error('Your payment went through, but we could not confirm it. Please refresh in a moment.');
-                }
-                finalStatus = (await confirmResponse.json()).subscription_status;
-            }
-
-            if (!['active', 'trialing'].includes((finalStatus || '').toLowerCase())) {
-                throw new Error('Your payment could not be completed. Please try another card.');
-            }
-
-            // Track successful subscription
             posthog.capture('subscription_success', {
                 userId: user?.uid,
                 email: email,
-                subscriptionStatus: finalStatus,
+                subscriptionStatus,
                 plan: selectedPlan,
-                requiredAction: Boolean(data.requires_action)
+                requiredAction,
             });
 
-            setSubscriptionData({ ...data, subscription_status: finalStatus });
-            setSubscriptionStatus(finalStatus);
+            setSubscriptionData(data);
+            setSubscriptionStatus(subscriptionStatus);
             // Entitlement lives on the organization, and /chat is gated on it.
             // Setting local state alone left the organization looking unpaid, so
             // navigating bounced straight back here. Re-resolve before leaving.
@@ -404,32 +299,7 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
                 // Never had a subscription and had one that ended are the same
                 // situation to a customer: no access, and a card to enter.
                 <>
-                    <div className="plan-choices">
-                        {plans.map((plan) => {
-                            const isSelected = plan.key === selectedPlan;
-                            return (
-                                <button
-                                    type="button"
-                                    key={plan.key}
-                                    onClick={() => setSelectedPlan(plan.key)}
-                                    disabled={!plan.available}
-                                    aria-pressed={isSelected}
-                                    className={`plan-choice ${isSelected ? 'is-selected' : ''}`}
-                                >
-                                    <span className="plan-choice-name">{plan.name}</span>
-                                    <span className="plan-choice-price">
-                                        ${(plan.base_cents / 100).toFixed(0)}
-                                        <span className="plan-choice-period">/month</span>
-                                    </span>
-                                    <span className="plan-choice-seats">
-                                        {plan.included_seats} seats included, then $
-                                        {(plan.overage_cents / 100).toFixed(0)} each
-                                    </span>
-                                    <span className="plan-choice-description">{plan.description}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
+                    <PlanChoices plans={plans} selected={selectedPlan} onSelect={setSelectedPlan} />
 
                     <form onSubmit={handleSubscribe}>
                         <CardElement
@@ -457,7 +327,20 @@ const PaymentView: React.FC<PaymentViewProps> = ({ stripePromise, user, darkMode
             ) : subscriptionData?.subscription_status === 'active' ? (
                 // Subscription is active, show card details and cancel button
                 <>
-                    <p>Your subscription is active.</p>
+                    {/* Which plan, not just that there is one. "Your
+                        subscription is active" left an owner unable to tell
+                        Starter from Business anywhere in the product, including
+                        when deciding whether they had run out of seats. */}
+                    <p>
+                        {subscriptionData?.plan_name
+                            ? <>
+                                You are on <strong>{subscriptionData.plan_name}</strong>
+                                {subscriptionData.seats_included
+                                    ? `, ${subscriptionData.seats_included} seats included.`
+                                    : '.'}
+                              </>
+                            : 'Your subscription is active.'}
+                    </p>
                     {subscriptionData?.current_period_end && (
                         <p>
                             Renews on: {new Date(subscriptionData.current_period_end).toLocaleDateString()}.

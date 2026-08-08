@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, BackgroundTasks, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
-from typing import Dict
+from pydantic import BaseModel
+from typing import Dict, Optional
 from ..core.utils import decode_firebase_token
 from ..core.auth import authenticate_user, get_store
 from api.workflows.tasks import delete_user_task
@@ -57,7 +58,34 @@ async def _owned_organization_id(store: RepositoryManager, user_id: int):
     return owned["organization_id"] if owned else None
 
 
-async def _start_organization(store: RepositoryManager, user_id: int, email: str):
+MAX_COMPANY_NAME = 100
+
+
+def _company_name(company_name: Optional[str], email: str) -> str:
+    """What to call this company.
+
+    Their answer if they gave one. Signup asks, because a company's name is not
+    something a customer should have to discover: deriving it from the address
+    produced "drsmith's Organization", which is what their colleagues then saw
+    in the chooser and what invite emails announced.
+
+    The derived name stays as the fallback, for the paths that create an
+    organization without asking, and because a blank field must not block
+    somebody from buying. It is a name they can change in settings, not a
+    decision that has to be right here.
+    """
+    chosen = (company_name or "").strip()
+    if chosen:
+        return chosen[:MAX_COMPANY_NAME]
+    return f"{(email.split('@')[0] or 'My').strip()}'s Organization"
+
+
+async def _start_organization(
+    store: RepositoryManager,
+    user_id: int,
+    email: str,
+    company_name: Optional[str] = None,
+):
     """Create the organization this user owns, or return the one they have.
 
     Idempotent under concurrency, which matters because signing up used to fire
@@ -65,15 +93,18 @@ async def _start_organization(store: RepositoryManager, user_id: int, email: str
     common case; the partial unique index on organization_members closes the
     race, and reaching it means another request won, so its organization is the
     answer.
+
+    An account owns one company, so a name passed here only ever applies to a
+    company being created. Somebody who already owns one gets it back unchanged
+    rather than silently renamed, which is what settings is for.
     """
     existing = await _owned_organization_id(store, user_id)
     if existing:
         logger.info(f"{email} already owns organization {existing}")
         return existing
 
-    org_label = (email.split("@")[0] or "My").strip()
     organization_id = await store.org_repo.create_organization(
-        name=f"{org_label}'s Organization",
+        name=_company_name(company_name, email),
         owner_user_id=user_id,
     )
     if not organization_id:
@@ -93,12 +124,26 @@ async def _start_organization(store: RepositoryManager, user_id: int, email: str
     return organization_id
 
 
+class SignUpRequest(BaseModel):
+    """What signup can tell us that the token cannot.
+
+    Optional, and the whole body is optional, because this endpoint is also
+    called by the sign-in listener with nothing to say. Defined out here at
+    module level on purpose: a model declared between the decorator and the
+    function below applies the decorator to the class, which registers the route
+    against a Pydantic model instead of a handler and crash-loops the app on
+    boot. That has happened here once already.
+    """
+    company_name: Optional[str] = None
+
+
 @users_router.post("", status_code=201) # This is the POST /api/v1/users endpoint
 async def create_user(
     intent: str = Query(
         "signin",
         description="'signup' to start an organization you own, 'signin' to enter ones you belong to",
     ),
+    body: Optional[SignUpRequest] = None,
     user_info: Dict = Depends(get_firebase_user_info_from_token),
     store: RepositoryManager = Depends(get_store)
 ):
@@ -147,7 +192,9 @@ async def create_user(
         if wants_own_organization:
             # _start_organization answers both cases: it returns the one they
             # already own, and is safe to call twice at once.
-            organization_id = await _start_organization(store, existing_user_id, email)
+            organization_id = await _start_organization(
+                store, existing_user_id, email, body.company_name if body else None
+            )
 
         return JSONResponse(
             content={
@@ -190,7 +237,9 @@ async def create_user(
         # signing in enough to become an owner.
         organization_id = None
         if wants_own_organization:
-            organization_id = await _start_organization(store, new_user_id, email)
+            organization_id = await _start_organization(
+                store, new_user_id, email, body.company_name if body else None
+            )
 
         return JSONResponse(
             content={

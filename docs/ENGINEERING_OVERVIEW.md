@@ -871,14 +871,8 @@ means accept, sign in, and land in the company that invited you, never being
 offered one of your own; an owner can remove a member; a member can delete their
 account freely; an owner must cancel the subscription before deleting theirs.
 
-Everything except the first is built, including role and reach chosen at invite
-time (2026-08-03). What remains is the sign-up screen itself: naming the company
-and paying for it as one flow from the home page, instead of a company named
-after the email prefix followed by a redirect to settings.
-
-Worth doing before real marketing spend, not before the next deploy: the current
-flow works and is honest, it just asks a customer to understand more than it
-should.
+**Closed 2026-08-07.** All of it is built. The sign-up screen now names the
+company and pays for it in one submit; see "Recent changes".
 
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
@@ -1084,6 +1078,115 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-07 (settings names the plan):** The billing panel said "Your
+  subscription is active" and nothing else, so an owner could not tell Starter
+  from Business anywhere in the product, including when working out whether they
+  had run out of seats.
+
+  Nothing needed to be computed. `plan_key` and `seats` were written on every
+  subscribe and by the webhook's plan sync, and `get_subscription` simply did
+  not copy them out of the ORM row, so no caller could see them. Added there,
+  surfaced by `/subscriptions/status` as `plan`, `plan_name` and
+  `seats_included`.
+
+  The name is resolved by the backend through `get_plan`, not mapped from a key
+  in the browser: the names and prices live in `core/plans.py` next to the
+  Stripe price ids they were created from, and a second copy of that mapping in
+  the frontend is how a page ends up naming a plan the customer is not on.
+
+  Reads "You are on Business, 30 seats included." One line rather than two,
+  because the organization section below already shows "1 member of 30 seats"
+  and two numbers saying 30 on one screen is noise.
+
+  Verified against both live subscriptions: org 1 returns starter/Starter/10,
+  org 4358 returns business/Business/30, and the panel renders the Business one.
+  A contradictory "this organization has no plan yet" banner seen alongside it
+  turned out to be an artifact of the dev sign-in harness, which skips
+  organization selection; once the organization resolves the banner is gone.
+
+- **2026-08-07 (an unpaid organization could still ask questions):** Found by
+  checking a condition rather than asserting it. The signup flow above keeps the
+  company when a card is declined instead of rolling it back, on the grounds
+  that settings can take the card later; Osas accepted that "as long as the
+  unpaid company has no access". It had access.
+
+  **Uploading and creating a workspace both went through `_assert_subscribed`.
+  Asking a question did not.** `create_message` checked who you are and what you
+  own, and nothing else. Verified against a real unpaid tenant, not read off the
+  code: creating a workspace returned 402 `SUBSCRIPTION_REQUIRED`, and the same
+  account posting a message returned 201 and ran the entire pipeline. From the
+  worker's own log, `TIMING {"event": "query", "ms": 7348, "chunks": 0}` — 7.3
+  seconds of retrieval, coverage loop and generation, including the metered
+  model call, for an organization that had never paid.
+
+  **Why it survived this long.** An unpaid tenant looks harmless. It cannot
+  upload, so it has no documents, so every answer is "I couldn't find relevant
+  information in your documents." Nothing leaks and nothing looks broken. It
+  only costs money, quietly, per question, and it means an account that never
+  paid still gets to use the product.
+
+  Closed with `assert_can_ask` in `core/limits.py`, the same shape as
+  `assert_can_create_doc`: the governing organization is the workspace's, not
+  the asker's, so staff stay covered by the company that pays for them. Called
+  after the ownership checks and before anything is written or queued, so a
+  refused caller stores no message and spends no model call. Deliberately not
+  first: a history belonging to somebody else answers 404 whether or not the
+  asker pays, rather than confirming it exists.
+
+  Verified: unpaid asks → 402, and the message count in that history is
+  unchanged after the attempt; the same organization marked active → 201 and the
+  answer runs. 86 tests pass.
+
+- **2026-08-07 (signup names the company and pays for it, on one screen):**
+  Closes Tier 2 item 3, which was held for "before real marketing spend". That
+  condition became true this week.
+
+  **What it was.** Pressing sign up parked `auth_intent=signup`, and the
+  sign-in listener created the organization the moment Firebase reported the
+  account, named `email.split("@")[0] + "'s Organization"`. Then a redirect to
+  settings to pay. So becoming a customer happened on two screens, and the
+  company arrived already named something they never chose but their colleagues
+  would see in the chooser and in every invite email.
+
+  **What it is.** One form: company name, plan, card, one submit. It creates the
+  organization with the chosen name, subscribes it, handles a 3D Secure
+  challenge if the card needs one, and lands in `/chat`. The listener no longer
+  creates anything: `auth_intent` is simply not set on this path, so it
+  registers the user and stops.
+
+  **`POST /users` takes an optional `company_name`.** Optional because the same
+  endpoint is called by the sign-in listener with nothing to say, and the
+  derived name stays as the fallback so a blank field cannot stop somebody
+  buying. `SignUpRequest` is defined at module level, not between the decorator
+  and the handler, which registers the route against the model and crash-loops
+  the app on boot; that has happened here once already.
+
+  **Two things extracted rather than copied.** `services/subscribe.ts` holds the
+  subscribe-and-confirm sequence, because two screens now take a card and the
+  awkward part is 3D Secure: four steps, two failure modes, and a copy on each
+  screen would drift, with the untested screen drifting first and the symptom
+  being a customer told their card was declined when it was not.
+  `components/PlanPicker.tsx` holds the prices, because two copies eventually
+  advertise two different numbers. `PaymentView` now uses both and got shorter.
+
+  **A retry after a declined card would have lied.** The organization is created
+  before the charge, and an account owns exactly one company, so posting the
+  name again returns the existing organization unchanged and an edited name
+  would be silently ignored. The screen now remembers the id, skips creation on
+  the retry, disables the name field and says the company already exists.
+
+  **Found by driving it:** the card field mounted with no border or padding and
+  was invisible, because `PaymentView.css` scoped `.StripeElement` under
+  `.PaymentView` and signup is not inside it. Only a screenshot showed this;
+  every type check passed.
+
+  Verified end to end against Stripe test mode on both paths: signup created
+  "Northgate Dental Group" (the typed name, not the derived one), active on
+  starter, landing in `/chat`; the settings path still subscribes after the
+  refactor; and `POST /users?intent=signup` with no body at all still produces
+  the derived name. 86 tests pass, tsc clean, test data removed from the
+  database, Stripe and Firebase.
 
 - **2026-08-07 (the second John Smith could not sign up):** Found while testing
   the 3D Secure work, not looked for. Two throwaway test accounts happened to

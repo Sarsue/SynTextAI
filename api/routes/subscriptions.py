@@ -213,8 +213,17 @@ async def subscription_status(
         trial_end = subscription.get('trial_end')
         current_period_end = subscription.get('current_period_end')
 
+        # Name the plan, do not make the browser map a key to a label. The
+        # names and prices live in core/plans.py, next to the Stripe price ids
+        # they were created from; a copy of that mapping in the frontend is how
+        # a page ends up naming a plan the customer is not on.
+        plan = get_plan(subscription.get('plan_key')) if subscription.get('plan_key') else None
+
         response = {
             'subscription_status': subscription.get('status'),
+            'plan': plan.key if plan else None,
+            'plan_name': plan.name if plan else None,
+            'seats_included': subscription.get('seats') if subscription.get('seats') else (plan.included_seats if plan else None),
             'card_last4': card_last4,
             'card_brand': card_brand,
             'card_exp_month': card_exp_month,

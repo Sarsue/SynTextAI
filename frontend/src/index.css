@@ -287,6 +287,51 @@ header, footer {
     opacity: 0.7;
 }
 
+/* Sign-up asks for a company name, a plan and a card on one screen, which does
+   not fit the 360px a single button needed. */
+.auth-card-wide {
+    max-width: 460px;
+}
+
+.auth-card form {
+    width: 100%;
+    text-align: left;
+}
+
+.auth-field {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.auth-field-label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.auth-input {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--surface, transparent);
+    border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+    border-radius: 8px;
+}
+
+.auth-input:focus {
+    outline: none;
+    border-color: var(--text-secondary);
+}
+
+.auth-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 /* ─── Invite page ──────────────────────────────────────────────────────── */
 .invite-card {
     width: 100%;
