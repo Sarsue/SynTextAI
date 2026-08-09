@@ -17,11 +17,17 @@ not message_id, so tying a rating to the run that produced it meant matching on
 timestamps within a conversation, which is a guess. Hence the second half of
 this migration: one nullable column that makes the join exact.
 
+WHICH RUN A RATING IS ABOUT IS DERIVED, NOT STORED
+
+This table deliberately holds no agent_run_id. The run is reachable by joining
+through the message that was rated, so storing it here would duplicate a fact
+rather than add one, and two copies of the same fact are what drift. The single
+link is agent_runs.message_id below.
+
 WHY A SEPARATE TABLE RATHER THAN COLUMNS ON messages
 
 messages is read in full on every conversation load. Feedback is sparse, and it
-carries a reason, a comment and a run reference that have no business widening
-that read. Keeping it separate also means the unique constraint below expresses
+carries a reason and a comment that have no business widening that read. Keeping it separate also means the unique constraint below expresses
 the rule directly.
 
 WHAT THE UNIQUE CONSTRAINT IS FOR
@@ -38,7 +44,6 @@ exists to avoid. Feedback on an older message simply records no run.
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision = "20260808_message_feedback"
 down_revision = "20260807_username_not_unique"
@@ -72,14 +77,6 @@ def upgrade() -> None:
         # change, not a migration.
         sa.Column("reason", sa.String(length=32), nullable=True),
         sa.Column("comment", sa.Text(), nullable=True),
-        # Which run produced the answer. SET NULL rather than CASCADE: if runs
-        # are ever pruned, the rating is still worth keeping.
-        sa.Column(
-            "agent_run_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
-            nullable=True,
-        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

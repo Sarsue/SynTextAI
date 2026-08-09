@@ -1092,10 +1092,18 @@ answer that with fair-use limits rather than repricing everyone.
   writes it. Without it this is a tally; with it, it is a diagnosis.
 
   **Separate table, not columns on `messages`.** `messages` is read in full on
-  every conversation load, and feedback is sparse and carries a reason, a
-  comment and a run reference that have no business widening that read. Unique
-  on `(message_id, user_id)`, so the other thumb replaces rather than
+  every conversation load, and feedback is sparse and carries a reason and a
+  comment that have no business widening that read. Unique on
+  `(message_id, user_id)`, so the other thumb replaces rather than
   accumulating.
+
+  **One link, not two.** The first version also stored `agent_run_id` on the
+  feedback row. It was derivable by joining through the rated message, so it
+  duplicated a fact rather than adding one, and two copies of a fact are what
+  drift. Dropped before it shipped, and the report derives the run from
+  `agent_runs.message_id` instead. The migration was corrected in place rather
+  than followed by a second one undoing it, because it had only ever run on a
+  local database; production never sees the churn.
 
   **Deleted rather than added alongside:** `Message.liked` / `Message.disliked`
   were dead scaffolding from an earlier attempt, set to `false` in four places

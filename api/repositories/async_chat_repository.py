@@ -340,12 +340,6 @@ class AsyncChatRepository(AsyncBaseRepository):
                 if message.sender != "bot":
                     return {"error": "not_an_answer"}
 
-                # The run that produced this answer, resolved here rather than
-                # accepted from the client. Null for anything answered before
-                # 20260808_message_feedback added the link.
-                run_stmt = select(AgentRunORM.id).where(AgentRunORM.message_id == message_id)
-                agent_run_id = (await session.execute(run_stmt)).scalar_one_or_none()
-
                 existing_stmt = select(MessageFeedbackORM).where(
                     and_(
                         MessageFeedbackORM.message_id == message_id,
@@ -366,7 +360,6 @@ class AsyncChatRepository(AsyncBaseRepository):
                 # rating and read as a complaint about an answer they liked.
                 feedback.reason = reason if rating == -1 else None
                 feedback.comment = comment if rating == -1 else None
-                feedback.agent_run_id = agent_run_id
 
                 await session.commit()
                 await session.refresh(feedback)
@@ -440,10 +433,14 @@ class AsyncChatRepository(AsyncBaseRepository):
                 if rating is not None:
                     conditions.append(MessageFeedbackORM.rating == rating)
 
+                # The run is derived, not stored: agent_runs.message_id is the
+                # single link, written by the worker when it saves the answer.
+                # Outer join because answers from before that column existed
+                # have no run to reach, which the report says rather than hides.
                 stmt = (
                     select(MessageFeedbackORM, MessageORM, AgentRunORM)
                     .join(MessageORM, MessageORM.id == MessageFeedbackORM.message_id)
-                    .outerjoin(AgentRunORM, AgentRunORM.id == MessageFeedbackORM.agent_run_id)
+                    .outerjoin(AgentRunORM, AgentRunORM.message_id == MessageFeedbackORM.message_id)
                     .order_by(desc(MessageFeedbackORM.created_at))
                     .limit(limit)
                 )
@@ -461,7 +458,7 @@ class AsyncChatRepository(AsyncBaseRepository):
                         "reason": feedback.reason,
                         "comment": feedback.comment,
                         "created_at": feedback.created_at,
-                        "agent_run_id": feedback.agent_run_id,
+                        "agent_run_id": run.id if run is not None else None,
                         "question": payload.get("message"),
                         "answer": answer.content,
                         "workspace_id": payload.get("workspace_id"),

@@ -362,9 +362,8 @@ class MessageFeedback(Base):
     """What a customer thought of one answer.
 
     Separate from messages because messages is read in full on every
-    conversation load, and this carries a reason, a comment and a run reference
-    that have no business widening that read. See migration
-    20260808_message_feedback.
+    conversation load, and this carries a reason and a comment that have no
+    business widening that read. See migration 20260808_message_feedback.
     """
     __tablename__ = "message_feedback"
     __table_args__ = (
@@ -385,11 +384,9 @@ class MessageFeedback(Base):
     rating = Column(SmallInteger, nullable=False)
     reason = Column(String(32), nullable=True)
     comment = Column(Text, nullable=True)
-    # Which run produced the answer, so a rating can be read alongside what was
-    # retrieved. SET NULL, not CASCADE: pruning runs must not discard ratings.
-    agent_run_id = Column(
-        UUID(as_uuid=True), ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
-    )
+    # No agent_run_id here on purpose. The run that produced the rated answer is
+    # reachable through agent_runs.message_id, so holding a copy would duplicate
+    # a fact rather than add one, and two copies are what drift.
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
