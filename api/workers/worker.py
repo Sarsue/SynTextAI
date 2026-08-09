@@ -422,12 +422,23 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                 )
                 response = result.get("response")
                 if response:
-                    await store.chat_repo.add_message(
+                    answer_message_id = await store.chat_repo.add_message(
                         content=str(response),
                         sender="bot",
                         user_id=int(user_id),
                         chat_history_id=int(history_id),
                     )
+                    # Tie this run to the answer it produced, so a thumbs-down
+                    # on that message can be read next to what was retrieved,
+                    # whether coverage was satisfied, and how much context the
+                    # model was given. Without it a rating can only be matched
+                    # to a run by timestamp within a conversation, which is a
+                    # guess. Never raises: the answer is already saved and the
+                    # customer is waiting, so a missing link must not fail it.
+                    if answer_message_id:
+                        await store.chat_repo.link_run_to_message(
+                            run_id, int(answer_message_id)
+                        )
                     await notify_client(
                         user_id=int(user_id),
                         event_type="message_received",

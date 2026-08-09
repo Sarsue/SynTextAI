@@ -1079,6 +1079,80 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-08 (customers can say an answer was wrong):** Thumbs on every
+  answer, four chips and an optional comment on thumbs-down, and a CLI that
+  reads them next to what the pipeline did.
+
+  **The design turned on one finding.** `agent_runs` already recorded every
+  query: the question in `payload`, and `retrievals`, `covered_needs`,
+  `context_chunks`, `expanded_terms` in `result`. But it stored
+  `chat_history_id` and not `message_id`, so tying a rating to the run that
+  produced it meant matching on timestamps inside a conversation, which is a
+  guess. Migration `20260808_message_feedback` adds that column and the worker
+  writes it. Without it this is a tally; with it, it is a diagnosis.
+
+  **Separate table, not columns on `messages`.** `messages` is read in full on
+  every conversation load, and feedback is sparse and carries a reason and a
+  comment that have no business widening that read. Unique on
+  `(message_id, user_id)`, so the other thumb replaces rather than
+  accumulating.
+
+  **One link, not two.** The first version also stored `agent_run_id` on the
+  feedback row. It was derivable by joining through the rated message, so it
+  duplicated a fact rather than adding one, and two copies of a fact are what
+  drift. Dropped before it shipped, and the report derives the run from
+  `agent_runs.message_id` instead. The migration was corrected in place rather
+  than followed by a second one undoing it, because it had only ever run on a
+  local database; production never sees the churn.
+
+  **Deleted rather than added alongside:** `Message.liked` / `Message.disliked`
+  were dead scaffolding from an earlier attempt, set to `false` in four places
+  and read once as `m.is_liked === 1` against a field the API never sent, so
+  permanently false and never rendered. Replaced by `feedback` rather than left
+  beside it.
+
+  **Chips and a comment, both.** The chip is countable, so "eleven of fourteen
+  complaints were wrong_source" is a sentence the report can produce. The
+  comment is where the diagnosis lives, because "cited the 2019 policy, we are
+  on the 2024 one" is not on any fixed list. The form only opens on
+  thumbs-down: somebody happy with an answer has moved on, and asking them to
+  categorise their happiness costs the rating already earned.
+
+  **Not gated on entitlement**, deliberately. An unpaid organization cannot ask
+  anything new, but telling us an old answer was wrong is the last thing to
+  refuse: it is the only signal we get from somebody on their way out.
+
+  **Comments never reach the logs.** `safe_text` on the write path, same rule
+  as questions.
+
+  **Four bugs of my own, three of them found by Osas driving it.** The chips
+  rendered where the composer covered the comment box, so the form looked like
+  it ended at the chips; it now scrolls itself into view. The pressed state used
+  `color: var(--primary)`, a token this app never defines, so it fell back to
+  #111 against a resting thumb of rgb(28,31,35): eleven points of grey apart and
+  invisible. A background on the same selector then lost to the button's own
+  utility classes and would have needed an `!important` to win, so the signal is
+  now a filled icon, which needs neither and reads in both themes. Worst of the
+  four: the second press on a pressed thumb cleared the rating, the usual toggle,
+  which here silently destroyed a chip and a comment that are invisible once the
+  form closes. Observed in the logs as `reason=incomplete, comment=len 19`
+  followed by a bare `-1`. Pressing a set thumbs-down now reopens what was said,
+  the comment box is seeded from the stored value, and removing a rating is a
+  deliberate button inside the form. And the report's summary counted
+  complaints with no run at all as "a run that had not satisfied the question",
+  which would have read as a pipeline failure on the very first report when the
+  truth was an answer predating the link.
+
+  **A real finding on the first run**, with synthetic data: a complaint where
+  the pipeline reported `covered=yes` while the answer was "I couldn't find
+  enough evidence in your documents." Coverage said the need was satisfied and
+  the generator refused anyway. Worth chasing when the quality work starts.
+
+  15 tests, 105 total. The isolation cases were checked by removing the
+  ownership condition from `_authorized_message`, which turned both red.
+  Verified end to end in the browser: rate, chip, comment, reload, still
+  pressed; and a fresh question through the real worker linked its run.
+
 - **2026-08-07 (a test for the card-update path):** `api/tests/test_card_update.py`.
   This is the recovery path for a locked-out paying customer, and since
   `past_due` now blocks chat as well as uploads it is the whole way back in. It

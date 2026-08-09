@@ -51,10 +51,23 @@ export interface Message {
 
     timestamp: string;
 
-    liked: boolean;
+    /**
+     * This caller's own rating of this answer, or null if they have not rated
+     * it. Replaces a `liked`/`disliked` pair that nothing ever rendered and
+     * that the API never populated: it was read as `m.is_liked === 1` against
+     * a field the server does not send, so it was permanently false.
+     */
+    feedback?: MessageFeedback | null;
 
-    disliked: boolean;
+}
 
+/** A chip from the thumbs-down form. The backend validates the set. */
+export type FeedbackReason = 'wrong' | 'incomplete' | 'not_in_documents' | 'wrong_source';
+
+export interface MessageFeedback {
+    rating: 1 | -1;
+    reason?: FeedbackReason | null;
+    comment?: string | null;
 }
 
 export interface History {

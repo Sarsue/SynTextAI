@@ -7,6 +7,7 @@ from ..repositories.repository_manager import RepositoryManager
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
 from ..core.limits import assert_can_ask
 from ..core.auth import authenticate_user, get_store
+from ..core.log_safety import safe_text
 import logging
 from typing import Dict
 # Set up logging
@@ -37,6 +38,28 @@ class MessageBody(BaseModel):
     history_id: int | None = None
     workspace_id: int | None = None
     file_id: int | None = None
+
+
+# The chips the thumbs-down form offers. Validated here rather than trusted,
+# so the stored set stays countable: free text is where the insight is, but a
+# free-text "reason" would make the tally meaningless.
+FEEDBACK_REASONS = {"wrong", "incomplete", "not_in_documents", "wrong_source"}
+
+# Long enough for a sentence about what went wrong, short enough that this
+# never becomes a second place customer content accumulates.
+MAX_FEEDBACK_COMMENT = 500
+
+
+class FeedbackBody(BaseModel):
+    """A rating of one answer.
+
+    Defined above the decorators, not between a decorator and its function.
+    Putting a class there once applied @messages_router.post to the class
+    instead of the handler and the app crash-looped on start.
+    """
+    rating: int
+    reason: str | None = None
+    comment: str | None = None
 
 
 # Route to create a new message
@@ -144,3 +167,90 @@ async def create_message(
     except Exception as e:
         logger.error(f"Error creating message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not create message")
+
+@messages_router.put("/{message_id}/feedback", status_code=200)
+async def set_feedback(
+    message_id: int,
+    body: FeedbackBody,
+    organization_id: int | None = None,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Record what somebody thought of an answer.
+
+    A PUT because it is idempotent: pressing thumbs-down and then thumbs-up
+    replaces the rating rather than adding a second one. The unique constraint
+    on (message_id, user_id) is what makes that true underneath.
+
+    Deliberately not gated on entitlement. An organization that has stopped
+    paying cannot ask anything new, but telling us an old answer was wrong is
+    the last thing we should refuse: it is the only signal we get from somebody
+    on their way out.
+    """
+    user_id = user_data["user_id"]
+
+    if body.rating not in (-1, 1):
+        raise HTTPException(status_code=422, detail="rating must be -1 or 1")
+
+    reason = (body.reason or "").strip() or None
+    if reason is not None and reason not in FEEDBACK_REASONS:
+        raise HTTPException(status_code=422, detail="unknown reason")
+
+    comment = (body.comment or "").strip() or None
+    if comment is not None and len(comment) > MAX_FEEDBACK_COMMENT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"comment must be {MAX_FEEDBACK_COMMENT} characters or fewer",
+        )
+
+    # Same reach question the rest of the app asks, not a new one.
+    accessible = await store.workspace_repo.accessible_workspace_ids(
+        user_id, organization_id=organization_id
+    )
+
+    saved = await store.chat_repo.set_message_feedback(
+        message_id=message_id,
+        user_id=user_id,
+        rating=body.rating,
+        reason=reason,
+        comment=comment,
+        accessible_workspace_ids=accessible,
+    )
+
+    if saved is None:
+        # Not theirs, or not there. One answer for both, so this cannot be used
+        # to discover which message ids exist.
+        raise HTTPException(status_code=404, detail="Message not found")
+    if saved.get("error") == "not_an_answer":
+        raise HTTPException(status_code=400, detail="Only answers can be rated")
+
+    # The comment is customer content and never reaches the log line.
+    logger.info(
+        "Feedback %s on message %s by user %s (reason=%s, comment=%s)",
+        saved["rating"], message_id, user_id, saved["reason"],
+        safe_text(saved["comment"], "c") if saved["comment"] else "none",
+    )
+    return saved
+
+
+@messages_router.delete("/{message_id}/feedback", status_code=200)
+async def clear_feedback(
+    message_id: int,
+    organization_id: int | None = None,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Undo a rating: pressing the same thumb again means "never mind"."""
+    user_id = user_data["user_id"]
+
+    accessible = await store.workspace_repo.accessible_workspace_ids(
+        user_id, organization_id=organization_id
+    )
+    ok = await store.chat_repo.clear_message_feedback(
+        message_id=message_id,
+        user_id=user_id,
+        accessible_workspace_ids=accessible,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"rating": None}

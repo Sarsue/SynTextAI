@@ -406,3 +406,107 @@
         transform: translateY(0);
     }
 }
+
+/* Rating an answer.
+   Sits in the same metadata row as the copy button, so the whole row is one
+   quiet strip under an answer rather than a second control area competing
+   with it. */
+.answer-feedback {
+    display: contents;
+}
+
+.answer-feedback-thumbs {
+    display: inline-flex;
+    gap: 0.125rem;
+}
+
+/* A pressed thumb has to be obvious at a glance, since it is the only thing
+   telling somebody they already rated this and need not do it again.
+
+   The signal is the filled icon, set in the component, not a colour here. Two
+   attempts at a colour failed and are worth not repeating: color: var(--primary)
+   resolved to #111 against a resting thumb of rgb(28,31,35), eleven points of
+   grey apart and invisible; and a background on this selector loses to the
+   button's own utility classes, which would take an !important to beat. A
+   filled shape needs neither, and reads in both themes. */
+.answer-feedback-thumbs .is-active {
+    opacity: 1;
+}
+
+.answer-feedback-form {
+    flex-basis: 100%;
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.answer-feedback-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
+.answer-feedback-chip {
+    border: 1px solid var(--border, #d4d4d4);
+    background: transparent;
+    border-radius: 999px;
+    padding: 0.2rem 0.625rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: inherit;
+}
+
+.answer-feedback-chip:hover {
+    border-color: var(--primary, #111);
+}
+
+.answer-feedback-chip.is-selected {
+    background: var(--primary, #111);
+    border-color: var(--primary, #111);
+    color: var(--primary-foreground, #fff);
+}
+
+.answer-feedback-comment {
+    display: flex;
+    gap: 0.375rem;
+    align-items: center;
+}
+
+.answer-feedback-comment input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--border, #d4d4d4);
+    border-radius: 0.375rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8125rem;
+    background: transparent;
+    color: inherit;
+}
+
+.dark-mode .answer-feedback-chip {
+    border-color: #444;
+}
+
+.dark-mode .answer-feedback-comment input {
+    border-color: #444;
+}
+
+/* Taking a rating back. Quiet, because it is the rare action: the common one
+   is pressing the thumb, and this only exists because the second press now
+   reopens the form rather than deleting what is in it. */
+.answer-feedback-remove {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.75rem;
+    color: inherit;
+    opacity: 0.6;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.answer-feedback-remove:hover {
+    opacity: 1;
+}
