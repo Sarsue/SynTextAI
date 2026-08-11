@@ -422,9 +422,11 @@ list, because both are gated on a benchmark the tool layer is currently losing.
 3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
    zeros somebody typed by hand. This is also the first thing that turns the
    feedback data from 2026-08-08 into something an owner can look at.
-4. **Integrations.** The largest gap between what the positioning promises and
-   what exists, and the first one a customer notices on their own. Nothing in
-   the codebase reads from an external system yet. When it does, it arrives as
+4. **Integrations. Started 2026-08-11.** Drive and SharePoint import is built
+   on the backend and waiting on OAuth app registrations for the browser half.
+   Slack and Teams were confirmed to be a *surface* rather than a source: the
+   app answers questions from inside them, which is roadmap item 11, not
+   another place to read documents from. When it does, it arrives as
    another source feeding the same ingestion path, never a parallel pipeline.
 5. **Workflow automation, Tier 3.** SOPs, meeting summaries, onboarding,
    proposal drafting, approvals. Marketing already implies this exists. It does
@@ -1218,6 +1220,46 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (documents can come from Drive and SharePoint):** The backend
+  half of the first connectors. A customer picks documents in the provider's
+  own picker and they arrive here as ordinary files: same storage, same
+  workspace, same ingestion queue, same citations. `POST /api/v1/files/import`.
+
+  **Nothing is stored to keep access, deliberately.** The browser hands us a
+  short-lived token for one import, we fetch the bytes with it, and it is gone
+  when the request ends. No refresh token in the database, no standing grant
+  against a customer's Drive, nothing to leak. The cost is real and named: no
+  automatic sync. Continuous sync means holding a credential that opens a law
+  firm's document store, which is worth doing when a customer asks and not
+  before.
+
+  **The Google scope decision is the one that saves weeks.** `drive.readonly`
+  is a *restricted* scope and production use requires a third-party security
+  assessment. The picker flow needs only `drive.file`, which reaches the
+  documents the customer chose and nothing else: no assessment, and a better
+  answer in a sales conversation.
+
+  **An import is another way in, not a way around.** It calls the same
+  functions an upload calls, in the same order: the workspace upload
+  permission, `assert_can_create_doc`, the duplicate-name rule, the file-type
+  list and the size ceiling. Mutation-tested, because "it looks like the upload
+  path" is not the same as being it: removing the permission check fails two
+  tests, removing the subscription check fails one.
+
+  **Partial success is reported as such.** Ten documents where one was deleted
+  in Drive since the customer picked it imports nine and names the tenth,
+  rather than refusing all ten. A provider error is never passed through to the
+  customer or the log, because those messages can carry a URL with the access
+  token in it.
+
+  Google Docs are exported to PDF on the way in, since a Doc has no bytes of
+  its own and PDF keeps the pagination a citation needs. Other Google-native
+  types are refused with a reason rather than imported as something unreadable.
+
+  10 tests, 171 total. **Still to do: the pickers in the browser, which need an
+  OAuth client id from Osas for Google and an Azure app for Microsoft.**
+
 
 - **2026-08-11 (the dashboard shows real numbers, and they are the customer's
   own):** `GET /analytics/dashboard` returned zeros somebody had typed by hand

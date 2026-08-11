@@ -1,4 +1,5 @@
 from firebase_admin import auth
+import asyncio
 import re
 from google.cloud import storage
 import logging
@@ -244,6 +245,41 @@ async def upload_to_gcs(file: UploadFile, workspace_id: int, file_id: int, filen
     except Exception as e:
         logger.error(f"Error uploading {filename} to GCS: {e}")
         return None
+
+async def upload_bytes_to_gcs(data: bytes, workspace_id: int, file_id: int, filename: str):
+    """Store bytes we already hold, under the same layout an upload uses.
+
+    Exists for connectors, which fetch a document from Drive or SharePoint and
+    have it in memory rather than as an UploadFile. Deliberately the same object
+    path, the same content type mapping and the same "never public" rule as
+    upload_to_gcs, because an imported document must be indistinguishable from
+    an uploaded one everywhere downstream.
+    """
+    try:
+        client = storage.Client.from_service_account_json('/app/api/config/credentials.json')
+        bucket = client.bucket(bucket_name)
+        object_path = workspace_object_path(workspace_id, file_id, filename)
+        blob = bucket.blob(object_path)
+
+        extension = filename.lower().split('.')[-1] if '.' in filename else ''
+        content_type = {
+            'pdf': 'application/pdf',
+            'txt': 'text/plain',
+            'md': 'text/markdown',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        }.get(extension, 'application/octet-stream')
+
+        await asyncio.to_thread(blob.upload_from_string, data, content_type=content_type)
+        blob.content_disposition = 'inline'
+        await asyncio.to_thread(blob.patch)
+
+        url = canonical_gcs_url(object_path)
+        logger.info(f"Stored imported {filename} ({len(data)} bytes) at {url}")
+        return url
+    except Exception as e:
+        logger.error(f"Error storing imported {filename}: {e}", exc_info=True)
+        return None
+
 
 def download_bytes(object_path: str):
     """Fetch an object by its path.
