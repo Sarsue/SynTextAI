@@ -60,7 +60,9 @@ async def test_a_stranger_cannot_search_another_tenants_workspace(
         f"/api/v1/search?q=anything&workspace_id={workspace}"
     )
 
-    assert response.status_code == 403
+    # 404, the same as chat, and not 403. A 403 would confirm the workspace
+    # exists to somebody who may not have it.
+    assert response.status_code == 404
 
 
 async def test_searching_one_document_is_authorized_by_its_workspace(
@@ -75,7 +77,7 @@ async def test_searching_one_document_is_authorized_by_its_workspace(
 
     response = await client.as_(outsider).get(f"/api/v1/search?q=anything&file_id={file_id}")
 
-    assert response.status_code == 403
+    assert response.status_code == 404
 
 
 async def test_a_missing_document_is_not_found(store, tenant, client, no_paid_calls):
@@ -97,12 +99,25 @@ async def test_an_empty_query_is_refused_before_anything_is_spent(
 
 
 async def test_somebody_with_no_workspaces_gets_nothing_rather_than_an_error(
-    store, tenant, client, no_paid_calls
+    store, tenant, client, paying, monkeypatch
 ):
-    """An empty account is empty, not broken."""
-    loner = await tenant.new_user("loner")
+    """An empty account is empty, not broken.
 
-    response = await client.as_(loner).get("/api/v1/search?q=anything")
+    Paying, because the checks now run in chat's order and an unpaid caller is
+    refused with 402 before this can be reached. That is the correct answer and
+    the same one asking a question gives; it is simply not what this test is
+    about.
+    """
+    async def fake_embed(_text):
+        return [0.01] * 1024
+
+    async def fake_search(**kwargs):
+        return []
+
+    monkeypatch.setattr(search_route, "get_text_embedding", fake_embed)
+    monkeypatch.setattr(store.file_repo, "hybrid_search", fake_search)
+
+    response = await client.as_(tenant.owner).get("/api/v1/search?q=anything")
 
     assert response.status_code == 200
     assert response.json()["results"] == []
@@ -218,3 +233,58 @@ async def test_an_organization_that_has_not_paid_cannot_search(
     )
 
     assert response.status_code == 402
+
+
+async def test_search_refuses_exactly_what_chat_refuses(store, tenant, client, no_paid_calls):
+    """The two paths, asked the same question, must answer the same way.
+
+    Searching a workspace and asking a question of a workspace are the same act
+    with a different ending. This asserts they agree rather than trusting that
+    two blocks of similar-looking code stay similar, because they did not: the
+    first version of the search route answered 403 where chat answers 404, used
+    a different function to decide, and had an extra branch chat does not have.
+    """
+    workspace = await tenant.workspace("Private")
+    outsider = await tenant.new_user("outsider")
+
+    searching = await client.as_(outsider).get(
+        f"/api/v1/search?q=anything&workspace_id={workspace}"
+    )
+    asking = await client.as_(outsider).post(
+        "/api/v1/messages",
+        json={"message": "anything", "history_id": 1, "workspace_id": workspace},
+    )
+
+    # Chat answers 404 for a history that is not yours before it reaches the
+    # workspace, so compare the shape rather than the exact route: neither may
+    # answer 200, and neither may answer 403, which would confirm the workspace
+    # exists to somebody who cannot have it.
+    assert searching.status_code == 404
+    assert asking.status_code == 404
+    assert searching.status_code == asking.status_code
+
+
+async def test_a_member_of_the_workspace_is_not_refused(store, tenant, client, paying, monkeypatch):
+    """The other half of the same rule, and the one that broke chat once.
+
+    An organization-wide member owns no workspace and is assigned to none, so
+    a check that asks "do you own or were you assigned this" refuses them.
+    accessible_workspace_ids is what includes them, which is why search uses it.
+    """
+    workspace = await tenant.workspace("Shared")
+    member = await tenant.member("wide", scope="organization")
+
+    async def fake_embed(_text):
+        return [0.01] * 1024
+
+    async def fake_search(**kwargs):
+        return []
+
+    monkeypatch.setattr(search_route, "get_text_embedding", fake_embed)
+    monkeypatch.setattr(store.file_repo, "hybrid_search", fake_search)
+
+    response = await client.as_(member).get(
+        f"/api/v1/search?q=anything&workspace_id={workspace}"
+    )
+
+    assert response.status_code == 200

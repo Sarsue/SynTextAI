@@ -54,7 +54,6 @@ from pydantic import BaseModel
 from ..core.auth import authenticate_user, get_store
 from ..core.limits import assert_can_ask
 from ..core.log_safety import safe_text
-from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
 from ..repositories.repository_manager import RepositoryManager
 from ..services.llm_service import get_text_embedding
@@ -126,36 +125,42 @@ async def search_documents(
             detail="Type something to search for.",
         )
 
-    # May you see it. Same two questions, same two functions, as every other
-    # route that touches documents.
+    # Identical to what asking a question does, deliberately, and copied from
+    # `messages.py` rather than reasoned out again here. Searching a workspace
+    # and asking a question of a workspace are the same act with a different
+    # ending, so any difference between these two blocks is a bug waiting to be
+    # found by whichever one is looser.
     #
-    # The document check comes first, before the "you have no workspaces at all"
-    # shortcut below. The other way round, somebody who belongs to nothing asked
-    # about a document they may not see and got 200 with an empty list, so a
-    # refusal was reported as "nothing here". No data escaped, but the answer
-    # was wrong, and a check that another branch can skip past is one nobody can
-    # rely on.
+    # Three things were different in the first version of this route, and all
+    # three are the kind that survive review because each looks defensible
+    # alone:
+    #
+    #   - It answered 403 where chat answers 404. A 403 confirms the workspace
+    #     exists and says you may not have it; a 404 says nothing at all. For a
+    #     resource named by an id in a URL, that difference is the whole
+    #     question of whether a stranger can enumerate what a company owns.
+    #   - It asked "may you do it" (`assert_workspace_capability`) for what is a
+    #     read. The rule in this codebase is that *may you see it* is
+    #     `accessible_workspace_ids`. The two agree today, which is exactly why
+    #     having both answer one question is how they stop agreeing later.
+    #   - It let a workspace-less document through on its uploader. Chat has no
+    #     such branch, and one extra rule in one of two places is the shape of
+    #     every access bug this codebase has had.
+    accessible = await store.workspace_repo.accessible_workspace_ids(user_id)
+
+    if workspace_id is not None and workspace_id not in accessible:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
     if file_id is not None:
         record = await store.file_repo.get_file_by_id(file_id)
         # Authorized by the document's workspace, not by who uploaded it, or a
         # member cannot search a document their owner added.
-        if not record:
-            raise HTTPException(status_code=404, detail="File not found")
-        file_workspace = record.get("workspace_id")
-        if file_workspace is not None:
-            await assert_workspace_capability(
-                store, user_id, file_workspace, Capability.READ
-            )
-        elif record.get("user_id") != user_id:
+        if not record or record.get("workspace_id") not in accessible:
             raise HTTPException(status_code=404, detail="File not found")
 
-    accessible_ids = None
-    if workspace_id is not None:
-        await assert_workspace_capability(store, user_id, workspace_id, Capability.READ)
-    elif file_id is None:
-        accessible_ids = await store.workspace_repo.accessible_workspace_ids(user_id)
-        if not accessible_ids:
-            return SearchResponse(query=query, results=[])
+    # Scoped to the one workspace when given, and to everything this person can
+    # reach when not, which is what the query agent does with the same values.
+    accessible_ids = None if workspace_id is not None else accessible
 
     # Paid for. This runs an embedding call, so an unsubscribed organization
     # searching is the same free ride that asking used to be.

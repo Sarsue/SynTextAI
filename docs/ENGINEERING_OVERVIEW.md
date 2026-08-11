@@ -1246,14 +1246,30 @@ answer that with fair-use limits rather than repricing everyone.
   quietly searching for something else is the fastest way to make search feel
   broken.
 
-  **Two findings from writing the tests rather than the code.** The document
-  check sat after the "you belong to no workspaces" shortcut, so somebody with
-  no memberships asking about a document they may not see got 200 and an empty
-  list instead of a refusal: no data escaped, but a check another branch can
-  skip past is one nobody can rely on. And removing `assert_can_ask` from the
-  route broke nothing, because every other test was refused earlier for not
-  being a member; an unpaid organization could have searched for free. Both
-  fixed, and the second now has a test that fails without the check.
+  **Four findings, none from reading the code.** Two came from writing the
+  tests: the document check sat behind the "you belong to no workspaces"
+  shortcut, so somebody with no memberships asking about a document they may
+  not see got 200 and an empty list rather than a refusal; and removing
+  `assert_can_ask` broke no test at all, because every other case was refused
+  earlier for not being a member, so an unpaid organization could have searched
+  for free.
+
+  The other two came from Osas asking why search was not gated exactly as chat
+  is. **It answered 403 where chat answers 404**, which for a resource named by
+  an id in a URL is the difference between confirming a workspace exists to a
+  stranger and telling them nothing. And it asked *may you do it*
+  (`assert_workspace_capability`) for what is a read, where the rule in this
+  codebase is that *may you see it* is `accessible_workspace_ids`. The two
+  agree today, which is precisely why having both answer one question is how
+  they stop agreeing later. It also carried an extra branch letting a
+  workspace-less document through on its uploader, which chat does not have.
+
+  The gating block is now copied from `messages.py` rather than reasoned out
+  again, and there is a test that asks both routes the same question and
+  asserts they refuse identically, plus one that an organization-wide member
+  (who owns no workspace and is assigned to none) is *not* refused, since that
+  is the half that broke chat once. Verified live: an unreachable workspace and
+  an unreachable document both answer 404 with no hint that either exists.
 
   **The interface.** A two-state control above the composer, because the choice
   changes what the button does and both options deserve naming. Switching to
@@ -1275,7 +1291,7 @@ answer that with fair-use limits rather than repricing everyone.
   pane, which does not render embedded PDFs, so that last hop is the one thing
   here confirmed by inspection rather than by eye.
 
-  10 tests, 152 total, plus a clean `tsc --noEmit` and production build.
+  12 tests, 154 total, plus a clean `tsc --noEmit` and production build.
 
 - **2026-08-11 (paying once for the same work):** The last two efficiency items.
   Embedding is no longer bought twice for the same text, and the same question
