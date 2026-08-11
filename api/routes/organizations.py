@@ -8,7 +8,7 @@ boundary is explicit rather than a dropdown people misread.
 from typing import Dict, List, Optional
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel, EmailStr
 
 from ..core.utils import get_user_id
@@ -202,6 +202,55 @@ async def list_organization_members(
             })
             for m in members
         ]
+    }
+
+
+@organizations_router.get("/{organization_id}/usage")
+async def organization_usage(
+    organization_id: int = Path(...),
+    days: int = Query(30, ge=1, le=365, description="Window in days"),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """What this company can see about its own use of the product.
+
+    Owner and admin only. Not because the numbers are dangerous, but because
+    they are about other people: who asked the most, and which answers somebody
+    rated as wrong. Staff seeing a leaderboard of their colleagues' question
+    counts is a different product from the one being sold.
+
+    Every figure comes from this database rather than PostHog. The PostHog key
+    configured here writes events and cannot read them back, and the numbers
+    worth showing an owner are the ones about their own documents and answers,
+    which live here and are already scoped by organization.
+    """
+    user_id = user_data["user_id"]
+
+    # "May you do it", because this is administration rather than reading a
+    # document. INVITE_MEMBER is the closest existing capability that both
+    # admin roles hold and staff does not; a capability of its own would be a
+    # third thing to keep in step for no additional meaning.
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.INVITE_MEMBER
+    )
+
+    usage = store.usage_repo
+    documents = await usage.documents_by_status(organization_id)
+
+    return {
+        "window_days": days,
+        "questions_asked": await usage.questions_asked(organization_id, days),
+        "most_active": await usage.most_active_people(organization_id, days),
+        "documents": {
+            "total": sum(documents.values()),
+            "by_status": documents,
+            # Named rather than derived in the browser, because "failed" is the
+            # one an owner should act on and a client that has to know the
+            # vocabulary of statuses will eventually miss a new one.
+            "failed": documents.get("failed", 0),
+            "never_retrieved": await usage.documents_never_retrieved(organization_id),
+        },
+        "feedback": await usage.answers_rated(organization_id, days),
     }
 
 

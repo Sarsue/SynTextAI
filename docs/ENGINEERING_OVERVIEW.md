@@ -975,11 +975,12 @@ company and pays for it in one submit; see "Recent changes".
     and a CLI that reads a complaint next to the run that caused it. The
     case-study argument for it still holds and is now waiting on volume rather
     than on code.
-14. Admin dashboard with search analytics — **nothing behind it yet.**
-    `api/routes/analytics.py` has two endpoints: the POST forwards events to
-    PostHog, and `GET /analytics/dashboard` returns a hardcoded object with
-    every metric at zero and a note saying to connect real storage. Read it
-    before estimating this; the route existing is not the feature existing.
+14. ~~Admin dashboard with search analytics~~ **Built 2026-08-11** as a Usage
+    section in Settings, owner and admin only, from this database rather than
+    PostHog. See "Recent changes" for why PostHog was the wrong source. The old
+    placeholder in `api/routes/analytics.py` is still there and still returns
+    zeros; nothing calls it, and it should be deleted next time that file is
+    opened.
 15. Saved prompts
 
 **Tier 3 — Phase 3, automation (search → action; this is where "workflow automation" becomes real, don't market it before it's here):**
@@ -1217,6 +1218,48 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (the dashboard shows real numbers, and they are the customer's
+  own):** `GET /analytics/dashboard` returned zeros somebody had typed by hand
+  and nothing called it. There is now a Usage section in Settings, owner and
+  admin only, answered from this database.
+
+  **Not from PostHog, and the reason is worth keeping.** PostHog is set up, but
+  the key configured is a project key (`phc_...`), which writes. Reading events
+  back needs a personal API key with query scope that does not exist here. More
+  importantly it is the wrong source: PostHog holds page views and clicks,
+  while an owner wants to know how much their team asks, which documents answer
+  nothing, and which answers were called wrong, all of which are already here
+  and already scoped by organization. Serving a customer their own numbers out
+  of a shared analytics account would mean filtering someone else's data out
+  afterwards, which is the tenancy shape this codebase spends its effort
+  avoiding. PostHog stays the right tool for the *other* dashboard, the one
+  about all customers, and that one needs no code because it has a UI.
+
+  **Every figure joins through the workspace**, because documents,
+  conversations and ratings carry no organization of their own. That join is
+  the tenancy boundary; there is a test that another company's document is
+  never counted.
+
+  **Three findings on the way, all from checking rather than reading.**
+  `agent_runs.result` records `retrievals` as a *count*, not a list, so "which
+  documents have never been used" could not be answered at all: the first
+  version of the query crashed on it. Recording the file ids then failed twice
+  more, because the chunk dictionary is rebuilt in two places in
+  `agents/evidence.py` and neither carried `file_id`, so by the time a run was
+  stored the document that answered was known only by name. Both fixed, and a
+  name is not an identity: two workspaces may each hold a policy.pdf.
+
+  **The panel lied on its first render, and only the screen showed it.** Every
+  document was listed as never used, including one that had just been cited.
+  The guard treated a run recording an *empty* citation list as evidence, which
+  it is not, so the metric switched on with nothing behind it. It now requires
+  a non-empty list, which also means the section stays silent for accounts
+  whose runs all predate this, rather than alarming them. Tested, and the test
+  fails without the guard.
+
+  7 tests, 161 total.
+
 
 - **2026-08-11 (search exists now, not just on the pricing page):** "AI search"
   has been sold as a separate capability since before there was any such thing

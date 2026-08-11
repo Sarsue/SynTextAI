@@ -313,7 +313,16 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
                   "covered_needs", "retrievals", "error")
         if result.get(k) is not None
     }
-    keep["context_chunks"] = len(result.get("context_chunks") or [])
+    chunks = result.get("context_chunks") or []
+    keep["context_chunks"] = len(chunks)
+    # Which documents actually answered, as ids rather than text. The count
+    # above says how much context there was; this says where it came from, and
+    # it is the only way to answer "which of my documents has never once been
+    # used", which is usually a document that failed to extract properly.
+    # Cheap: a handful of integers against a count that was already stored.
+    keep["cited_file_ids"] = sorted(
+        {c.get("file_id") for c in chunks if isinstance(c, dict) and c.get("file_id")}
+    )
     return keep
 
 

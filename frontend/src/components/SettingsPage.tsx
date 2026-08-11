@@ -7,6 +7,7 @@ import DarkModeToggle from './DarkModeToggle';
 import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
+import UsagePanel from './UsagePanel';
 import { Stripe } from '@stripe/stripe-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -296,6 +297,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 )}
 
                 {/* Theme Section */}
+                <div className="settings-section">
+                    <h2 className="section-title">Usage</h2>
+                    <UsagePanel />
+                </div>
+
                 <div className="settings-section">
                     <h2 className="section-title">Theme</h2>
                     <div className="section-content">
