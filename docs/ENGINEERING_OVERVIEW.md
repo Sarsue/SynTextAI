@@ -415,11 +415,10 @@ list, because both are gated on a benchmark the tool layer is currently losing.
    instead of starting again, and is searchable while it finishes; the same text
    is embedded once per organization; and a repeated question is answered in
    0.33s against 20.40s. Next is "AI search", item 2 in this list.
-2. **"AI search."** The site sells it as a second capability and there is no
-   such thing in the code: it is the same retrieval engine chat already uses.
-   **Decided 2026-08-11: build it.** A toggle on the chat screen and one
-   synchronous route that returns retrieval results instead of an answer. Shape
-   and the four catches are under "Explicitly not being built" below.
+2. ~~**"AI search."**~~ **Built 2026-08-11.** A `Find` mode beside `Ask`, and
+   one synchronous route returning the pages that matched instead of an answer.
+   0.57s against 11-20s for a generated answer. All four catches were handled;
+   writing the tests found two more. See "Recent changes".
 3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
    zeros somebody typed by hand. This is also the first thing that turns the
    feedback data from 2026-08-08 into something an owner can look at.
@@ -997,8 +996,9 @@ company and pays for it in one submit; see "Recent changes".
 - Manufacturing-specific ingestion (table/diagram-aware PDF parsing, symptom/fault-code
   query tuning, revision control) — shelved with the manufacturing pivot, see above.
   Revisit only if a real manufacturing customer shows up through the vertical tab.
-- ~~Standalone AI search UI — revisit if a customer specifically asks for it.~~
-  **Decided 2026-08-11: build it, straight after the efficiency backlog.** The
+- ~~Standalone AI search UI~~ **Built 2026-08-11**, straight after the
+  efficiency backlog, as decided. What follows is the reasoning it was built
+  on, which held up. The
   alternative was deleting the claim from the site. Building won because it is
   a toggle on the chat screen and one route, not a project, and because it
   cannot hallucinate: it is the demo for a buyer who does not trust a generated
@@ -1217,6 +1217,65 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (search exists now, not just on the pricing page):** "AI search"
+  has been sold as a separate capability since before there was any such thing
+  in the code. There is now a `Find` mode beside `Ask`: the same box, and
+  instead of an answer it returns the pages that matched, each opening the
+  document at that page.
+
+  **0.57 seconds against 11 to 20 for an answer.** It is chat with the
+  expensive half removed: embed the question once, run the same
+  `hybrid_search` the answer path runs, render the rows. No query rewriting, no
+  term expansion, no model call, no message saved, no queued job, which is why
+  it can be an ordinary request while chat goes through the worker.
+
+  **Chunks are grouped back into pages.** A chunk is a slice of a page, so
+  twenty rows are routinely five pages, and ungrouped the list shows the same
+  page three times with near-identical snippets. The count is shown as "3
+  passages", which is countable and checkable, unlike a relevance score.
+
+  **The score never leaves the backend**, and there is a test asserting the
+  number does not appear in the response body. It is a reciprocal rank fusion
+  value on an arbitrary scale; shown, "0.87" reads as 87% confident, which it
+  is not.
+
+  **No query rewriting, deliberately.** Chat rewrites a question because a
+  rewritten question retrieves better before a model reads the results.
+  Somebody typing "termination clause" into a search box means those words, and
+  quietly searching for something else is the fastest way to make search feel
+  broken.
+
+  **Two findings from writing the tests rather than the code.** The document
+  check sat after the "you belong to no workspaces" shortcut, so somebody with
+  no memberships asking about a document they may not see got 200 and an empty
+  list instead of a refusal: no data escaped, but a check another branch can
+  skip past is one nobody can rely on. And removing `assert_can_ask` from the
+  route broke nothing, because every other test was refused earlier for not
+  being a member; an unpaid organization could have searched for free. Both
+  fixed, and the second now has a test that fails without the check.
+
+  **The interface.** A two-state control above the composer, because the choice
+  changes what the button does and both options deserve naming. Switching to
+  `Find` changes the placeholder, the button, and the panel: results replace the
+  conversation rather than appearing inside it, since a search is not a message
+  and filling the thread list with searches would be the wrong record. The query
+  stays in the box afterwards, unlike a sent message, because searching is
+  iterative and the usual next move is changing one word.
+
+  Matched terms are highlighted by splitting on them rather than building HTML,
+  so no page of a customer's PDF is ever handed to `dangerouslySetInnerHTML`.
+  Results are buttons, not clickable divs, so they are reachable by keyboard.
+
+  **Opening a result reuses the citation path exactly.** Documents are private
+  in storage, so a result carries the document's identity and never a readable
+  link; the signed URL is minted at the moment of opening. Verified in the
+  browser: the viewer's iframe carried a signed URL ending `#page=35`, matching
+  the result clicked. The PDF itself did not paint in the automated browser
+  pane, which does not render embedded PDFs, so that last hop is the one thing
+  here confirmed by inspection rather than by eye.
+
+  10 tests, 152 total, plus a clean `tsc --noEmit` and production build.
 
 - **2026-08-11 (paying once for the same work):** The last two efficiency items.
   Embedding is no longer bought twice for the same text, and the same question

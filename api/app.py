@@ -244,6 +244,7 @@ from .routes.subscriptions import subscriptions_router
 from .routes.users import users_router
 from .routes.analytics import router as analytics_router, posthog_middleware
 from .routes.internal import router as internal_router  # ⬅️ Add internal router
+from .routes.search import search_router
 from .routes.workspaces import workspaces_router
 from .routes.organizations import organizations_router
 from .routes.sendgrid_events import router as sendgrid_events_router
@@ -256,6 +257,9 @@ app.include_router(subscriptions_router)
 app.include_router(users_router)
 app.include_router(analytics_router)
 app.include_router(internal_router, prefix="/api/v1/internal")  # ⬅️ Include internal router
+# Finding a passage, as opposed to being told an answer. Carries its own
+# prefix, like files/histories/messages, so nothing is added here.
+app.include_router(search_router)
 app.include_router(workspaces_router)
 app.include_router(organizations_router)
 # Public and unauthenticated by necessity: SendGrid posts here, and it holds no

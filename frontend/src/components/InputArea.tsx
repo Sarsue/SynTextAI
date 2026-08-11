@@ -8,13 +8,23 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
+export type ComposerMode = 'ask' | 'find';
+
 interface InputAreaProps {
     onSend: (message: string, files: File[]) => Promise<void>;
     isSending: boolean;
     onContentAdded: () => Promise<void>;
+    mode: ComposerMode;
+    onModeChange: (mode: ComposerMode) => void;
 }
 
-const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded }) => {
+const InputArea: React.FC<InputAreaProps> = ({
+    onSend,
+    isSending,
+    onContentAdded,
+    mode,
+    onModeChange,
+}) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
     const { darkMode, orgContext } = useUserContext();
@@ -53,7 +63,25 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
         return !!ext && SUPPORTED_EXT.includes(ext);
     };
 
+    const isFinding = mode === 'find';
+
     const handleSendClick = () => {
+        // Finding needs words. There is nothing to search for in an attachment,
+        // and silently uploading it instead would be a different action from
+        // the one the button offered.
+        if (isFinding) {
+            if (!message.trim()) {
+                addToast('Type what you want to find.', 'info');
+                return;
+            }
+            onSend(message, []).then(() => {
+                // The query stays in the box on purpose, unlike a sent message:
+                // searching is iterative, and the usual next move is to change
+                // one word rather than start again.
+            });
+            return;
+        }
+
         if (!message.trim() && attachedFiles.length === 0) {
             addToast('Please type a message or attach a file.', 'info');
             return;
@@ -116,14 +144,42 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
 
     return (
         <div className={`input-area ${darkMode ? 'dark-mode' : ''}`}>
+            {/* Two things the same box can do, named by what the person wants
+                rather than by how it works: an answer, or the page it is on.
+                A radiogroup rather than two buttons, so a screen reader says
+                which of the two is selected. */}
+            <div className="composer-modes" role="radiogroup" aria-label="What to do">
+                <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!isFinding}
+                    className={cn('composer-mode', !isFinding && 'is-active')}
+                    onClick={() => onModeChange('ask')}
+                >
+                    Ask
+                </button>
+                <button
+                    type="button"
+                    role="radio"
+                    aria-checked={isFinding}
+                    className={cn('composer-mode', isFinding && 'is-active')}
+                    onClick={() => onModeChange('find')}
+                >
+                    Find
+                </button>
+            </div>
             <Textarea
                 className="composer-input"
-                placeholder="Ask a question about your documents..."
+                placeholder={
+                    isFinding
+                        ? 'Find a passage in your documents...'
+                        : 'Ask a question about your documents...'
+                }
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={isSending}
-                aria-label="Message input"
+                aria-label={isFinding ? 'Search input' : 'Message input'}
             />
             {attachedFiles.length > 0 && (
                 <div className="attached-files">
@@ -166,11 +222,18 @@ const InputArea: React.FC<InputAreaProps> = ({ onSend, isSending, onContentAdded
                 </div>
                 <Button
                     onClick={handleSendClick}
-                    disabled={isSending || (!message.trim() && attachedFiles.length === 0)}
-                    aria-label="Send message"
+                    disabled={
+                        isSending ||
+                        (isFinding
+                            ? !message.trim()
+                            : !message.trim() && attachedFiles.length === 0)
+                    }
+                    aria-label={isFinding ? 'Search documents' : 'Send message'}
                     className="send-button"
                 >
-                    {isSending ? 'Sending...' : 'Send'}
+                    {isFinding
+                        ? isSending ? 'Searching...' : 'Find'
+                        : isSending ? 'Sending...' : 'Send'}
                 </Button>
             </div>
         </div>
