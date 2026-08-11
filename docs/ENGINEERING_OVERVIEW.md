@@ -50,6 +50,95 @@ infrastructure that only pays off at a scale we're not at. If you're choosing be
 "simple and slightly less elegant" and "correct in theory but adds an operational
 dependency," lean simple until there's a concrete reason not to.
 
+## What this actually is: a harness for one small business at a time
+
+*(Framing settled 2026-08-11, while reading about Hermes Agent. It renames
+nothing and rewrites no code. It exists because the roadmap had become a list
+of features with no test for what belonged on it, and this is that test.)*
+
+SyntextAI is an agent harness whose every part is scoped to one company. It
+currently ships with one tool, which is "know things about your documents", and
+that is why it looks like a document Q&A product from the outside.
+
+**The part that is hard is already done, and it was done by accident of being
+careful.** An agent loop is a weekend. Multi-tenancy is not, because it touches
+every query and cannot be retrofitted. Hermes Agent's own open issue says *"one
+agent = one tenant. Memory is global, sessions don't scope by tenant, and there
+is no isolation between groups, channels, or users."* That sentence describes
+the thing this codebase has spent three weeks making impossible: organizations
+holding workspaces, one function answering *may you see it* and another
+answering *may you do it*, a queue with per-tenant fairness and leases, storage
+keyed by workspace, retrieval scoped by workspace, entitlement per company.
+
+The commercial version of that sentence: **your company's memory is yours, and
+there is no pile it can leak into.** For dental, legal and accounting that
+answers the objection before it is raised, and nobody building on an open agent
+runtime can say it honestly.
+
+### The four layers, and why the distinction earns its place
+
+Every idea for this product is one of four things. Sorting it first is what
+stops a surface being mistaken for a retention feature, which is the mistake
+that put a Slack bot at the top of the roadmap for a month.
+
+| Layer | What it is | Decides anything? | Examples |
+|---|---|---|---|
+| **Sources** | Ways knowledge gets in | No | Upload, Google Drive import, forward-to-an-address |
+| **Surfaces** | Places to ask | No | The web app, Find, a Slack bot, replying to an email |
+| **Tools** | Things the agent chooses to do | Yes | Search the documents (the only one today), later: draft a reply, check a portal |
+| **Memory** | What the company has told us that is in no document | No, but it changes every answer | "We bill through Delta Dental", "the 2019 protocol is void" |
+
+Memory is the fourth thing and it is genuinely missing. It appears nowhere in
+this product, and the roadmap has it parked in Tier 4 as "cross-chat memory",
+which undersells it. It is not chat history. It is the standing facts a practice
+manager repeats to every new hire, and the customers hand it to us already: a
+thumbs-down reading *"cited the 2019 policy, we are on the 2024 one"* is a
+memory being offered and thrown away.
+
+### The test for anything new
+
+**Can the person who benefits say yes by themselves?** If yes, build it. If
+somebody else has to approve it first, park it until a customer asks by name.
+
+That single question sorted a week of decisions cleanly. Email in needs nobody.
+Google Drive with the picker and `drive.file` needs the person using it, and no
+IT involvement, which is why it survived. SharePoint, Outlook, Slack and Teams
+all need a tenant administrator, which for a fifteen-person practice is an
+outsourced IT company and a wait, so they are parked with their adapters intact.
+
+### Computer-use, corrected
+
+An earlier version of this note dismissed computer-use as enterprise
+automation with no nameable job. **That was wrong, and the reason is worth
+keeping because it inverts the usual argument.**
+
+Enterprise software has APIs. Salesforce, Workday, NetSuite. *Small-business
+software does not.* Dentrix and Eaglesoft are Windows desktop applications.
+Insurance eligibility lives on payer web portals with no API and no plan for
+one. County recorder sites, state bar portals, QuickBooks Desktop. So the
+"UI automation as the fallback where no good API exists" layer is **more**
+relevant to a dental practice than to a bank, not less.
+
+The job is nameable, which is where the test should have caught the error: the
+front-desk person who logs into Delta Dental's portal every morning and checks
+eligibility for tomorrow's patients, one member id at a time.
+
+What holds, and what shape it should take when it is built:
+
+- **Read-only lookups, not writes.** A wrong click in practice-management
+  software is a billing incident, not a bad answer.
+- **Human-triggered, not unattended.** A batch of thirty eligibility checks
+  running overnight against a UI that changed is a support call for somebody
+  who has one employee.
+- **Results come back into the harness** as knowledge, so an answer can cite
+  what the portal said and when.
+- **Portal credentials are the real cost.** Holding a practice's login to their
+  payer portal is a heavier thing than holding a Drive token, and the answer to
+  it is the same as everywhere else here: do not store what you do not have to,
+  and if you must, decide deliberately and write down why.
+
+It is the hardest thing on this list and it stays last, but it is on the list.
+
 ## Stack
 
 | Layer | Tech |
@@ -422,11 +511,20 @@ list, because both are gated on a benchmark the tool layer is currently losing.
 3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
    zeros somebody typed by hand. This is also the first thing that turns the
    feedback data from 2026-08-08 into something an owner can look at.
-4. **Integrations. Started 2026-08-11.** Drive and SharePoint import is built
-   on the backend and waiting on OAuth app registrations for the browser half.
-   Slack and Teams were confirmed to be a *surface* rather than a source: the
-   app answers questions from inside them, which is roadmap item 11, not
-   another place to read documents from. When it does, it arrives as
+4. **Integrations. Started 2026-08-11, then narrowed by the test in "What this
+   actually is".** Sorted by who has to approve them:
+   - **Email in** (a source, needs nobody): next. Forward a document to an
+     address and it is in the knowledge base. SendGrid Inbound Parse is the
+     same shape as the signed webhook `sendgrid_events.py` already receives.
+   - **Google Drive** (a source, needs the person using it): backend built and
+     tested, waiting on an OAuth client id for the picker. `drive.file` and the
+     picker, never `drive.readonly`, which is restricted and needs a paid
+     security assessment.
+   - **SharePoint, Outlook, Slack, Teams** (all need a tenant administrator):
+     parked. The SharePoint adapter and the Slack signature verification are
+     built and dormant, roughly forty lines and eleven tests, so a
+     Microsoft-heavy firm asking by name is a picker away rather than a
+     project. When it does, it arrives as
    another source feeding the same ingestion path, never a parallel pipeline.
 5. **Workflow automation, Tier 3.** SOPs, meeting summaries, onboarding,
    proposal drafting, approvals. Marketing already implies this exists. It does
