@@ -303,7 +303,20 @@ them being reopened:**
   still Report-Only: check the browser console for violations, then flip the
   header name. `frame-src` must keep `storage.googleapis.com` or every citation
   breaks when it is enforced.
-- **Still open: no DB-level RLS.** See below.
+- ~~An unauthenticated internal endpoint~~ **Closed 2026-08-11.**
+  `/api/v1/internal/notify-client` relays arbitrary event data to any user's
+  WebSocket and had no auth at all; it now requires `INTERNAL_API_SECRET` and
+  fails closed when that is unset. It is also no longer the normal path, only
+  the fallback when a Redis publish fails. See "Recent changes".
+- **Still open: no DB-level RLS.** See below. Scoped properly on 2026-08-11 and
+  it is roughly a week, not an afternoon: sessions carry no tenant today (91
+  `get_async_session()` call sites), the worker's queue poll is deliberately
+  cross-tenant, five tables reach their tenant only through a four-table chain,
+  and a policy on `chunks` lands on the vector search path that was rewritten
+  specifically to keep its index. Deprioritised behind the Slack bot, because
+  `permissions.py` plus the refusal tests in `test_route_authorization.py`
+  already cover the same ground; revisit when a customer's security
+  questionnaire asks for it in writing.
 - **Re-triaged 2026-08-03: down to 5 from 34, and the remaining ones have
   nowhere to go.** The backend is clean, `pip-audit` finds nothing. The frontend
   has two highs and neither has a fix that is worth taking:
@@ -363,10 +376,12 @@ them being reopened:**
   authorization bug in this codebase so far has been one of those three.
 
 **Product:**
-- **DOCX ingestion closed 2026-07-29** — `DocxProcessor` implemented, mirrors
-  `PDFProcessor`'s shape, wired into the factory. Extraction logic tested against a
-  generated sample doc (headings, body, table); not yet tested through the real
-  upload → GCS → worker → DB → chat-citation path end to end.
+- ~~**DOCX ingestion**~~ **Closed.** `DocxProcessor` implemented 2026-07-29,
+  mirrors `PDFProcessor`'s shape, wired into the factory. The extraction logic
+  was tested against a generated sample doc (headings, body, table) at the time,
+  and the remaining doubt was whether it survived the real path. **Osas drove a
+  real DOCX through upload → GCS → worker on 2026-08-11 and it ingested.** The
+  one thing that was never in question is now also not in doubt.
 - ~~`TextProcessor` built and orphaned~~ **Closed.** Wired into
   `factory.py`'s `processor_map` for `.txt` and `.md`.
 - ~~EdTech generator functions orphaned~~ **Closed.** Deleted.
@@ -377,12 +392,49 @@ them being reopened:**
   businesses in the tools they use, and nothing in the codebase reads from an
   external system yet. When it does, it should arrive as another source feeding the
   same ingestion path, not as a parallel pipeline, and a connector's imported
-  documents belong to a workspace like any other.
+  documents belong to a workspace like any other. **Fourth in "What is next, in
+  order" as of 2026-08-11**, ahead of the Tier 3 automation work and behind the
+  efficiency backlog.
 
 ## Roadmap (prioritized, not a wishlist)
 
 Update this section as items close or new ones turn up, don't spin up a new doc file
 for it.
+
+### What is next, in order (decided with Osas 2026-08-11)
+
+Tier 0 and Tier 1 are closed, so "what now" was an open question. This is the
+answer, and it deliberately does not start with the biggest idea on the page.
+The agentic platform and serving our own models stay where they are, below this
+list, because both are gated on a benchmark the tool layer is currently losing.
+
+1. **The efficiency backlog, items 18-22 below.** Every one of them is felt by a
+   customer as waiting, and none needs a decision from anybody. Start here.
+   **Started 2026-08-11: items 19 and 22 are done**, 10s down to 0.2s before a
+   question or an upload begins. Left in this order: 18 (a crashed large PDF
+   restarts from page 1), 20 (re-uploads re-pay the embedding bill), 21 (query
+   cache).
+2. **"AI search."** The site sells it as a second capability and there is no
+   such thing in the code: it is the same retrieval engine chat already uses.
+   **Decided 2026-08-11: build it.** A toggle on the chat screen and one
+   synchronous route that returns retrieval results instead of an answer. Shape
+   and the four catches are under "Explicitly not being built" below.
+3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
+   zeros somebody typed by hand. This is also the first thing that turns the
+   feedback data from 2026-08-08 into something an owner can look at.
+4. **Integrations.** The largest gap between what the positioning promises and
+   what exists, and the first one a customer notices on their own. Nothing in
+   the codebase reads from an external system yet. When it does, it arrives as
+   another source feeding the same ingestion path, never a parallel pipeline.
+5. **Workflow automation, Tier 3.** SOPs, meeting summaries, onboarding,
+   proposal drafting, approvals. Marketing already implies this exists. It does
+   not, and it stays last because everything above it is either felt sooner or
+   cheaper to close.
+
+The ordering logic worth keeping: **close the gaps between the promise and the
+product before adding new promises.** Items 2, 3 and 4 are all cases where the
+site says something the code does not do. Item 5 is the biggest of those and is
+also the most work, which is why it is last rather than first.
 
 **Tier 0 — blocking, not features, fix before a real customer touches this:**
 1. ~~Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB~~ — **verified already applied 2026-07-29.** `alembic current` matches the single head, and a direct `information_schema.tables` query confirmed both tables exist live. The "multiple divergent heads, no tracked alembic.ini" gap was also stale: only one head exists (`b8f6b3f63f7d`), and `alembic.ini` is git-tracked. `docs/migrations/drop_learning_content_tables.sql` was redundant for the same reason, the `flashcards`/`quiz_questions`/`key_concepts` drop it described had already happened via the alembic migration of the same name, confirmed those tables no longer exist, removed the now-dead script.
@@ -456,10 +508,52 @@ Premise checked and found wrong, so **do not act on these**:
 Genuinely still open, roughly in value order:
 
 18. Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages. Batching and empty-chunk filtering already exist.
-19. Event queue instead of polling. `POLL_INTERVAL` defaults to 30s, so that is the idle-latency floor before work starts. `redis>=5.0.0` is already a dependency, so this is cheaper than it looks.
+19. ~~**The Redis wake-up.**~~ **Closed 2026-08-11**, see "Recent changes":
+    10.02s to 0.18s, measured. The description below is the original entry,
+    kept because two of its claims were wrong and the corrections are worth
+    carrying: the Python package was installed but no Redis server existed, and
+    production had been running at a 10s interval rather than the 30s default.
+
+    `POLL_INTERVAL` defaults to 30s at
+    `workers/worker.py:110`, so up to thirty seconds of an upload's apparent
+    slowness is the worker not having looked yet. Nothing is running during it.
+    `redis>=5.0.0` is already a dependency, so this is cheaper than it looks.
+
+    **What it is: a tap on the shoulder, not a new queue.** On enqueue, publish
+    the run id. The worker subscribes and wakes immediately instead of at the
+    next poll. That is the whole feature, and it removes idle latency without
+    touching how long any job actually takes.
+
+    **The database queue stays, and this is the part to hold.** The tempting
+    version replaces `agent_runs` with Redis and deletes the polling. Do not.
+    Redis pub/sub is fire and forget: publish while the worker is restarting and
+    that message is gone, the file is never processed, and nobody learns about
+    it until a customer asks why their upload has sat there since Tuesday. The
+    table already handles the ugly cases correctly, and each of those behaviours
+    was paid for in a real bug: lease reclaim for a worker killed mid-job
+    (`worker.py:507`), retries to `max_attempts`, per-user fairness so one
+    person uploading forty files does not starve everyone else.
+
+    So: **Redis is the notification, Postgres remains the record.** Keep the
+    30s poll as the safety net underneath. If a message is missed, the poll
+    still catches it and the only cost is the latency this feature was meant to
+    remove, in the rare case rather than every case. A missed tap is a slow job;
+    a missed queue entry is a lost one.
+
+    Redis Streams would be durable enough to be a queue, and that is exactly the
+    trap: it would mean rebuilding leases, retries and fairness in a second
+    place, against the "what not to do" note at the end of Tier 2.
+
+    **Side effect worth knowing when the RLS work happens.** The awkward part of
+    putting row-level security on the worker is that finding the next job means
+    reading across every tenant, which is what the policy forbids. If the
+    published message carries the organization id, the worker can set its tenant
+    before it touches anything and run under the same policy as the API. The
+    poll still needs the privileged read, but it becomes the fallback path
+    rather than the normal one.
 20. Embedding dedupe by chunk hash, so re-uploads and retries stop re-paying the embedding cost.
-21. Short-TTL query cache keyed by user, document set, and normalized question.
-22. Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.
+21. Short-TTL query cache keyed by user, document set, and normalized question. Worth having, but size the expectation: it only pays off on the same question asked twice in a few minutes, and it does nothing for uploads, which is where the waiting actually is.
+22. ~~Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.~~ **Closed 2026-08-11** alongside item 19, as planned. One difference from the plan: the HTTP call was kept as the fallback rather than deleted, because this is the notification whose loss a customer watches happen. It now needs a shared secret, which closed an unauthenticated endpoint nobody had noticed. See "Recent changes".
 
 Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
 
@@ -876,8 +970,16 @@ company and pays for it in one submit; see "Recent changes".
 
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
-13. Answer feedback (thumbs up/down) — also generates real usage data for case studies, replacing illustrative ones
-14. Admin dashboard with search analytics
+13. ~~Answer feedback (thumbs up/down)~~ — **closed 2026-08-08**, see "Recent
+    changes". Thumbs on every answer, four chips and a comment on thumbs-down,
+    and a CLI that reads a complaint next to the run that caused it. The
+    case-study argument for it still holds and is now waiting on volume rather
+    than on code.
+14. Admin dashboard with search analytics — **nothing behind it yet.**
+    `api/routes/analytics.py` has two endpoints: the POST forwards events to
+    PostHog, and `GET /analytics/dashboard` returns a hardcoded object with
+    every metric at zero and a note saying to connect real storage. Read it
+    before estimating this; the route existing is not the feature existing.
 15. Saved prompts
 
 **Tier 3 — Phase 3, automation (search → action; this is where "workflow automation" becomes real, don't market it before it's here):**
@@ -894,7 +996,43 @@ company and pays for it in one submit; see "Recent changes".
 - Manufacturing-specific ingestion (table/diagram-aware PDF parsing, symptom/fault-code
   query tuning, revision control) — shelved with the manufacturing pivot, see above.
   Revisit only if a real manufacturing customer shows up through the vertical tab.
-- Standalone AI search UI — revisit if a customer specifically asks for it.
+- ~~Standalone AI search UI — revisit if a customer specifically asks for it.~~
+  **Decided 2026-08-11: build it, straight after the efficiency backlog.** The
+  alternative was deleting the claim from the site. Building won because it is
+  a toggle on the chat screen and one route, not a project, and because it
+  cannot hallucinate: it is the demo for a buyer who does not trust a generated
+  answer yet. They see their own document, on the right page, with their own
+  words in it. Same engine either way.
+
+  Search and chat are different products to a user, which is why this is worth
+  a surface rather than a setting. Search is "where is that clause", where
+  somebody wants the document and will read it themselves. Chat is "what does
+  our policy say", where they want the answer.
+
+  **The shape: chat with the expensive half removed.** Embed the question once,
+  call `hybrid_search`, render the rows. No query rewriting, no term expansion,
+  no model call, no message saved, no queued job. It can be an ordinary
+  synchronous route answering in well under a second, while chat keeps going
+  through the worker.
+
+  Four things stop it being a literal passthrough of the retrieval list, all
+  small, all worth knowing before it is estimated at an afternoon:
+
+  1. **Chunks are not results.** `hybrid_search` returns slices of a page, so
+     twenty rows can be five near-identical snippets from page 12 of the same
+     file. Group by file and page, keep the best-scoring snippet per page, then
+     count.
+  2. **Never show the score.** It is a reciprocal rank fusion number on an
+     arbitrary scale, not a percentage match. Rank by it, do not print it.
+  3. **The same scoping as chat, or it is a leak.** Pass `workspace_id` or
+     `accessible_workspace_ids` exactly as `query_agent.py` does. A new route
+     reading documents is precisely where the missing-`WHERE` class of bug has
+     shown up before.
+  4. **Entitlement and a rate limit.** Chat refuses an organization that has not
+     paid (2026-08-07) and is rate limited because it costs money per call.
+     Search calls the embedding service, so it costs money too, and a search
+     route without both checks is a free door into the product beside the
+     locked one.
 - Voice interface — deferred, not in current scope.
 
 Compliance is a stated differentiator (Canadian data residency option, no training on
@@ -1078,6 +1216,89 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (the worker stops waiting to be asked):** Queueing a run now
+  announces it over Redis and the worker wakes at once. **Ten seconds becomes
+  two tenths of a second**, measured rather than assumed: three probes each
+  way, alternating, on the same idle worker.
+
+  | | readings | mean |
+  |---|---|---|
+  | Announced | 0.49, 0.03, 0.03 | **0.18s** |
+  | Poll only | 10.03, 10.03, 10.02 | **10.02s** |
+
+  **This was never only about uploads.** Every chat question is a queued run
+  too (`routes/messages.py:142`), so a question asked while the worker had
+  nothing to do sat for up to ten seconds before the pipeline even started.
+  Nothing was running during it. The roadmap entry described it as upload
+  latency, which undersold it.
+
+  **Two corrections to what that entry claimed.** "`redis>=5.0.0` is already a
+  dependency, so this is cheaper than it looks" was half true: the Python
+  package was installed, but no Redis server existed anywhere, no `REDIS_URL`
+  was configured, and the only import in the codebase was a dead `RedisError`.
+  So this added a container to both compose files, not just a call. And the
+  interval it quoted was the code default of 30s; production has run at 10s
+  since the compose file was written.
+
+  **Postgres LISTEN/NOTIFY was offered as the no-new-infrastructure
+  alternative and Osas chose Redis**, on the grounds that item 21's query cache
+  wants one anyway. Recorded because the reasoning matters if that cache is
+  ever dropped: without it, this is a container earning its keep on one feature.
+
+  **The queue did not move.** `agent_runs` is still the record of what needs
+  doing. Redis carries "look now" and nothing else, the announcement is only a
+  run id, and the worker still claims work through `SELECT ... FOR UPDATE SKIP
+  LOCKED` in priority order under the per-tenant cap. Chasing the announced id
+  directly would sidestep leases, retries and fairness, all three of which were
+  paid for in real bugs. `POLL_INTERVAL` stays as the safety net, so a missed
+  announcement costs seconds and never costs a job.
+
+  **Proven by taking Redis away, not by reasoning about it.** With the
+  container stopped: work was still claimed every time, in 1.39s, 9.04s, 9.04s
+  and 9.02s, which is whatever remained of the ten second window. Client
+  notifications fell back to the HTTP call and were delivered. When Redis came
+  back the listener reconnected on its own, backoff and all, with no restart,
+  and the fast path returned to 0.16s.
+
+  **The notification path back to the browser moved too, and closed a hole on
+  the way.** `/internal/notify-client` takes a user id and arbitrary event data
+  and pushes it down that person's WebSocket, and it had no authentication at
+  all: "internal" was the intent, and nothing enforced it while the container
+  publishes port 3000 and the router sits on the same public prefix as
+  everything else. Anybody who could reach the API could push whatever they
+  liked into a signed-in customer's browser. It now requires a shared secret
+  (`INTERNAL_API_SECRET`), compared with `compare_digest`, and **refuses
+  everything when the secret is unset** rather than treating unconfigured as
+  open.
+
+  **The HTTP path was kept as the fallback rather than deleted**, which is the
+  one place here where more code was the right answer. A published message
+  reaches only a listener connected at that instant, and this is the path whose
+  loss a customer sees directly: they watch a spinner for an answer that is
+  already saved. So the worker publishes, and on failure posts as before.
+
+  **A comment I wrote was wrong and is now corrected in place.** It claimed
+  clearing the wake flag before the fetch rather than after the wait prevented
+  a lost announcement. Checked by making the change: the tests stayed green,
+  because every wake is followed by a fetch either way, so the ordering is
+  tidiness and not a race. The test that claimed to cover it was renamed to
+  what it actually proves, which is that an announcement drives the loop at
+  all. That one has teeth: replacing the wake in the loop's wait with a plain
+  sleep turns it red and leaves the other seven green.
+
+  13 tests, 118 total. Each was checked by putting its bug back: dropping the
+  auth check fails 3, letting a publish failure raise fails 1, removing the
+  handler guard hangs the listener in its reconnect loop. One gap found this
+  way and then closed: nothing covered "announce only after the commit", which
+  is the ordering the module rests on, so there is now a test that announces
+  from a second database session and asserts the row is already visible.
+  Driven in the browser afterwards: signed in, asked a question, and the answer
+  arrived live over the socket.
+
+  **Before deploying, `INTERNAL_API_SECRET` must be in production `.env` for
+  both the API and the worker** (`openssl rand -hex 32`). Without it the
+  fallback notifications are refused, which only bites while Redis is down.
 
 - **2026-08-08 (customers can say an answer was wrong):** Thumbs on every
   answer, four chips and an optional comment on thumbs-down, and a CLI that
@@ -2151,6 +2372,8 @@ answer that with fair-use limits rather than repricing everyone.
 - Whether Redis is meant to be doing more than it currently is, or is leftover
 - Whether the firebase v12 upgrade's live Google sign-in flow actually works
   end to end (types and build pass; Osas is testing this live)
-- Whether to build a standalone AI search surface or just fix the marketing copy
+- ~~Standalone AI search: build the surface, or fix the copy?~~ **Answered
+  2026-08-11: build it**, after the efficiency backlog. See "Explicitly not
+  being built right now" for the shape and the four catches.
 - Whether the report-only CSP policy is clean (check browser console for violations)
   before switching it to enforced

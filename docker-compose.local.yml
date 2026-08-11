@@ -37,6 +37,26 @@ services:
       - syntextai_network
     restart: unless-stopped
 
+  # Local mirror of the notification bus. Same reasoning as production: this
+  # carries "there is work" and "tell this browser", never the queue itself.
+  redis:
+    image: redis:7-alpine
+    container_name: syntextai-redis-local
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      # 6380 on the host so it cannot collide with a local Redis install.
+      # Exposed here and deliberately not in production, so that tests running
+      # outside the containers can reach it.
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syntextai_network
+    restart: unless-stopped
+
   syntextaiapp:
     build:
       context: .
@@ -63,8 +83,12 @@ services:
       - ./.env.dev:/app/.env
       # Mount CA certificate for PostgreSQL SSL
       - ./api/config/ca-certificate.crt:/app/api/config/ca-certificate.crt:ro
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - syntextai_network
@@ -121,7 +145,10 @@ services:
       - QUERY_CONCURRENCY=4
       - INGEST_CONCURRENCY=2
       - MAX_RUNS_PER_USER=3
+      # The floor on how late a job can be, not the normal wait: the worker
+      # now wakes as soon as work is announced on REDIS_URL.
       - POLL_INTERVAL=10
+      - REDIS_URL=redis://redis:6379/0
       # PostgreSQL SSL cert path
       - DATABASE_SSLROOTCERT=/app/api/config/ca-certificate.crt
       # Worker-specific connection pool settings (smaller to avoid exhausting DB connections)
@@ -131,9 +158,12 @@ services:
       - ./api:/app/api
       - ./.env.dev:/app/.env
       - ./api/config/ca-certificate.crt:/app/api/config/ca-certificate.crt:ro
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - syntextai_network
-    
+
     deploy:
       resources:
         limits:

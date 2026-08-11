@@ -27,6 +27,13 @@ from urllib.parse import urlparse
 import uuid
 from dotenv import load_dotenv
 from pathlib import Path
+from api.core.events import (
+    WORK_CHANNEL,
+    aclose as aclose_events,
+    announce_client_event,
+    is_enabled as is_events_enabled,
+    listen,
+)
 from api.core.timing import emit
 from api.models.orm_models import AgentRun
 from api.workflows.tasks import process_file_data
@@ -116,6 +123,12 @@ LEASE_MINUTES = int(os.getenv("LEASE_MINUTES", "15"))
 # API base URL for internal notifications (docker-compose sets this to http://syntextaiapp:3000)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/")
 
+# Proves to /internal/notify-client that a notification came from the worker.
+# Only used on the fallback path, when a Redis publish did not go out. The
+# endpoint refuses without it, so an unset value here means notifications are
+# lost during a Redis outage rather than being accepted from anybody.
+INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+
 
 query_semaphore = asyncio.Semaphore(QUERY_CONCURRENCY)
 ingest_semaphore = asyncio.Semaphore(INGEST_CONCURRENCY)
@@ -128,6 +141,10 @@ inflight_by_user: Dict[int, int] = {}
 # and removes entries as jobs start and finish rather than in batches.
 running_tasks: set = set()
 shutdown_event = asyncio.Event()
+
+# Set by the Redis listener when the API announces a queued run, so the loop
+# stops waiting and goes to look. Cleared by the loop before each fetch.
+work_available = asyncio.Event()
 
 # How often to sweep for runs whose lease expired.
 RECLAIM_INTERVAL = int(os.getenv("RECLAIM_INTERVAL", "60"))
@@ -484,8 +501,19 @@ async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> 
 
     We route notifications by DB user_id. The API registers each WebSocket connection
     under both firebase uid AND db user id, so the worker doesn't need to parse URLs.
+
+    Redis first, HTTP second, and the fallback is deliberate. Publishing is
+    non-blocking and costs no round trip, but a published message reaches only
+    a listener that is connected at that instant. This is the one notification
+    path where losing a message is visible to a customer: they would sit
+    watching a spinner for an answer that is already saved in the database.
+    So when the publish does not go out, we make the old direct call rather
+    than shrug.
     """
     if not user_id:
+        return
+
+    if await announce_client_event(int(user_id), event_type, data):
         return
 
     url = f"{API_BASE_URL}/api/v1/internal/notify-client"
@@ -494,10 +522,11 @@ async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> 
         "event_type": event_type,
         "data": data,
     }
+    headers = {"X-Internal-Secret": INTERNAL_API_SECRET} if INTERNAL_API_SECRET else {}
 
     def _post():
         try:
-            requests.post(url, json=payload, timeout=5)
+            requests.post(url, json=payload, headers=headers, timeout=5)
         except Exception as e:
             logger.warning(f"Failed to notify client for user {user_id}: {e}")
 
@@ -646,6 +675,18 @@ async def _run_tracked(run_id: uuid.UUID, user_id: Optional[int]) -> None:
                 inflight_by_user.pop(user_id, None)
 
 
+async def _work_announced(payload: Dict[str, Any]) -> None:
+    """Somebody queued a run. Wake the loop.
+
+    The run id in the payload is deliberately ignored. The loop claims work
+    under `SELECT ... FOR UPDATE SKIP LOCKED` in priority order, which is what
+    keeps two workers off the same row and keeps one tenant from starving
+    another. Chasing the announced id directly would sidestep all of it. The
+    message means "look now", nothing more.
+    """
+    work_available.set()
+
+
 async def worker_loop() -> None:
     """Claim work continuously, topping up to capacity as jobs finish.
 
@@ -655,6 +696,12 @@ async def worker_loop() -> None:
     looked at until that PDF finished, and no new work was picked up in the
     meantime, so priority ordering never got a chance to matter. Now the loop
     wakes the moment any job finishes and immediately refills the freed slot.
+
+    It also wakes the moment work is announced over Redis, which is what
+    removes the idle wait: previously a question asked while the worker had
+    nothing to do sat for up to POLL_INTERVAL seconds before anything started.
+    POLL_INTERVAL stays as the safety net for an announcement nobody was
+    listening for, so the worst case is what the whole system used to do.
     """
     last_reclaim = 0.0
     while not shutdown_event.is_set():
@@ -665,6 +712,19 @@ async def worker_loop() -> None:
             if time.monotonic() - last_reclaim > RECLAIM_INTERVAL:
                 await reclaim_expired_runs()
                 last_reclaim = time.monotonic()
+
+            # Cleared here so the flag only ever means "announcements this
+            # iteration has not acted on yet". One that lands during the fetch
+            # below leaves it set, and the wait then returns at once.
+            #
+            # This comment used to claim that clearing after the wait instead
+            # would swallow an announcement and cost a full poll interval. That
+            # is wrong, and it was checked by making the change and watching
+            # the tests stay green: every wake is followed by a fetch at the
+            # top of the next iteration, so a swallowed announcement costs one
+            # wasted fetch and no latency. Kept here for adjacency to the fetch
+            # it describes, not because it is guarding a race.
+            work_available.clear()
 
             capacity = MAX_INFLIGHT - len(running_tasks)
             if capacity > 0:
@@ -678,16 +738,24 @@ async def worker_loop() -> None:
                     running_tasks.add(task)
                     task.add_done_callback(running_tasks.discard)
 
-            if running_tasks:
-                # Wake as soon as any job completes so its slot is refilled
-                # immediately, rather than waiting out the poll interval.
+            # One wait covers both reasons to wake: a job finished and freed a
+            # slot, or new work was announced. At capacity the announcement is
+            # not interesting yet, but waking on it is harmless, because the
+            # next fetch simply claims nothing.
+            waiters = set(running_tasks)
+            announcement = asyncio.create_task(work_available.wait())
+            waiters.add(announcement)
+            try:
                 await asyncio.wait(
-                    set(running_tasks),
+                    waiters,
                     timeout=POLL_INTERVAL,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-            else:
-                await asyncio.sleep(POLL_INTERVAL)
+            finally:
+                # Nothing else awaits this task, so an uncancelled one left
+                # behind on every iteration is a slow leak.
+                if not announcement.done():
+                    announcement.cancel()
 
         except Exception as e:
             logger.exception(f"Error in worker loop: {str(e)}")
@@ -727,14 +795,32 @@ async def main():
     # No local model to preload
     logger.info("✅ Using HTTP-based embeddings (Voyage AI) - no model preload needed")
 
+    # Listen for announcements alongside the loop. This is the fast path only:
+    # if it never connects, or dies and stays dead, the loop still polls and
+    # the product behaves exactly as it did before this existed.
+    listener = asyncio.create_task(listen(WORK_CHANNEL, _work_announced))
+    if is_events_enabled():
+        logger.info("Waking on announcements as well as polling")
+    else:
+        logger.info(
+            "REDIS_URL is not set, so work is found by polling every %ss", POLL_INTERVAL
+        )
+
     # Start the worker loop
     try:
         await worker_loop()
-        
+
     except Exception as e:
         logger.exception(f"Fatal error in worker: {str(e)}")
-        
+
     finally:
+        # listen() blocks on the next message and exits only on cancellation.
+        listener.cancel()
+        try:
+            await listener
+        except asyncio.CancelledError:
+            pass
+
         # Wait for remaining tasks to complete on shutdown
         if running_tasks:
             logger.info(f"Waiting for {len(running_tasks)} tasks to complete...")
@@ -746,6 +832,7 @@ async def main():
         await cleanup_shared_db_resources()
         from api.services.llm_service import aclose_client
         await aclose_client()
+        await aclose_events()
 
         logger.info("SynText AI Worker shutdown complete")
 
