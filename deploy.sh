@@ -276,6 +276,11 @@ pull_image() {
 # Pull all required images
 pull_image "osasdeeon/syntextai:latest" || exit 1
 pull_image "searxng/searxng:latest" || exit 1
+# Redis carries the worker wake-up and the answer cache. `up -d` would pull it
+# on its own, but that pull would happen in the last step with no retry, which
+# is the one place a flaky registry can leave the site down rather than just
+# delay the deploy.
+pull_image "redis:7-alpine" || exit 1
 
 # Step 8.5: Run database migrations against the freshly pulled image, before
 # the new containers start serving traffic. --entrypoint sh skips the
