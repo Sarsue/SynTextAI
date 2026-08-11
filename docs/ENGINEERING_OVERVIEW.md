@@ -410,10 +410,12 @@ list, because both are gated on a benchmark the tool layer is currently losing.
 
 1. **The efficiency backlog, items 18-22 below.** Every one of them is felt by a
    customer as waiting, and none needs a decision from anybody. Start here.
-   **Started 2026-08-11: items 19 and 22 are done**, 10s down to 0.2s before a
-   question or an upload begins. Left in this order: 18 (a crashed large PDF
-   restarts from page 1), 20 (re-uploads re-pay the embedding bill), 21 (query
-   cache).
+   **Started 2026-08-11: items 18, 19 and 22 are done.** 10s down to 0.2s
+   before a question or an upload begins, and a long document now keeps the
+   pages it got through instead of starting again. Left: 20 (re-uploads re-pay
+   the embedding bill) and 21 (query cache). Item 20 is now cheaper than it
+   looks, because ingestion already skips pages it has stored; what remains is
+   the same document uploaded twice as two separate files.
 2. **"AI search."** The site sells it as a second capability and there is no
    such thing in the code: it is the same retrieval engine chat already uses.
    **Decided 2026-08-11: build it.** A toggle on the chat screen and one
@@ -507,7 +509,7 @@ Premise checked and found wrong, so **do not act on these**:
 
 Genuinely still open, roughly in value order:
 
-18. Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages. Batching and empty-chunk filtering already exist.
+18. ~~Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages.~~ **Closed 2026-08-11**, both halves. Each batch of pages is stored as it finishes, so a crash keeps what it reached and a retry resumes from the first unstored page. Chat on the first N pages needed no work beyond not marking the file processed early, because retrieval never filtered on status. Proven by interrupting a 1,500-page PDF at page 550. See "Recent changes".
 19. ~~**The Redis wake-up.**~~ **Closed 2026-08-11**, see "Recent changes":
     10.02s to 0.18s, measured. The description below is the original entry,
     kept because two of its claims were wrong and the corrections are worth
@@ -1216,6 +1218,63 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (a long document keeps what it got through):** Ingestion writes
+  each batch of pages as it finishes instead of holding everything and writing
+  once at the end. **Verified by killing the worker mid-document**, not by
+  reasoning about it: a 1,500-page PDF was interrupted at page 550, and 550
+  pages and 1,100 chunks were on disk. Before this change that number was zero,
+  every time, however far it had got.
+
+  The restart resumed at 551 (`Resuming big.pdf: 550 page(s) already stored,
+  950 to go`) and finished at 1,500 segments, 1,500 distinct pages, 3,000
+  chunks, **zero pages written twice**. The 550 already-embedded pages were not
+  paid for a second time.
+
+  **The second half of the item came free.** Retrieval scopes by workspace and
+  has never looked at `processing_status`, so a chunk is findable the moment
+  its transaction commits. While that document sat at 550 of 1,500, a question
+  about page 400 was answered and cited correctly. What had to be added was the
+  opposite guarantee: `update_file_with_chunks` takes `mark_processed=False`
+  for intermediate batches, because a file that says "processed" after its
+  first fifty pages is worse than one that says nothing.
+
+  **How resuming knows where it got to: it asks the rows, not a counter.** A
+  batch is one transaction, so a page either has its segment or has nothing.
+  `stored_page_numbers` reads the page numbers already present and skips them.
+  No progress column, no migration, and nothing that can disagree with what is
+  actually stored.
+
+  **The batching was only ever half true.** The old loop batched the work and
+  then accumulated the results, holding every chunk and every 1024-dimension
+  vector until the end, while a comment said peak memory was bounded by the
+  batch. Now it really is.
+
+  **One loop, not three.** PDF, DOCX and TXT each carried their own copy of
+  that loop, identical apart from one string, and the copies had already
+  drifted into a silent bug: `page_text` was added to the PDF version on
+  2026-08-07 referring to a variable the others did not have. Rather than fix
+  the PDF copy and leave two more to drift, the loop moved to
+  `FileProcessor.embed_and_store_pages` and the three copies were deleted, 287
+  lines of duplication for 173 of shared code. All three formats got resuming
+  and early searchability as a side effect.
+
+  **Also verified: the emptiness guard still fires.** It had to change meaning,
+  from "the loop returned no chunks" to "nothing was stored and nothing was
+  skipped", or a resumed run that found every page already present would have
+  marked a finished document failed.
+
+  5 tests, 124 total, each checked by putting the old behaviour back: writing
+  only at the end fails 3, ignoring already-stored pages fails 1, letting a
+  batch mark the file processed fails 1.
+
+  **A separate bug found by driving the API, now fixed.** `messages.py` used
+  `status.HTTP_422_UNPROCESSABLE_ENTITY` without importing `status`, so a
+  request missing `history_id` raised NameError while *building its own
+  refusal*, and the broad handler turned that into a 500. The customer was told
+  the app was broken when the answer was "you left out a field". One import,
+  plus a test that fails without it. Every other route file was checked for the
+  same missing import; this was the only one.
 
 - **2026-08-11 (the worker stops waiting to be asked):** Queueing a run now
   announces it over Redis and the worker wakes at once. **Ten seconds becomes

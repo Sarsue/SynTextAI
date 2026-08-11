@@ -72,6 +72,21 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Error adding file {file_name}: {e}", exc_info=True)
                 return None
 
+    async def stored_page_numbers(self, file_id: int) -> set:
+        """Which pages of this file are already in the database.
+
+        This is what makes a re-run resume instead of starting again. A batch
+        is written in one transaction, so a page either has its segment or it
+        has nothing: there is no half-written page to detect. That is why this
+        can be answered from `segments` alone, with no progress column to keep
+        in step with reality and no migration.
+        """
+        async with self.get_async_session() as session:
+            rows = await session.execute(
+                select(SegmentORM.page_number).where(SegmentORM.file_id == int(file_id))
+            )
+            return {r for (r,) in rows.all() if r is not None}
+
     async def update_file_with_chunks(
         self,
         user_id: int,
@@ -79,6 +94,7 @@ class AsyncFileRepository(AsyncBaseRepository):
         file_type: str,
         extracted_data: List[Dict],
         file_id: Optional[int] = None,
+        mark_processed: bool = True,
     ) -> bool:
         """Store processed file data with embeddings, segments, and metadata.
 
@@ -87,6 +103,11 @@ class AsyncFileRepository(AsyncBaseRepository):
             filename: Name of the file
             file_type: Type of file (pdf, video, etc.)
             extracted_data: Processed data containing chunks and embeddings
+            mark_processed: Whether this call finishes the document. False when
+                storing one batch of a larger file, because a 500-page PDF that
+                says "processed" after its first fifty pages is worse than one
+                that says nothing: the file list shows it ready and the rest
+                never arrives visibly.
 
         Returns:
             bool: True if successful, False otherwise
@@ -114,13 +135,23 @@ class AsyncFileRepository(AsyncBaseRepository):
                         file_name=filename,
                         file_url="",
                         file_type=file_type,
-                        processing_status="processed"
+                        processing_status="processed" if mark_processed else "embedding",
                     )
                     session.add(file)
                     await session.flush()
                 else:
                     file.file_type = file_type
-                    file.processing_status = "processed"
+                    if mark_processed:
+                        file.processing_status = "processed"
+
+                # What was already here before this call, so the check at the
+                # end measures what *this* call stored. Comparing against the
+                # file's total would pass trivially on every batch after the
+                # first, which is exactly when a silent partial write would
+                # start being possible.
+                already_stored = (await session.execute(
+                    select(func.count(ChunkORM.id)).where(ChunkORM.file_id == file.id)
+                )).scalar() or 0
 
                 # Every processor emits a flat list of retrieval units:
                 #   {'text': str, 'page_num': int, 'embedding': list[float], ...}
@@ -220,13 +251,17 @@ class AsyncFileRepository(AsyncBaseRepository):
                 stored = (await session.execute(
                     select(func.count(ChunkORM.id)).where(ChunkORM.file_id == file.id)
                 )).scalar() or 0
-                if stored < expected:
+                if stored - already_stored < expected:
                     logger.error(
-                        f"Stored {stored} chunks for {filename} but expected {expected}"
+                        f"Stored {stored - already_stored} chunks for {filename} "
+                        f"but expected {expected}"
                     )
                     return False
 
-                logger.info(f"Stored {stored} chunks and segments for {filename} (ID: {file.id})")
+                logger.info(
+                    f"Stored {stored - already_stored} chunks and segments for "
+                    f"{filename} (ID: {file.id}), {stored} in total"
+                )
                 return True
             except IntegrityError as e:
                 await session.rollback()
