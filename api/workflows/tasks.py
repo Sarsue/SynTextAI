@@ -1,5 +1,6 @@
 import logging
 
+from api.core import query_cache
 from api.core.log_safety import safe_text
 import os
 import asyncio
@@ -112,6 +113,9 @@ async def _process_file_data_impl(
                     "file_type": FileUtils.determine_file_type(filename),
                     "status": "pending",
                     "url": file_url,
+                    # Or the recreated row belongs to no workspace and nobody
+                    # can see the document that was just ingested into it.
+                    "workspace_id": workspace_id,
                 }
                 file_result = await store.file_repo.create_file(file_data)
                 if not file_result or not file_result.get("id"):
@@ -197,6 +201,13 @@ async def _process_file_data_impl(
                 )
 
             await store.file_repo.update_file_status(file_id_int, "processed")
+
+            # This workspace's documents just changed, so answers cached from
+            # the old set are wrong now rather than in five minutes. "I uploaded
+            # it and it says it cannot find it" is the failure this prevents.
+            await query_cache.bump_document_version(
+                workspace_id if workspace_id is not None else file.get("workspace_id")
+            )
             logger.info(f"File processing completed successfully for {filename}")
             return {
                 "success": True,
@@ -260,6 +271,26 @@ async def run_query_pipeline(
     file_id: int | None = None,
 ) -> Dict[str, Any]:
     """Run retrieval + generation for a single query without persisting chat messages."""
+    cache_key_parts = dict(
+        workspace_id=workspace_id,
+        question=message,
+        formatted_history=formatted_history,
+        language=language,
+        comprehension_level=comprehension_level,
+        file_id=file_id,
+    )
+
+    # The same question, from the same documents, within a few minutes. Costs a
+    # Redis read; saves an embedding call, a retrieval and one or more model
+    # calls. Returns None whenever anything is unavailable or uncertain, so the
+    # normal path below is the fallback for every failure here.
+    cached = await query_cache.get(**cache_key_parts)
+    if cached is not None:
+        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="cached") as ctx:
+            ctx["chunks"] = cached.get("context_chunk_count") or 0
+        logger.info({"event": "run_query_pipeline.cache_hit", "workspace_id": workspace_id})
+        return cached
+
     try:
         logger.info({"event": "run_query_pipeline.agent_start", "message": safe_text(message)})
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="pipeline") as ctx:
@@ -273,6 +304,7 @@ async def run_query_pipeline(
                 file_id=file_id,
             )
             ctx["chunks"] = len(result.get("context_chunks") or [])
+        await query_cache.put(result=result, **cache_key_parts)
         return result
     except Exception as agent_error:
         logger.warning(

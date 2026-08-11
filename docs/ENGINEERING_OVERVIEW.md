@@ -303,7 +303,20 @@ them being reopened:**
   still Report-Only: check the browser console for violations, then flip the
   header name. `frame-src` must keep `storage.googleapis.com` or every citation
   breaks when it is enforced.
-- **Still open: no DB-level RLS.** See below.
+- ~~An unauthenticated internal endpoint~~ **Closed 2026-08-11.**
+  `/api/v1/internal/notify-client` relays arbitrary event data to any user's
+  WebSocket and had no auth at all; it now requires `INTERNAL_API_SECRET` and
+  fails closed when that is unset. It is also no longer the normal path, only
+  the fallback when a Redis publish fails. See "Recent changes".
+- **Still open: no DB-level RLS.** See below. Scoped properly on 2026-08-11 and
+  it is roughly a week, not an afternoon: sessions carry no tenant today (91
+  `get_async_session()` call sites), the worker's queue poll is deliberately
+  cross-tenant, five tables reach their tenant only through a four-table chain,
+  and a policy on `chunks` lands on the vector search path that was rewritten
+  specifically to keep its index. Deprioritised behind the Slack bot, because
+  `permissions.py` plus the refusal tests in `test_route_authorization.py`
+  already cover the same ground; revisit when a customer's security
+  questionnaire asks for it in writing.
 - **Re-triaged 2026-08-03: down to 5 from 34, and the remaining ones have
   nowhere to go.** The backend is clean, `pip-audit` finds nothing. The frontend
   has two highs and neither has a fix that is worth taking:
@@ -363,10 +376,12 @@ them being reopened:**
   authorization bug in this codebase so far has been one of those three.
 
 **Product:**
-- **DOCX ingestion closed 2026-07-29** — `DocxProcessor` implemented, mirrors
-  `PDFProcessor`'s shape, wired into the factory. Extraction logic tested against a
-  generated sample doc (headings, body, table); not yet tested through the real
-  upload → GCS → worker → DB → chat-citation path end to end.
+- ~~**DOCX ingestion**~~ **Closed.** `DocxProcessor` implemented 2026-07-29,
+  mirrors `PDFProcessor`'s shape, wired into the factory. The extraction logic
+  was tested against a generated sample doc (headings, body, table) at the time,
+  and the remaining doubt was whether it survived the real path. **Osas drove a
+  real DOCX through upload → GCS → worker on 2026-08-11 and it ingested.** The
+  one thing that was never in question is now also not in doubt.
 - ~~`TextProcessor` built and orphaned~~ **Closed.** Wired into
   `factory.py`'s `processor_map` for `.txt` and `.md`.
 - ~~EdTech generator functions orphaned~~ **Closed.** Deleted.
@@ -377,12 +392,49 @@ them being reopened:**
   businesses in the tools they use, and nothing in the codebase reads from an
   external system yet. When it does, it should arrive as another source feeding the
   same ingestion path, not as a parallel pipeline, and a connector's imported
-  documents belong to a workspace like any other.
+  documents belong to a workspace like any other. **Fourth in "What is next, in
+  order" as of 2026-08-11**, ahead of the Tier 3 automation work and behind the
+  efficiency backlog.
 
 ## Roadmap (prioritized, not a wishlist)
 
 Update this section as items close or new ones turn up, don't spin up a new doc file
 for it.
+
+### What is next, in order (decided with Osas 2026-08-11)
+
+Tier 0 and Tier 1 are closed, so "what now" was an open question. This is the
+answer, and it deliberately does not start with the biggest idea on the page.
+The agentic platform and serving our own models stay where they are, below this
+list, because both are gated on a benchmark the tool layer is currently losing.
+
+1. **The efficiency backlog, items 18-22 below.** Every one of them is felt by a
+   customer as waiting, and none needs a decision from anybody. Start here.
+   **Closed 2026-08-11: all five, 18 through 22.** 10s down to 0.2s before a
+   question or an upload begins; a long document keeps the pages it got through
+   instead of starting again, and is searchable while it finishes; the same text
+   is embedded once per organization; and a repeated question is answered in
+   0.33s against 20.40s. Next is "AI search", item 2 in this list.
+2. ~~**"AI search."**~~ **Built 2026-08-11.** A `Find` mode beside `Ask`, and
+   one synchronous route returning the pages that matched instead of an answer.
+   0.57s against 11-20s for a generated answer. All four catches were handled;
+   writing the tests found two more. See "Recent changes".
+3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
+   zeros somebody typed by hand. This is also the first thing that turns the
+   feedback data from 2026-08-08 into something an owner can look at.
+4. **Integrations.** The largest gap between what the positioning promises and
+   what exists, and the first one a customer notices on their own. Nothing in
+   the codebase reads from an external system yet. When it does, it arrives as
+   another source feeding the same ingestion path, never a parallel pipeline.
+5. **Workflow automation, Tier 3.** SOPs, meeting summaries, onboarding,
+   proposal drafting, approvals. Marketing already implies this exists. It does
+   not, and it stays last because everything above it is either felt sooner or
+   cheaper to close.
+
+The ordering logic worth keeping: **close the gaps between the promise and the
+product before adding new promises.** Items 2, 3 and 4 are all cases where the
+site says something the code does not do. Item 5 is the biggest of those and is
+also the most work, which is why it is last rather than first.
 
 **Tier 0 — blocking, not features, fix before a real customer touches this:**
 1. ~~Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB~~ — **verified already applied 2026-07-29.** `alembic current` matches the single head, and a direct `information_schema.tables` query confirmed both tables exist live. The "multiple divergent heads, no tracked alembic.ini" gap was also stale: only one head exists (`b8f6b3f63f7d`), and `alembic.ini` is git-tracked. `docs/migrations/drop_learning_content_tables.sql` was redundant for the same reason, the `flashcards`/`quiz_questions`/`key_concepts` drop it described had already happened via the alembic migration of the same name, confirmed those tables no longer exist, removed the now-dead script.
@@ -455,11 +507,53 @@ Premise checked and found wrong, so **do not act on these**:
 
 Genuinely still open, roughly in value order:
 
-18. Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages. Batching and empty-chunk filtering already exist.
-19. Event queue instead of polling. `POLL_INTERVAL` defaults to 30s, so that is the idle-latency floor before work starts. `redis>=5.0.0` is already a dependency, so this is cheaper than it looks.
-20. Embedding dedupe by chunk hash, so re-uploads and retries stop re-paying the embedding cost.
-21. Short-TTL query cache keyed by user, document set, and normalized question.
-22. Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.
+18. ~~Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages.~~ **Closed 2026-08-11**, both halves. Each batch of pages is stored as it finishes, so a crash keeps what it reached and a retry resumes from the first unstored page. Chat on the first N pages needed no work beyond not marking the file processed early, because retrieval never filtered on status. Proven by interrupting a 1,500-page PDF at page 550. See "Recent changes".
+19. ~~**The Redis wake-up.**~~ **Closed 2026-08-11**, see "Recent changes":
+    10.02s to 0.18s, measured. The description below is the original entry,
+    kept because two of its claims were wrong and the corrections are worth
+    carrying: the Python package was installed but no Redis server existed, and
+    production had been running at a 10s interval rather than the 30s default.
+
+    `POLL_INTERVAL` defaults to 30s at
+    `workers/worker.py:110`, so up to thirty seconds of an upload's apparent
+    slowness is the worker not having looked yet. Nothing is running during it.
+    `redis>=5.0.0` is already a dependency, so this is cheaper than it looks.
+
+    **What it is: a tap on the shoulder, not a new queue.** On enqueue, publish
+    the run id. The worker subscribes and wakes immediately instead of at the
+    next poll. That is the whole feature, and it removes idle latency without
+    touching how long any job actually takes.
+
+    **The database queue stays, and this is the part to hold.** The tempting
+    version replaces `agent_runs` with Redis and deletes the polling. Do not.
+    Redis pub/sub is fire and forget: publish while the worker is restarting and
+    that message is gone, the file is never processed, and nobody learns about
+    it until a customer asks why their upload has sat there since Tuesday. The
+    table already handles the ugly cases correctly, and each of those behaviours
+    was paid for in a real bug: lease reclaim for a worker killed mid-job
+    (`worker.py:507`), retries to `max_attempts`, per-user fairness so one
+    person uploading forty files does not starve everyone else.
+
+    So: **Redis is the notification, Postgres remains the record.** Keep the
+    30s poll as the safety net underneath. If a message is missed, the poll
+    still catches it and the only cost is the latency this feature was meant to
+    remove, in the rare case rather than every case. A missed tap is a slow job;
+    a missed queue entry is a lost one.
+
+    Redis Streams would be durable enough to be a queue, and that is exactly the
+    trap: it would mean rebuilding leases, retries and fairness in a second
+    place, against the "what not to do" note at the end of Tier 2.
+
+    **Side effect worth knowing when the RLS work happens.** The awkward part of
+    putting row-level security on the worker is that finding the next job means
+    reading across every tenant, which is what the policy forbids. If the
+    published message carries the organization id, the worker can set its tenant
+    before it touches anything and run under the same policy as the API. The
+    poll still needs the privileged read, but it becomes the fallback path
+    rather than the normal one.
+20. ~~Embedding dedupe by chunk hash~~ **Closed 2026-08-11.** Scoped to the organization, hashed over the text that is actually embedded rather than the `content` column, and it dedupes within a batch as well as against what is stored. See "Recent changes".
+21. ~~Short-TTL query cache~~ **Closed 2026-08-11.** 20.40s cold, 0.33s repeated, measured live. A new or deleted document invalidates the workspace's answers immediately rather than leaving them to expire. The expectation set here was right: it does nothing for uploads, which is where item 18 went instead.
+22. ~~Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.~~ **Closed 2026-08-11** alongside item 19, as planned. One difference from the plan: the HTTP call was kept as the fallback rather than deleted, because this is the notification whose loss a customer watches happen. It now needs a shared secret, which closed an unauthenticated endpoint nobody had noticed. See "Recent changes".
 
 Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
 
@@ -876,8 +970,16 @@ company and pays for it in one submit; see "Recent changes".
 
 11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
 12. Activity history
-13. Answer feedback (thumbs up/down) — also generates real usage data for case studies, replacing illustrative ones
-14. Admin dashboard with search analytics
+13. ~~Answer feedback (thumbs up/down)~~ — **closed 2026-08-08**, see "Recent
+    changes". Thumbs on every answer, four chips and a comment on thumbs-down,
+    and a CLI that reads a complaint next to the run that caused it. The
+    case-study argument for it still holds and is now waiting on volume rather
+    than on code.
+14. Admin dashboard with search analytics — **nothing behind it yet.**
+    `api/routes/analytics.py` has two endpoints: the POST forwards events to
+    PostHog, and `GET /analytics/dashboard` returns a hardcoded object with
+    every metric at zero and a note saying to connect real storage. Read it
+    before estimating this; the route existing is not the feature existing.
 15. Saved prompts
 
 **Tier 3 — Phase 3, automation (search → action; this is where "workflow automation" becomes real, don't market it before it's here):**
@@ -894,7 +996,44 @@ company and pays for it in one submit; see "Recent changes".
 - Manufacturing-specific ingestion (table/diagram-aware PDF parsing, symptom/fault-code
   query tuning, revision control) — shelved with the manufacturing pivot, see above.
   Revisit only if a real manufacturing customer shows up through the vertical tab.
-- Standalone AI search UI — revisit if a customer specifically asks for it.
+- ~~Standalone AI search UI~~ **Built 2026-08-11**, straight after the
+  efficiency backlog, as decided. What follows is the reasoning it was built
+  on, which held up. The
+  alternative was deleting the claim from the site. Building won because it is
+  a toggle on the chat screen and one route, not a project, and because it
+  cannot hallucinate: it is the demo for a buyer who does not trust a generated
+  answer yet. They see their own document, on the right page, with their own
+  words in it. Same engine either way.
+
+  Search and chat are different products to a user, which is why this is worth
+  a surface rather than a setting. Search is "where is that clause", where
+  somebody wants the document and will read it themselves. Chat is "what does
+  our policy say", where they want the answer.
+
+  **The shape: chat with the expensive half removed.** Embed the question once,
+  call `hybrid_search`, render the rows. No query rewriting, no term expansion,
+  no model call, no message saved, no queued job. It can be an ordinary
+  synchronous route answering in well under a second, while chat keeps going
+  through the worker.
+
+  Four things stop it being a literal passthrough of the retrieval list, all
+  small, all worth knowing before it is estimated at an afternoon:
+
+  1. **Chunks are not results.** `hybrid_search` returns slices of a page, so
+     twenty rows can be five near-identical snippets from page 12 of the same
+     file. Group by file and page, keep the best-scoring snippet per page, then
+     count.
+  2. **Never show the score.** It is a reciprocal rank fusion number on an
+     arbitrary scale, not a percentage match. Rank by it, do not print it.
+  3. **The same scoping as chat, or it is a leak.** Pass `workspace_id` or
+     `accessible_workspace_ids` exactly as `query_agent.py` does. A new route
+     reading documents is precisely where the missing-`WHERE` class of bug has
+     shown up before.
+  4. **Entitlement and a rate limit.** Chat refuses an organization that has not
+     paid (2026-08-07) and is rate limited because it costs money per call.
+     Search calls the embedding service, so it costs money too, and a search
+     route without both checks is a free door into the product beside the
+     locked one.
 - Voice interface — deferred, not in current scope.
 
 Compliance is a stated differentiator (Canadian data residency option, no training on
@@ -1078,6 +1217,291 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (search exists now, not just on the pricing page):** "AI search"
+  has been sold as a separate capability since before there was any such thing
+  in the code. There is now a `Find` mode beside `Ask`: the same box, and
+  instead of an answer it returns the pages that matched, each opening the
+  document at that page.
+
+  **0.57 seconds against 11 to 20 for an answer.** It is chat with the
+  expensive half removed: embed the question once, run the same
+  `hybrid_search` the answer path runs, render the rows. No query rewriting, no
+  term expansion, no model call, no message saved, no queued job, which is why
+  it can be an ordinary request while chat goes through the worker.
+
+  **Chunks are grouped back into pages.** A chunk is a slice of a page, so
+  twenty rows are routinely five pages, and ungrouped the list shows the same
+  page three times with near-identical snippets. The count is shown as "3
+  passages", which is countable and checkable, unlike a relevance score.
+
+  **The score never leaves the backend**, and there is a test asserting the
+  number does not appear in the response body. It is a reciprocal rank fusion
+  value on an arbitrary scale; shown, "0.87" reads as 87% confident, which it
+  is not.
+
+  **No query rewriting, deliberately.** Chat rewrites a question because a
+  rewritten question retrieves better before a model reads the results.
+  Somebody typing "termination clause" into a search box means those words, and
+  quietly searching for something else is the fastest way to make search feel
+  broken.
+
+  **Four findings, none from reading the code.** Two came from writing the
+  tests: the document check sat behind the "you belong to no workspaces"
+  shortcut, so somebody with no memberships asking about a document they may
+  not see got 200 and an empty list rather than a refusal; and removing
+  `assert_can_ask` broke no test at all, because every other case was refused
+  earlier for not being a member, so an unpaid organization could have searched
+  for free.
+
+  The other two came from Osas asking why search was not gated exactly as chat
+  is. **It answered 403 where chat answers 404**, which for a resource named by
+  an id in a URL is the difference between confirming a workspace exists to a
+  stranger and telling them nothing. And it asked *may you do it*
+  (`assert_workspace_capability`) for what is a read, where the rule in this
+  codebase is that *may you see it* is `accessible_workspace_ids`. The two
+  agree today, which is precisely why having both answer one question is how
+  they stop agreeing later. It also carried an extra branch letting a
+  workspace-less document through on its uploader, which chat does not have.
+
+  The gating block is now copied from `messages.py` rather than reasoned out
+  again, and there is a test that asks both routes the same question and
+  asserts they refuse identically, plus one that an organization-wide member
+  (who owns no workspace and is assigned to none) is *not* refused, since that
+  is the half that broke chat once. Verified live: an unreachable workspace and
+  an unreachable document both answer 404 with no hint that either exists.
+
+  **The interface.** A two-state control above the composer, because the choice
+  changes what the button does and both options deserve naming. Switching to
+  `Find` changes the placeholder, the button, and the panel: results replace the
+  conversation rather than appearing inside it, since a search is not a message
+  and filling the thread list with searches would be the wrong record. The query
+  stays in the box afterwards, unlike a sent message, because searching is
+  iterative and the usual next move is changing one word.
+
+  Matched terms are highlighted by splitting on them rather than building HTML,
+  so no page of a customer's PDF is ever handed to `dangerouslySetInnerHTML`.
+  Results are buttons, not clickable divs, so they are reachable by keyboard.
+
+  **Opening a result reuses the citation path exactly.** Documents are private
+  in storage, so a result carries the document's identity and never a readable
+  link; the signed URL is minted at the moment of opening. Verified in the
+  browser: the viewer's iframe carried a signed URL ending `#page=35`, matching
+  the result clicked. The PDF itself did not paint in the automated browser
+  pane, which does not render embedded PDFs, so that last hop is the one thing
+  here confirmed by inspection rather than by eye.
+
+  12 tests, 154 total, plus a clean `tsc --noEmit` and production build.
+
+- **2026-08-11 (paying once for the same work):** The last two efficiency items.
+  Embedding is no longer bought twice for the same text, and the same question
+  asked twice within a few minutes is answered from a cache.
+
+  **The query cache, measured live: 20.40s cold, 0.33s repeated.** Keyed on
+  workspace, a documents version, file scope, language, level, the question and
+  a hash of the conversation. Every one of those is in there because leaving it
+  out returns somebody else's answer. Only cached when a workspace is given:
+  without one the document set is "everything this person can reach", which
+  varies per person and has no single version to invalidate against.
+
+  **A new document drops the workspace's cached answers at once**, rather than
+  leaving five minutes where "I just uploaded it" meets "I cannot find it". The
+  version counter is bumped on ingest and on delete, and it is part of the key,
+  so old entries become unreachable and expire on their own. Verified live: the
+  0.33s answer went back to 11.17s after an upload.
+
+  **The cache silently did not work at first, and the tests were green.**
+  `format_user_chat_history` returns a list of dictionaries, not a string, so
+  `.encode()` raised on every read and every write, was swallowed by the
+  never-fail guard, and logged a warning nobody was reading. The tests passed a
+  string. Asking the running app the same question twice found it immediately.
+  There are now tests for the shape the application actually passes.
+
+  **The question normalisation buys nothing today, and that is written down in
+  the module rather than left to be rediscovered.** The route saves the question
+  before queueing the run, so the conversation the worker formats already
+  contains it verbatim, and the raw text reaches the key through the history
+  fingerprint whatever the normalisation does. Retyping the same question with
+  different capitals misses: 14.92s. Kept anyway, because it costs three lines
+  and becomes load-bearing the moment the current turn stops being part of the
+  hashed history, which is the obvious way to raise the hit rate later.
+
+  **Embedding reuse is scoped to the organization.** Text this organization has
+  already embedded is reused from `chunks.content_hash` instead of being sent to
+  the embedder again, which is a customer re-uploading a corrected policy, or
+  the same standard terms across twenty contracts. Crossing tenants would leak
+  nothing, since the vector is derived from text the caller already holds, but a
+  cache that crosses tenants is something somebody has to keep proving safe, and
+  nearly all the saving is same-tenant. The narrow version buys the benefit and
+  none of the argument.
+
+  **The hash is over what is embedded, not over `content`.** That is the passage
+  with its context sentence in front where it has one. Hashing the column alone
+  would hand back a vector computed from different text. The backfill in
+  `20260811_chunk_content_hash` can only hash `content`, so rows embedded with
+  context simply never match, which costs an embedding call rather than
+  returning a wrong vector.
+
+  **A real bug found by a test that could not fail.** The first version of the
+  reuse test used a stub returning the same vector every time, so "the reused
+  vector is the same vector" was true whether or not anything was reused.
+  Giving the stub a unique vector per call turned it red and exposed that
+  identical text repeated *within one batch* was still embedded once per
+  occurrence. Fixed, and the two savings are now counted apart, because
+  "already stored" and "repeated in this batch" mean different things and
+  adding them together makes both unreadable.
+
+  **`create_file` silently dropped `workspace_id`.** It accepted the key in its
+  dict and never passed it to the row, so a file created that way belonged to no
+  workspace and was invisible to everyone in the organization, since visibility
+  follows the workspace. The one production caller is the recreate path in
+  `_process_file_data_impl`. Found because test fixtures used it and the reuse
+  lookup, which joins through workspaces, quietly matched nothing.
+
+  19 tests, 143 total. Each checked by putting the bug back: dropping the
+  organization scope from the lookup fails the isolation test, removing the
+  reuse fails two, and removing the workspace, the history or the error guard
+  from the cache key each fail their own.
+
+- **2026-08-11 (a long document keeps what it got through):** Ingestion writes
+  each batch of pages as it finishes instead of holding everything and writing
+  once at the end. **Verified by killing the worker mid-document**, not by
+  reasoning about it: a 1,500-page PDF was interrupted at page 550, and 550
+  pages and 1,100 chunks were on disk. Before this change that number was zero,
+  every time, however far it had got.
+
+  The restart resumed at 551 (`Resuming big.pdf: 550 page(s) already stored,
+  950 to go`) and finished at 1,500 segments, 1,500 distinct pages, 3,000
+  chunks, **zero pages written twice**. The 550 already-embedded pages were not
+  paid for a second time.
+
+  **The second half of the item came free.** Retrieval scopes by workspace and
+  has never looked at `processing_status`, so a chunk is findable the moment
+  its transaction commits. While that document sat at 550 of 1,500, a question
+  about page 400 was answered and cited correctly. What had to be added was the
+  opposite guarantee: `update_file_with_chunks` takes `mark_processed=False`
+  for intermediate batches, because a file that says "processed" after its
+  first fifty pages is worse than one that says nothing.
+
+  **How resuming knows where it got to: it asks the rows, not a counter.** A
+  batch is one transaction, so a page either has its segment or has nothing.
+  `stored_page_numbers` reads the page numbers already present and skips them.
+  No progress column, no migration, and nothing that can disagree with what is
+  actually stored.
+
+  **The batching was only ever half true.** The old loop batched the work and
+  then accumulated the results, holding every chunk and every 1024-dimension
+  vector until the end, while a comment said peak memory was bounded by the
+  batch. Now it really is.
+
+  **One loop, not three.** PDF, DOCX and TXT each carried their own copy of
+  that loop, identical apart from one string, and the copies had already
+  drifted into a silent bug: `page_text` was added to the PDF version on
+  2026-08-07 referring to a variable the others did not have. Rather than fix
+  the PDF copy and leave two more to drift, the loop moved to
+  `FileProcessor.embed_and_store_pages` and the three copies were deleted, 287
+  lines of duplication for 173 of shared code. All three formats got resuming
+  and early searchability as a side effect.
+
+  **Also verified: the emptiness guard still fires.** It had to change meaning,
+  from "the loop returned no chunks" to "nothing was stored and nothing was
+  skipped", or a resumed run that found every page already present would have
+  marked a finished document failed.
+
+  5 tests, 124 total, each checked by putting the old behaviour back: writing
+  only at the end fails 3, ignoring already-stored pages fails 1, letting a
+  batch mark the file processed fails 1.
+
+  **A separate bug found by driving the API, now fixed.** `messages.py` used
+  `status.HTTP_422_UNPROCESSABLE_ENTITY` without importing `status`, so a
+  request missing `history_id` raised NameError while *building its own
+  refusal*, and the broad handler turned that into a 500. The customer was told
+  the app was broken when the answer was "you left out a field". One import,
+  plus a test that fails without it. Every other route file was checked for the
+  same missing import; this was the only one.
+
+- **2026-08-11 (the worker stops waiting to be asked):** Queueing a run now
+  announces it over Redis and the worker wakes at once. **Ten seconds becomes
+  two tenths of a second**, measured rather than assumed: three probes each
+  way, alternating, on the same idle worker.
+
+  | | readings | mean |
+  |---|---|---|
+  | Announced | 0.49, 0.03, 0.03 | **0.18s** |
+  | Poll only | 10.03, 10.03, 10.02 | **10.02s** |
+
+  **This was never only about uploads.** Every chat question is a queued run
+  too (`routes/messages.py:142`), so a question asked while the worker had
+  nothing to do sat for up to ten seconds before the pipeline even started.
+  Nothing was running during it. The roadmap entry described it as upload
+  latency, which undersold it.
+
+  **Two corrections to what that entry claimed.** "`redis>=5.0.0` is already a
+  dependency, so this is cheaper than it looks" was half true: the Python
+  package was installed, but no Redis server existed anywhere, no `REDIS_URL`
+  was configured, and the only import in the codebase was a dead `RedisError`.
+  So this added a container to both compose files, not just a call. And the
+  interval it quoted was the code default of 30s; production has run at 10s
+  since the compose file was written.
+
+  **Postgres LISTEN/NOTIFY was offered as the no-new-infrastructure
+  alternative and Osas chose Redis**, on the grounds that item 21's query cache
+  wants one anyway. Recorded because the reasoning matters if that cache is
+  ever dropped: without it, this is a container earning its keep on one feature.
+
+  **The queue did not move.** `agent_runs` is still the record of what needs
+  doing. Redis carries "look now" and nothing else, the announcement is only a
+  run id, and the worker still claims work through `SELECT ... FOR UPDATE SKIP
+  LOCKED` in priority order under the per-tenant cap. Chasing the announced id
+  directly would sidestep leases, retries and fairness, all three of which were
+  paid for in real bugs. `POLL_INTERVAL` stays as the safety net, so a missed
+  announcement costs seconds and never costs a job.
+
+  **Proven by taking Redis away, not by reasoning about it.** With the
+  container stopped: work was still claimed every time, in 1.39s, 9.04s, 9.04s
+  and 9.02s, which is whatever remained of the ten second window. Client
+  notifications fell back to the HTTP call and were delivered. When Redis came
+  back the listener reconnected on its own, backoff and all, with no restart,
+  and the fast path returned to 0.16s.
+
+  **The notification path back to the browser moved too, and closed a hole on
+  the way.** `/internal/notify-client` takes a user id and arbitrary event data
+  and pushes it down that person's WebSocket, and it had no authentication at
+  all: "internal" was the intent, and nothing enforced it while the container
+  publishes port 3000 and the router sits on the same public prefix as
+  everything else. Anybody who could reach the API could push whatever they
+  liked into a signed-in customer's browser. It now requires a shared secret
+  (`INTERNAL_API_SECRET`), compared with `compare_digest`, and **refuses
+  everything when the secret is unset** rather than treating unconfigured as
+  open.
+
+  **The HTTP path was kept as the fallback rather than deleted**, which is the
+  one place here where more code was the right answer. A published message
+  reaches only a listener connected at that instant, and this is the path whose
+  loss a customer sees directly: they watch a spinner for an answer that is
+  already saved. So the worker publishes, and on failure posts as before.
+
+  **A comment I wrote was wrong and is now corrected in place.** It claimed
+  clearing the wake flag before the fetch rather than after the wait prevented
+  a lost announcement. Checked by making the change: the tests stayed green,
+  because every wake is followed by a fetch either way, so the ordering is
+  tidiness and not a race. The test that claimed to cover it was renamed to
+  what it actually proves, which is that an announcement drives the loop at
+  all. That one has teeth: replacing the wake in the loop's wait with a plain
+  sleep turns it red and leaves the other seven green.
+
+  13 tests, 118 total. Each was checked by putting its bug back: dropping the
+  auth check fails 3, letting a publish failure raise fails 1, removing the
+  handler guard hangs the listener in its reconnect loop. One gap found this
+  way and then closed: nothing covered "announce only after the commit", which
+  is the ordering the module rests on, so there is now a test that announces
+  from a second database session and asserts the row is already visible.
+  Driven in the browser afterwards: signed in, asked a question, and the answer
+  arrived live over the socket.
+
+  **Before deploying, `INTERNAL_API_SECRET` must be in production `.env` for
+  both the API and the worker** (`openssl rand -hex 32`). Without it the
+  fallback notifications are refused, which only bites while Redis is down.
 
 - **2026-08-08 (customers can say an answer was wrong):** Thumbs on every
   answer, four chips and an optional comment on thumbs-down, and a CLI that
@@ -2151,6 +2575,8 @@ answer that with fair-use limits rather than repricing everyone.
 - Whether Redis is meant to be doing more than it currently is, or is leftover
 - Whether the firebase v12 upgrade's live Google sign-in flow actually works
   end to end (types and build pass; Osas is testing this live)
-- Whether to build a standalone AI search surface or just fix the marketing copy
+- ~~Standalone AI search: build the surface, or fix the copy?~~ **Answered
+  2026-08-11: build it**, after the efficiency backlog. See "Explicitly not
+  being built right now" for the shape and the four catches.
 - Whether the report-only CSP policy is clean (check browser console for violations)
   before switching it to enforced

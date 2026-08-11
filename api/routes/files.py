@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastA
 from typing import List, Dict, Optional, Any, TypeVar
 from sqlalchemy.orm import Session
 from redis.exceptions import RedisError
+from ..core import query_cache
 from ..core.utils import (
     get_user_id,
     upload_to_gcs,
@@ -487,6 +488,12 @@ async def delete_file(
 
         if not await store.file_repo.delete_file_entry(file_id):
              raise HTTPException(status_code=500, detail="Failed to delete file entry.")
+
+        # Answers cached from a set of documents that included this one must
+        # not outlive it. Deleting a document and still being quoted it is the
+        # worst version of a stale cache, because the reason it was deleted is
+        # usually that it was wrong.
+        await query_cache.bump_document_version(workspace_id)
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 

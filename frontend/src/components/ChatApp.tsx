@@ -3,7 +3,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 
 import { useNavigate, useLocation } from 'react-router-dom';
 import ConversationView from './ConversationView';
-import InputArea from './InputArea';
+import InputArea, { ComposerMode } from './InputArea';
+import SearchResults, { SearchHit } from './SearchResults';
 import HistoryView from './HistoryView';
 import { Message, History, MessageFeedback } from '../components/types';
 import './ChatApp.css';
@@ -104,6 +105,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
     const [activeTab, setActiveTab] = useState("chat"); 
     const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
     const [isSending, setIsSending] = useState(false);
+    // Ask or Find. Two different products sharing one box: an answer, or the
+    // page it is on. Held here rather than in InputArea because the results
+    // replace the conversation, so the main panel has to know too.
+    const [composerMode, setComposerMode] = useState<ComposerMode>('ask');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [hasSearched, setHasSearched] = useState(false);
     // isSending only covers the POST, which returns as soon as the question is
     // queued. The answer arrives later over the websocket, so between those two
     // moments the UI had nothing to say and the app looked like it had simply
@@ -456,9 +465,66 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
             });
     };
 
-    const handleSend = async (message: string, files: File[]) => {
+    /**
+     * Find, rather than ask.
+     *
+     * One request, answered directly: no conversation is created, nothing is
+     * saved, and no model is called, which is why this returns in well under a
+     * second where an answer takes ten. Scoped to the workspace being looked
+     * at, the same as everything else on this screen.
+     */
+    const handleSearch = async (query: string) => {
+        const trimmed = query.trim();
+        if (!trimmed) return;
+
+        setIsSearching(true);
+        setSearchQuery(trimmed);
+        setHasSearched(true);
+        capture(AnalyticsEvents.CHAT_MESSAGE_SENT, createEventProperties({
+            message_length: trimmed.length,
+            mode: 'search',
+        }));
+
         try {
-            setIsSending(true); 
+            const params = new URLSearchParams({ q: trimmed });
+            // Only when a real workspace is selected. currentWorkspaceId is a
+            // number here; ALL_WORKSPACES is the sentinel used for the file
+            // list, and the backend treats a missing workspace_id as "every
+            // workspace this person can reach", which is the same thing.
+            if (typeof currentWorkspaceId === 'number') {
+                params.set('workspace_id', String(currentWorkspaceId));
+            }
+            const response = await callApiWithToken(`api/v1/search?${params.toString()}`, 'GET');
+            if (!response.ok) {
+                // A refusal is the answer here, not a crash: an unpaid
+                // organization gets 402 and somebody who has run out of their
+                // rate limit gets 429, and both deserve their own words.
+                const detail = await response.json().catch(() => null);
+                addToast(
+                    detail?.detail || 'Could not search right now. Please try again.',
+                    'error',
+                );
+                setSearchResults([]);
+                return;
+            }
+            const data = await response.json();
+            setSearchResults(Array.isArray(data?.results) ? data.results : []);
+        } catch (error) {
+            console.error('Search failed:', error);
+            addToast('Could not search right now. Please try again.', 'error');
+            setSearchResults([]);
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const handleSend = async (message: string, files: File[]) => {
+        if (composerMode === 'find') {
+            await handleSearch(message);
+            return;
+        }
+        try {
+            setIsSending(true);
             
             capture(AnalyticsEvents.CHAT_MESSAGE_SENT, createEventProperties({
                 message_length: message.length,
@@ -972,16 +1038,28 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 </aside>
 
                 <main className={`main-content-area chat-column ${activeTab === 'chat' ? 'active' : ''}`}>
-                    <ConversationView
-                        files={userFiles}
-                        history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
-                        awaitingReply={awaitingReplyFor !== null && awaitingReplyFor === currentHistory}
-                        onCopy={handleCopy}
-                        onFeedbackChange={handleFeedbackChange}
-                    />
+                    {composerMode === 'find' ? (
+                        <SearchResults
+                            query={searchQuery}
+                            results={searchResults}
+                            isSearching={isSearching}
+                            hasSearched={hasSearched}
+                            files={userFiles}
+                        />
+                    ) : (
+                        <ConversationView
+                            files={userFiles}
+                            history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
+                            awaitingReply={awaitingReplyFor !== null && awaitingReplyFor === currentHistory}
+                            onCopy={handleCopy}
+                            onFeedbackChange={handleFeedbackChange}
+                        />
+                    )}
                     <InputArea
                         onSend={handleSend}
-                        isSending={isSending}
+                        isSending={isSending || isSearching}
+                        mode={composerMode}
+                        onModeChange={setComposerMode}
                         onContentAdded={async () => {
                             // Scoped to the workspace the file was uploaded into.
                         // Reloading without it showed every document in the

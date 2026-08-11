@@ -491,3 +491,19 @@ async def test_an_organization_cannot_be_subscribed_twice(store, tenant, client)
     )
     assert res.status_code == 400, res.text
     assert "already has an active subscription" in res.text
+
+
+async def test_a_message_with_no_history_is_refused_clearly(store, tenant, client):
+    """422, not 500.
+
+    `status` was never imported in messages.py, so building this refusal raised
+    NameError, the broad handler turned that into a 500, and the customer was
+    told the app was broken when the real answer was "you left out a field".
+    Found by driving the API on 2026-08-11, not by reading the code.
+    """
+    response = await client.as_(tenant.owner).post(
+        "/api/v1/messages", json={"message": "hello", "history_id": None}
+    )
+
+    assert response.status_code == 422
+    assert "history_id" in response.json()["detail"]

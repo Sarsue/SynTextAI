@@ -1,3 +1,7 @@
+import hmac
+import logging
+import os
+
 from fastapi import APIRouter, HTTPException, Request, status, Header
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
@@ -6,7 +10,42 @@ from api.core.utils import get_user_id
 from api.repositories.repository_manager import RepositoryManager
 from api.workflows.tasks import run_query_pipeline
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# Shared with the worker. Read at call time rather than at import, so a test
+# can set it without reimporting the module.
+INTERNAL_SECRET_ENV = "INTERNAL_API_SECRET"
+
+
+def _assert_from_worker(supplied: Optional[str]) -> None:
+    """Refuse anyone who cannot prove they are the worker.
+
+    Fails closed when the secret is not configured. The alternative, treating
+    "no secret set" as "allow everyone", would mean one missing environment
+    variable silently reopens the hole, and nothing would say so. A deploy
+    without INTERNAL_API_SECRET loses the fallback notifications instead, which
+    only matter while Redis is down, and says so in the log.
+    """
+    expected = os.getenv(INTERNAL_SECRET_ENV, "")
+    if not expected:
+        logger.error(
+            "%s is not set, so worker notifications are being refused. "
+            "Set it in the environment of both the API and the worker.",
+            INTERNAL_SECRET_ENV,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Internal notifications are not configured.",
+        )
+    # compare_digest rather than ==, so the comparison does not finish early on
+    # the first wrong character and leak the secret one byte at a time.
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not permitted.",
+        )
 
 class WorkerNotification(BaseModel):
     user_id: str
@@ -79,12 +118,23 @@ async def eval_query_endpoint(
 )
 async def notify_client_endpoint(
     request: Request,
-    notification: WorkerNotification
+    notification: WorkerNotification,
+    x_internal_secret: Optional[str] = Header(None),
 ):
     """
     Internal endpoint for the worker to send status updates or other messages
     to be relayed to the appropriate frontend client via WebSocket using the standard event/data structure.
+
+    Only the fallback now. The worker announces over Redis first and comes here
+    when that publish did not go out; see core/events.py.
+
+    It used to take anyone's word for it. "Internal" described the intent and
+    nothing enforced it: the container publishes port 3000, the router is
+    mounted on the same public prefix as everything else, and this endpoint
+    takes a user id and arbitrary event data. Anybody who could reach the API
+    could push whatever they liked into any signed-in customer's browser.
     """
+    _assert_from_worker(x_internal_secret)
     try:
         # Access WebSocketManager from application state
         # This assumes WebSocketManager is attached to app.state in your main.py
@@ -109,6 +159,3 @@ async def notify_client_endpoint(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to relay notification to client"
         )
-
-# You might want to add authentication to this internal endpoint later,
-# e.g., using a shared secret or an internal API key, to ensure only the worker can call it.

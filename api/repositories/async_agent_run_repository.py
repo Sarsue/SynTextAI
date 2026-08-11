@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from .async_base_repository import AsyncBaseRepository
+from ..core.events import announce_work
 from ..models import AgentRun as AgentRunORM
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,14 @@ class AsyncAgentRunRepository(AsyncBaseRepository):
                 await session.flush()
                 run_id = str(run.id)
                 await session.commit()
+
+                # Tap the worker on the shoulder, strictly after the commit.
+                # Before it, the worker can wake, run its SELECT against a row
+                # that is not visible yet, find nothing, and go back to sleep,
+                # so the job then waits out the full poll interval anyway. See
+                # core/events.py. Never raises: a missed announcement costs
+                # seconds, and the poll still picks the run up.
+                await announce_work(run_id)
                 return run_id
             except IntegrityError as e:
                 await session.rollback()

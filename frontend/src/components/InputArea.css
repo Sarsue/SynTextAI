@@ -132,3 +132,46 @@
         font-size: clamp(10px, 3vw, 12px);
     }
 }
+/* Ask or Find.
+ *
+ * A segmented control rather than a dropdown or an icon: two options, both
+ * worth naming, and the choice changes what the button below does. Sits above
+ * the box so the placeholder and the button read as its consequence.
+ */
+.composer-modes {
+    display: inline-flex;
+    align-self: flex-start;
+    gap: 2px;
+    padding: 2px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: 999px;
+    background-color: var(--card-bg, #f8f8f8);
+}
+
+.composer-mode {
+    border: none;
+    background: transparent;
+    color: var(--secondary-color, #777);
+    font: inherit;
+    font-size: 0.82rem;
+    line-height: 1;
+    padding: 6px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.composer-mode:hover {
+    color: var(--text-color, #111);
+}
+
+.composer-mode.is-active {
+    background-color: var(--button-bg, #111);
+    color: var(--button-text-color, #fff);
+}
+
+.composer-mode:focus-visible {
+    outline: 2px solid var(--text-color, #111);
+    outline-offset: 2px;
+}

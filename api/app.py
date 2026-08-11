@@ -9,6 +9,7 @@ from .core.rate_limit import limiter
 from .repositories.repository_manager import RepositoryManager
 from dotenv import load_dotenv
 from .core.firebase_setup import initialize_firebase
+import asyncio
 import os
 import logging
 
@@ -117,12 +118,46 @@ async def startup_event():
     initialize_firebase()
     logger.info("Firebase initialized successfully.")
 
+    # Relay the worker's announcements to the browser. Replaces the worker
+    # making a blocking HTTP call back into this process for every file status
+    # change and every finished answer. That endpoint still exists as the
+    # fallback for when Redis is unreachable, and now requires a shared secret.
+    from .core.events import CLIENT_CHANNEL, listen as listen_for_events
+
+    async def _relay(payload: dict) -> None:
+        user_id = payload.get("user_id")
+        event_type = payload.get("event_type")
+        if not user_id or not event_type:
+            logger.warning("Ignoring a client event with no user or type")
+            return
+        await websocket_manager.send_message(
+            user_id=str(user_id),
+            event_type=str(event_type),
+            data=payload.get("data") or {},
+        )
+
+    app.state.event_listener = asyncio.create_task(
+        listen_for_events(CLIENT_CHANNEL, _relay)
+    )
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """
     Cleanup shared database resources on application shutdown.
     """
     logger.info("Executing shutdown event: Cleaning up database resources...")
+
+    listener = getattr(app.state, "event_listener", None)
+    if listener is not None:
+        # listen() blocks on the next message, so it ends by being cancelled.
+        listener.cancel()
+        try:
+            await listener
+        except asyncio.CancelledError:
+            pass
+    from .core.events import aclose as aclose_events
+    await aclose_events()
+
     from .repositories.async_base_repository import cleanup_shared_db_resources
     await cleanup_shared_db_resources()
     # The inference client pools connections for the life of the process, so it
@@ -209,6 +244,7 @@ from .routes.subscriptions import subscriptions_router
 from .routes.users import users_router
 from .routes.analytics import router as analytics_router, posthog_middleware
 from .routes.internal import router as internal_router  # ⬅️ Add internal router
+from .routes.search import search_router
 from .routes.workspaces import workspaces_router
 from .routes.organizations import organizations_router
 from .routes.sendgrid_events import router as sendgrid_events_router
@@ -221,6 +257,9 @@ app.include_router(subscriptions_router)
 app.include_router(users_router)
 app.include_router(analytics_router)
 app.include_router(internal_router, prefix="/api/v1/internal")  # ⬅️ Include internal router
+# Finding a passage, as opposed to being told an answer. Carries its own
+# prefix, like files/histories/messages, so nothing is added here.
+app.include_router(search_router)
 app.include_router(workspaces_router)
 app.include_router(organizations_router)
 # Public and unauthenticated by necessity: SendGrid posts here, and it holds no

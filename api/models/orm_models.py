@@ -305,7 +305,17 @@ class Chunk(Base):
     # full text stays on the segment, because a citation names a page and a page
     # is what a reader opens.
     content = Column(Text, nullable=True)
-    
+
+    # sha256 of the text that was actually embedded, which is the passage with
+    # its context sentence in front where it has one, not `content` alone. Lets
+    # the same text be embedded once and reused, so a re-uploaded document is
+    # not billed twice. See migration 20260811_chunk_content_hash.
+    #
+    # Declared without index=True: the migration creates idx_chunks_content_hash
+    # under that name, and declaring one here too makes autogenerate propose
+    # dropping the live index and adding an identical one called ix_*.
+    content_hash = Column(String(64), nullable=True)
+
     # Relationship to file
     file = relationship("File", back_populates="chunks")
     
