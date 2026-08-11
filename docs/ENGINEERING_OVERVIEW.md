@@ -410,12 +410,11 @@ list, because both are gated on a benchmark the tool layer is currently losing.
 
 1. **The efficiency backlog, items 18-22 below.** Every one of them is felt by a
    customer as waiting, and none needs a decision from anybody. Start here.
-   **Started 2026-08-11: items 18, 19 and 22 are done.** 10s down to 0.2s
-   before a question or an upload begins, and a long document now keeps the
-   pages it got through instead of starting again. Left: 20 (re-uploads re-pay
-   the embedding bill) and 21 (query cache). Item 20 is now cheaper than it
-   looks, because ingestion already skips pages it has stored; what remains is
-   the same document uploaded twice as two separate files.
+   **Closed 2026-08-11: all five, 18 through 22.** 10s down to 0.2s before a
+   question or an upload begins; a long document keeps the pages it got through
+   instead of starting again, and is searchable while it finishes; the same text
+   is embedded once per organization; and a repeated question is answered in
+   0.33s against 20.40s. Next is "AI search", item 2 in this list.
 2. **"AI search."** The site sells it as a second capability and there is no
    such thing in the code: it is the same retrieval engine chat already uses.
    **Decided 2026-08-11: build it.** A toggle on the chat screen and one
@@ -553,8 +552,8 @@ Genuinely still open, roughly in value order:
     before it touches anything and run under the same policy as the API. The
     poll still needs the privileged read, but it becomes the fallback path
     rather than the normal one.
-20. Embedding dedupe by chunk hash, so re-uploads and retries stop re-paying the embedding cost.
-21. Short-TTL query cache keyed by user, document set, and normalized question. Worth having, but size the expectation: it only pays off on the same question asked twice in a few minutes, and it does nothing for uploads, which is where the waiting actually is.
+20. ~~Embedding dedupe by chunk hash~~ **Closed 2026-08-11.** Scoped to the organization, hashed over the text that is actually embedded rather than the `content` column, and it dedupes within a batch as well as against what is stored. See "Recent changes".
+21. ~~Short-TTL query cache~~ **Closed 2026-08-11.** 20.40s cold, 0.33s repeated, measured live. A new or deleted document invalidates the workspace's answers immediately rather than leaving them to expire. The expectation set here was right: it does nothing for uploads, which is where item 18 went instead.
 22. ~~Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.~~ **Closed 2026-08-11** alongside item 19, as planned. One difference from the plan: the HTTP call was kept as the fallback rather than deleted, because this is the notification whose loss a customer watches happen. It now needs a shared secret, which closed an unauthenticated endpoint nobody had noticed. See "Recent changes".
 
 Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
@@ -1218,6 +1217,76 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-11 (paying once for the same work):** The last two efficiency items.
+  Embedding is no longer bought twice for the same text, and the same question
+  asked twice within a few minutes is answered from a cache.
+
+  **The query cache, measured live: 20.40s cold, 0.33s repeated.** Keyed on
+  workspace, a documents version, file scope, language, level, the question and
+  a hash of the conversation. Every one of those is in there because leaving it
+  out returns somebody else's answer. Only cached when a workspace is given:
+  without one the document set is "everything this person can reach", which
+  varies per person and has no single version to invalidate against.
+
+  **A new document drops the workspace's cached answers at once**, rather than
+  leaving five minutes where "I just uploaded it" meets "I cannot find it". The
+  version counter is bumped on ingest and on delete, and it is part of the key,
+  so old entries become unreachable and expire on their own. Verified live: the
+  0.33s answer went back to 11.17s after an upload.
+
+  **The cache silently did not work at first, and the tests were green.**
+  `format_user_chat_history` returns a list of dictionaries, not a string, so
+  `.encode()` raised on every read and every write, was swallowed by the
+  never-fail guard, and logged a warning nobody was reading. The tests passed a
+  string. Asking the running app the same question twice found it immediately.
+  There are now tests for the shape the application actually passes.
+
+  **The question normalisation buys nothing today, and that is written down in
+  the module rather than left to be rediscovered.** The route saves the question
+  before queueing the run, so the conversation the worker formats already
+  contains it verbatim, and the raw text reaches the key through the history
+  fingerprint whatever the normalisation does. Retyping the same question with
+  different capitals misses: 14.92s. Kept anyway, because it costs three lines
+  and becomes load-bearing the moment the current turn stops being part of the
+  hashed history, which is the obvious way to raise the hit rate later.
+
+  **Embedding reuse is scoped to the organization.** Text this organization has
+  already embedded is reused from `chunks.content_hash` instead of being sent to
+  the embedder again, which is a customer re-uploading a corrected policy, or
+  the same standard terms across twenty contracts. Crossing tenants would leak
+  nothing, since the vector is derived from text the caller already holds, but a
+  cache that crosses tenants is something somebody has to keep proving safe, and
+  nearly all the saving is same-tenant. The narrow version buys the benefit and
+  none of the argument.
+
+  **The hash is over what is embedded, not over `content`.** That is the passage
+  with its context sentence in front where it has one. Hashing the column alone
+  would hand back a vector computed from different text. The backfill in
+  `20260811_chunk_content_hash` can only hash `content`, so rows embedded with
+  context simply never match, which costs an embedding call rather than
+  returning a wrong vector.
+
+  **A real bug found by a test that could not fail.** The first version of the
+  reuse test used a stub returning the same vector every time, so "the reused
+  vector is the same vector" was true whether or not anything was reused.
+  Giving the stub a unique vector per call turned it red and exposed that
+  identical text repeated *within one batch* was still embedded once per
+  occurrence. Fixed, and the two savings are now counted apart, because
+  "already stored" and "repeated in this batch" mean different things and
+  adding them together makes both unreadable.
+
+  **`create_file` silently dropped `workspace_id`.** It accepted the key in its
+  dict and never passed it to the row, so a file created that way belonged to no
+  workspace and was invisible to everyone in the organization, since visibility
+  follows the workspace. The one production caller is the recreate path in
+  `_process_file_data_impl`. Found because test fixtures used it and the reuse
+  lookup, which joins through workspaces, quietly matched nothing.
+
+  19 tests, 143 total. Each checked by putting the bug back: dropping the
+  organization scope from the lookup fails the isolation test, removing the
+  reuse fails two, and removing the workspace, the history or the error guard
+  from the cache key each fail their own.
 
 - **2026-08-11 (a long document keeps what it got through):** Ingestion writes
   each batch of pages as it finishes instead of holding everything and writing

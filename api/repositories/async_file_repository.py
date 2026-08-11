@@ -87,6 +87,58 @@ class AsyncFileRepository(AsyncBaseRepository):
             )
             return {r for (r,) in rows.all() if r is not None}
 
+    async def embeddings_for_hashes(self, file_id: int, hashes: List[str]) -> Dict[str, Any]:
+        """Vectors this organization has already paid to compute.
+
+        Embedding is a pure function of its input, so the same text always has
+        the same vector and computing it twice is money for nothing. The common
+        cases are a customer re-uploading a corrected document and boilerplate
+        that repeats across many files.
+
+        **Scoped to the organization that owns `file_id`, on purpose.** Reusing
+        another tenant's vector would leak nothing: the caller already holds the
+        text, and the vector is derived from it with no other input. But a cache
+        that crosses tenants is a thing somebody has to keep proving is safe
+        every time this code is touched, and nearly all the saving is a customer
+        re-uploading their own document. The narrow version buys most of the
+        benefit and none of the argument.
+
+        Returns {hash: embedding} for whatever was found, which may be empty.
+        """
+        if not hashes:
+            return {}
+
+        async with self.get_async_session() as session:
+            rows = await session.execute(
+                text(
+                    """
+                    WITH owner AS (
+                      SELECT w.organization_id AS org
+                      FROM files f
+                      JOIN workspaces w ON w.id = f.workspace_id
+                      WHERE f.id = :file_id
+                    )
+                    SELECT DISTINCT ON (c.content_hash) c.content_hash, c.embedding
+                    FROM chunks c
+                    JOIN files f ON f.id = c.file_id
+                    JOIN workspaces w ON w.id = f.workspace_id
+                    WHERE c.content_hash = ANY(:hashes)
+                      AND c.embedding IS NOT NULL
+                      AND w.organization_id = (SELECT org FROM owner)
+                    """
+                ),
+                {"file_id": int(file_id), "hashes": list(hashes)},
+            )
+            found = {}
+            for content_hash, embedding in rows.all():
+                if embedding is None:
+                    continue
+                # pgvector hands this back as a string on a raw query.
+                if isinstance(embedding, str):
+                    embedding = [float(x) for x in embedding.strip("[]").split(",") if x]
+                found[content_hash] = list(embedding)
+            return found
+
     async def update_file_with_chunks(
         self,
         user_id: int,
@@ -240,6 +292,10 @@ class AsyncFileRepository(AsyncBaseRepository):
                                 u.get('text') or u.get('content') or ''
                             ),
                             embedding=embedding,
+                            # What was embedded, so the next document holding
+                            # this same text can reuse the vector instead of
+                            # buying it again.
+                            content_hash=u.get('content_hash'),
                         ))
                         expected += 1
 
@@ -925,7 +981,11 @@ class AsyncFileRepository(AsyncBaseRepository):
         Create a new file record with enhanced error handling and uniqueness checks.
 
         Args:
-            file_data: Dictionary containing file information
+            file_data: Dictionary containing file information. `workspace_id` is
+                optional but should almost always be given: visibility follows
+                the workspace, so a file created without one is reachable by
+                nobody, including the owner of the organization it was uploaded
+                into. It used to be dropped silently even when passed.
 
         Returns:
             Dict: Created file record with id and filename, or empty dict if failed
@@ -945,7 +1005,13 @@ class AsyncFileRepository(AsyncBaseRepository):
                     file_name=file_data["filename"],
                     file_url=file_data.get("url", ""),
                     file_type=file_data["file_type"],
-                    processing_status=file_data["status"]
+                    processing_status=file_data["status"],
+                    # Was accepted in the dict and then dropped here, so a
+                    # caller that passed it got a document belonging to no
+                    # workspace: invisible to every person in the organization,
+                    # since visibility follows the workspace and not the
+                    # uploader. Silent, because the row is created successfully.
+                    workspace_id=file_data.get("workspace_id"),
                 )
 
                 session.add(file_orm)

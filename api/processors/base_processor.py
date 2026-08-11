@@ -11,6 +11,7 @@ nothing used to still mark its file processed.
 """
 from abc import ABC, abstractmethod
 import gc
+import hashlib
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 
@@ -64,7 +65,15 @@ class FileProcessor(ABC):
         which is what lets `stored_page_numbers` answer this without a progress
         column that could disagree with the rows.
 
-        Returns {stored_chunks, stored_pages, skipped_pages, total_pages}.
+        NOT PAYING TWICE FOR THE SAME TEXT
+
+        Embedding is the one part of this that costs money per call, and it is
+        a pure function of its input. Each chunk's text is hashed and any vector
+        this organization already has is reused, so only genuinely new text is
+        sent to the embedder.
+
+        Returns {stored_chunks, stored_pages, skipped_pages, reused_embeddings,
+        deduplicated_in_batch, total_pages}.
         """
         total_pages = len(page_data)
         already = await self.store.file_repo.stored_page_numbers(int(file_id))
@@ -78,6 +87,8 @@ class FileProcessor(ABC):
 
         stored_chunks = 0
         stored_pages = 0
+        reused_embeddings = 0
+        deduplicated_in_batch = 0
 
         for batch_start in range(0, len(pending), BATCH_SIZE):
             batch = pending[batch_start:batch_start + BATCH_SIZE]
@@ -128,21 +139,81 @@ class FileProcessor(ABC):
                 logger.warning(f"Contextualisation skipped: {ctx_error}")
 
             chunk_texts = [embedding_text(chunk) for chunk in batch_chunks]
-            try:
-                embeddings = await get_text_embeddings_in_batches(chunk_texts, batch_size=50)
-            except Exception as e:
-                logger.error(f"Embedding generation failed for batch: {e}")
-                raise ValueError(f"Failed to generate embeddings: {e}")
+            hashes = [
+                hashlib.sha256(t.encode("utf-8")).hexdigest() for t in chunk_texts
+            ]
+            for chunk, content_hash in zip(batch_chunks, hashes):
+                chunk["content_hash"] = content_hash
 
-            if not embeddings or len(embeddings) != len(chunk_texts):
-                raise ValueError(
-                    f"Embedding count mismatch: expected {len(chunk_texts)}, got "
-                    f"{len(embeddings) if embeddings else 0}"
+            # Embedding is a pure function of its input, so text this
+            # organization has embedded before has a vector already sitting in
+            # the database. Re-uploading a corrected policy, or the same terms
+            # appearing across twenty contracts, used to be billed every time.
+            #
+            # Never fatal. A lookup that fails means paying for embeddings we
+            # could have had free, which is exactly today's behaviour, and an
+            # upload must not fail because an optimisation did.
+            try:
+                known = await self.store.file_repo.embeddings_for_hashes(
+                    int(file_id), sorted(set(hashes))
                 )
-            if not embeddings[0]:
-                raise ValueError(
-                    "Embeddings have zero dimensions - model failed to generate valid vectors"
+            except Exception as e:
+                logger.warning(f"Could not check for reusable embeddings: {e}")
+                known = {}
+
+            # Unique texts, not unique positions. A batch routinely contains the
+            # same text twice, from a repeated header or a boilerplate
+            # paragraph, and sending each occurrence separately pays twice for
+            # one answer within a single call. Worse, an embedder with any
+            # sampling in it can return two different vectors for one hash,
+            # which then makes "the same text has the same vector" false in the
+            # very table the reuse lookup reads from.
+            from_database = set(known)
+            wanted = []
+            seen = set()
+            for content_hash, content in zip(hashes, chunk_texts):
+                if content_hash in known or content_hash in seen:
+                    continue
+                seen.add(content_hash)
+                wanted.append((content_hash, content))
+
+            if wanted:
+                try:
+                    fresh = await get_text_embeddings_in_batches(
+                        [content for _, content in wanted], batch_size=50
+                    )
+                except Exception as e:
+                    logger.error(f"Embedding generation failed for batch: {e}")
+                    raise ValueError(f"Failed to generate embeddings: {e}")
+
+                if not fresh or len(fresh) != len(wanted):
+                    raise ValueError(
+                        f"Embedding count mismatch: expected {len(wanted)}, got "
+                        f"{len(fresh) if fresh else 0}"
+                    )
+                if not fresh[0]:
+                    raise ValueError(
+                        "Embeddings have zero dimensions - model failed to generate valid vectors"
+                    )
+                for (content_hash, _), vector in zip(wanted, fresh):
+                    known[content_hash] = vector
+
+            # Two different savings, counted apart because they mean different
+            # things. One is "this organization already owns this vector",
+            # which is the re-uploaded document. The other is "this batch
+            # contains the same text more than once", which is a repeated
+            # header. Adding them together would make either number unreadable.
+            from_db = sum(1 for h in hashes if h in from_database)
+            within_batch = len(chunk_texts) - len(wanted) - from_db
+            if from_db or within_batch:
+                logger.info(
+                    f"Embedded {len(wanted)} of {len(chunk_texts)} chunks: "
+                    f"{from_db} already stored, {within_batch} repeated in this batch"
                 )
+            reused_embeddings += from_db
+            deduplicated_in_batch += within_batch
+
+            embeddings = [known.get(h) for h in hashes]
 
             for chunk, embedding in zip(batch_chunks, embeddings):
                 chunk["embedding"] = embedding
@@ -181,6 +252,8 @@ class FileProcessor(ABC):
             "stored_chunks": stored_chunks,
             "stored_pages": stored_pages,
             "skipped_pages": len(already),
+            "reused_embeddings": reused_embeddings,
+            "deduplicated_in_batch": deduplicated_in_batch,
             "total_pages": total_pages,
         }
     

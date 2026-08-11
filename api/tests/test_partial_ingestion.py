@@ -50,11 +50,21 @@ def fake_embeddings(monkeypatch):
 
 
 def pages(count: int, tag: str):
-    """`count` pages with enough text that the chunker keeps them."""
+    """`count` pages with enough text that the chunker keeps them.
+
+    Every sentence carries its own page and index, so no two chunks anywhere
+    hold identical text. That matters since embedding reuse landed: repetitive
+    filler made the later pages of a document reuse the earlier ones' vectors,
+    so the embedder was never called again and a test that simulates the
+    embedder failing had nothing to fail.
+    """
     return [
         {
             "page_num": n,
-            "text": f"Page {n}. " + f"This is {tag} content for page {n}. " * 20,
+            "text": f"Page {n}. " + " ".join(
+                f"Line {i} of page {n} concerns {tag} and value {n * 100 + i}."
+                for i in range(1, 22)
+            ),
         }
         for n in range(1, count + 1)
     ]
@@ -64,16 +74,17 @@ def pages(count: int, tag: str):
 async def doc(store, tenant):
     """A file row in a real workspace, cleaned up with its tenant."""
     workspace_id = await tenant.workspace("Ingestion")
-    created = await store.file_repo.create_file({
-        "user_id": tenant.owner,
-        "filename": f"long-{uuid.uuid4().hex[:8]}.txt",
-        "file_type": "text",
-        "status": "uploaded",
-        "url": "",
-        "workspace_id": workspace_id,
-    })
-    assert created and created.get("id")
-    return created
+    # add_file, because that is what the upload route uses. create_file used to
+    # drop workspace_id silently, which produced a file belonging to no
+    # workspace: fine for these assertions, and nothing like a real row.
+    file_id = await store.file_repo.add_file(
+        user_id=tenant.owner,
+        file_name=f"long-{uuid.uuid4().hex[:8]}.txt",
+        file_url="",
+        workspace_id=workspace_id,
+    )
+    assert file_id
+    return {"id": file_id, "filename": f"long-{file_id}.txt", "workspace_id": workspace_id}
 
 
 async def _chunk_count(store, file_id: int) -> int:
