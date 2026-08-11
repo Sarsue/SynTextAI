@@ -1221,6 +1221,43 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-11 (the Slack surface: the security half first):**
+  `api/services/slack.py`. Slack and Teams were confirmed as a *surface*, not a
+  source: somewhere to ask, not another place to read documents from.
+
+  **Built the part that must be right before the part that is visible.** This
+  endpoint will be a public URL that takes an instruction and answers with the
+  contents of private documents, so the request signature is the only thing
+  between those two facts. Verified before the body is parsed, with
+  `compare_digest`, plus a five minute window so a captured request cannot be
+  replayed tomorrow, and **refusal when the secret is unset**, so one missing
+  environment variable is never the difference between private and public.
+
+  11 tests, each checked by removing its guard: not comparing the signature
+  fails 3, dropping the replay window fails 2, treating an unconfigured secret
+  as permission fails 1.
+
+  **The design decision that matters is not Slack, it is who is asking.**
+  Everything else here answers as a *person*, scoped to what that person may
+  see. A Slack message carries a Slack user id, which means nothing to us.
+  Bridged carelessly, a company's whole document set becomes readable by
+  anybody who can type in their Slack, including guests and, in a shared
+  channel, another company entirely. So: an owner links a Slack workspace once,
+  deliberately; every question resolves the asker to a member by verified
+  email; an unrecognised email is refused. Adding somebody to Slack must never
+  add them to the knowledge base, and an administrator has to be able to say
+  that plainly.
+
+  **Still to build:** the events route, the installation table linking a Slack
+  team to an organization, and the worker posting the answer back into the
+  thread. The answer path itself needs almost nothing new: a Slack question
+  becomes a chat history and an ordinary queued run, so entitlement, retrieval,
+  citations and feedback all work as they already do.
+
+  Local testing goes through a cloudflared tunnel, since Slack needs a public
+  URL to call.
+
+
 - **2026-08-11 (documents can come from Drive and SharePoint):** The backend
   half of the first connectors. A customer picks documents in the provider's
   own picker and they arrive here as ordinary files: same storage, same
