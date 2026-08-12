@@ -43,18 +43,33 @@ async def add_coop_coep_headers(request: Request, call_next):
 # live traffic. Check the console for violations, then switch the header
 # name below from Content-Security-Policy-Report-Only to
 # Content-Security-Policy once it's confirmed clean.
+#
+# The Google entries are for the Drive picker, added 2026-08-11 with the
+# import feature rather than after it. This policy is still Report-Only, so a
+# missing origin costs nothing today and breaks the feature silently on the day
+# somebody flips the header name. Adding it later would mean debugging a
+# picker that opens in development and refuses in production.
+#
+#   accounts.google.com   the token client that asks for drive.file
+#   apis.google.com       the picker itself
+#   www.googleapis.com    the Drive API the picker talks to
+#   docs.google.com       the picker renders in an iframe from here
 _CSP_POLICY = "; ".join([
     "default-src 'self'",
-    "script-src 'self' https://js.stripe.com",
+    "script-src 'self' https://js.stripe.com https://accounts.google.com https://apis.google.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
-    "img-src 'self' data: https://storage.googleapis.com",
+    "img-src 'self' data: https://storage.googleapis.com https://*.googleusercontent.com "
+    "https://ssl.gstatic.com https://www.gstatic.com",
     "connect-src 'self' https://app.posthog.com https://identitytoolkit.googleapis.com "
-    "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com",
+    "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com "
+    "https://accounts.google.com https://www.googleapis.com",
     # Cited documents open in an iframe pointed at their GCS URL, so leaving
     # storage.googleapis.com out here would break every citation the moment
-    # this policy stops being Report-Only.
-    "frame-src https://js.stripe.com https://storage.googleapis.com",
+    # this policy stops being Report-Only. docs.google.com is the Drive picker,
+    # which is also an iframe.
+    "frame-src https://js.stripe.com https://storage.googleapis.com "
+    "https://docs.google.com https://accounts.google.com",
     "object-src 'none'",
     "base-uri 'self'",
 ])

@@ -1319,6 +1319,46 @@ answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
 
+- **2026-08-11 (the Drive picker, and the four places a build-time value has to
+  be listed):** The browser half of the Drive import. An "Import from Google
+  Drive" button in the knowledge base panel, hidden for anybody who cannot add
+  documents, exactly as the paperclip is.
+
+  **`drive.file` through the picker, never `drive.readonly`.** The customer
+  signs in with their own Google account and picks documents; the app receives
+  access to those documents and nothing else. The restricted scope would mean
+  asking a dental practice for read access to their whole Drive to import four
+  policies, and a paid third-party security assessment before it could ship.
+
+  **The button does not render when the credentials are absent.** A control
+  that always fails teaches people the feature is broken, so an unconfigured
+  deploy simply does not offer it.
+
+  **The Content-Security-Policy was updated in the same change, not later.**
+  The picker needs `accounts.google.com` and `apis.google.com` for scripts,
+  `www.googleapis.com` to talk to Drive, and `docs.google.com` because the
+  picker is an iframe. The policy is still Report-Only, so a missing origin
+  costs nothing today and breaks the feature silently on the day the header
+  name is flipped. That is the worst kind of bug to leave behind: it works in
+  development and refuses in production, months after anybody remembers why.
+
+  **A build-time value has to be listed in four places here**, and missing any
+  one of them fails quietly. The workflow writes it into the frontend `.env`
+  and passes it as a build arg; the Dockerfile has to declare `ARG` and `ENV`
+  for it or the arg is accepted and ignored; and the local compose file needs
+  it to build the same way. Checked all four rather than assuming, because the
+  failure mode is a button that never appears in production with nothing in any
+  log.
+
+  **Two GitHub secrets are needed before this works in production:**
+  `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY`. Both are public by design:
+  they identify the app and authorise nothing on their own.
+
+  182 tests. **Not yet driven end to end**, because that needs the Google
+  credentials; the backend import path is covered by its own tests with a fake
+  provider.
+
+
 - **2026-08-11 (the Slack surface: the security half first):**
   `api/services/slack.py`. Slack and Teams were confirmed as a *surface*, not a
   source: somewhere to ask, not another place to read documents from.
