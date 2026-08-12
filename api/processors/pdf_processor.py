@@ -71,7 +71,7 @@ class PDFProcessor(FileProcessor):
         logger.info(f"Processing PDF file: {filename} (ID: {file_id}, User: {user_id}, Language: {language}, Level: {comprehension_level})")
         
         # Extract text from PDF with page numbers
-        page_data = await self.extract_text_with_page_numbers(file_data)
+        page_data = await self.extract_text_with_page_numbers(file_data, file_id=int(file_id))
         logger.info(f"PDF extraction complete. Pages: {len(page_data)}")
 
         # And what the document says it contains. Cheap, one call on a document
@@ -257,13 +257,22 @@ class PDFProcessor(FileProcessor):
             flags["vision_unverified_numbers"] = sorted(set(invented))[:10]
         return markdown, flags
 
-    async def extract_text_with_page_numbers(self, pdf_data: bytes) -> List[Dict[str, Any]]:
+    async def extract_text_with_page_numbers(
+        self, pdf_data: bytes, file_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         Extracts text from PDF data while capturing page numbers.
         Falls back to OCR (Tesseract) if a page contains only images.
-        
+
+        Pages read by the vision model are cached in `page_reads` as each one
+        lands, and a re-run picks them back up. Without that, an ingest
+        interrupted at page 57 of 58 re-bought all 57, at about three minutes
+        each. Pass `file_id` to get the cache; omit it and this behaves exactly
+        as it did before, which is what the non-ingest callers want.
+
         Args:
             pdf_data: PDF file data in bytes
+            file_id: the file these pages belong to, if they are being ingested
 
         Returns:
             List of dictionaries with page numbers and text content
@@ -271,14 +280,42 @@ class PDFProcessor(FileProcessor):
         page_texts = []
         page_flags: Dict[int, Any] = {}
         read_by_vision = 0
+        resumed = 0
+
+        cached: Dict[int, Dict[str, Any]] = {}
+        if file_id is not None:
+            try:
+                cached = await self.store.file_repo.cached_page_reads(int(file_id))
+            except Exception as e:
+                logger.warning(f"Could not read cached pages for file {file_id}: {e}")
+
+        async def remember(n: int, text_value: str, source: str, flags: Optional[Dict] = None):
+            if file_id is None:
+                return
+            await self.store.file_repo.save_page_read(
+                int(file_id), n, text_value, source, flags
+            )
+
         try:
             with fitz.open(stream=pdf_data, filetype="pdf") as doc:
                 layer = {}
                 needs_vision = []
                 for page_num, page in enumerate(doc, 1):
                     layer[page_num] = sanitize_extracted_text(page.get_text("text"))
+                    hit = cached.get(page_num)
+                    if hit and hit.get("source") == "vision":
+                        # Already paid for. Its flags come back with it, so a
+                        # resumed page is no more trusted than a fresh one.
+                        layer[page_num] = hit["text"]
+                        if hit.get("flags"):
+                            page_flags[page_num] = hit["flags"]
+                        resumed += 1
+                        continue
                     if self._page_needs_vision(page, layer[page_num]):
                         needs_vision.append(page_num)
+
+                if resumed:
+                    logger.info(f"Resumed {resumed} page(s) already read by the vision model")
 
                 # Concurrently, because a page takes about 146 seconds and
                 # doing 112 of them one after another is four and a half hours
@@ -294,26 +331,55 @@ class PDFProcessor(FileProcessor):
 
                     async def read_one(n: int):
                         async with gate:
-                            return n, await self._read_page_with_vision(doc[n - 1], layer[n])
+                            markdown, flags = await self._read_page_with_vision(doc[n - 1], layer[n])
+                        # Saved here rather than after the gather, because the
+                        # gather is the hour that keeps getting interrupted.
+                        if markdown:
+                            await remember(n, markdown, "vision", flags)
+                        return n, (markdown, flags)
 
-                    for n, (markdown, flags) in await asyncio.gather(
-                        *(read_one(n) for n in needs_vision)
+                    # return_exceptions, because a bare gather aborts on the
+                    # first failure: it returns the moment one page raises,
+                    # while its siblings are still mid-call. Every page already
+                    # read but not yet saved was lost with it, and the whole
+                    # document then fell into the handler below and extracted
+                    # nothing. One page that the vision endpoint refused should
+                    # cost that page its markdown and nothing else, because the
+                    # text layer for it is still right there.
+                    failed = 0
+                    for outcome in await asyncio.gather(
+                        *(read_one(n) for n in needs_vision), return_exceptions=True
                     ):
+                        if isinstance(outcome, BaseException):
+                            failed += 1
+                            logger.warning(f"A page could not be read by vision: {outcome}")
+                            continue
+                        n, (markdown, flags) = outcome
                         if markdown:
                             layer[n] = markdown
                             read_by_vision += 1
                             if flags:
                                 page_flags[n] = flags
+                    if failed:
+                        logger.warning(
+                            f"{failed} of {len(needs_vision)} pages fell back to the "
+                            f"text layer because the vision call failed"
+                        )
 
                 for page_num in range(1, doc.page_count + 1):
                     text = layer[page_num]
                     if not text.strip():
-                        # Nothing from the text layer and nothing from vision.
-                        # OCR is the last resort it always was.
-                        pix = doc[page_num - 1].get_pixmap(dpi=300)
-                        image = Image.open(io.BytesIO(pix.tobytes("png")))
-                        text = pytesseract.image_to_string(image)
-                        logger.debug(f"OCR extracted: {len(text)} chars")
+                        hit = cached.get(page_num)
+                        if hit and hit.get("source") == "ocr":
+                            text = hit["text"]
+                        else:
+                            # Nothing from the text layer and nothing from
+                            # vision. OCR is the last resort it always was.
+                            pix = doc[page_num - 1].get_pixmap(dpi=300)
+                            image = Image.open(io.BytesIO(pix.tobytes("png")))
+                            text = pytesseract.image_to_string(image)
+                            logger.debug(f"OCR extracted: {len(text)} chars")
+                            await remember(page_num, text, "ocr")
 
                     page_texts.append({
                         "page_num": page_num,
@@ -322,7 +388,7 @@ class PDFProcessor(FileProcessor):
 
             logger.info(
                 f"Extracted {len(page_texts)} pages, {read_by_vision} of them read "
-                f"by the vision model"
+                f"by the vision model, {resumed} resumed from a previous attempt"
             )
             return page_texts
         except Exception as e:

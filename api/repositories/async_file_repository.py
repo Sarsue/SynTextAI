@@ -9,6 +9,7 @@ import asyncio
 from .async_base_repository import AsyncBaseRepository
 from ..models import File as FileORM, Chunk as ChunkORM
 from ..models import Segment as SegmentORM
+from ..models import PageRead as PageReadORM
 
 # Import SQLAlchemy async components
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,6 +87,72 @@ class AsyncFileRepository(AsyncBaseRepository):
                 select(SegmentORM.page_number).where(SegmentORM.file_id == int(file_id))
             )
             return {r for (r,) in rows.all() if r is not None}
+
+    async def cached_page_reads(self, file_id: int) -> Dict[int, Dict[str, Any]]:
+        """Pages of this file that extraction has already produced.
+
+        Read once at the start of extraction. A page that is here does not go
+        to the vision model again, which is the whole point: that call costs
+        about three minutes and real money, and until now an interrupted ingest
+        threw away every one of them.
+        """
+        async with self.get_async_session() as session:
+            rows = await session.execute(
+                select(
+                    PageReadORM.page_number,
+                    PageReadORM.text,
+                    PageReadORM.source,
+                    PageReadORM.flags,
+                ).where(PageReadORM.file_id == int(file_id))
+            )
+            return {
+                int(n): {"text": t, "source": s, "flags": f}
+                for (n, t, s, f) in rows.all()
+                if n is not None
+            }
+
+    async def save_page_read(
+        self,
+        file_id: int,
+        page_number: int,
+        text_content: str,
+        source: str,
+        flags: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Keep one extracted page, as soon as it exists.
+
+        Called per page rather than per document on purpose. Saving at the end
+        would keep exactly the runs that did not need saving.
+
+        Never raises. This is a cache, and failing to write it must not fail an
+        ingest that is otherwise going fine.
+        """
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            async with self.get_async_session() as session:
+                stmt = (
+                    pg_insert(PageReadORM.__table__)
+                    .values(
+                        file_id=int(file_id),
+                        page_number=int(page_number),
+                        text=text_content,
+                        source=source,
+                        flags=flags or None,
+                    )
+                    # A re-run that got further than a previous one should be
+                    # able to overwrite a page rather than collide with it.
+                    .on_conflict_do_update(
+                        index_elements=["file_id", "page_number"],
+                        set_={"text": text_content, "source": source, "flags": flags or None},
+                    )
+                )
+                await session.execute(stmt)
+                await session.commit()
+        except Exception as e:
+            logger.warning(
+                f"Could not cache page {page_number} of file {file_id}: {type(e).__name__}: {e}"
+            )
 
     async def embeddings_for_hashes(self, file_id: int, hashes: List[str]) -> Dict[str, Any]:
         """Vectors this organization has already paid to compute.
