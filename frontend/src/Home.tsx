@@ -95,7 +95,7 @@ const faqs = [
     },
     {
         q: 'What file types do you support?',
-        a: 'PDF and Word (.docx) files. If your SOPs, policies, or handbooks are in those formats, you are ready to go.',
+        a: 'PDF, Word (.docx), text and Markdown. Drag them in, or import them straight from Google Drive without downloading anything first.',
     },
     {
         q: 'How accurate are the answers?',
@@ -182,7 +182,7 @@ const Home: React.FC = () => {
                 <h2 className="home-section-heading">How it works</h2>
                 <div className="home-steps">
                     {[
-                        { n: '01', title: 'Upload your documents', body: 'Add your SOPs, policy manuals, or employee handbooks. PDF and Word files supported.' },
+                        { n: '01', title: 'Bring your documents', body: 'Import straight from Google Drive, or drag in PDFs and Word files. Your SOPs, policy manuals and handbooks.' },
                         { n: '02', title: 'Invite your staff', body: 'Add team members by email. They get access immediately, no training required.' },
                         { n: '03', title: 'Staff get cited answers', body: 'Your team asks questions in plain English and gets answers with direct links to the source.' },
                     ].map(s => (
@@ -277,7 +277,7 @@ const Home: React.FC = () => {
                             <li>10 seats included, then $9 each</li>
                             <li>Unlimited documents</li>
                             <li>Cited answers</li>
-                            <li>PDF and Word support</li>
+                            <li>PDF and Word, or import from Google Drive</li>
                             <li>Email support</li>
                         </ul>
                         <Button asChild variant="outline" className="home-btn-outline">
@@ -294,7 +294,7 @@ const Home: React.FC = () => {
                             <li>30 seats included, then $7 each</li>
                             <li>Unlimited documents</li>
                             <li>Cited answers</li>
-                            <li>PDF and Word support</li>
+                            <li>PDF and Word, or import from Google Drive</li>
                             <li>Priority support</li>
                             <li>Onboarding call included</li>
                         </ul>
