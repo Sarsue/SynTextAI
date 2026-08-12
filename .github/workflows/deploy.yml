@@ -62,6 +62,28 @@ jobs:
         EOF
         chmod 600 frontend/.env
     
+    # A missing GitHub secret is an empty string, not an error, so a build
+    # without these goes green and ships a frontend with the Drive button
+    # eliminated as dead code, while the home page copy promising it ships
+    # anyway. That happened on 2026-08-12 and cost two deploys to notice,
+    # because nothing anywhere said the value was absent.
+    #
+    # Note for whoever hits this: "Secrets" and "Variables" are different tabs
+    # on the same settings page, and a value in the wrong one reads as empty
+    # here with no warning.
+    - name: Check the browser build values are actually set
+      run: |
+        missing=""
+        [ -z "${{ secrets.REACT_APP_FIREBASE_API_KEY }}" ] && missing="$missing REACT_APP_FIREBASE_API_KEY"
+        [ -z "${{ secrets.VITE_GOOGLE_CLIENT_ID }}" ] && missing="$missing VITE_GOOGLE_CLIENT_ID"
+        [ -z "${{ secrets.VITE_GOOGLE_API_KEY }}" ] && missing="$missing VITE_GOOGLE_API_KEY"
+        if [ -n "$missing" ]; then
+          echo "::error::These repository secrets are empty or missing:$missing"
+          echo "::error::Settings -> Secrets and variables -> Actions -> Secrets tab (not Variables)."
+          exit 1
+        fi
+        echo "All browser build values are present."
+
     - name: Login to DockerHub
       uses: docker/login-action@v4
       with:
