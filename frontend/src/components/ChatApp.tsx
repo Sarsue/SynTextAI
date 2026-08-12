@@ -1060,6 +1060,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         isSending={isSending || isSearching}
                         mode={composerMode}
                         onModeChange={setComposerMode}
+                        workspaceId={typeof currentWorkspaceId === 'number' ? currentWorkspaceId : null}
                         onContentAdded={async () => {
                             // Scoped to the workspace the file was uploaded into.
                         // Reloading without it showed every document in the

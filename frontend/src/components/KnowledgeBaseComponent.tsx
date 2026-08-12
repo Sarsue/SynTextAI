@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/select';
 
 import { useUserContext , ALL_WORKSPACES } from '../UserContext';
-import DriveImport from './DriveImport';
 
 
 interface KnowledgeBaseComponentProps {
@@ -357,19 +356,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
             </ul>
 
 
-
-            {/* Documents a company already keeps in Drive, without asking them
-                to download and re-upload each one. Hidden for anybody who
-                cannot add documents, like the paperclip in the composer, so
-                nobody is offered an action the backend would refuse. */}
-            {canManageDocuments && (
-                <DriveImport
-                    workspaceId={currentWorkspaceId}
-                    onImported={() =>
-                        loadUserFiles(1, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES)
-                    }
-                />
-            )}
 
             <div className="kb-help-text">
                 {canManageDocuments ? (

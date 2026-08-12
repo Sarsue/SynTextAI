@@ -7,6 +7,12 @@ import { useToast } from '../contexts/ToastContext';
 interface DriveImportProps {
     workspaceId: number | null;
     onImported: () => void;
+    /**
+     * Icon-only, for the composer, where it sits beside the paperclip because
+     * both answer the same question: how do I get a document in. Separating
+     * them by panel made one of the two answers hard to find.
+     */
+    compact?: boolean;
 }
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
@@ -56,7 +62,7 @@ const loadScript = (src: string): Promise<void> => {
     return loaded[src];
 };
 
-const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported }) => {
+const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported, compact = false }) => {
     const { user } = useUserContext();
     const { addToast } = useToast();
     const [busy, setBusy] = useState(false);
@@ -213,12 +219,14 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported }) =>
     return (
         <button
             type="button"
-            className="kb-import-button"
+            className={compact ? 'composer-drive-button' : 'kb-import-button'}
             onClick={openPicker}
             disabled={busy || !ready}
+            title="Import from Google Drive"
+            aria-label="Import from Google Drive"
         >
-            <HardDrive className="kb-import-icon" aria-hidden="true" />
-            {busy ? 'Opening Drive…' : 'Import from Google Drive'}
+            <HardDrive className={compact ? 'size-4' : 'kb-import-icon'} aria-hidden="true" />
+            {!compact && (busy ? 'Opening Drive…' : 'Import from Google Drive')}
         </button>
     );
 };
