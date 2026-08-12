@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { HardDrive } from 'lucide-react';
 
 import { useUserContext } from '../UserContext';
@@ -60,6 +60,40 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported }) =>
     const { user } = useUserContext();
     const { addToast } = useToast();
     const [busy, setBusy] = useState(false);
+    const [ready, setReady] = useState(false);
+
+    /**
+     * Google's libraries are loaded when this mounts, not when the button is
+     * pressed, and that ordering is the whole reason the button works.
+     *
+     * Asking for a token opens a popup, and a browser only allows a popup that
+     * is opened during a user gesture. Loading the scripts inside the click
+     * handler means awaiting two network requests first, by which time the
+     * gesture is over and Chrome blocks the window silently: no error, no
+     * popup, a button that goes to "Opening Drive…" and stays there. Found
+     * exactly that way.
+     *
+     * Loading here costs two script requests for anybody who can add
+     * documents, which is the cheaper mistake.
+     */
+    useEffect(() => {
+        if (!CLIENT_ID || !API_KEY) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                await Promise.all([
+                    loadScript('https://accounts.google.com/gsi/client'),
+                    loadScript('https://apis.google.com/js/api.js'),
+                ]);
+                await new Promise<void>((resolve) => window.gapi.load('picker', resolve));
+                if (!cancelled) setReady(true);
+            } catch {
+                // Leaving `ready` false disables the button rather than
+                // offering one that cannot work.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
 
     // Hidden rather than broken when the app has no Google credentials
     // configured. A button that always fails teaches people the feature does
@@ -108,19 +142,16 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported }) =>
         onImported();
     };
 
-    const openPicker = async () => {
+    // Deliberately not async, and nothing is awaited before the token request.
+    // Everything Google needs is already loaded by the effect above, so the
+    // popup opens inside the click that asked for it.
+    const openPicker = () => {
         if (!workspaceId) {
             addToast('Choose a workspace to import into first.', 'info');
             return;
         }
         setBusy(true);
         try {
-            await Promise.all([
-                loadScript('https://accounts.google.com/gsi/client'),
-                loadScript('https://apis.google.com/js/api.js'),
-            ]);
-            await new Promise<void>((resolve) => window.gapi.load('picker', resolve));
-
             const tokenClient = window.google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPE,
@@ -180,7 +211,12 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported }) =>
     };
 
     return (
-        <button type="button" className="kb-import-button" onClick={openPicker} disabled={busy}>
+        <button
+            type="button"
+            className="kb-import-button"
+            onClick={openPicker}
+            disabled={busy || !ready}
+        >
             <HardDrive className="kb-import-icon" aria-hidden="true" />
             {busy ? 'Opening Drive…' : 'Import from Google Drive'}
         </button>
