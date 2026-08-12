@@ -71,6 +71,30 @@
 # longer exists. Same shape at 13 and 18. Those three are the cleanest
 # statement of what extraction is costing.
 #
+# MODEL SELECTION, MEASURED 2026-08-12 ON PAGE 9
+#
+# The charging chart was rendered at 150 dpi and given to every vision model
+# the key can actually use. OpenAI's are 403 on this account.
+#
+#   model                  time/page  digits wrong (48 cells)
+#   llama-4-maverick           146s   0
+#   nemotron-nano-12b-v2-vl     59s   3
+#   gemma-4-31B-it            timeout  -
+#
+# llama-4-maverick reproduced the table exactly, rows and columns intact.
+# nemotron is two and a half times faster and invents digits: row 266 came
+# back 82/28/78 where the page reads 82/28/80. For HVAC that is disqualifying,
+# because a wrong torque or charge value is a safety claim rather than a typo.
+# It is also the strongest possible argument for the digit guardrail.
+#
+# THE SPEED PROBLEM, AND WHAT IT MEANS FOR THE DESIGN
+#
+# 146s per page is 17 hours for this 433-page corpus, which is not a pipeline.
+# So selective routing moves from step 5 of the plan to step 1: send a page to
+# the vision model only when the text layer is likely to have failed it, which
+# by the measurements above is roughly 104 digit-dense pages plus the
+# figure-dominant ones, not all 433.
+#
 # Run it with:
 #   python api/evals/run_benchmark.py --base-url http://localhost:3000 \
 #     --workspace <id> --spec api/evals/hvac_benchmark.yaml --label <name>
