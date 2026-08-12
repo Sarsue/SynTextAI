@@ -197,6 +197,11 @@ async def import_from_source(
             # answer, not one document's.
             raise
         except ImportRefused as e:
+            # Logged as well as returned. The browser shows the customer why,
+            # but the first time an import came back empty the reason was only
+            # visible by turning on httpx debug logging and reading a 404 out
+            # of a request trace.
+            logger.info(f"Import skipped in workspace {workspace_id}: {e}")
             skipped.append({"name": item_id, "reason": str(e)})
         except Exception as e:
             # Never the exception text: a provider error can carry a URL with

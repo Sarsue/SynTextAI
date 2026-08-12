@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { HardDrive } from 'lucide-react';
 
 import { useUserContext } from '../UserContext';
@@ -28,6 +28,20 @@ const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY as string | undefined;
  * import four policies. This scope is cheaper to ship and easier to defend.
  */
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+/**
+ * The Cloud project number, which the picker needs in order to grant this app
+ * access to the documents somebody picks.
+ *
+ * Without it the picker still opens and still returns file ids, and every
+ * subsequent Drive call answers 404 for a file the customer is looking at.
+ * That is `drive.file` working as designed: it grants access per file, to a
+ * named app, and with no app id there is no app to grant it to.
+ *
+ * Derived from the client id rather than added as another environment
+ * variable, because it is the same number and two copies of one fact drift.
+ */
+const APP_ID = (CLIENT_ID || '').split('-')[0];
 
 const MIME_TYPES = [
     'application/pdf',
@@ -67,6 +81,20 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported, comp
     const { addToast } = useToast();
     const [busy, setBusy] = useState(false);
     const [ready, setReady] = useState(false);
+
+    /**
+     * The access token, kept for as long as it is valid.
+     *
+     * Google's browser flow issues short-lived tokens and has no refresh token
+     * by design, so one is needed per session. Asking for a new one on every
+     * click meant an authorisation popup every time somebody imported, which
+     * reads as the app having forgotten them. Held in a ref rather than state:
+     * nothing renders from it, and it must not survive a reload.
+     *
+     * Sixty seconds of headroom, so a token that expires mid-import fails
+     * before the picker rather than halfway through fetching documents.
+     */
+    const tokenRef = useRef<{ value: string; expiresAt: number } | null>(null);
 
     /**
      * Google's libraries are loaded when this mounts, not when the button is
@@ -148,6 +176,48 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported, comp
         onImported();
     };
 
+    /** Build and show the picker for a token we already hold. */
+    const showPicker = (accessToken: string) => {
+        const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS)
+            .setMimeTypes(MIME_TYPES)
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(false);
+
+        const picker = new window.google.picker.PickerBuilder()
+            .addView(view)
+            .setOAuthToken(accessToken)
+            .setDeveloperKey(API_KEY)
+            // What turns "they chose this file" into "this app may read this
+            // file". Without it every fetch answers 404 for a document the
+            // customer is looking at. See APP_ID above.
+            .setAppId(APP_ID)
+            .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
+            .setCallback(async (data: any) => {
+                if (data.action === window.google.picker.Action.CANCEL) {
+                    setBusy(false);
+                    return;
+                }
+                if (data.action !== window.google.picker.Action.PICKED) return;
+
+                const ids = (data.docs || []).map((d: any) => d.id);
+                // The backend caps this too; stopping here spares somebody
+                // picking a hundred files and waiting for a refusal.
+                if (ids.length > 25) {
+                    addToast('Pick 25 documents or fewer at a time.', 'warning');
+                    setBusy(false);
+                    return;
+                }
+                try {
+                    await importPicked(accessToken, ids);
+                } finally {
+                    setBusy(false);
+                }
+            })
+            .build();
+
+        picker.setVisible(true);
+    };
+
     // Deliberately not async, and nothing is awaited before the token request.
     // Everything Google needs is already loaded by the effect above, so the
     // popup opens inside the click that asked for it.
@@ -158,57 +228,38 @@ const DriveImport: React.FC<DriveImportProps> = ({ workspaceId, onImported, comp
         }
         setBusy(true);
         try {
+            // A token already granted and still valid, so no popup at all.
+            const cached = tokenRef.current;
+            if (cached && cached.expiresAt > Date.now()) {
+                showPicker(cached.value);
+                return;
+            }
+
             const tokenClient = window.google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPE,
+                // Skips the account chooser for somebody already signed in
+                // here, which is everybody: they cannot reach this button
+                // otherwise.
+                hint: user?.email || undefined,
                 callback: (response: any) => {
                     if (response.error || !response.access_token) {
                         setBusy(false);
                         addToast('Google sign-in was cancelled.', 'info');
                         return;
                     }
-                    const accessToken = response.access_token;
-
-                    const view = new window.google.picker.DocsView(
-                        window.google.picker.ViewId.DOCS,
-                    )
-                        .setMimeTypes(MIME_TYPES)
-                        .setIncludeFolders(true)
-                        .setSelectFolderEnabled(false);
-
-                    const picker = new window.google.picker.PickerBuilder()
-                        .addView(view)
-                        .setOAuthToken(accessToken)
-                        .setDeveloperKey(API_KEY)
-                        .enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
-                        .setCallback(async (data: any) => {
-                            if (data.action === window.google.picker.Action.CANCEL) {
-                                setBusy(false);
-                                return;
-                            }
-                            if (data.action !== window.google.picker.Action.PICKED) return;
-
-                            const ids = (data.docs || []).map((d: any) => d.id);
-                            // The backend caps this too; stopping here spares
-                            // somebody picking a hundred files and waiting for
-                            // a refusal.
-                            if (ids.length > 25) {
-                                addToast('Pick 25 documents or fewer at a time.', 'warning');
-                                setBusy(false);
-                                return;
-                            }
-                            try {
-                                await importPicked(accessToken, ids);
-                            } finally {
-                                setBusy(false);
-                            }
-                        })
-                        .build();
-
-                    picker.setVisible(true);
+                    tokenRef.current = {
+                        value: response.access_token,
+                        expiresAt:
+                            Date.now() + (Number(response.expires_in || 3600) - 60) * 1000,
+                    };
+                    showPicker(response.access_token);
                 },
             });
 
+            // '' means "do not prompt if this app was already granted the
+            // scope". consent every time would be correct only if we were
+            // asking for something new each time, and we are not.
             tokenClient.requestAccessToken({ prompt: '' });
         } catch (e) {
             setBusy(false);
