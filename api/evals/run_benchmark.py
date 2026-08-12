@@ -223,10 +223,19 @@ class Client:
         self.last_history_id = history_id
         before = len(self.messages(history_id))
 
+        # A JSON body, not query parameters. The route takes MessageBody, and
+        # sending the old query-string form gets a 422 for every question,
+        # which scores as zero citations and reads exactly like catastrophically
+        # broken retrieval. Found on 2026-08-12 when a fresh corpus scored 0/20
+        # including the prose controls, which was too bad to be true.
+        #
+        # A benchmark that cannot tell "the product is broken" from "the
+        # benchmark is broken" is worse than no benchmark, so `ask` now says
+        # which it is rather than returning a scoreable empty answer.
         r = requests.post(
             f"{self.base}/api/v1/messages",
             headers=self.headers,
-            params={
+            json={
                 "message": question,
                 "language": "English",
                 "history_id": history_id,
@@ -234,7 +243,12 @@ class Client:
             },
             timeout=120,
         )
-        r.raise_for_status()
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"asking failed with {r.status_code}: {r.text[:200]}. "
+                "The runner and the API disagree about the request shape; fix "
+                "that before reading any score."
+            )
 
         deadline = time.time() + poll_timeout_s
         while time.time() < deadline:

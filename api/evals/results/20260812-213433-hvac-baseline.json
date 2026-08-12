@@ -1,0 +1,619 @@
+{
+  "label": "hvac-baseline",
+  "when": "20260812-213433",
+  "base_url": "http://localhost:3000",
+  "workspace": 7354,
+  "repeat": 1,
+  "spread": {
+    "citations_correct": [
+      0
+    ],
+    "passed": [
+      0
+    ]
+  },
+  "totals": {
+    "questions": 20,
+    "passed": 0,
+    "grounded": 20,
+    "citations_correct": 0,
+    "refusals": 0,
+    "refusals_honoured": 0
+  },
+  "results": [
+    {
+      "id": 1,
+      "question": "what does error code E4 mean",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+does+error+code+E4+mean&language=English&history_id=2615&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[32]",
+        "missing required text: 'cooling system abnormal'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2615
+    },
+    {
+      "id": 2,
+      "question": "what does E5 mean on a Goodman GSZC7",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+does+E5+mean+on+a+Goodman+GSZC7&language=English&history_id=2616&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[96]",
+        "missing required text: 'fuse'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2616
+    },
+    {
+      "id": 3,
+      "question": "what is fault F8 on the mini split",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+is+fault+F8+on+the+mini+split&language=English&history_id=2617&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[33]",
+        "missing required text: '4-way'",
+        "missing required text: 'reversing'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2617
+    },
+    {
+      "id": 4,
+      "question": "F7 protection meaning",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=F7+protection+meaning&language=English&history_id=2618&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[33]",
+        "missing required text: 'IPM'",
+        "missing required text: 'temperature'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2618
+    },
+    {
+      "id": 5,
+      "question": "E7 error on outdoor unit",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=E7+error+on+outdoor+unit&language=English&history_id=2619&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[32]",
+        "missing required text: 'ambient'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2619
+    },
+    {
+      "id": 6,
+      "question": "liquid pressure is 251 psig and subcooling is 10 degrees, what should the liquid line temperature be",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=liquid+pressure+is+251+psig+and+subcooling+is+10+degrees%2C+what+should+the+liquid+line+temperature+be&language=English&history_id=2620&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+        "missing required text: '74'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2620
+    },
+    {
+      "id": 7,
+      "question": "at 335 psig with 10 degrees of subcooling what liquid line temp am I looking for",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=at+335+psig+with+10+degrees+of+subcooling+what+liquid+line+temp+am+I+looking+for&language=English&history_id=2621&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+        "missing required text: '94'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2621
+    },
+    {
+      "id": 8,
+      "question": "384 psig 6 degree subcooling liquid line temperature",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=384+psig+6+degree+subcooling+liquid+line+temperature&language=English&history_id=2622&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+        "missing required text: '108'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2622
+    },
+    {
+      "id": 9,
+      "question": "what is the SEER rating on the size 36",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+is+the+SEER+rating+on+the+size+36&language=English&history_id=2623&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+        "missing required text: '17'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2623
+    },
+    {
+      "id": 10,
+      "question": "fan CFM for the 48",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=fan+CFM+for+the+48&language=English&history_id=2624&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+        "missing required text: '4350'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2624
+    },
+    {
+      "id": 11,
+      "question": "at what pressure does the high pressure switch open",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=at+what+pressure+does+the+high+pressure+switch+open&language=English&history_id=2625&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+        "missing required text: '670'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2625
+    },
+    {
+      "id": 12,
+      "question": "PSC fan motor horsepower on the size 24",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=PSC+fan+motor+horsepower+on+the+size+24&language=English&history_id=2626&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+        "missing required text: '1/12'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2626
+    },
+    {
+      "id": 13,
+      "question": "in the modular blower model number what does 16 mean for airflow",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=in+the+modular+blower+model+number+what+does+16+mean+for+airflow&language=English&history_id=2627&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[7]",
+        "missing required text: '1600'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2627
+    },
+    {
+      "id": 14,
+      "question": "what cabinet width is code C",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+cabinet+width+is+code+C&language=English&history_id=2628&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[7]",
+        "missing required text: '21'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2628
+    },
+    {
+      "id": 15,
+      "question": "what refrigerant does a 4 in the model number mean",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+refrigerant+does+a+4+in+the+model+number+mean&language=English&history_id=2629&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[7]",
+        "missing required text: '410'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2629
+    },
+    {
+      "id": 16,
+      "question": "expansion device V in the model number",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=expansion+device+V+in+the+model+number&language=English&history_id=2630&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[7]",
+        "missing required text: 'Inverter'",
+        "missing required text: 'Expansion Valve'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2630
+    },
+    {
+      "id": 17,
+      "question": "what signal starts the outdoor unit in cooling mode",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+signal+starts+the+outdoor+unit+in+cooling+mode&language=English&history_id=2631&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_dc_inverter_technical.pdf p[65]",
+        "missing required text: 'Y-C'",
+        "missing required text: 'high'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2631
+    },
+    {
+      "id": 18,
+      "question": "how do the indoor and outdoor units communicate",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=how+do+the+indoor+and+outdoor+units+communicate&language=English&history_id=2632&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_dc_inverter_technical.pdf p[65]",
+        "missing required text: '24V'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2632
+    },
+    {
+      "id": 19,
+      "question": "what does a run capacitor actually do",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+does+a+run+capacitor+actually+do&language=English&history_id=2633&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[35]",
+        "missing required text: 'line current'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2633
+    },
+    {
+      "id": 20,
+      "question": "when should I take the cap off the connecting pipe",
+      "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=when+should+I+take+the+cap+off+the+connecting+pipe&language=English&history_id=2634&workspace_id=7354",
+      "cited": [],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[29]",
+        "missing required text: 'until'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 2634
+    }
+  ],
+  "runs": [
+    [
+      {
+        "id": 1,
+        "question": "what does error code E4 mean",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+does+error+code+E4+mean&language=English&history_id=2615&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[32]",
+          "missing required text: 'cooling system abnormal'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2615
+      },
+      {
+        "id": 2,
+        "question": "what does E5 mean on a Goodman GSZC7",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+does+E5+mean+on+a+Goodman+GSZC7&language=English&history_id=2616&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[96]",
+          "missing required text: 'fuse'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2616
+      },
+      {
+        "id": 3,
+        "question": "what is fault F8 on the mini split",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+is+fault+F8+on+the+mini+split&language=English&history_id=2617&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[33]",
+          "missing required text: '4-way'",
+          "missing required text: 'reversing'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2617
+      },
+      {
+        "id": 4,
+        "question": "F7 protection meaning",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=F7+protection+meaning&language=English&history_id=2618&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[33]",
+          "missing required text: 'IPM'",
+          "missing required text: 'temperature'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2618
+      },
+      {
+        "id": 5,
+        "question": "E7 error on outdoor unit",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=E7+error+on+outdoor+unit&language=English&history_id=2619&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[32]",
+          "missing required text: 'ambient'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2619
+      },
+      {
+        "id": 6,
+        "question": "liquid pressure is 251 psig and subcooling is 10 degrees, what should the liquid line temperature be",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=liquid+pressure+is+251+psig+and+subcooling+is+10+degrees%2C+what+should+the+liquid+line+temperature+be&language=English&history_id=2620&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+          "missing required text: '74'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2620
+      },
+      {
+        "id": 7,
+        "question": "at 335 psig with 10 degrees of subcooling what liquid line temp am I looking for",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=at+335+psig+with+10+degrees+of+subcooling+what+liquid+line+temp+am+I+looking+for&language=English&history_id=2621&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+          "missing required text: '94'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2621
+      },
+      {
+        "id": 8,
+        "question": "384 psig 6 degree subcooling liquid line temperature",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=384+psig+6+degree+subcooling+liquid+line+temperature&language=English&history_id=2622&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+          "missing required text: '108'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2622
+      },
+      {
+        "id": 9,
+        "question": "what is the SEER rating on the size 36",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+is+the+SEER+rating+on+the+size+36&language=English&history_id=2623&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+          "missing required text: '17'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2623
+      },
+      {
+        "id": 10,
+        "question": "fan CFM for the 48",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=fan+CFM+for+the+48&language=English&history_id=2624&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+          "missing required text: '4350'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2624
+      },
+      {
+        "id": 11,
+        "question": "at what pressure does the high pressure switch open",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=at+what+pressure+does+the+high+pressure+switch+open&language=English&history_id=2625&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+          "missing required text: '670'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2625
+      },
+      {
+        "id": 12,
+        "question": "PSC fan motor horsepower on the size 24",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=PSC+fan+motor+horsepower+on+the+size+24&language=English&history_id=2626&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+          "missing required text: '1/12'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2626
+      },
+      {
+        "id": 13,
+        "question": "in the modular blower model number what does 16 mean for airflow",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=in+the+modular+blower+model+number+what+does+16+mean+for+airflow&language=English&history_id=2627&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[7]",
+          "missing required text: '1600'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2627
+      },
+      {
+        "id": 14,
+        "question": "what cabinet width is code C",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+cabinet+width+is+code+C&language=English&history_id=2628&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[7]",
+          "missing required text: '21'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2628
+      },
+      {
+        "id": 15,
+        "question": "what refrigerant does a 4 in the model number mean",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+refrigerant+does+a+4+in+the+model+number+mean&language=English&history_id=2629&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[7]",
+          "missing required text: '410'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2629
+      },
+      {
+        "id": 16,
+        "question": "expansion device V in the model number",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=expansion+device+V+in+the+model+number&language=English&history_id=2630&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[7]",
+          "missing required text: 'Inverter'",
+          "missing required text: 'Expansion Valve'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2630
+      },
+      {
+        "id": 17,
+        "question": "what signal starts the outdoor unit in cooling mode",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+signal+starts+the+outdoor+unit+in+cooling+mode&language=English&history_id=2631&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_dc_inverter_technical.pdf p[65]",
+          "missing required text: 'Y-C'",
+          "missing required text: 'high'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2631
+      },
+      {
+        "id": 18,
+        "question": "how do the indoor and outdoor units communicate",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=how+do+the+indoor+and+outdoor+units+communicate&language=English&history_id=2632&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_dc_inverter_technical.pdf p[65]",
+          "missing required text: '24V'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2632
+      },
+      {
+        "id": 19,
+        "question": "what does a run capacitor actually do",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=what+does+a+run+capacitor+actually+do&language=English&history_id=2633&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[35]",
+          "missing required text: 'line current'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2633
+      },
+      {
+        "id": 20,
+        "question": "when should I take the cap off the connecting pipe",
+        "answer": "__ERROR__ 422 Client Error: Unprocessable Entity for url: http://localhost:3000/api/v1/messages?message=when+should+I+take+the+cap+off+the+connecting+pipe&language=English&history_id=2634&workspace_id=7354",
+        "cited": [],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[29]",
+          "missing required text: 'until'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 2634
+      }
+    ]
+  ],
+  "stability": {
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "8": 0,
+    "9": 0,
+    "10": 0,
+    "11": 0,
+    "12": 0,
+    "13": 0,
+    "14": 0,
+    "15": 0,
+    "16": 0,
+    "17": 0,
+    "18": 0,
+    "19": 0,
+    "20": 0
+  }
+}

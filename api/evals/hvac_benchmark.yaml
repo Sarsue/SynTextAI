@@ -50,6 +50,36 @@
 #          a position. No text extraction can ever get these right, which is
 #          what justifies read_page as a query-time tool.
 #   17-20  prose. Controls. These work today and must not regress.
+#
+# THE BASELINE, 2026-08-12, before any vision work
+#
+#   group                  overall   cited
+#   error codes (1-5)        3/5       3/5
+#   charging chart (6-8)     0/3       1/3
+#   physical data (9-12)     2/4       2/4
+#   figures (13-16)          0/4       1/4
+#   prose (17-20)            3/4       4/4
+#   -------------------------------------
+#   total                   8/20      11/20
+#
+# Prose mostly works. Tables are a coin flip. Figures are zero. That is the
+# hypothesis, measured.
+#
+# The sharpest result is question 6: the right page was cited and the answer
+# still said 78 instead of 74. Retrieval found the charging chart, and the
+# model could not read a value out of it, because the row it belongs to no
+# longer exists. Same shape at 13 and 18. Those three are the cleanest
+# statement of what extraction is costing.
+#
+# Run it with:
+#   python api/evals/run_benchmark.py --base-url http://localhost:3000 \
+#     --workspace <id> --spec api/evals/hvac_benchmark.yaml --label <name>
+#
+# The first two attempts scored 0/20 and measured nothing: the runner was
+# posting query parameters to a route that has taken a JSON body since
+# 2026-08-07, so every question got a 422. It now raises instead of scoring a
+# failed request, because a benchmark that cannot tell a broken product from a
+# broken benchmark is worse than none.
 
 questions:
   # ---------- tables: error codes ----------
