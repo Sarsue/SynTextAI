@@ -23,6 +23,7 @@ rather than per call. Close it on shutdown with `aclose_client()`.
 import asyncio
 import logging
 from typing import Callable, List, Dict, Any, Optional
+import base64
 import httpx
 import os
 from dotenv import load_dotenv
@@ -40,6 +41,53 @@ logger = logging.getLogger(__name__)
 
 # Active models
 CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai-gpt-oss-20b")
+
+# The model that reads a rendered page, chosen by measurement on 2026-08-12
+# against page 9 of the Carrier manual, a two-dimensional charging chart whose
+# every cell had already been verified by hand.
+#
+#   llama-4-maverick          146s/page   0 wrong in 48 cells
+#   nemotron-nano-12b-v2-vl    59s/page   3 wrong in 48 cells
+#   gemma-4-31B-it            timed out
+#
+# The fast one invents digits: it returned 82/28/78 for a row that reads
+# 82/28/80. In a service manual a wrong charge or torque value is a safety
+# claim, not a typo, so accuracy wins and the cost is paid in routing rather
+# than in a cheaper model. Anything swapped in here must be measured the same
+# way before it ships.
+VISION_MODEL = os.getenv("MODEL_VISION_ID", "llama-4-maverick")
+
+# 150 worked; 110 made the small model burn its budget on reasoning and return
+# nothing. Higher costs image tokens for no measured gain on these pages.
+VISION_DPI = int(os.getenv("VISION_DPI", "150"))
+
+# A dense table page produced about 2,000 characters. 8,000 tokens leaves room
+# for the worst page in the corpus without ever hitting finish_reason=length,
+# which returns an empty string and looks exactly like a page with no content.
+VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "8000"))
+
+# 146s was the honest measurement for one page. This is not a hung request.
+VISION_TIMEOUT = float(os.getenv("VISION_TIMEOUT", "900"))
+
+# How many pages are read at once.
+#
+# Eight was tried first and was worse than useless: the endpoint queues these
+# server side, so every request slowed until all eight passed the timeout and
+# the whole document fell back to the text layer. Concurrency here does not buy
+# throughput past a small number, it converts one slow page into eight failed
+# ones.
+#
+# Three, with a timeout long enough that a queued request still lands. The real
+# ceiling is the endpoint, not this process.
+VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "3"))
+
+VISION_PROMPT = (
+    "Transcribe this page as markdown. Reproduce every table as a real markdown "
+    "table with all rows and columns in their original order. Do not summarise, "
+    "do not omit rows, and do not correct anything you think is wrong. "
+    "For a diagram, describe what it shows and transcribe every label, keeping "
+    "each label with the part it points to."
+)
 
 # Max tokens allowed for combined context in syntext_agent
 try:
@@ -160,6 +208,88 @@ TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
 # gets silence. That is exactly what happened to the chunk contextualiser,
 # which asked for 200, and had 308 of 316 chunks come back empty.
 MIN_COMPLETION_TOKENS = 500
+
+
+async def read_page(image_png: bytes, hint: str = "") -> str:
+    """Read one rendered page and return it as markdown.
+
+    WHY THIS EXISTS
+
+    `page.get_text()` returns characters in PDF storage order, so a table
+    arrives as a column of loose values with every row destroyed. Measured on
+    a 433-page corpus of HVAC service manuals: prose questions scored 4/4 on
+    citations, table questions 5/12, figure questions 0/4. One question cited
+    the correct page and still answered 78 where the page reads 74, because
+    the row that value belongs to no longer existed by the time retrieval or
+    the model saw it.
+
+    A vision model reads the page as a page. The same chart came back with
+    every row intact.
+
+    NEVER RAISES
+
+    An empty string means "use the text layer", and every caller must treat it
+    that way. A page that fails here should cost accuracy, never the document.
+
+    `hint` is the text layer for this page, passed to the model as a
+    transcription aid rather than as truth: the characters are all correct, it
+    is only their order that is wrong.
+    """
+    if not MODEL_ACCESS_KEY:
+        logger.error("MODEL_ACCESS_KEY not configured for vision")
+        return ""
+
+    content: List[Dict[str, Any]] = [{"type": "text", "text": VISION_PROMPT}]
+    if hint:
+        content.append({
+            "type": "text",
+            "text": (
+                "The text layer of this page is below. Every character in it is "
+                "correct and its order is not. Use it to resolve anything "
+                "ambiguous in the image, never to decide the layout:\n\n"
+                + hint[:4000]
+            ),
+        })
+    content.append({
+        "type": "image_url",
+        "image_url": {
+            "url": "data:image/png;base64," + base64.b64encode(image_png).decode()
+        },
+    })
+
+    data = {
+        "model": VISION_MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": VISION_MAX_TOKENS,
+        # Zero, because this is transcription. Any creativity here is a
+        # hallucinated digit in somebody's refrigerant charge.
+        "temperature": 0,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+    }
+    url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
+
+    try:
+        async with httpx.AsyncClient(timeout=VISION_TIMEOUT) as client:
+            response = await client.post(url, headers=headers, json=data)
+        if response.status_code != 200:
+            logger.warning("Vision read refused: %s", response.status_code)
+            return ""
+        choice = (response.json().get("choices") or [{}])[0]
+        text = (choice.get("message") or {}).get("content") or ""
+        if not text:
+            # Seen in practice: a reasoning model spends the whole budget
+            # thinking and returns content=None with finish_reason=length.
+            logger.warning(
+                "Vision read returned nothing (finish_reason=%s). Falling back "
+                "to the text layer.", choice.get("finish_reason")
+            )
+        return text.strip()
+    except Exception as e:
+        logger.warning("Vision read failed: %s", type(e).__name__)
+        return ""
 
 
 async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
