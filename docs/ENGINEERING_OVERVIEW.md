@@ -50,6 +50,95 @@ infrastructure that only pays off at a scale we're not at. If you're choosing be
 "simple and slightly less elegant" and "correct in theory but adds an operational
 dependency," lean simple until there's a concrete reason not to.
 
+## What this actually is: a harness for one small business at a time
+
+*(Framing settled 2026-08-11, while reading about Hermes Agent. It renames
+nothing and rewrites no code. It exists because the roadmap had become a list
+of features with no test for what belonged on it, and this is that test.)*
+
+SyntextAI is an agent harness whose every part is scoped to one company. It
+currently ships with one tool, which is "know things about your documents", and
+that is why it looks like a document Q&A product from the outside.
+
+**The part that is hard is already done, and it was done by accident of being
+careful.** An agent loop is a weekend. Multi-tenancy is not, because it touches
+every query and cannot be retrofitted. Hermes Agent's own open issue says *"one
+agent = one tenant. Memory is global, sessions don't scope by tenant, and there
+is no isolation between groups, channels, or users."* That sentence describes
+the thing this codebase has spent three weeks making impossible: organizations
+holding workspaces, one function answering *may you see it* and another
+answering *may you do it*, a queue with per-tenant fairness and leases, storage
+keyed by workspace, retrieval scoped by workspace, entitlement per company.
+
+The commercial version of that sentence: **your company's memory is yours, and
+there is no pile it can leak into.** For dental, legal and accounting that
+answers the objection before it is raised, and nobody building on an open agent
+runtime can say it honestly.
+
+### The four layers, and why the distinction earns its place
+
+Every idea for this product is one of four things. Sorting it first is what
+stops a surface being mistaken for a retention feature, which is the mistake
+that put a Slack bot at the top of the roadmap for a month.
+
+| Layer | What it is | Decides anything? | Examples |
+|---|---|---|---|
+| **Sources** | Ways knowledge gets in | No | Upload, Google Drive import, forward-to-an-address |
+| **Surfaces** | Places to ask | No | The web app, Find, a Slack bot, replying to an email |
+| **Tools** | Things the agent chooses to do | Yes | Search the documents (the only one today), later: draft a reply, check a portal |
+| **Memory** | What the company has told us that is in no document | No, but it changes every answer | "We bill through Delta Dental", "the 2019 protocol is void" |
+
+Memory is the fourth thing and it is genuinely missing. It appears nowhere in
+this product, and the roadmap has it parked in Tier 4 as "cross-chat memory",
+which undersells it. It is not chat history. It is the standing facts a practice
+manager repeats to every new hire, and the customers hand it to us already: a
+thumbs-down reading *"cited the 2019 policy, we are on the 2024 one"* is a
+memory being offered and thrown away.
+
+### The test for anything new
+
+**Can the person who benefits say yes by themselves?** If yes, build it. If
+somebody else has to approve it first, park it until a customer asks by name.
+
+That single question sorted a week of decisions cleanly. Email in needs nobody.
+Google Drive with the picker and `drive.file` needs the person using it, and no
+IT involvement, which is why it survived. SharePoint, Outlook, Slack and Teams
+all need a tenant administrator, which for a fifteen-person practice is an
+outsourced IT company and a wait, so they are parked with their adapters intact.
+
+### Computer-use, corrected
+
+An earlier version of this note dismissed computer-use as enterprise
+automation with no nameable job. **That was wrong, and the reason is worth
+keeping because it inverts the usual argument.**
+
+Enterprise software has APIs. Salesforce, Workday, NetSuite. *Small-business
+software does not.* Dentrix and Eaglesoft are Windows desktop applications.
+Insurance eligibility lives on payer web portals with no API and no plan for
+one. County recorder sites, state bar portals, QuickBooks Desktop. So the
+"UI automation as the fallback where no good API exists" layer is **more**
+relevant to a dental practice than to a bank, not less.
+
+The job is nameable, which is where the test should have caught the error: the
+front-desk person who logs into Delta Dental's portal every morning and checks
+eligibility for tomorrow's patients, one member id at a time.
+
+What holds, and what shape it should take when it is built:
+
+- **Read-only lookups, not writes.** A wrong click in practice-management
+  software is a billing incident, not a bad answer.
+- **Human-triggered, not unattended.** A batch of thirty eligibility checks
+  running overnight against a UI that changed is a support call for somebody
+  who has one employee.
+- **Results come back into the harness** as knowledge, so an answer can cite
+  what the portal said and when.
+- **Portal credentials are the real cost.** Holding a practice's login to their
+  payer portal is a heavier thing than holding a Drive token, and the answer to
+  it is the same as everywhere else here: do not store what you do not have to,
+  and if you must, decide deliberately and write down why.
+
+It is the hardest thing on this list and it stays last, but it is on the list.
+
 ## Stack
 
 | Layer | Tech |
@@ -422,9 +511,21 @@ list, because both are gated on a benchmark the tool layer is currently losing.
 3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
    zeros somebody typed by hand. This is also the first thing that turns the
    feedback data from 2026-08-08 into something an owner can look at.
-4. **Integrations.** The largest gap between what the positioning promises and
-   what exists, and the first one a customer notices on their own. Nothing in
-   the codebase reads from an external system yet. When it does, it arrives as
+4. **Integrations. Started 2026-08-11, then narrowed by the test in "What this
+   actually is".** Sorted by who has to approve them:
+   - **Email in** (a source, needs nobody): next. Forward a document to an
+     address and it is in the knowledge base. SendGrid Inbound Parse is the
+     same shape as the signed webhook `sendgrid_events.py` already receives.
+   - ~~**Google Drive**~~ **Done 2026-08-12**, verified end to end against a
+     real account: picked in Drive, ingested, and cited in an answer.
+     `drive.file` and the picker, never `drive.readonly`. Needs
+     `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY` as GitHub secrets before
+     it works in production.
+   - **SharePoint, Outlook, Slack, Teams** (all need a tenant administrator):
+     parked. The SharePoint adapter and the Slack signature verification are
+     built and dormant, roughly forty lines and eleven tests, so a
+     Microsoft-heavy firm asking by name is a picker away rather than a
+     project. When it does, it arrives as
    another source feeding the same ingestion path, never a parallel pipeline.
 5. **Workflow automation, Tier 3.** SOPs, meeting summaries, onboarding,
    proposal drafting, approvals. Marketing already implies this exists. It does
@@ -975,11 +1076,12 @@ company and pays for it in one submit; see "Recent changes".
     and a CLI that reads a complaint next to the run that caused it. The
     case-study argument for it still holds and is now waiting on volume rather
     than on code.
-14. Admin dashboard with search analytics — **nothing behind it yet.**
-    `api/routes/analytics.py` has two endpoints: the POST forwards events to
-    PostHog, and `GET /analytics/dashboard` returns a hardcoded object with
-    every metric at zero and a note saying to connect real storage. Read it
-    before estimating this; the route existing is not the feature existing.
+14. ~~Admin dashboard with search analytics~~ **Built 2026-08-11** as a Usage
+    section in Settings, owner and admin only, from this database rather than
+    PostHog. See "Recent changes" for why PostHog was the wrong source. The old
+    placeholder in `api/routes/analytics.py` is still there and still returns
+    zeros; nothing calls it, and it should be deleted next time that file is
+    opened.
 15. Saved prompts
 
 **Tier 3 — Phase 3, automation (search → action; this is where "workflow automation" becomes real, don't market it before it's here):**
@@ -1217,6 +1319,205 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-12 (Drive import works end to end, and the two bugs that stood in
+  the way):** Verified against a real Google account and a real document:
+  1,073,763 bytes fetched from Drive, stored under
+  `workspaces/1/839-…pdf`, ingested to 71 pages and 100 chunks, and returned by
+  search on page 6 within a minute of being picked. Same storage, same queue,
+  same citations as an upload.
+
+  **The picker had no app id, so every import came back empty.** Google
+  answered 404 for a file the customer was looking at, which reads as
+  nonsense until the scope is understood: `drive.file` grants access *per file,
+  to a named app*, and the picker has to be told which app. Without
+  `setAppId`, the picker returns ids and no grant is ever created. Fixed with
+  the project number derived from the client id, because it is the same number
+  and two copies of one fact drift.
+
+  **The popup was blocked, silently.** The first version loaded Google's
+  libraries inside the click handler and then asked for a token. Two network
+  requests happen in between, so the popup opened outside the user gesture and
+  the browser refused it: no error, no popup, a button reading "Opening
+  Drive…" forever. The libraries now load on mount and the click handler
+  awaits nothing. Found by pressing the button, which is the only way it could
+  have been found.
+
+  **And it asked for authorisation on every click.** The browser flow issues
+  short-lived tokens with no refresh token, so one per session is unavoidable,
+  but one per *click* reads as the app having forgotten you. The token is now
+  held for its lifetime less a minute, and the account chooser is skipped with
+  a hint, since anybody who can reach the button is already signed in.
+
+  **`origin_mismatch` is a configuration answer, not a bug.** The OAuth
+  client's Authorised JavaScript origins are a different list from Firebase's
+  Authorised domains, and Firebase already showing localhost makes it look
+  done. There is no gcloud command for it; OAuth client management is console
+  only.
+
+  **A skip reason is now logged as well as returned.** The first empty import
+  could only be diagnosed by enabling httpx debug logging and reading a 404 out
+  of a request trace.
+
+
+- **2026-08-11 (the Drive picker, and the four places a build-time value has to
+  be listed):** The browser half of the Drive import. An "Import from Google
+  Drive" button in the knowledge base panel, hidden for anybody who cannot add
+  documents, exactly as the paperclip is.
+
+  **`drive.file` through the picker, never `drive.readonly`.** The customer
+  signs in with their own Google account and picks documents; the app receives
+  access to those documents and nothing else. The restricted scope would mean
+  asking a dental practice for read access to their whole Drive to import four
+  policies, and a paid third-party security assessment before it could ship.
+
+  **The button does not render when the credentials are absent.** A control
+  that always fails teaches people the feature is broken, so an unconfigured
+  deploy simply does not offer it.
+
+  **The Content-Security-Policy was updated in the same change, not later.**
+  The picker needs `accounts.google.com` and `apis.google.com` for scripts,
+  `www.googleapis.com` to talk to Drive, and `docs.google.com` because the
+  picker is an iframe. The policy is still Report-Only, so a missing origin
+  costs nothing today and breaks the feature silently on the day the header
+  name is flipped. That is the worst kind of bug to leave behind: it works in
+  development and refuses in production, months after anybody remembers why.
+
+  **A build-time value has to be listed in four places here**, and missing any
+  one of them fails quietly. The workflow writes it into the frontend `.env`
+  and passes it as a build arg; the Dockerfile has to declare `ARG` and `ENV`
+  for it or the arg is accepted and ignored; and the local compose file needs
+  it to build the same way. Checked all four rather than assuming, because the
+  failure mode is a button that never appears in production with nothing in any
+  log.
+
+  **Two GitHub secrets are needed before this works in production:**
+  `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY`. Both are public by design:
+  they identify the app and authorise nothing on their own.
+
+  182 tests. **Not yet driven end to end**, because that needs the Google
+  credentials; the backend import path is covered by its own tests with a fake
+  provider.
+
+
+- **2026-08-11 (the Slack surface: the security half first):**
+  `api/services/slack.py`. Slack and Teams were confirmed as a *surface*, not a
+  source: somewhere to ask, not another place to read documents from.
+
+  **Built the part that must be right before the part that is visible.** This
+  endpoint will be a public URL that takes an instruction and answers with the
+  contents of private documents, so the request signature is the only thing
+  between those two facts. Verified before the body is parsed, with
+  `compare_digest`, plus a five minute window so a captured request cannot be
+  replayed tomorrow, and **refusal when the secret is unset**, so one missing
+  environment variable is never the difference between private and public.
+
+  11 tests, each checked by removing its guard: not comparing the signature
+  fails 3, dropping the replay window fails 2, treating an unconfigured secret
+  as permission fails 1.
+
+  **The design decision that matters is not Slack, it is who is asking.**
+  Everything else here answers as a *person*, scoped to what that person may
+  see. A Slack message carries a Slack user id, which means nothing to us.
+  Bridged carelessly, a company's whole document set becomes readable by
+  anybody who can type in their Slack, including guests and, in a shared
+  channel, another company entirely. So: an owner links a Slack workspace once,
+  deliberately; every question resolves the asker to a member by verified
+  email; an unrecognised email is refused. Adding somebody to Slack must never
+  add them to the knowledge base, and an administrator has to be able to say
+  that plainly.
+
+  **Still to build:** the events route, the installation table linking a Slack
+  team to an organization, and the worker posting the answer back into the
+  thread. The answer path itself needs almost nothing new: a Slack question
+  becomes a chat history and an ordinary queued run, so entitlement, retrieval,
+  citations and feedback all work as they already do.
+
+  Local testing goes through a cloudflared tunnel, since Slack needs a public
+  URL to call.
+
+
+- **2026-08-11 (documents can come from Drive and SharePoint):** The backend
+  half of the first connectors. A customer picks documents in the provider's
+  own picker and they arrive here as ordinary files: same storage, same
+  workspace, same ingestion queue, same citations. `POST /api/v1/files/import`.
+
+  **Nothing is stored to keep access, deliberately.** The browser hands us a
+  short-lived token for one import, we fetch the bytes with it, and it is gone
+  when the request ends. No refresh token in the database, no standing grant
+  against a customer's Drive, nothing to leak. The cost is real and named: no
+  automatic sync. Continuous sync means holding a credential that opens a law
+  firm's document store, which is worth doing when a customer asks and not
+  before.
+
+  **The Google scope decision is the one that saves weeks.** `drive.readonly`
+  is a *restricted* scope and production use requires a third-party security
+  assessment. The picker flow needs only `drive.file`, which reaches the
+  documents the customer chose and nothing else: no assessment, and a better
+  answer in a sales conversation.
+
+  **An import is another way in, not a way around.** It calls the same
+  functions an upload calls, in the same order: the workspace upload
+  permission, `assert_can_create_doc`, the duplicate-name rule, the file-type
+  list and the size ceiling. Mutation-tested, because "it looks like the upload
+  path" is not the same as being it: removing the permission check fails two
+  tests, removing the subscription check fails one.
+
+  **Partial success is reported as such.** Ten documents where one was deleted
+  in Drive since the customer picked it imports nine and names the tenth,
+  rather than refusing all ten. A provider error is never passed through to the
+  customer or the log, because those messages can carry a URL with the access
+  token in it.
+
+  Google Docs are exported to PDF on the way in, since a Doc has no bytes of
+  its own and PDF keeps the pagination a citation needs. Other Google-native
+  types are refused with a reason rather than imported as something unreadable.
+
+  10 tests, 171 total. **Still to do: the pickers in the browser, which need an
+  OAuth client id from Osas for Google and an Azure app for Microsoft.**
+
+
+- **2026-08-11 (the dashboard shows real numbers, and they are the customer's
+  own):** `GET /analytics/dashboard` returned zeros somebody had typed by hand
+  and nothing called it. There is now a Usage section in Settings, owner and
+  admin only, answered from this database.
+
+  **Not from PostHog, and the reason is worth keeping.** PostHog is set up, but
+  the key configured is a project key (`phc_...`), which writes. Reading events
+  back needs a personal API key with query scope that does not exist here. More
+  importantly it is the wrong source: PostHog holds page views and clicks,
+  while an owner wants to know how much their team asks, which documents answer
+  nothing, and which answers were called wrong, all of which are already here
+  and already scoped by organization. Serving a customer their own numbers out
+  of a shared analytics account would mean filtering someone else's data out
+  afterwards, which is the tenancy shape this codebase spends its effort
+  avoiding. PostHog stays the right tool for the *other* dashboard, the one
+  about all customers, and that one needs no code because it has a UI.
+
+  **Every figure joins through the workspace**, because documents,
+  conversations and ratings carry no organization of their own. That join is
+  the tenancy boundary; there is a test that another company's document is
+  never counted.
+
+  **Three findings on the way, all from checking rather than reading.**
+  `agent_runs.result` records `retrievals` as a *count*, not a list, so "which
+  documents have never been used" could not be answered at all: the first
+  version of the query crashed on it. Recording the file ids then failed twice
+  more, because the chunk dictionary is rebuilt in two places in
+  `agents/evidence.py` and neither carried `file_id`, so by the time a run was
+  stored the document that answered was known only by name. Both fixed, and a
+  name is not an identity: two workspaces may each hold a policy.pdf.
+
+  **The panel lied on its first render, and only the screen showed it.** Every
+  document was listed as never used, including one that had just been cited.
+  The guard treated a run recording an *empty* citation list as evidence, which
+  it is not, so the metric switched on with nothing behind it. It now requires
+  a non-empty list, which also means the section stays silent for accounts
+  whose runs all predate this, rather than alarming them. Tested, and the test
+  fails without the guard.
+
+  7 tests, 161 total.
+
 
 - **2026-08-11 (search exists now, not just on the pricing page):** "AI search"
   has been sold as a separate capability since before there was any such thing

@@ -360,7 +360,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
             <div className="kb-help-text">
                 {canManageDocuments ? (
                     <>
-                        <p>Upload PDF, DOCX, or TXT files using the 📎 button in the chat.</p>
+                        <p>Upload PDF, DOCX, or TXT files using the 📎 button in the chat, or import them from Drive.</p>
                         <p>Processing happens automatically in the background.</p>
                         <p>Files are ready when marked with a ✓.</p>
                     </>

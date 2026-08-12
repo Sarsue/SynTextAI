@@ -218,3 +218,29 @@
     color: #a0aec0;
     border-top-color: #4a5568;
 }
+
+/* Import from Drive. Sits with the document list rather than in the composer,
+ * because it is document management and not part of asking a question. */
+.kb-import-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    margin: 12px 0 4px;
+    padding: 9px 12px;
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text-color, #111);
+    background-color: var(--bg, #fff);
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+.kb-import-button:hover:not(:disabled) { border-color: var(--text-muted, #bbb); }
+.kb-import-button:disabled { opacity: 0.6; cursor: default; }
+.kb-import-button:focus-visible { outline: 2px solid var(--text-color, #111); outline-offset: 2px; }
+
+.kb-import-icon { width: 15px; height: 15px; }

@@ -62,6 +62,13 @@ class EvidenceSet:
             if item is None:
                 item = {
                     "segment_id": c.get("segment_id"),
+                    # Carried through because a name is not an identity. Two
+                    # workspaces may each hold a policy.pdf, and anything
+                    # counting which documents actually answered has to tell
+                    # them apart. It was dropped here, so by the time a run was
+                    # recorded only the name survived and "which of my
+                    # documents has never been used" could not be answered.
+                    "file_id": c.get("file_id"),
                     "file_name": c.get("file_name"),
                     "page_number": c.get("page_number"),
                     "file_url": c.get("file_url"),
@@ -100,6 +107,12 @@ class EvidenceSet:
                 "chunk_id": None,
                 "segment_id": e["segment_id"],
                 "content": e["content"],
+                # Two dictionaries are built from one chunk on the way here,
+                # this one and the item in `add`, and a field is only carried
+                # through if both of them list it. file_id was in neither, so
+                # by the time a run was recorded the document that answered was
+                # known only by name.
+                "file_id": e.get("file_id"),
                 "file_name": e["file_name"],
                 "file_url": e["file_url"],
                 "page_number": e["page_number"],

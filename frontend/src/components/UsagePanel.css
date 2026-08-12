@@ -1,0 +1,93 @@
+/* Usage panel. Built on the tokens in index.css so it follows dark mode
+ * without a second palette to keep in step. Quiet on purpose: an owner opens
+ * Settings to check something, not to read a report.
+ */
+.usage-status {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--secondary-color, #777);
+}
+
+.usage-window {
+    margin: 0 0 12px;
+    font-size: 0.8rem;
+    color: var(--secondary-color, #777);
+}
+
+.usage-figures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.usage-figure {
+    flex: 1 1 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    background-color: var(--card-bg, #f8f8f8);
+}
+
+/* The one an owner should act on, so it is the one that looks different. */
+.usage-figure-warn {
+    border-color: #d97706;
+}
+
+.usage-number {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--text-color, #111);
+}
+
+.usage-label {
+    font-size: 0.78rem;
+    color: var(--secondary-color, #777);
+}
+
+.usage-block { margin-bottom: 18px; }
+
+.usage-heading {
+    margin: 0 0 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-color, #111);
+}
+
+.usage-line {
+    margin: 0 0 6px;
+    font-size: 0.88rem;
+    color: var(--text-color, #111);
+}
+
+.usage-muted { color: var(--secondary-color, #777); font-size: 0.82rem; }
+
+.usage-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.usage-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.88rem;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-color, #e8e8e8);
+    color: var(--text-color, #111);
+}
+
+.usage-list li:last-child { border-bottom: none; }
+
+.usage-count {
+    font-variant-numeric: tabular-nums;
+    color: var(--secondary-color, #777);
+}

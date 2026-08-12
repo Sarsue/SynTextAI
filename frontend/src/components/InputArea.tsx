@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Paperclip, X } from 'lucide-react';
 
 import { useUserContext } from '../UserContext';
+import DriveImport from './DriveImport';
 import { useToast } from '../contexts/ToastContext';
 import './InputArea.css';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -16,6 +17,8 @@ interface InputAreaProps {
     onContentAdded: () => Promise<void>;
     mode: ComposerMode;
     onModeChange: (mode: ComposerMode) => void;
+    /** Where an imported document lands. Null means no workspace is chosen. */
+    workspaceId: number | null;
 }
 
 const InputArea: React.FC<InputAreaProps> = ({
@@ -24,6 +27,7 @@ const InputArea: React.FC<InputAreaProps> = ({
     onContentAdded,
     mode,
     onModeChange,
+    workspaceId,
 }) => {
     const [message, setMessage] = useState('');
     const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -216,6 +220,14 @@ const InputArea: React.FC<InputAreaProps> = ({
                                 disabled={isSending}
                                 aria-label="File upload"
                                 style={{ display: 'none' }}
+                            />
+                            {/* Beside the paperclip, because both answer the
+                                same question: how do I get a document in.
+                                Same permission gate, for the same reason. */}
+                            <DriveImport
+                                compact
+                                workspaceId={workspaceId}
+                                onImported={onContentAdded}
                             />
                         </>
                     )}

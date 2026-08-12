@@ -57,6 +57,8 @@ jobs:
         VITE_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
         VITE_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
         VITE_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
+        VITE_GOOGLE_CLIENT_ID=${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+        VITE_GOOGLE_API_KEY=${{ secrets.VITE_GOOGLE_API_KEY }}
         EOF
         chmod 600 frontend/.env
     
@@ -83,6 +85,8 @@ jobs:
           VITE_FIREBASE_APP_ID=${{ secrets.REACT_APP_FIREBASE_APP_ID }}
           VITE_STRIPE_API_KEY=${{ secrets.REACT_APP_STRIPE_API_KEY }}
           VITE_POST_HOG_API_KEY=${{ secrets.REACT_APP_POST_HOG_API_KEY }}
+          VITE_GOOGLE_CLIENT_ID=${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_API_KEY=${{ secrets.VITE_GOOGLE_API_KEY }}
           FIREBASE_PROJECT_ID=${{ env.FIREBASE_PROJECT_ID }}
           FIREBASE_PRIVATE_KEY=${{ env.FIREBASE_PRIVATE_KEY }}
           FIREBASE_CLIENT_EMAIL=${{ env.FIREBASE_CLIENT_EMAIL }}

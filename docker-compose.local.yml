@@ -72,6 +72,10 @@ services:
         - VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
         - VITE_STRIPE_API_KEY=${VITE_STRIPE_API_KEY}
         - VITE_POST_HOG_API_KEY=${VITE_POST_HOG_API_KEY}
+        # Default to empty rather than warning on every build: absent is a
+        # valid state, and it means the Drive button does not render.
+        - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID:-}
+        - VITE_GOOGLE_API_KEY=${VITE_GOOGLE_API_KEY:-}
 
     container_name: syntextaiapp-local
     ports:
@@ -116,6 +120,10 @@ services:
         - VITE_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}
         - VITE_STRIPE_API_KEY=${VITE_STRIPE_API_KEY}
         - VITE_POST_HOG_API_KEY=${VITE_POST_HOG_API_KEY}
+        # Default to empty rather than warning on every build: absent is a
+        # valid state, and it means the Drive button does not render.
+        - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID:-}
+        - VITE_GOOGLE_API_KEY=${VITE_GOOGLE_API_KEY:-}
 
     container_name: syntextai-worker-local
     command: python -m api.workers.worker

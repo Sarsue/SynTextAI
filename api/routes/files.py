@@ -8,6 +8,7 @@ from ..core import query_cache
 from ..core.utils import (
     get_user_id,
     upload_to_gcs,
+    upload_bytes_to_gcs,
     delete_from_gcs,
     generate_signed_url,
     move_object_to_workspace,
@@ -27,6 +28,7 @@ from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from pydantic import BaseModel, Field
 from ..models import File
 from ..core.auth import authenticate_user, get_store
+from ..services.connectors import ImportRefused, get_connector
 
 class FileResponse(BaseModel):
     id: int
@@ -73,6 +75,143 @@ async def check_can_read_workspace(workspace_id: int, user_id: int, store: Repos
     arbitrary workspace_id would return that workspace's files.
     """
     await assert_workspace_capability(store, user_id, workspace_id, Capability.READ)
+
+
+
+
+class ImportRequest(BaseModel):
+    """Documents a customer picked in Drive or SharePoint.
+
+    The access token is theirs, minted in their browser by that provider's own
+    picker for the documents they chose. It is used to fetch the bytes and is
+    never written down: not to the database, not to a log line, not into an
+    error message. See services/connectors.py for why there is no stored grant.
+    """
+    provider: str = Field(..., description="google_drive or sharepoint")
+    access_token: str = Field(..., min_length=10)
+    item_ids: List[str] = Field(..., min_length=1, max_length=25)
+
+
+@files_router.post("/import", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit(UPLOAD_RATE_LIMIT)
+async def import_from_source(
+    request: Request,
+    payload: ImportRequest,
+    workspace_id: int = Query(..., description="Workspace to import into"),
+    language: str = Query(default="English"),
+    comprehension_level: str = Query(default="Beginner"),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Bring documents in from Drive or SharePoint.
+
+    Every check an upload passes, this passes, in the same order and by calling
+    the same functions: may you add documents to this workspace, is the company
+    subscribed, is there already a document by that name here. An import that
+    was allowed to skip any of them would be a way around the rules rather than
+    another way in.
+
+    Partial success is the honest outcome and is reported as such. Ten
+    documents where one has been deleted in Drive since the customer picked it
+    should import nine and say which one did not, rather than refusing all ten.
+    """
+    user_id = user_data["user_id"]
+
+    await check_can_upload_to_workspace(workspace_id, user_id, store)
+
+    try:
+        connector = get_connector(payload.provider)
+    except ImportRefused as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    imported: List[FileResponse] = []
+    skipped: List[Dict[str, str]] = []
+
+    for item_id in payload.item_ids:
+        file_id = None
+        gcs_url = None
+        try:
+            # Charged against the plan per document, like an upload, and
+            # checked inside the loop so a customer at their limit imports what
+            # fits rather than nothing at all.
+            await assert_can_create_doc(store, user_id, workspace_id=workspace_id)
+
+            document = await connector.fetch(item_id, payload.access_token)
+
+            if await store.file_repo.file_name_exists_in_workspace(
+                workspace_id, document.filename
+            ):
+                skipped.append({
+                    "name": document.filename,
+                    "reason": "A document with that name is already in this workspace.",
+                })
+                continue
+
+            file_id = await store.file_repo.add_file(
+                user_id=user_id,
+                file_name=document.filename,
+                file_url="",
+                file_size_bytes=document.size,
+                workspace_id=workspace_id,
+            )
+            if not file_id:
+                skipped.append({"name": document.filename, "reason": "Could not be saved."})
+                continue
+
+            gcs_url = await upload_bytes_to_gcs(
+                document.content, workspace_id, file_id, document.filename
+            )
+            if not gcs_url or not await store.file_repo.set_file_url(file_id, gcs_url):
+                # Same rule as an upload: a file row with no stored object is a
+                # document that appears in the list and can never be opened.
+                await store.file_repo.delete_file_entry(file_id)
+                skipped.append({"name": document.filename, "reason": "Could not be stored."})
+                continue
+
+            record = await store.file_repo.get_file_by_id(file_id=file_id)
+            imported.append(FileResponse.model_validate(record))
+
+            await store.agent_run_repo.enqueue_run(
+                run_type="ingest_file",
+                agent_name="IngestionAgent",
+                agent_version=None,
+                payload={
+                    "file_id": int(file_id),
+                    "user_id": int(user_id),
+                    "workspace_id": int(workspace_id),
+                    "filename": document.filename,
+                    "file_url": gcs_url,
+                    "language": language,
+                    "comprehension_level": comprehension_level,
+                    "file_size_bytes": int(document.size),
+                },
+                user_id=int(user_id),
+                workspace_id=int(workspace_id),
+                file_id=int(file_id),
+                priority=200,
+                max_attempts=3,
+            )
+
+        except HTTPException:
+            # A refusal about the plan or the workspace is the whole request's
+            # answer, not one document's.
+            raise
+        except ImportRefused as e:
+            # Logged as well as returned. The browser shows the customer why,
+            # but the first time an import came back empty the reason was only
+            # visible by turning on httpx debug logging and reading a 404 out
+            # of a request trace.
+            logger.info(f"Import skipped in workspace {workspace_id}: {e}")
+            skipped.append({"name": item_id, "reason": str(e)})
+        except Exception as e:
+            # Never the exception text: a provider error can carry a URL with
+            # the access token in it.
+            logger.error(f"Import failed for an item in workspace {workspace_id}: {type(e).__name__}")
+            if file_id and not gcs_url:
+                await store.file_repo.delete_file_entry(file_id)
+            skipped.append({"name": item_id, "reason": "Could not be imported."})
+
+    return {"imported": imported, "skipped": skipped}
 
 
 # Route to save file
