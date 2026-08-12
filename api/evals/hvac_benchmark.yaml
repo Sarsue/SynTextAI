@@ -1,0 +1,244 @@
+# The HVAC citation benchmark.
+#
+# Same shape and same rules as citation_benchmark.yaml. This one exists because
+# that corpus is prose-heavy federal PDFs, and what is being tested now is
+# whether a table survives extraction. A benchmark made of paragraphs cannot
+# answer that question.
+#
+# THE CORPUS
+#
+# Five public HVAC service manuals. 433 pages, 415 embedded images. Upload all
+# five into one workspace before running. Measured 2026-08-12:
+#
+#   file                                pages  imgs  digit-dense
+#   carrier_hch6_heatpump_service.pdf      69     0   58    charging charts
+#   goodman_gszc7_service.pdf             111    55   13    nomenclature, codes
+#   goodman_gvxc_service.pdf              114   112    5    diagrams
+#   trane_dc_inverter_technical.pdf        68   183   20    wiring
+#   trane_minisplit_hw_inverter.pdf        71    65    8    error code tables
+#
+#   https://hvacdirect.com/media/hvac/pdf/HCH6-Service.pdf
+#   https://hvacdirect.com/media/pdf/GSZC7%20Service%20Manual%20New.pdf
+#   https://www.acdirect.com/media/specs/Goodman/goodman-gvxc-service-manual.pdf
+#   https://www.trane.com/content/dam/Trane/Commercial/lar/es/service-manual/Manual-SS-SVM001A-EM-V2.pdf
+#   https://www.trane.com/content/dam/Trane/Commercial/lar/es/product-systems/DX%20Residencial/mini-split-hi-wall-inverter-glass-panel/svm-en-mini-split-inverter-unidad-interior-pared-alta-hp-50-60hz-4mxw-4txk-ms-svm027a-en-16012024.pdf
+#
+# THE FINDING THAT MADE THIS THE RIGHT CORPUS
+#
+# Not one of the 433 pages has zero extractable text, so the OCR fallback in
+# extract_text_with_page_numbers never fires on any of them. Every page
+# extracts, every file is marked processed, and the tables are soup with
+# nothing anywhere saying so. Page 9 of the Carrier manual, a two-dimensional
+# charging chart, currently arrives as a bare column of numbers with every row
+# destroyed.
+#
+# EVERY PAGE AND EVERY VALUE BELOW WAS READ OFF THE PDF (2026-08-12)
+#
+# Tables were reconstructed from word positions rather than from get_text,
+# because get_text is the thing under test. The four figure questions were
+# verified by rendering the page and looking at it.
+#
+# Pages are PDF pages, one-indexed, as a citation resolves them. They are not
+# the numbers printed in the footers.
+#
+# WHAT EACH GROUP IS FOR
+#
+#   1-12   tables. must_include is an exact value, so a hallucinated digit
+#          fails. Several have must_not_include set to the neighbouring cell,
+#          which is what a destroyed row actually returns.
+#   13-16  figures. The answer exists only as lines drawn between a label and
+#          a position. No text extraction can ever get these right, which is
+#          what justifies read_page as a query-time tool.
+#   17-20  prose. Controls. These work today and must not regress.
+
+questions:
+  # ---------- tables: error codes ----------
+  - id: 1
+    question: what does error code E4 mean
+    citations:
+      - file: trane_minisplit_hw_inverter.pdf
+        pages: [32]
+    must_include: ["cooling system abnormal"]
+    must_not_include: ["communication failure"]
+    notes: >
+      The whole test in one question. E0 through E8 are consecutive rows and
+      the raw extraction gives code and meaning as separate lines with nothing
+      marking where a row ends, so returning E0's meaning for E4 is the exact
+      failure mode. E0 is communication failure.
+
+  - id: 2
+    question: what does E5 mean on a Goodman GSZC7
+    citations:
+      - file: goodman_gszc7_service.pdf
+        pages: [96]
+    must_include: ["fuse"]
+    must_not_include: ["mismatched"]
+    notes: >
+      Cross-manual distractor, and the most valuable question here. E5 is an
+      open fuse on the Goodman and an IDU/ODU mismatch on the Trane. A
+      technician working across brands is the whole use case, and answering
+      from the wrong manufacturer's manual is worse than not answering.
+
+  - id: 3
+    question: what is fault F8 on the mini split
+    citations:
+      - file: trane_minisplit_hw_inverter.pdf
+        pages: [33]
+    must_include: ["4-way", "reversing"]
+    must_not_include: ["IPM"]
+    notes: F7 is IPM module temperature protection, the row above.
+
+  - id: 4
+    question: F7 protection meaning
+    citations:
+      - file: trane_minisplit_hw_inverter.pdf
+        pages: [33]
+    must_include: ["IPM", "temperature"]
+
+  - id: 5
+    question: E7 error on outdoor unit
+    citations:
+      - file: trane_minisplit_hw_inverter.pdf
+        pages: [32]
+    must_include: ["ambient"]
+    must_not_include: ["discharge"]
+    notes: E8 is the ODU discharge temperature sensor, the adjacent row.
+
+  # ---------- tables: the charging chart, a 2D lookup ----------
+  - id: 6
+    question: liquid pressure is 251 psig and subcooling is 10 degrees, what should the liquid line temperature be
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [9]
+    must_include: ["74"]
+    must_not_include: ["78"]
+    notes: >
+      Rows are measured liquid pressure, columns are required subcooling.
+      251/10 is 74F. 251/6 is 78F, the same row two columns left, which is
+      what a flattened table returns.
+
+  - id: 7
+    question: at 335 psig with 10 degrees of subcooling what liquid line temp am I looking for
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [9]
+    must_include: ["94"]
+
+  - id: 8
+    question: 384 psig 6 degree subcooling liquid line temperature
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [9]
+    must_include: ["108"]
+
+  # ---------- tables: physical data, four models side by side ----------
+  - id: 9
+    question: what is the SEER rating on the size 36
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [62]
+    must_include: ["17"]
+    must_not_include: ["16.5"]
+    notes: >
+      Sizes 24/36/48/60 read 16.5/17.0/16.0/15.7. The best SEER is not the
+      biggest unit, so a model reasoning from the shape of the numbers rather
+      than reading the column gets it wrong. 16.5 is size 24.
+
+  - id: 10
+    question: fan CFM for the 48
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [62]
+    must_include: ["4350"]
+    must_not_include: ["5000"]
+    notes: 5000 is the size 60, the next column.
+
+  - id: 11
+    question: at what pressure does the high pressure switch open
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [62]
+    must_include: ["670"]
+    must_not_include: ["470"]
+    notes: 470 is the close pressure. Open and close sit adjacent in the table.
+
+  - id: 12
+    question: PSC fan motor horsepower on the size 24
+    citations:
+      - file: carrier_hch6_heatpump_service.pdf
+        pages: [62]
+    must_include: ["1/12"]
+    must_not_include: ["1/8"]
+    notes: 1/8 is the size 36.
+
+  # ---------- figures: answerable only by looking ----------
+  - id: 13
+    question: in the modular blower model number what does 16 mean for airflow
+    citations:
+      - file: goodman_gszc7_service.pdf
+        pages: [7]
+    must_include: ["1600"]
+    must_not_include: ["1200"]
+    notes: >
+      A leader-line nomenclature diagram. Every label extracts and every
+      connection between a label and a character position is drawn, not
+      written. 12 is 1200 CFM and 20 is 2000 CFM, so the wrong line is the
+      likely answer. Verified by rendering the page.
+
+  - id: 14
+    question: what cabinet width is code C
+    citations:
+      - file: goodman_gszc7_service.pdf
+        pages: [7]
+    must_include: ["21"]
+    must_not_include: ["17"]
+    notes: B is 17 and a half inches, D is 24 and a half. Same diagram.
+
+  - id: 15
+    question: what refrigerant does a 4 in the model number mean
+    citations:
+      - file: goodman_gszc7_service.pdf
+        pages: [7]
+    must_include: ["410"]
+
+  - id: 16
+    question: expansion device V in the model number
+    citations:
+      - file: goodman_gszc7_service.pdf
+        pages: [7]
+    must_include: ["Inverter", "Expansion Valve"]
+    must_not_include: ["Flowrater"]
+    notes: F is Flowrater, T is Expansion Device, V is Inverter Tuned.
+
+  # ---------- prose: controls ----------
+  - id: 17
+    question: what signal starts the outdoor unit in cooling mode
+    citations:
+      - file: trane_dc_inverter_technical.pdf
+        pages: [65]
+    must_include: ["Y-C", "high"]
+
+  - id: 18
+    question: how do the indoor and outdoor units communicate
+    citations:
+      - file: trane_dc_inverter_technical.pdf
+        pages: [65]
+    must_include: ["24V"]
+
+  - id: 19
+    question: what does a run capacitor actually do
+    citations:
+      - file: goodman_gszc7_service.pdf
+        pages: [35]
+    must_include: ["line current"]
+    notes: Reduces line current and improves the torque characteristics of the motor.
+
+  - id: 20
+    question: when should I take the cap off the connecting pipe
+    citations:
+      - file: trane_minisplit_hw_inverter.pdf
+        pages: [29]
+    must_include: ["until"]
+    notes: >
+      Not until connecting it, to keep dampness and dirt out. Prose control on
+      a page that is otherwise instructional images.
