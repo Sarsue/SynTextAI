@@ -516,10 +516,11 @@ list, because both are gated on a benchmark the tool layer is currently losing.
    - **Email in** (a source, needs nobody): next. Forward a document to an
      address and it is in the knowledge base. SendGrid Inbound Parse is the
      same shape as the signed webhook `sendgrid_events.py` already receives.
-   - **Google Drive** (a source, needs the person using it): backend built and
-     tested, waiting on an OAuth client id for the picker. `drive.file` and the
-     picker, never `drive.readonly`, which is restricted and needs a paid
-     security assessment.
+   - ~~**Google Drive**~~ **Done 2026-08-12**, verified end to end against a
+     real account: picked in Drive, ingested, and cited in an answer.
+     `drive.file` and the picker, never `drive.readonly`. Needs
+     `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY` as GitHub secrets before
+     it works in production.
    - **SharePoint, Outlook, Slack, Teams** (all need a tenant administrator):
      parked. The SharePoint adapter and the Slack signature verification are
      built and dormant, roughly forty lines and eleven tests, so a
@@ -1318,6 +1319,46 @@ unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
 answer that with fair-use limits rather than repricing everyone.
 
 ## Recent changes (chronological, most recent first)
+
+- **2026-08-12 (Drive import works end to end, and the two bugs that stood in
+  the way):** Verified against a real Google account and a real document:
+  1,073,763 bytes fetched from Drive, stored under
+  `workspaces/1/839-…pdf`, ingested to 71 pages and 100 chunks, and returned by
+  search on page 6 within a minute of being picked. Same storage, same queue,
+  same citations as an upload.
+
+  **The picker had no app id, so every import came back empty.** Google
+  answered 404 for a file the customer was looking at, which reads as
+  nonsense until the scope is understood: `drive.file` grants access *per file,
+  to a named app*, and the picker has to be told which app. Without
+  `setAppId`, the picker returns ids and no grant is ever created. Fixed with
+  the project number derived from the client id, because it is the same number
+  and two copies of one fact drift.
+
+  **The popup was blocked, silently.** The first version loaded Google's
+  libraries inside the click handler and then asked for a token. Two network
+  requests happen in between, so the popup opened outside the user gesture and
+  the browser refused it: no error, no popup, a button reading "Opening
+  Drive…" forever. The libraries now load on mount and the click handler
+  awaits nothing. Found by pressing the button, which is the only way it could
+  have been found.
+
+  **And it asked for authorisation on every click.** The browser flow issues
+  short-lived tokens with no refresh token, so one per session is unavoidable,
+  but one per *click* reads as the app having forgotten you. The token is now
+  held for its lifetime less a minute, and the account chooser is skipped with
+  a hint, since anybody who can reach the button is already signed in.
+
+  **`origin_mismatch` is a configuration answer, not a bug.** The OAuth
+  client's Authorised JavaScript origins are a different list from Firebase's
+  Authorised domains, and Firebase already showing localhost makes it look
+  done. There is no gcloud command for it; OAuth client management is console
+  only.
+
+  **A skip reason is now logged as well as returned.** The first empty import
+  could only be diagnosed by enabling httpx debug logging and reading a 404 out
+  of a request trace.
+
 
 - **2026-08-11 (the Drive picker, and the four places a build-time value has to
   be listed):** The browser half of the Drive import. An "Import from Google
