@@ -316,16 +316,91 @@ In order. The first two need nothing from anybody.
 1. **Email in.** Forward a document to an address and it is in the knowledge
    base. No OAuth, no admin, no app to install. SendGrid Inbound Parse is the
    same shape as the signed webhook `sendgrid_events.py` already receives.
-2. **Vision extraction.** Replace the text-layer-then-OCR escalation with a
-   vision pass per page. `page.get_text` returns characters in storage order, so
-   multi-column layouts interleave and tables collapse into soup, and customer
-   documents are mostly tables. Needs a vision model, which the current
-   endpoint (`openai-gpt-oss-20b`) is not, so price it before building.
+2. **Vision extraction.** Built on `develop`, unmerged, and **not yet proven**.
+   See the section below: the feature works, the speed does not, and there is
+   no benchmark number for it yet.
 3. **Memory.** Standing facts per organization and workspace, editable, fed by
    the feedback that already arrives.
 4. **The agent tool layer.** Built and behind `AGENT_MODE=tools`, currently
    losing on citations: 13-14 of 22 against the fixed pipeline's 16-18. It
    replaces the pipeline when it wins, not before.
+
+## Vision extraction: in progress, not merged
+
+On `develop` as of 2026-08-13. Written down here because most of what has been
+learned is negative, and a negative result is only worth anything if the reason
+is recorded.
+
+**The problem it exists for.** `page.get_text` returns characters in PDF storage
+order, so a table arrives as a column of loose values with every row destroyed.
+Measured on a 433-page corpus of HVAC service manuals (`api/evals/hvac_benchmark.yaml`):
+
+| group | overall | citations |
+|---|---|---|
+| error codes | 3/5 | 3/5 |
+| charging chart | 0/3 | 1/3 |
+| physical data | 2/4 | 2/4 |
+| figures | 0/4 | 1/4 |
+| prose | 3/4 | 4/4 |
+| **total** | **8/20** | **11/20** |
+
+Prose works. Tables are a coin flip. Figures are zero. The sharpest single
+result is question 6: the **right page was cited** and the answer still said 78
+where the page reads 74, because the row that value belongs to no longer existed
+by the time the model saw it.
+
+**What is built.** A page goes to `llama-4-maverick` only when the text layer has
+probably failed it (digit density, image area, or empty). Every number the model
+returns is checked against the text layer; a page that introduces more than five
+numbers absent from the page is rejected outright. Proven on the charging chart:
+rows come back intact, including the 74 and 94 that questions 6 and 7 get wrong.
+
+**What is not proven: whether any of that moves 8/20.** No measurement exists.
+
+### The speed problem, and three wrong explanations
+
+A page takes 120 to 180 seconds. 58 of the Carrier manual's 69 pages qualify, so
+one 69-page document is about an hour. Three explanations were proposed and
+measured, and the first two were wrong:
+
+1. *"Routing is too loose."* No. Page-by-page digit density on the Carrier
+   manual: 58 pages qualify at the 0.12 threshold and **51 still qualify at
+   0.30**. It is genuinely a book of tables. Corpus-wide the rule picks 112 of
+   433, about a quarter. The threshold is fine.
+2. *"The model is writing too much."* No. Measured output is **490 to 700
+   tokens** per page, taking 122 to 169 seconds. That is 3 to 6 tokens/second
+   against a normal 25 to 60, so almost none of the time is generation.
+3. *"It is image prefill, so lower the DPI."* **Unproven, and the first attempt
+   to measure it was invalid.** A descending sweep (150, 110, 80, 60) had the
+   150 run succeed at 177s and every subsequent run fail: ReadTimeout, 408,
+   RemoteProtocolError. That is indistinguishable from the endpoint degrading
+   under repeated calls, so it says nothing about DPI. Any re-run must
+   interleave settings and repeat each one.
+
+The endpoint's behaviour under load is now the open question, and it may also
+explain the earlier finding that `VISION_CONCURRENCY=8` produced timeouts.
+
+### Three bugs this work exposed, all fixed 2026-08-13
+
+None were introduced by vision. All three were latent and invisible while
+extraction took milliseconds.
+
+- **A running job did not hold its lease.** `lease_expires_at` meant "started
+  less than 15 minutes ago", not "somebody is holding this". An hour-long
+  extraction was reclaimed at 15, 30 and 45 minutes and then failed as "worker
+  presumed dead" while the worker was alive and working. Each reclaim started a
+  **second concurrent extraction of the same document** against a metered
+  endpoint. `_hold_lease` now renews while the job runs, conditional on the row
+  still being ours.
+- **Extraction was not resumable.** Item 18 made *storage* resumable, but all
+  extraction completes before the first batch is written, so a crash discarded
+  every page already paid for. Roughly three hours of vision calls bought
+  nothing on 2026-08-12. `page_reads` now stores each page as it lands.
+- **One refused page killed the whole document.** `asyncio.gather` without
+  `return_exceptions` returns the instant one page raises, with its siblings
+  still in flight, and the bare exception fell through to the handler that
+  returns `[]`. Found by the cache test, which expected pages 1 and 2 on disk
+  and found only page 1.
 
 ## Parked, and why
 
