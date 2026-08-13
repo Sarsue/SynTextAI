@@ -162,6 +162,14 @@ services:
       # Worker-specific connection pool settings (smaller to avoid exhausting DB connections)
       - DB_POOL_SIZE=3
       - DB_MAX_OVERFLOW=2
+      # Measured 2026-08-13: a vision page takes ~166s regardless of image size
+      # (150 dpi and 80 dpi are within noise of each other) and regardless of
+      # output length (490-700 tokens). It is a fixed per-request cost at the
+      # far end, so throughput comes from concurrency and nothing else. Being
+      # raised here to find the endpoint's ceiling; failures are now cheap,
+      # since a refused page falls back to its text layer and every page that
+      # succeeds is banked in page_reads.
+      - VISION_CONCURRENCY=6
     volumes:
       - ./api:/app/api
       - ./.env.dev:/app/.env

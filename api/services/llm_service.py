@@ -21,11 +21,13 @@ One shared AsyncClient, so connections are pooled and TLS is negotiated once
 rather than per call. Close it on shutdown with `aclose_client()`.
 """
 import asyncio
+import json
 import logging
 from typing import Callable, List, Dict, Any, Optional
 import base64
 import httpx
 import os
+import time
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -61,13 +63,30 @@ VISION_MODEL = os.getenv("MODEL_VISION_ID", "llama-4-maverick")
 # nothing. Higher costs image tokens for no measured gain on these pages.
 VISION_DPI = int(os.getenv("VISION_DPI", "150"))
 
-# A dense table page produced about 2,000 characters. 8,000 tokens leaves room
-# for the worst page in the corpus without ever hitting finish_reason=length,
-# which returns an empty string and looks exactly like a page with no content.
-VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "8000"))
+# A token budget is a TIME budget at this endpoint, which is the thing the
+# original 8,000 here missed.
+#
+# Measured 2026-08-13: this endpoint writes at roughly 3 tokens/second, so 8,000
+# tokens is not "headroom for a dense page", it is a 44-minute page. And that is
+# not hypothetical: a prompt A/B run was killed after 33 minutes on a single
+# page whose sibling prompt finished the same page in 148 seconds. The model had
+# started rambling and the budget let it.
+#
+# The densest page measured in the HVAC corpus produced about 700 tokens. 2,500
+# is more than three times the worst real page and caps a runaway at about 14
+# minutes, with VISION_DEADLINE below as the actual backstop.
+VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "2500"))
 
-# 146s was the honest measurement for one page. This is not a hung request.
+# Gap between chunks, not total request time. Since the response is streamed,
+# httpx resets this on every chunk that arrives, so it only catches a stalled
+# connection. It cannot bound a slow-but-alive stream, which is what
+# VISION_DEADLINE is for.
 VISION_TIMEOUT = float(os.getenv("VISION_TIMEOUT", "900"))
+
+# Total wall-clock budget for one page, enforced by hand in the streaming loop.
+# A page takes 120-180s when it is behaving; 600 leaves generous room for a slow
+# one and still stops a run away.
+VISION_DEADLINE = float(os.getenv("VISION_DEADLINE", "600"))
 
 # How many pages are read at once.
 #
@@ -264,6 +283,23 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
         # Zero, because this is transcription. Any creativity here is a
         # hallucinated digit in somebody's refrigerant charge.
         "temperature": 0,
+        # STREAMED, AND NOT FOR THE REASON STREAMING IS USUALLY ADDED.
+        #
+        # Nobody watches this output arrive; it goes into a database. It is
+        # streamed because a page takes two to three minutes and a request that
+        # sends nothing for three minutes is an idle connection. Idle
+        # connections get closed by whatever sits between here and the model,
+        # and that is what the 408s and RemoteProtocolErrors were: measured
+        # 2026-08-13, a second image in one request died with HTTP 408 after
+        # exactly 601 seconds, which is a proxy timeout, not a model failing.
+        # A stream is never idle.
+        #
+        # It is also the only way to see where the time goes. Measured the same
+        # day: the first token arrives in 1.5 to 3 seconds and the rest write
+        # out at roughly 3 tokens/second. That single number ruled out image
+        # size, routing and queueing as explanations for a slow page, all three
+        # of which had been guessed at and two of which had been wrong.
+        "stream": True,
     }
     headers = {
         "Content-Type": "application/json",
@@ -272,19 +308,63 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
     url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
 
     try:
-        async with httpx.AsyncClient(timeout=VISION_TIMEOUT) as client:
-            response = await client.post(url, headers=headers, json=data)
-        if response.status_code != 200:
-            logger.warning("Vision read refused: %s", response.status_code)
-            return ""
-        choice = (response.json().get("choices") or [{}])[0]
-        text = (choice.get("message") or {}).get("content") or ""
+        parts: List[str] = []
+        finish_reason = None
+        started = time.monotonic()
+        first_token_at = None
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(VISION_TIMEOUT, read=VISION_TIMEOUT)) as client:
+            async with client.stream("POST", url, headers=headers, json=data) as response:
+                if response.status_code != 200:
+                    # The body has not been read yet on a streamed response, and
+                    # httpx refuses to look at it until it has been.
+                    await response.aread()
+                    logger.warning("Vision read refused: %s", response.status_code)
+                    return ""
+                async for line in response.aiter_lines():
+                    if time.monotonic() - started > VISION_DEADLINE:
+                        # Discarded, not truncated. A cut-off table looks exactly
+                        # like a complete one: the rows that never arrived leave
+                        # no trace, and the number guardrail only catches numbers
+                        # that were invented, never rows that are missing. The
+                        # text layer is the honest fallback.
+                        logger.warning(
+                            "Vision read exceeded %ss and was discarded; the page "
+                            "keeps its text layer", VISION_DEADLINE,
+                        )
+                        return ""
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(payload)
+                    except ValueError:
+                        # A malformed keepalive or comment frame is not worth
+                        # losing a two-minute page over.
+                        continue
+                    choice = (event.get("choices") or [{}])[0]
+                    piece = (choice.get("delta") or {}).get("content")
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+                    if piece:
+                        if first_token_at is None:
+                            first_token_at = time.monotonic() - started
+                        parts.append(piece)
+
+        text = "".join(parts)
         if not text:
             # Seen in practice: a reasoning model spends the whole budget
-            # thinking and returns content=None with finish_reason=length.
+            # thinking and returns no content at all.
             logger.warning(
                 "Vision read returned nothing (finish_reason=%s). Falling back "
-                "to the text layer.", choice.get("finish_reason")
+                "to the text layer.", finish_reason
+            )
+        else:
+            logger.debug(
+                "Vision page read in %.0fs (first token %.1fs, %d chars)",
+                time.monotonic() - started, first_token_at or 0, len(text),
             )
         return text.strip()
     except Exception as e:
