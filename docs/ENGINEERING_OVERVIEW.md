@@ -380,7 +380,42 @@ measured, and the first two were wrong:
 The endpoint's behaviour under load is now the open question, and it may also
 explain the earlier finding that `VISION_CONCURRENCY=8` produced timeouts.
 
-### The provider is the problem, priced 2026-08-13
+### Resolved: moved to DeepInfra 2026-08-13, and it was the provider
+
+Same model weights, same prompts, same pages:
+
+| | DigitalOcean | DeepInfra |
+|---|---|---|
+| vision, page 9 (charging chart) | 165s | **16.5s** |
+| vision, page 62 (physical data) | 148-186s | **12.3s** |
+| chat, time to first token | 23.8s / 26.7s | 2.1s total |
+| embeddings | Voyage, 11-18ms/chunk | Qwen3-0.6B, 0.2s, 1024-dim |
+
+All hand-verified values survived on both pages, including the 74 that benchmark
+question 6 gets wrong. The Carrier manual goes from 2.7 hours of extraction to
+about five minutes.
+
+**The lesson worth keeping.** Four explanations were proposed and measured for a
+165-second page — pages routed, output length, image size, request queueing —
+and every one was about what we send. All four were wrong. The check that found
+it in five minutes was "is this speed normal for this model", against a public
+throughput figure. Ask that first next time.
+
+**What did not just work: reasoning models spend the answer's budget thinking.**
+`gpt-oss-20b` returned 1,394 characters of `reasoning_content`,
+`finish_reason=length`, and `content: ""` — a successful HTTP 200 with no answer.
+`_post_json`'s `accept()` already existed for this, so it is not new, but it is
+intermittent, which surfaces as an answer that is occasionally blank rather than
+as something obviously broken. `CHAT_REASONING_EFFORT=low` bounds it: 1.4s
+instead of 3.7-5.4s, 138 characters of thinking instead of 800-1,100, same
+answer. Raise it if the benchmark says less thinking costs accuracy.
+
+**Model ids are matched exactly and are namespaced with a slash.** The live
+config had a trailing space on `MODEL_CHAT_ID`, which DigitalOcean tolerated. A
+wrong id returns "model not found", which reads like an outage rather than a
+typo.
+
+### The measurements that led there, 2026-08-13
 
 Every speed hypothesis was measured and every one was wrong, because they were
 all about *what we send*. The cause is *where we send it*.
