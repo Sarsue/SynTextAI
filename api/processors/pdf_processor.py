@@ -279,6 +279,10 @@ class PDFProcessor(FileProcessor):
         """
         page_texts = []
         page_flags: Dict[int, Any] = {}
+        # Pages whose text is vision markdown rather than PDF character soup.
+        # The chunker needs to know: markdown has structure to respect, and a
+        # text layer only has pipes that are not tables.
+        vision_pages: set = set()
         read_by_vision = 0
         resumed = 0
 
@@ -307,6 +311,7 @@ class PDFProcessor(FileProcessor):
                         # Already paid for. Its flags come back with it, so a
                         # resumed page is no more trusted than a fresh one.
                         layer[page_num] = hit["text"]
+                        vision_pages.add(page_num)
                         if hit.get("flags"):
                             page_flags[page_num] = hit["flags"]
                         resumed += 1
@@ -357,6 +362,7 @@ class PDFProcessor(FileProcessor):
                         n, (markdown, flags) = outcome
                         if markdown:
                             layer[n] = markdown
+                            vision_pages.add(n)
                             read_by_vision += 1
                             if flags:
                                 page_flags[n] = flags
@@ -383,7 +389,14 @@ class PDFProcessor(FileProcessor):
 
                     page_texts.append({
                         "page_num": page_num,
-                        "text": f"Page {page_num}\n{text.strip()}"  # Use 'text' for consistency
+                        "text": f"Page {page_num}\n{text.strip()}",  # Use 'text' for consistency
+                        # Tells the chunker this page has structure worth
+                        # respecting. Only pages the vision model actually
+                        # produced markdown for: a page that fell back to its
+                        # text layer is not markdown, and running the markdown
+                        # chunker over PDF character soup would find pipes that
+                        # are not tables.
+                        "is_markdown": page_num in vision_pages,
                     })
 
             logger.info(

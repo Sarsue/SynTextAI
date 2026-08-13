@@ -15,7 +15,7 @@ import hashlib
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 
-from api.core.utils import chunk_text
+from api.core.utils import chunk_text, chunk_markdown
 from api.services.contextualizer import add_context, embedding_text
 from api.services.llm_service import get_text_embeddings_in_batches
 
@@ -106,7 +106,14 @@ class FileProcessor(ABC):
                     if not page_content:
                         continue
 
-                    for chunk in chunk_text(page_content):
+                    # A page the vision model read is markdown, and markdown is
+                    # chunked on its own structure. The general splitter counts
+                    # to 400 and cuts wherever it lands, which on a table means
+                    # mid-row and away from the header: measured 2026-08-13, it
+                    # turned a reconstructed charging chart into three chunks of
+                    # which all three were unanswerable. See chunk_markdown.
+                    chunker = chunk_markdown if page_item.get("is_markdown") else chunk_text
+                    for chunk in chunker(page_content):
                         content = chunk.get("content") or ""
                         if not content.strip():
                             continue

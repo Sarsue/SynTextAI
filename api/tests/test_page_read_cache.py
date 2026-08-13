@@ -157,6 +157,98 @@ async def test_a_failed_cache_write_does_not_fail_the_ingest(store, doc_file, mo
     assert len(pages) == 2, "a broken cache took the document down with it"
 
 
+async def test_only_vision_pages_are_marked_as_markdown(store, doc_file, monkeypatch):
+    """The flag that decides which chunker a page gets.
+
+    A page that fell back to its text layer is PDF character soup, not markdown.
+    Running the markdown chunker over it would find pipes that are not tables
+    and split on structure that is not there.
+    """
+    processor = PDFProcessor(store)
+    # Only page 2 goes to vision; page 3's call fails, so it is not markdown.
+    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: page.number + 1 in (2, 3))
+    monkeypatch.setattr(processor, "_read_page_with_vision", _CountingVision(fail_on={3}))
+
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(3), file_id=doc_file["id"]
+    )
+
+    flags = {p["page_num"]: p["is_markdown"] for p in pages}
+    assert flags == {1: False, 2: True, 3: False}
+
+
+async def test_a_resumed_vision_page_is_still_markdown(store, doc_file, monkeypatch):
+    """A page recovered from the cache must chunk the same way as a fresh one.
+
+    Easy to get wrong: the resume path is a separate branch from the read path,
+    and a resumed page that lost its flag would silently go back through the
+    splitter that breaks tables.
+    """
+    processor = PDFProcessor(store)
+    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+
+    monkeypatch.setattr(processor, "_read_page_with_vision", _CountingVision(fail_on={2}))
+    await processor.extract_text_with_page_numbers(_pdf_bytes(2), file_id=doc_file["id"])
+
+    # Second run: page 1 comes from the cache, page 2 is read fresh.
+    second = _CountingVision()
+    monkeypatch.setattr(processor, "_read_page_with_vision", second)
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(2), file_id=doc_file["id"]
+    )
+
+    assert second.pages_read == [2], "page 1 should have come from the cache"
+    assert all(p["is_markdown"] for p in pages), "a resumed page lost its markdown flag"
+
+
+async def test_a_vision_table_survives_the_ingest_chunker(store, tenant, monkeypatch):
+    """End to end: the rows the vision model rebuilt are still whole in storage.
+
+    The narrow unit tests prove chunk_markdown keeps rows intact and that the
+    flag is set. This proves the two are actually wired to each other, which is
+    the part that silently does nothing if the flag never reaches the chunker.
+    """
+    from api.processors import base_processor
+
+    workspace_id = await tenant.workspace("Chunking")
+    file_id = await store.file_repo.add_file(
+        user_id=tenant.owner, file_name="chart.pdf", file_url="", workspace_id=workspace_id,
+    )
+
+    header = "| Liquid Pressure (psig) | 6F | 8F | 10F | 12F | 14F | 16F |"
+    sep = "| --- | --- | --- | --- | --- | --- | --- |"
+    rows = [f"| {134 + i * 7} | {68+i} | {66+i} | {64+i} | {62+i} | {60+i} | {58+i} |"
+            for i in range(60)]
+    page = "\n".join(["## Required Liquid Line Temperature", "", header, sep] + rows)
+
+    async def embed(texts, batch_size=50):
+        return [[0.01] * 1024 for _ in texts]
+
+    monkeypatch.setattr(base_processor, "get_text_embeddings_in_batches", embed)
+
+    processor = PDFProcessor(store)
+    await processor.embed_and_store_pages(
+        [{"page_num": 1, "text": page, "is_markdown": True}],
+        file_id=file_id, user_id=tenant.owner, filename="chart.pdf", file_type="pdf",
+    )
+
+    from sqlalchemy import select
+    from api.models.orm_models import Chunk
+
+    async with store.file_repo.get_async_session() as session:
+        stored = (await session.execute(
+            select(Chunk.content).where(Chunk.file_id == int(file_id))
+        )).scalars().all()
+
+    assert len(stored) > 1, "the fixture must split, or this proves nothing"
+    for content in stored:
+        table_rows = [l for l in content.splitlines() if l.strip().startswith("|")]
+        assert table_rows, "a chunk of the table has no rows"
+        assert header in content, "a stored chunk lost the header naming its columns"
+        for row in table_rows:
+            assert row.count("|") == 8, f"a row was cut in storage: {row!r}"
+
+
 # ---------------------------------------------------------------------------
 # The lease
 # ---------------------------------------------------------------------------
