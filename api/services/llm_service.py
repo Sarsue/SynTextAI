@@ -42,7 +42,30 @@ EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY") or MODEL_ACCESS_KEY
 logger = logging.getLogger(__name__)
 
 # Active models
-CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai-gpt-oss-20b")
+CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai/gpt-oss-20b")
+
+# How much of its token budget the chat model may spend thinking before it
+# answers. "low" | "medium" | "high"; empty sends nothing and takes the
+# provider's default.
+#
+# WHY THIS IS SET RATHER THAN LEFT ALONE
+#
+# gpt-oss-20b is a reasoning model, and its reasoning comes out of the SAME
+# budget as the answer. Measured 2026-08-13 on DeepInfra, one short question at
+# max_tokens=400: 1,394 characters of `reasoning_content`, finish_reason=length,
+# and `content: ""`. A perfectly successful HTTP 200 carrying no answer.
+#
+# Not a new failure — `_post_json`'s accept() exists because this happened
+# occasionally before — but it is intermittent, which is worse than constant: it
+# surfaces as an answer that is sometimes simply blank.
+#
+# Same question with reasoning_effort=low: 1.4s rather than 3.7-5.4s, 138
+# characters of thinking rather than 800-1,100, and an answer of the same
+# quality. Bounding the thinking bounds the failure.
+#
+# If the citation benchmark shows "low" costs accuracy, raise it. The benchmark
+# decides this, not taste.
+CHAT_REASONING_EFFORT = os.getenv("CHAT_REASONING_EFFORT", "low").strip().lower()
 
 # The model that reads a rendered page, chosen by measurement on 2026-08-12
 # against page 9 of the Carrier manual, a two-dimensional charging chart whose
@@ -407,6 +430,8 @@ async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
         "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
         "temperature": TEMPERATURE,
     }
+    if CHAT_REASONING_EFFORT:
+        data["reasoning_effort"] = CHAT_REASONING_EFFORT
 
     body = await _post_json(url, headers, data, accept=_has_content)
     if not body:

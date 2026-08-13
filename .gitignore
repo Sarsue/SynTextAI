@@ -238,3 +238,6 @@ do_github_actions*
 # Copies of env files made while editing. These hold live secrets.
 .env.backup-*
 .env.bak
+
+# Recovered credentials from the DigitalOcean/Voyage era, kept out of git.
+.env.previous-provider-keys
