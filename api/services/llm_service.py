@@ -59,6 +59,24 @@ CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai-gpt-oss-20b")
 # way before it ships.
 VISION_MODEL = os.getenv("MODEL_VISION_ID", "llama-4-maverick")
 
+# Vision can be pointed at a different provider from chat, and needs to be.
+#
+# Measured 2026-08-13: this endpoint writes at ~3 tokens/second. The published
+# median for llama-4-maverick across providers is 123 t/s, and Azure serves the
+# same weights at 368. We are not running a slow model, we are running an
+# ordinary model roughly forty times slower than everybody else, and the pricing
+# is the same either way (~$0.11-0.14 per 69-page manual whichever provider).
+#
+# The consequence is not only speed. The same prompt on the same page returned
+# byte-identical output in 188s and in 113s, a 66% spread, which is wider than
+# any prompt or DPI difference worth measuring. Nothing about this call can be
+# measured here.
+#
+# Chat is a different model with different behaviour and is left alone, so
+# moving vision is two environment variables and no code.
+VISION_BASE_URL = os.getenv("VISION_BASE_URL") or INFERENCE_BASE_URL
+VISION_API_KEY = os.getenv("VISION_API_KEY") or MODEL_ACCESS_KEY
+
 # 150 worked; 110 made the small model burn its budget on reasoning and return
 # nothing. Higher costs image tokens for no measured gain on these pages.
 VISION_DPI = int(os.getenv("VISION_DPI", "150"))
@@ -254,8 +272,8 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
     transcription aid rather than as truth: the characters are all correct, it
     is only their order that is wrong.
     """
-    if not MODEL_ACCESS_KEY:
-        logger.error("MODEL_ACCESS_KEY not configured for vision")
+    if not VISION_API_KEY:
+        logger.error("No API key configured for vision (VISION_API_KEY or MODEL_ACCESS_KEY)")
         return ""
 
     content: List[Dict[str, Any]] = [{"type": "text", "text": VISION_PROMPT}]
@@ -303,9 +321,9 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
     }
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
+        "Authorization": f"Bearer {VISION_API_KEY}",
     }
-    url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
+    url = f"{VISION_BASE_URL.rstrip('/')}/chat/completions"
 
     try:
         parts: List[str] = []

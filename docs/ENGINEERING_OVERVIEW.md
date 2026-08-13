@@ -380,6 +380,48 @@ measured, and the first two were wrong:
 The endpoint's behaviour under load is now the open question, and it may also
 explain the earlier finding that `VISION_CONCURRENCY=8` produced timeouts.
 
+### The provider is the problem, priced 2026-08-13
+
+Every speed hypothesis was measured and every one was wrong, because they were
+all about *what we send*. The cause is *where we send it*.
+
+`llama-4-maverick`, the model we already run, has a published median of **123
+output tokens/second** across providers; Azure serves the same weights at 368.
+**We measure 3.** Not a slow model: an ordinary model on a provider serving it
+roughly forty times slower than anybody else.
+
+Costed on our own numbers — the Carrier manual, 69 pages, 58 to vision, ~412k
+input and ~35k output tokens:
+
+| option | speed | this document | cost/document |
+|---|---|---|---|
+| DigitalOcean (today) | 3 t/s | **2.7 hours** | ~$0.14 |
+| same model, DeepInfra | 98 t/s | ~6 min serial | $0.11 |
+| same model, Azure FP8 | 368 t/s | **~3 min serial** | $0.12 |
+| same model, Bedrock | 230 t/s | ~4 min | $0.13 |
+| Mistral OCR 4 | purpose-built | seconds | $0.28, $0.14 batched |
+
+**Cost is not the variable.** Everything lands between 11 and 28 cents a
+document. The variable is a factor of fifty in time, paid for no saving.
+
+`VISION_BASE_URL` and `VISION_API_KEY` now exist so vision can move providers
+without touching chat, which is a different model with different behaviour.
+Moving is two environment variables.
+
+Mistral OCR 4 is the strategic option rather than the quick one: $4/1,000 pages,
+86.2% on table extraction (ahead of GPT-5.4 Pro, Claude Opus 4.6 and Gemini
+3.1), and it returns **block types, bounding boxes and per-block confidence**,
+which is precisely what `chunk_markdown` wants as input rather than having to
+infer from pipes. Its documented weakness is merged cells and nested headers,
+which is exactly what a charging chart is, so it gets measured against page 9's
+48 hand-verified cells before it ships. Those benchmark numbers are somebody
+else's measurement.
+
+**Do not tune anything else against the current endpoint.** The same prompt on
+the same page returned byte-identical output in 188s and 113s, a 66% spread.
+That is wider than any prompt or DPI effect worth having, so no A/B run here can
+resolve anything. Two prompt comparisons were abandoned for this reason.
+
 ### Three bugs this work exposed, all fixed 2026-08-13
 
 None were introduced by vision. All three were latent and invisible while
