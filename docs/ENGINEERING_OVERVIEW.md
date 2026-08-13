@@ -465,6 +465,51 @@ payer portal every morning. When it is built: read-only, human-triggered,
 results returning as citable knowledge, and portal credentials treated as the
 heaviest thing we would ever hold.
 
+## Consolidating onto one inference provider, decided 2026-08-13
+
+Three providers today: DigitalOcean (chat, vision), Voyage (embeddings), and
+that is one bill and one status page too many. Moving to DeepInfra. The reasons
+differ per piece, and two of the three are not what they look like.
+
+**Chat and vision: moving because the current provider is broken.** Measured:
+
+| call | DigitalOcean measured | DeepInfra published |
+|---|---|---|
+| vision, one page | 165s, ~3 tok/s | ~6.6s, 98 tok/s |
+| chat, first token | **23.8s / 26.7s** | ~0.5s |
+| chat, generation | 3.9-4.5 tok/s | 98 tok/s |
+
+24 seconds before a customer sees the first word of an answer. That is the real
+reason the app feels slow, not the absence of streaming. `openai/gpt-oss-20b` is
+the identical model on DeepInfra ($0.03/$0.14 per M), so chat is a URL change
+with nothing stored to migrate.
+
+**Embeddings: NOT moving for speed or money, and this needs saying plainly so
+nobody "optimises" it later on a false premise.** Measured 2026-08-13,
+voyage-3.5-lite: 11-18ms per chunk at batch 128, ~2s for a 100-chunk document.
+It is nowhere near a bottleneck. Price is $0.02/M against Qwen3's $0.01/M, and
+the entire local corpus (1,833 chunks, ~733k tokens) is **1.5 cents against 0.7
+cents.**
+
+The actual reason is lock-in. `voyage-3.5-lite` is proprietary and single-source:
+only Voyage serves it, so every vector ever stored depends on one company's
+pricing and roadmap, and leaving means re-embedding everything under duress.
+`Qwen3-Embedding-0.6B` is open weights served by many providers and self-hostable
+— same weights, same vectors, so a future provider change costs nothing. It is
+also 1024 dimensions, matching the existing pgvector column.
+
+**Embeddings are a data migration, not a config change.** A Voyage vector and a
+Qwen vector for identical text are unrelated numbers. Embedding queries with one
+model while documents hold the other does not error; it silently returns
+confident citations to the wrong pages, which is the worst failure this product
+has. So: second column, backfill, switch reads, and the citation benchmark as
+the gate. If Qwen retrieves worse, keep Voyage and we are still down to two
+providers.
+
+Order: vision (no stored data), chat (no stored data), embeddings (its own
+migration, its own measurement). Doing them in one change would make a retrieval
+regression impossible to attribute.
+
 ## Decisions not to re-litigate
 
 One line each. The reasoning is in the commit or the code comment beside it.
