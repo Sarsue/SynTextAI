@@ -201,26 +201,77 @@ class PDFProcessor(FileProcessor):
 
         return False
 
+    # Above this many vector drawing operations, a page's content is drawn
+    # rather than written, so its text layer cannot account for what is on it.
+    # Measured 2026-08-14: the goodman nomenclature diagram has 202, and pages
+    # that are genuinely tables or prose have very few.
+    VISION_VECTOR_DRAWINGS = int(os.getenv("VISION_VECTOR_DRAWINGS", "60"))
+
+    def _text_layer_is_credible(self, page) -> bool:
+        """Whether this page's text layer can arbitrate the vision output.
+
+        True for tables and prose, where every character is present and only
+        the order is wrong. False for figures, whose labels are drawn as vector
+        art and never reach the text layer at all.
+        """
+        try:
+            if len(page.get_drawings()) >= self.VISION_VECTOR_DRAWINGS:
+                return False
+            page_area = abs(page.rect.width * page.rect.height)
+            if page_area:
+                image_area = 0.0
+                for img in page.get_images(full=True):
+                    bbox = page.get_image_bbox(img)
+                    if bbox:
+                        image_area += abs(fitz.Rect(bbox).get_area())
+                if image_area / page_area >= self.VISION_IMAGE_AREA:
+                    return False
+        except Exception:
+            # If the page cannot be inspected, keep the stricter behaviour.
+            return True
+        return True
+
     async def _read_page_with_vision(self, page, text_layer: str):
         """Read a page with the vision model, and check its numbers.
 
-        THE GUARDRAIL, AND WHAT IT CAN AND CANNOT DO
+        THE GUARDRAIL, AND THE PAGES IT MUST NOT BE APPLIED TO
 
         A vision model that invents a digit is the worst failure available
         here: a confident wrong refrigerant charge or torque value is a safety
-        claim, not a typo. This is not theoretical. Measured on 2026-08-12, a
-        smaller model returned 82/28/78 for a row that reads 82/28/80.
+        claim, not a typo. Measured 2026-08-12, a smaller model returned
+        82/28/78 for a row that reads 82/28/80.
 
-        So every number the model produces is checked against the text layer.
-        The characters in that layer are correct even when their order is
-        destroyed, which is exactly what makes it useful as a check and useless
-        as a transcription.
+        So numbers are checked against the text layer. That rests on one
+        assumption: the characters in the text layer are all CORRECT, and only
+        their order is wrong. On a table that holds, which is what makes the
+        layer a useful oracle and a useless transcription.
 
-        What this catches: a number that appears nowhere on the page. What it
-        cannot catch: a number that exists on the page and has been put in the
-        wrong cell, which is what the smaller model actually did. That is why
-        the model is chosen for accuracy first and the check is a second line
-        rather than the reason to trust a cheap one.
+        ON A FIGURE IT IS FALSE, AND ENFORCING IT COST FOUR BENCHMARK QUESTIONS
+
+        A leader-line nomenclature diagram draws its labels as vector art.
+        Measured 2026-08-14 on page 7 of goodman_gszc7_service.pdf: 202 vector
+        drawings, and the vision model read it correctly at 3,462 characters,
+        including the two values the benchmark asks for. Sixteen of its numbers
+        were absent from the text layer, so the whole page was rejected:
+
+            '21'  (cabinet width, question 14)   in text layer: FALSE
+            '410' (refrigerant,   question 15)   in text layer: FALSE
+
+        Those numbers are not on the text layer to be verified against. The
+        page was discarded and its garbled text kept, which is how question 13
+        came to answer 1200 where the diagram says 1600. The check was
+        rejecting precisely the pages vision exists for.
+
+        So the hard reject applies only where its assumption holds: a page whose
+        text layer is a credible record of what is on it. On a figure-dominant
+        page the output is kept and flagged instead, because an unverifiable
+        transcription still beats character soup that produces confident wrong
+        answers.
+
+        What this catches: a number that appears nowhere on a text-bearing page.
+        What it cannot catch: a number that exists on the page and has been put
+        in the wrong cell. That is why the model is chosen for accuracy first
+        and this is a second line rather than a licence to use a cheap one.
 
         Returns (markdown, flags). Empty markdown means fall back.
         """
@@ -243,11 +294,23 @@ class PDFProcessor(FileProcessor):
         # but a model may spell out a figure caption or renumber a list. Many
         # of them means it is writing rather than reading.
         if len(set(invented)) > 5:
-            logger.warning(
+            if self._text_layer_is_credible(page):
+                logger.warning(
+                    f"Vision output introduced {len(set(invented))} numbers absent "
+                    f"from the text layer; keeping the text layer for this page"
+                )
+                return "", {"vision_rejected": "introduced numbers not on the page"}
+            # A figure page's text layer is incomplete, not merely disordered,
+            # so it cannot arbitrate. Keep the read and say it is unverified.
+            logger.info(
                 f"Vision output introduced {len(set(invented))} numbers absent from "
-                f"the text layer; keeping the text layer for this page"
+                f"the text layer, but this page is figure-dominant so the layer "
+                f"cannot verify it; keeping the read and flagging it"
             )
-            return "", {"vision_rejected": "introduced numbers not on the page"}
+            return markdown, {
+                "vision_unverified_page": "figure page; text layer cannot verify",
+                "vision_unverified_numbers": sorted(set(invented))[:10],
+            }
 
         flags = {}
         if invented:

@@ -175,3 +175,67 @@ async def test_a_question_with_no_identifiers_still_works(store, tenant, corpus)
         workspace_id=corpus["workspace_id"],
     )
     assert hits, "a question with no identifying tokens returned nothing at all"
+
+
+# ---------------------------------------------------------------------------
+# The guardrail, and the pages it must not arbitrate
+# ---------------------------------------------------------------------------
+
+
+class TestWhichPagesTheTextLayerCanVerify:
+    """A vision read is checked against the text layer. That only works if the
+    text layer holds everything on the page.
+
+    Measured 2026-08-14 on page 7 of goodman_gszc7_service.pdf, a leader-line
+    nomenclature diagram with 202 vector drawings: the vision model read it
+    correctly at 3,462 characters, and sixteen of its numbers were absent from
+    the text layer, so the whole page was rejected and its garbled text kept.
+
+        '21'  (cabinet width, benchmark Q14)   in text layer: FALSE
+        '410' (refrigerant,   benchmark Q15)   in text layer: FALSE
+
+    Those labels are drawn, not written. The check was rejecting precisely the
+    pages vision exists for, and it cost four of twenty benchmark questions;
+    fixing it took the suite from 9/20 to 13/20 answers and 11/20 to 15/20
+    citations.
+    """
+
+    def _page(self, *, drawings: int):
+        class _FakePage:
+            rect = type("R", (), {"width": 612.0, "height": 792.0})()
+
+            def get_drawings(self):
+                return [{}] * drawings
+
+            def get_images(self, full=False):
+                return []
+
+            def get_image_bbox(self, img):
+                return None
+
+        return _FakePage()
+
+    def test_a_figure_page_cannot_arbitrate(self):
+        from api.processors.pdf_processor import PDFProcessor
+
+        proc = PDFProcessor.__new__(PDFProcessor)
+        assert proc._text_layer_is_credible(self._page(drawings=202)) is False
+
+    def test_an_ordinary_page_still_arbitrates(self):
+        """The strict reject must survive where its assumption holds, or a model
+        inventing a torque value goes unnoticed."""
+        from api.processors.pdf_processor import PDFProcessor
+
+        proc = PDFProcessor.__new__(PDFProcessor)
+        assert proc._text_layer_is_credible(self._page(drawings=25)) is True
+
+    def test_a_page_that_cannot_be_inspected_keeps_the_strict_check(self):
+        """Failing open here would silently disable the guardrail everywhere."""
+        from api.processors.pdf_processor import PDFProcessor
+
+        class _Broken:
+            def get_drawings(self):
+                raise RuntimeError("damaged page")
+
+        proc = PDFProcessor.__new__(PDFProcessor)
+        assert proc._text_layer_is_credible(_Broken()) is True
