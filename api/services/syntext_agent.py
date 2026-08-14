@@ -153,8 +153,18 @@ class SyntextAgent:
             page_num = result.get('page_number')
             meta = result.get('meta_data', {})
             
-            # --- Part 1: Format context for LLM --- 
-            context_header = f"--- Context Segment {segment_id} ---"
+            # --- Part 1: Format context for LLM ---
+            #
+            # The document and page are IN the header, not merely in the source
+            # map the reader sees afterwards. Without them the model is handed
+            # five near-identical charging charts labelled only "Segment 3" and
+            # "Segment 7", and cannot tell whose manual any of them is, let
+            # alone say so. Measured 2026-08-14: the stored Carrier chart reads
+            # "## R--410A CHARGING CHART | Measured Liquid Pressure ..." and the
+            # word Carrier appears nowhere in it, so the header is the only
+            # place that information can come from.
+            where = f" — {file_name}" + (f", page {page_num}" if page_num is not None else "")
+            context_header = f"--- Context Segment {segment_id}{where} ---"
             context_parts.append(f"{context_header}\n{content}")
             
             # --- Part 2: Create source mapping entry --- 
@@ -235,7 +245,12 @@ class SyntextAgent:
                     "3. If directly quoting text, use quotation marks and include page or timestamp: \"quoted text\" [Segment N, timestamp 3:45].\n"
                     "4. If the segments answer part of the question but not all of it, answer that part and say plainly which part they do not cover.\n"
                     "5. When citing timestamps or page numbers, be precise and only reference what actually appears in the context.\n"
-                    "6. If the question has several parts, cover every part the segments support, and cite the source of each."
+                    "6. If the question has several parts, cover every part the segments support, and cite the source of each.\n"
+                    "7. If segments from DIFFERENT documents give different answers to "
+                    "the same question — the same kind of table, code or specification "
+                    "appearing in more than one manual — do not choose between them and "
+                    "do not merge them. Give each answer with the document it comes "
+                    "from, then ask which one the reader means."
                 )
 
                 # Step 4: Adapt detail level based on comprehension level
