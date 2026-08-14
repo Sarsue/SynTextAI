@@ -255,7 +255,19 @@ def _has_content(body: Dict[str, Any]) -> bool:
 # into a degenerate loop, and this endpoint gives no seed to make runs
 # genuinely reproducible anyway. Low enough to be near-deterministic in
 # practice, and overridable for anything that ever wants variety.
-TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
+# ZERO, because every answer this product gives is read off a document.
+#
+# 0.1 is a small amount of sampling, and it was enough to make the same question
+# over the same corpus score 6, 7 and 8 out of 20 on three consecutive runs
+# (measured 2026-08-13). Two questions flipped between passing and failing with
+# nothing changed but the dice.
+#
+# That is not benchmark noise to be averaged away, it is the product being
+# non-deterministic about facts. A vision model was disqualified yesterday for
+# returning 78 where the page reads 80; sampling in the answering path is the
+# same failure with a friendlier name. If a technician asks the same question
+# twice they should get the same torque value.
+TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0"))
 
 
 # The configured chat model reasons before it answers, and that reasoning is

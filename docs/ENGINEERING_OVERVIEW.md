@@ -545,6 +545,70 @@ Order: vision (no stored data), chat (no stored data), embeddings (its own
 migration, its own measurement). Doing them in one change would make a retrieval
 regression impossible to attribute.
 
+## Retrieval, 2026-08-14: four ideas measured, four rejected
+
+The benchmark answers the same question the same way now, so a one-question
+difference is a fact rather than a coin flip. That is what made this possible
+and it is the only thing here that shipped.
+
+**Answering temperature is 0.** It was 0.1. Measured 2026-08-13, three
+consecutive runs of the same questions over the same corpus: 6, 7 and 8 out of
+20. Two questions flipped with nothing changed but the dice. That is not
+benchmark noise to average away, it is the product being non-deterministic about
+facts, in a tool that reads torque values off service manuals.
+
+It also means **every number quoted before this is suspect**, including the
+"8/20 baseline". That was one draw from a distribution centred near 7.
+
+### The four, on one corpus, all repeatable to the question
+
+| config | overall | citations |
+|---|---|---|
+| **untouched pipeline** | **8/20** | **9/20** |
+| truncate candidates to 15 | 7/20 | 9/20 |
+| cross-encoder rerank + truncate 15 | 6/20 | 8/20 |
+| cross-encoder rerank, no truncate | 7/20 | 9/20 |
+| model-written chunk context | 6/20 | 7/20 |
+| deterministic "<file>, page N" context | 6/20 | 7/20 |
+
+**A real cross-encoder does not help here.** `Qwen3-Reranker-0.6B` separates
+relevant from irrelevant by four orders of magnitude in isolation (0.97 against
+0.000016) and still loses to Reciprocal Rank Fusion end to end. Five HVAC
+service manuals are near the worst case for reranking: every document genuinely
+resembles every other, so there is little for a relevance judgement to separate.
+Worth retrying on a mixed-document workspace; the table above is what it has to
+beat. Note this is NOT the reranker deleted earlier — that one re-embedded
+`content[:600]` with the same bi-encoder and was rightly removed.
+
+**Contextual retrieval made it worse, twice, for two different reasons.**
+Model-written context said "the heat-pump service manual", which is true of all
+five manuals, and said it near-identically for every chunk of a page. Replacing
+it with the exact filename failed too, and one query says why:
+
+    to_tsvector('carrier_hch6_heatpump_service.pdf, page 62')
+      -> 'carrier_hch6_heatpump_service.pdf':1  'page':2  '62':3
+    to_tsquery('carrier') matches it?  -> FALSE
+
+**The filename is one indivisible token.** Searching "carrier" cannot match it.
+So the label added no discrimination while promoting `page` and a page number
+above the content at weight 'A', in every chunk in the corpus. Anything put in a
+weighted field has to survive tokenisation to be worth anything; split the
+filename on underscores first if this is retried.
+
+**Enabling the contextualiser also costs the embedding-reuse saving**, which is
+not a bug: reuse works because embedding is a pure function of its input, and a
+per-chunk context sentence makes that input document-specific. Identical
+boilerplate across twenty documents stops sharing a vector.
+
+### What the failures point at
+
+Nine of fourteen failures are "did not cite". Extraction and chunking are
+verified correct on stored rows, so the bottleneck is retrieval, and none of the
+usual levers moved it. Questions 6-8 ask "at 335 psig with 10 degrees of
+subcooling" without naming a manufacturer, against five manuals holding five
+near-identical charging charts. That is not a retrieval defect. It is a product
+question: the workspace should scope to one unit, or the answer should ask which.
+
 ## Decisions not to re-litigate
 
 One line each. The reasoning is in the commit or the code comment beside it.
