@@ -112,6 +112,73 @@ class AsyncUsageRepository(AsyncBaseRepository):
             )
             return {status: count for status, count in rows.all()}
 
+    async def ingestion_time(
+        self, organization_id: int, days: int = DEFAULT_DAYS
+    ) -> Dict[str, Any]:
+        """How long a document takes to become answerable, once work starts.
+
+        WHERE THE NUMBER COMES FROM
+
+        `agent_runs` already holds it. Every ingest is a row with run_type
+        'ingest_file' carrying created_at when it was queued, started_at when a
+        worker picked it up, and finished_at when it was done. Nothing new is
+        written to measure this and it covers documents ingested before anyone
+        thought to ask.
+
+        The alternative considered was the gap between the file row and its last
+        chunk. `chunks` carries no timestamp at all, so that needed a migration
+        and would have answered only for documents ingested after it.
+
+        PROCESSING, NOT WAITING
+
+        finished_at - started_at, deliberately. The queue wait is a real number
+        and it is a different one: it moves when the workers are busy, and no
+        change to extraction or chunking will touch it. Blending them into one
+        figure means a slower dashboard cannot tell you whether ingestion got
+        worse or the queue backed up, which have nothing to do with each other.
+
+        MEDIAN AS WELL AS MEAN
+
+        One 400-page manual among twenty memos drags an average somewhere no
+        real document has ever been. The median says what a document usually
+        costs and the two together say whether the average is worth reading.
+
+        Only runs that finished. A failure has a duration and it is the duration
+        of giving up, which is not what this is asking.
+        """
+        async with self.get_async_session() as session:
+            row = (await session.execute(
+                text(
+                    """
+                    SELECT count(*),
+                           avg(extract(epoch FROM (r.finished_at - r.started_at))),
+                           percentile_cont(0.5) WITHIN GROUP (
+                               ORDER BY extract(epoch FROM (r.finished_at - r.started_at))
+                           ),
+                           max(extract(epoch FROM (r.finished_at - r.started_at)))
+                    FROM agent_runs r
+                    JOIN workspaces w ON w.id = r.workspace_id
+                    WHERE w.organization_id = :org
+                      AND r.run_type = 'ingest_file'
+                      AND r.status = 'succeeded'
+                      AND r.started_at IS NOT NULL
+                      AND r.finished_at IS NOT NULL
+                      AND r.finished_at >= now() - make_interval(days => :days)
+                    """
+                ),
+                {"org": int(organization_id), "days": int(days)},
+            )).first()
+
+        documents, mean, median, slowest = row or (0, None, None, None)
+        return {
+            # So the caller can say "not enough to average yet" rather than
+            # showing a confident number drawn from one document.
+            "documents": int(documents or 0),
+            "average_seconds": round(float(mean), 1) if mean is not None else None,
+            "median_seconds": round(float(median), 1) if median is not None else None,
+            "slowest_seconds": round(float(slowest), 1) if slowest is not None else None,
+        }
+
     async def answers_rated(
         self, organization_id: int, days: int = DEFAULT_DAYS
     ) -> Dict[str, Any]:

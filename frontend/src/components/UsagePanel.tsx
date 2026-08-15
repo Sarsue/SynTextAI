@@ -13,12 +13,32 @@ interface Usage {
         failed: number;
         never_retrieved: string[];
     };
+    // Optional on purpose. A deploy replaces the bundle and the API at
+    // different moments, and a browser holding yesterday's tab meets today's
+    // API, so a field this panel expects can genuinely be absent. Typed as
+    // present, it read `usage.ingestion.average_seconds` off undefined and took
+    // the whole Settings page down to a white screen over one missing tile.
+    // Caught by opening the page; nothing else would have.
+    ingestion?: {
+        documents: number;
+        average_seconds: number | null;
+        median_seconds: number | null;
+        slowest_seconds: number | null;
+    };
     feedback: {
         helpful: number;
         unhelpful: number;
         reasons: { reason: string; count: number }[];
     };
 }
+
+/** Seconds as a person would say them. */
+const duration = (seconds: number): string => {
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const rest = Math.round(seconds % 60);
+    return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+};
 
 /** The four chips from the answer feedback form, in words rather than keys. */
 const REASON_LABELS: Record<string, string> = {
@@ -84,7 +104,7 @@ const UsagePanel: React.FC = () => {
     if (error) return <p className="usage-status">{error}</p>;
     if (!usage) return null;
 
-    const { documents, feedback } = usage;
+    const { documents, feedback, ingestion } = usage;
     const rated = feedback.helpful + feedback.unhelpful;
 
     return (
@@ -100,6 +120,31 @@ const UsagePanel: React.FC = () => {
                     <span className="usage-number">{documents.total}</span>
                     <span className="usage-label">documents</span>
                 </div>
+                {/* How long a document takes to become answerable, counted from
+                    when a worker picks it up. Waiting in the queue is left out
+                    on purpose: it moves when the workers are busy, which is a
+                    different problem with a different fix, and one figure
+                    covering both cannot say which of them got worse.
+
+                    Absent rather than zero when nothing has been ingested in
+                    the window, because "0s" reads as instant rather than as
+                    nothing to report. The median and the slowest sit in the
+                    tooltip: one long manual pulls an average somewhere no real
+                    document has been, and the pair says whether to believe it.
+                */}
+                {ingestion?.average_seconds != null && (
+                    <div
+                        className="usage-figure"
+                        title={
+                            `${ingestion.documents} document${ingestion.documents === 1 ? '' : 's'}. ` +
+                            `Half took under ${duration(ingestion.median_seconds ?? 0)}. ` +
+                            `Slowest ${duration(ingestion.slowest_seconds ?? 0)}.`
+                        }
+                    >
+                        <span className="usage-number">{duration(ingestion.average_seconds)}</span>
+                        <span className="usage-label">average processing</span>
+                    </div>
+                )}
                 {/* Only when there are any. A zero here is good news and does
                     not need a box of its own competing for attention. */}
                 {documents.failed > 0 && (
