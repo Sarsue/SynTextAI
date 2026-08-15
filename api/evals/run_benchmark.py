@@ -136,6 +136,42 @@ def looks_like_refusal(answer: str) -> bool:
     return any(m in a for m in REFUSAL_MARKERS)
 
 
+# A question is ambiguous when several documents answer it and the question
+# names none of them: "at 335 psig what liquid line temp" against five manuals
+# holding five charging charts. There is no correct single answer, and picking
+# one is guessing with a citation attached.
+#
+# This is NOT a refusal. A refusal says the documents do not cover it; the
+# documents cover it several times over. Scoring it as a refusal would accept
+# "I could not find that", which is wrong and unhelpful.
+_ASKING = (
+    "which ", "which one", "could you clarify", "can you clarify", "please specify",
+    "please confirm", "are you asking about", "do you mean", "did you mean",
+    "let me know which", "tell me which", "specify which",
+)
+
+
+def looks_like_clarification(answer: str, documents: List[str]) -> Tuple[bool, str]:
+    """Did it ask which document, AND name the candidates?
+
+    Naming them is the whole requirement. "Which unit do you mean?" makes the
+    customer do the work of remembering what they uploaded; "this appears in
+    your Carrier HCH6 and your Goodman GVXC — which one?" is an answer they can
+    act on in one click. A bare question is scored as a failure.
+    """
+    a = normalise(answer)
+    if not any(m in a for m in _ASKING):
+        return False, "did not ask which document was meant"
+    named = [d for d in documents if normalise(Path(d).stem.replace("_", " ")).split()[0] in a
+             or normalise(d) in a]
+    if len(named) < 2:
+        return False, (
+            "asked for clarification without naming the documents it is "
+            "choosing between"
+        )
+    return True, ""
+
+
 class Client:
     def __init__(self, base_url: str, token: str, workspace_id: int):
         self.base = base_url.rstrip("/")
@@ -288,6 +324,23 @@ def score(q: Dict[str, Any], answer: str) -> Dict[str, Any]:
     }
     body = normalise(answer)
 
+    if q.get("must_seek_clarification"):
+        # Several documents answer this and the question names none of them.
+        # The right behaviour is to ask, naming the candidates -- so BOTH
+        # answering confidently and refusing outright are failures here.
+        asked, why = looks_like_clarification(answer, q.get("candidates") or [])
+        result["kind"] = "clarification"
+        result["passed"] = asked
+        if not asked:
+            if looks_like_refusal(answer):
+                result["failures"].append(
+                    "declined a question several documents answer, instead of "
+                    "asking which was meant"
+                )
+            else:
+                result["failures"].append(why)
+        return result
+
     if q.get("must_be_refusal"):
         refused = looks_like_refusal(answer)
         result["kind"] = "refusal"
@@ -424,6 +477,7 @@ def main() -> int:
             print("" if r["passed"] else f"  {r['failures'][0][:60]}")
 
         grounded = [r for r in results if r["kind"] == "grounded"]
+        clarifications = [r for r in results if r["kind"] == "clarification"]
         refusals = [r for r in results if r["kind"] == "refusal"]
         passed = [r for r in results if r["passed"]]
         cited_ok = [r for r in grounded if r.get("cited_correctly")]
@@ -432,6 +486,8 @@ def main() -> int:
             "passed": len(passed),
             "grounded": len(grounded),
             "citations_correct": len(cited_ok),
+            "clarifications": len(clarifications),
+            "clarifications_honoured": len([r for r in clarifications if r["passed"]]),
             "refusals": len(refusals),
             "refusals_honoured": len([r for r in refusals if r["passed"]]),
         })

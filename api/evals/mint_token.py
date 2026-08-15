@@ -36,6 +36,12 @@ import os
 import sys
 
 import requests
+from dotenv import find_dotenv, load_dotenv
+
+# `docker exec` starts a process that inherits none of the app's environment,
+# and the key lives in the same .env the app loads at startup. Read it the same
+# way rather than making the caller export anything by hand.
+load_dotenv(find_dotenv(usecwd=True) or "/app/.env")
 
 
 def main() -> int:
@@ -45,7 +51,18 @@ def main() -> int:
         "--credentials",
         default=os.getenv("FIREBASE_CREDENTIALS", "/app/api/config/credentials.json"),
     )
-    ap.add_argument("--api-key", default=os.getenv("FIREBASE_API_KEY"))
+    # The Firebase Web API key. There is one per project and it is public by
+    # design, since it ships inside the browser bundle; the identitytoolkit
+    # exchange below wants the same value the frontend signs in with.
+    #
+    # It has only ever existed in .env under the VITE_ name the frontend build
+    # reads, so looking solely for FIREBASE_API_KEY meant this tool could never
+    # find a key that was sitting right there, and the benchmark looked like it
+    # needed a config change to run. It did not.
+    ap.add_argument(
+        "--api-key",
+        default=os.getenv("FIREBASE_API_KEY") or os.getenv("VITE_FIREBASE_API_KEY"),
+    )
     args = ap.parse_args()
 
     if not args.api_key:

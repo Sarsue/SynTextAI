@@ -385,12 +385,11 @@ class AsyncFileRepository(AsyncBaseRepository):
                     meta = {
                         k: v for k, v in units[0].items()
                         if k not in ('text', 'content', 'page_num', 'page_number',
-                                     'embedding', 'chunks', 'context', 'page_text')
+                                     'embedding', 'chunks', 'page_text')
                     }
                     segment = SegmentORM(
                         file_id=file.id,
                         content=page_text,
-                        context=(units[0].get('context') or None),
                         page_number=page_key,
                     )
                     if meta:
@@ -747,14 +746,18 @@ class AsyncFileRepository(AsyncBaseRepository):
                       ORDER BY ts_rank_cd(c.tsv, q.literals, 32) DESC
                       LIMIT :candidates
                     ),
+                    -- Ranked on the chunk, like the other two arms. This used
+                    -- to join `segments` and then rank `c.tsv` anyway, left
+                    -- over from when the text arm read `s.tsv`. The join
+                    -- decided nothing: every chunk has a segment, checked
+                    -- 2026-08-15 across 2,633 rows, so it only cost work.
                     txt AS (
                       SELECT c.id AS chunk_id,
                              ROW_NUMBER() OVER (
                                ORDER BY ts_rank_cd(c.tsv, q.keywords, 32) DESC
                              ) AS rank
-                      FROM segments s
-                      JOIN chunks c ON c.segment_id = s.id
-                      JOIN files f ON f.id = s.file_id
+                      FROM chunks c
+                      JOIN files f ON f.id = c.file_id
                       CROSS JOIN query q
                       WHERE """ + where_sql + """ AND c.tsv @@ q.keywords
                       ORDER BY ts_rank_cd(c.tsv, q.keywords, 32) DESC
@@ -846,21 +849,6 @@ class AsyncFileRepository(AsyncBaseRepository):
             except Exception as e:
                 logger.error(f"Error performing hybrid_search: {e}", exc_info=True)
                 return []
-
-    async def set_outline(self, file_id: int, outline: List[Dict[str, Any]]) -> bool:
-        """Store what the document says it contains."""
-        async with self.get_async_session() as session:
-            try:
-                await session.execute(
-                    text("UPDATE files SET outline = CAST(:outline AS jsonb) WHERE id = :fid"),
-                    {"outline": json.dumps(outline), "fid": int(file_id)},
-                )
-                await session.commit()
-                return True
-            except Exception as e:
-                await session.rollback()
-                logger.error(f"Could not store outline for file {file_id}: {e}")
-                return False
 
     async def get_file_pages(self, file_id: int) -> List[Dict[str, Any]]:
         """Every page of a document, in order, as extracted.

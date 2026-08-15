@@ -321,9 +321,15 @@ In order. The first two need nothing from anybody.
    no benchmark number for it yet.
 3. **Memory.** Standing facts per organization and workspace, editable, fed by
    the feedback that already arrives.
-4. **The agent tool layer.** Built and behind `AGENT_MODE=tools`, currently
-   losing on citations: 13-14 of 22 against the fixed pipeline's 16-18. It
-   replaces the pipeline when it wins, not before.
+4. **The agent tool layer.** ~~Built and behind `AGENT_MODE=tools`~~ **This is
+   stale, corrected 2026-08-15.** There is no `AGENT_MODE` in the codebase and
+   no tool layer. `tool_agent.py` and `document_tools.py` were deleted in
+   40ca829, "One pipeline that sometimes loops, instead of a pipeline and an
+   agent", after the two systems scored 16.2 and 17.0 calling the same
+   `hybrid_search` and three regressions came from the code around them
+   drifting. What survives is `query_agent.py`, one graph that retrieves again
+   when coverage says a question has a second information need. Rebuilding a
+   tool layer is a fresh decision, not a flag to flip.
 
 ## Vision extraction: in progress, not merged
 
@@ -545,6 +551,226 @@ Order: vision (no stored data), chat (no stored data), embeddings (its own
 migration, its own measurement). Doing them in one change would make a retrieval
 regression impossible to attribute.
 
+## Ingestion, 2026-08-15: what DOCX and TXT documents were losing
+
+Two faults, both only in the Word and text paths, both invisible to every
+measurement taken so far because the benchmark corpus is PDFs. Found by reading
+the ingestion code rather than by a failing question.
+
+**Punctuation was deleted before embedding.** `clean_text` had a `csv_like`
+branch that stripped everything except letters, digits, commas, dots, spaces and
+newlines. `detect_content_type` chose it for any text with a comma and more than
+three lines, which is ordinary prose. It could never fire on a PDF, because a
+PDF page carries its "Page N" marker and matched an earlier branch first, so the
+damage fell entirely on the formats an SMB customer actually uploads.
+
+Driven through the real ingestion path against the local database, one Word
+policy document, before and after:
+
+| in the document | stored in `chunks.content` before | after |
+|---|---|---|
+| `billing@acme.com` | `billingacme.com` | unchanged |
+| `555-0134` | `5550134` | unchanged |
+| `1.5%` | `1.5` | unchanged |
+| `$1,200/month` | `1,200month` | unchanged |
+| `(see Schedule A)` | `see Schedule A` | unchanged |
+
+That column is not only what a reader sees. It is what gets embedded, what the
+keyword index is built from, and what the model is handed to answer from. It
+also disarmed the literal-token arm of the search, whose whole job is to let a
+rare token decide the ranking: nobody searches for `5550134`.
+
+The branch is gone rather than fixed. Real CSV uploads are not supported, and if
+they become supported they need a parser, not a regex deleting punctuation from
+every other format on the way past.
+
+**A Word table was not a table.** `_chunk_table` cuts on row boundaries and
+repeats the header above every piece, and only PDF pages read by the vision
+model were ever marked `is_markdown`, so no DOCX ever reached it. Rows were
+joined with a bare `" | "`, with no pipes on the ends and no separator row, so
+they would not have been recognised as a table even if the flag had been set.
+A 60-row pricing table went through the general 400-token splitter: cut mid-row,
+header left behind in the first piece. Same failure as the charging chart on
+2026-08-13, one format over.
+
+Tables are now rendered as real markdown and marked as such. Same document,
+same real path: 3 table chunks, every one carrying the `Table 1` caption and the
+`| Plan | Users | Monthly | Annual |` header, every row intact. Before: 0 chunks
+matched a table shape at all. `.md` uploads are marked from their extension too.
+
+**Nothing needed re-ingesting.** Both faults are written into stored chunks, so
+an affected document stays damaged until it is uploaded again. Osas confirmed
+2026-08-15 that no DOCX or TXT document exists in production yet, so there was
+nothing to backfill. If that ever stops being true before this ships somewhere
+new, the rule stands: a number measured on re-processed data does not describe
+what is in production.
+
+**The benchmark still cannot see any of this.** `citation_benchmark.yaml` is
+PDFs. Until it has DOCX and TXT questions in it, this whole section is verified
+by driving the pipeline and reading the stored rows, which is how it was done,
+and not by a score.
+
+## Three things written and read by nothing, resolved 2026-08-15
+
+Found by reading the ingestion path. Each was written on purpose and then lost
+its reader, which is the state that quietly rots: a future reader cannot tell
+whether the column is authoritative, and `segments.tsv` was a GIN index
+maintained on every insert to answer a query nobody sends.
+
+**The vision verification flags: finished.** `_read_page_with_vision` decides,
+deliberately, to keep a figure page whose numbers the text layer cannot confirm
+and to flag it instead of rejecting it. Enforcing the strict rule there cost
+four benchmark questions on 2026-08-14, so the decision matters. The flags went
+into `page_reads`, which is an extraction cache nothing queries while answering,
+and the in-run collection was assigned twice and read nowhere. They now travel
+on the page to `segments.meta_data`, which `hybrid_search` already returns with
+every result. Displaying them to a reader is still an open design decision.
+
+**`files.outline`: deleted.** Not an untried idea, a tried one. It had two
+consumers and both are gone: the `outline` tool, whose own comment on
+2026-08-05 read "The `outline` tool exists and the model does not call it,
+exactly as it did not call read_page when told to. Two prompt revisions failed
+to change that", and then `workspace_map`, which stopped asking and stuffed
+every document's contents into the prompt, which went with the whole tool layer
+in 40ca829. Extraction also cost a full `get_text("dict")` pass over every page
+of any PDF without an embedded contents page, paid on every upload for nobody.
+`api/services/outline.py` and `api/scripts/backfill_outline.py` are in the
+history at c026c2d if the idea comes back with a consumer attached.
+
+**`segments.context` and `segments.tsv`: deleted.** The context sentence went
+entirely, see the section below. `segments.tsv` had not been queried by anything
+since chunk-level retrieval landed on 2026-08-06, and was a GIN index maintained
+on every insert to answer nothing. The segment keeps `content`, which is the
+page a citation opens, and that is what a segment is for. Retrieval measured
+before and after: 17/17 and 8/10, unchanged.
+
+Also gone: the vestigial `segments` join in the text arm of `hybrid_search`,
+left from when that arm read `s.tsv`. It ranked `c.tsv` anyway and every chunk
+has a segment, checked across 2,633 rows, so it decided nothing and only cost
+work.
+
+## The embedding model changed and the documents did not, 2026-08-15
+
+Confined to the development database. **Production is clean, confirmed by Osas
+2026-08-15**, so no customer was ever answered from this. What it did cost is
+every local retrieval measurement taken between the provider switch on 08-13 and
+the repair on 08-15, which includes the runs that rejected contextual retrieval.
+
+Worth writing down anyway, because it is the failure the provider consolidation
+section above predicts in writing, including the word "silently", and because
+nothing in the system noticed for two days.
+
+**What happened.** Reads moved from `voyage-3.5-lite` to
+`Qwen3-Embedding-0.6B`. Both are 1024 dimensions, so every stored vector still
+fits the column, every query still returns rows, and nothing anywhere raises.
+Questions were being embedded with one model and compared against documents
+holding another, which is arithmetic on two unrelated coordinate systems.
+
+**How it was found, and the shape of the check worth keeping.** Embedding is a
+pure function of its input, so a chunk's stored vector and a fresh embedding of
+that chunk's own text must be the same vector. Cosine near 1 means the same
+model wrote it. Near 0 means a different one did. One embedding call per
+workspace answers it, and it needs no benchmark and no opinion:
+
+| workspace | chunks | uploaded | cosine |
+|---|---|---|---|
+| 1 | 184 | 2026-08-08 to 08-12 | -0.044 |
+| 4060 | 210 | 2026-08-06 to 08-07 | -0.044 |
+| 4219 | 540 | 2026-08-06 | -0.053 |
+| 7354 | 1607 | 2026-08-12 | **+0.9998** |
+
+**What it cost, measured on the SMB benchmark corpus.** `retrieval_ranks.py`,
+which asks only whether each question's required page reached the fused top 25
+and at what rank. No model in the loop, so the numbers are exact rather than a
+draw from a distribution:
+
+| | before repair | after repair |
+|---|---|---|
+| single-document questions with their source retrieved | **6/17** | **17/17** |
+| multi-document questions with every source retrieved | **0/10** | **8/10** |
+
+Eleven of seventeen questions could not retrieve their own answer. The documents
+were fine, the chunking was fine, the index was fine, and the product was
+answering from whatever happened to land nearest in a space that meant nothing.
+
+**The repair.** `api/scripts/reembed_chunks.py`. `--check` audits every
+workspace with one call each; `--workspace N` or `--all` re-embeds with the
+model configured now and rewrites `content_hash` to match, because the hash is
+the sha256 of the text that was actually embedded and a stale hash beside a new
+vector poisons the reuse cache for every document sharing that text.
+
+**Production was checked and is clean.** Run `--check` there again after any
+future change of embedding model or provider, because this failure presents as
+a customer saying the answers got worse rather than as an error anybody sees.
+
+**122 chunks could not be repaired.** They pre-date `chunks.content` (added
+2026-08-06), so the text they were made from is stored nowhere and they are
+invisible to both keyword arms as well. The only fix is uploading those
+documents again. The check reports them rather than quietly re-embedding 88 of
+210 and calling it done.
+
+**The lesson, and it is the same one as the 165-second page.** The overview
+already said embeddings are a data migration and named the gate: second column,
+backfill, switch reads, benchmark. In production that was followed. Locally the
+reads were switched and the documents were not, and nothing anywhere said so for
+two days, which is the part that would have mattered had it gone the other way.
+
+**The narrower lesson, which cost real work here.** A benchmark run says nothing
+about retrieval unless the corpus it ran on is in a state somebody has checked.
+Three separate conclusions were drawn from this corpus while it was broken. Run
+`--check` before trusting a local retrieval number, not after being surprised by
+one.
+
+## Contextual retrieval, measured properly and then removed, 2026-08-15
+
+Deleted: `services/contextualizer.py`, `scripts/backfill_context.py`,
+`CONTEXTUALIZE_CHUNKS`, `chunks.context`, `segments.context`, and the weighted
+tsvector. Embedding input is now the chunk's text and nothing else.
+
+**Why the old number meant nothing.** The 2026-08-14 result could not have said
+what it claimed: the keyword half was never wired up, the backfill flattened
+every chunk of a page to one page-level vector, and the corpus held vectors from
+the wrong model. Three reasons for a bad number, none of them "context does not
+help".
+
+**So it was measured once, properly.** Mechanism complete, corpus repaired, 463
+of 540 chunks contextualised (77 calls came back empty, the reasoning-budget
+failure described above):
+
+| | no context | with context |
+|---|---|---|
+| single-document retrieved | 17/17 | 17/17 |
+| multi-document retrieved | 8/10 | 8/10 |
+| mean worst rank | **5.80** | **6.12** |
+| worst rank improved / unchanged / degraded | | **4 / 14 / 7** |
+
+Nothing new retrieved, ranks slightly worse.
+
+**Why it was never likely to work here, which is the part worth carrying.**
+Anthropic send the entire document with every chunk and rely on prompt caching
+to afford it. With no prompt caching this sent one document-level précis shared
+by every chunk of that document, which is a different technique wearing the same
+name. The context it produced said "the heat-pump service manual", true of all
+five manuals and near-identical for every chunk of a page, so at weight 'A' it
+crowded out the body text while adding no way to tell anything apart.
+
+Underneath that is a property of the corpus, and it is the same one that beat
+the cross-encoder: contextual retrieval pays when a passage is ambiguous alone
+and the document identity resolves it. Five near-identical service manuals, or
+five small-business government guides, are exactly where document identity
+resolves nothing. It also costs the embedding-reuse saving, because a per-chunk
+context sentence makes the embedded text document-specific, so even a neutral
+result was a net loss.
+
+**The test to apply next time** is not "has somebody published good numbers for
+this". It is "is there a reason this mechanism separates OUR documents from each
+other". Both rejected retrieval ideas failed that question and neither was asked
+it first.
+
+If it is ever retried, on a genuinely mixed workspace and with per-chunk context
+rather than a shared précis, the numbers above are what it has to beat, and the
+empty-response failure has to be fixed first.
+
 ## Retrieval, 2026-08-14: four ideas measured, four rejected
 
 The benchmark answers the same question the same way now, so a one-question
@@ -595,10 +821,15 @@ above the content at weight 'A', in every chunk in the corpus. Anything put in a
 weighted field has to survive tokenisation to be worth anything; split the
 filename on underscores first if this is retried.
 
-**Enabling the contextualiser also costs the embedding-reuse saving**, which is
-not a bug: reuse works because embedding is a pure function of its input, and a
-per-chunk context sentence makes that input document-specific. Identical
-boilerplate across twenty documents stops sharing a vector.
+**Both context rows of the table above are void, found 2026-08-15.** Only the
+embedding half of contextual retrieval was ever connected: the migration adding
+`chunks.tsv` claims in its own comment to weight the context sentence and then
+builds `to_tsvector('english', coalesce(content, ''))`, against a table with no
+context column. The keyword arms never saw a context sentence, and storage kept
+one sentence per page rather than one per chunk. The experiment was re-run
+properly and contextual retrieval was then removed outright; see "Contextual
+retrieval, measured properly and then removed". The filename-tokenisation
+finding above stands on its own and is the more useful half of this anyway.
 
 ### What the failures point at
 
@@ -648,6 +879,13 @@ One line each. The reasoning is in the commit or the code comment beside it.
   `docs.google.com` or citations and the Drive picker break.
 - **"Workflow automation" is marketed and does not exist.** It is the last item
   on the roadmap for a reason.
+- **Nothing displays the vision verification flags yet.** They now reach
+  `segments.meta_data` and come back from `hybrid_search` with every result, so
+  the data is there. Whether a citation to an unverified figure page should say
+  so, and how, is a design decision nobody has made.
+- **A corpus can silently hold vectors from a retired embedding model.** Nothing
+  detects this at runtime. `api/scripts/reembed_chunks.py --check` does, in one
+  call per workspace; it is not wired into the deploy or into any alert.
 - **A browser build value has to be correct in five places**: the workflow's
   env file, its build args, the Dockerfile `ARG` and `ENV`, the compose file,
   and the secret itself. Every one fails silently and green. The deploy now

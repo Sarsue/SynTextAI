@@ -34,17 +34,33 @@ together: the embedding never found it, the keyword index never found it, or
 both found it and the fusion buried it. Those need different fixes, and the
 fusion weights cannot be tuned sensibly without knowing which.
 
-No model runs here. Pure SQL against the same two searches hybrid_search fuses,
-so it is deterministic and fast enough to sweep.
+No model runs here. Pure SQL against the same searches hybrid_search fuses, so
+it is deterministic and fast enough to sweep.
+
+WHAT IT WAS MEASURING INSTEAD, FIXED 2026-08-15
+
+Two ways this had drifted from the retriever it exists to describe, both of
+which make an old number here incomparable with a new one:
+
+  - the text arm ranked `s.tsv`, the SEGMENT index, while hybrid_search has
+    ranked `c.tsv` since chunk-level retrieval landed on 2026-08-06. Those are
+    different indexes over different units.
+  - there was no literal arm at all. Production has fused three lists since
+    2026-08-14, and the third one exists because it is what puts a rare token
+    like 251 or E4 at the top. Sweeping vector against keyword while the
+    shipped retriever fuses three could not have described it.
 """
 import asyncio, os, statistics, sys
 import yaml
 from sqlalchemy import text
 from api.repositories.repository_manager import RepositoryManager
+from api.repositories.async_file_repository import literal_tokens
 from api.services.llm_service import get_text_embedding, aclose_client
 
 WS = int(os.getenv("WS", "4219"))
 POOL = 100
+# The shipped weights, so the default run describes what customers get.
+VW, BW, LW = 0.7, 0.3, 0.7
 
 VEC = """
 SELECT c.id, s.page_number, f.file_name,
@@ -56,31 +72,52 @@ WHERE f.workspace_id=:w ORDER BY c.embedding <=> CAST(:emb AS vector) LIMIT :poo
 TXT = """
 WITH q AS (SELECT REPLACE(plainto_tsquery('english', :kw)::text,' & ',' | ')::tsquery AS kw)
 SELECT c.id, s.page_number, f.file_name,
-       ROW_NUMBER() OVER (ORDER BY ts_rank_cd(s.tsv, q.kw, 32) DESC) AS rank
-FROM segments s JOIN chunks c ON c.segment_id=s.id JOIN files f ON f.id=s.file_id CROSS JOIN q
-WHERE f.workspace_id=:w AND s.tsv @@ q.kw
-ORDER BY ts_rank_cd(s.tsv, q.kw, 32) DESC LIMIT :pool
+       ROW_NUMBER() OVER (ORDER BY ts_rank_cd(c.tsv, q.kw, 32) DESC) AS rank
+FROM chunks c JOIN files f ON f.id=c.file_id LEFT JOIN segments s ON s.id=c.segment_id
+CROSS JOIN q
+WHERE f.workspace_id=:w AND c.tsv @@ q.kw
+ORDER BY ts_rank_cd(c.tsv, q.kw, 32) DESC LIMIT :pool
 """
+
+LIT = """
+WITH q AS (SELECT CAST(:lit AS tsquery) AS lit)
+SELECT c.id, s.page_number, f.file_name,
+       ROW_NUMBER() OVER (ORDER BY ts_rank_cd(c.tsv, q.lit, 32) DESC) AS rank
+FROM chunks c JOIN files f ON f.id=c.file_id LEFT JOIN segments s ON s.id=c.segment_id
+CROSS JOIN q
+WHERE f.workspace_id=:w AND c.tsv @@ q.lit
+ORDER BY ts_rank_cd(c.tsv, q.lit, 32) DESC LIMIT :pool
+"""
+
+
+def _best_rank_per_page(rows):
+    """A page is the citation unit, so several chunks of it collapse to its best
+    rank. The rows arrive in rank order, so the first one seen is the best."""
+    out = {}
+    for _cid, page, fname, rank in rows:
+        out.setdefault((fname, page), int(rank))
+    return out
 
 
 async def ranks_for(session, question, emb):
     vec = (await session.execute(text(VEC), {"emb": emb, "w": WS, "pool": POOL})).all()
     txt = (await session.execute(text(TXT), {"kw": question, "w": WS, "pool": POOL})).all()
-    v = {}
-    for _cid, page, fname, rank in vec:
-        v.setdefault((fname, page), int(rank))
-    t = {}
-    for _cid, page, fname, rank in txt:
-        t.setdefault((fname, page), int(rank))
-    return v, t
+
+    tokens = literal_tokens(question)
+    lit = []
+    if tokens:
+        lit = (await session.execute(
+            text(LIT), {"lit": " | ".join(tokens), "w": WS, "pool": POOL}
+        )).all()
+
+    return _best_rank_per_page(vec), _best_rank_per_page(txt), _best_rank_per_page(lit)
 
 
-def fuse(v, t, vw, bw, top):
+def fuse(v, t, lit, vw, bw, top, lw=LW):
     scores = {}
-    for key, rank in v.items():
-        scores[key] = scores.get(key, 0.0) + vw / (60 + rank)
-    for key, rank in t.items():
-        scores[key] = scores.get(key, 0.0) + bw / (60 + rank)
+    for ranks, weight in ((v, vw), (t, bw), (lit, lw)):
+        for key, rank in ranks.items():
+            scores[key] = scores.get(key, 0.0) + weight / (60 + rank)
     ordered = sorted(scores, key=scores.get, reverse=True)
     return {key: i for i, key in enumerate(ordered[:top], start=1)}
 
@@ -95,9 +132,9 @@ async def main():
     async with repo.get_async_session() as session:
         for q in qs:
             emb = "[" + ",".join(str(float(x)) for x in await get_text_embedding(q["question"])) + "]"
-            v, t = await ranks_for(session, q["question"], emb)
+            v, t, l = await ranks_for(session, q["question"], emb)
             gold = [(c["file"], p) for c in q["citations"] for p in c["pages"]]
-            cache.append((q, v, t, gold))
+            cache.append((q, v, t, l, gold))
 
     if sweep:
         # The binding constraint is the WORST required source, not the easiest.
@@ -108,8 +145,13 @@ async def main():
 
         def measure(rows, vw, bw, top=25):
             complete, worst = 0, []
-            for q, v, t, _g in rows:
-                fused = fuse(v, t, vw, bw, top)
+            for q, v, t, l, _g in rows:
+                # The literal arm is held at its shipped weight through the
+                # sweep. It answers a different question from the other two --
+                # "which chunk contains this exact token" -- and folding it into
+                # a vector-against-keyword trade-off would make both axes mean
+                # something else.
+                fused = fuse(v, t, l, vw, bw, top)
                 per = [next((fused.get((c["file"], p)) for p in c["pages"]
                              if (c["file"], p) in fused), None) for c in q["citations"]]
                 if all(per):
@@ -134,8 +176,8 @@ async def main():
     # the loop was built for.
     full, partial = 0, 0
     print(f"{'q':>3} {'srcs':>5} {'in top25':>9}  {'fused ranks':<22} question")
-    for q, v, t, gold in cache:
-        fused = fuse(v, t, 0.7, 0.3, 25)
+    for q, v, t, l, gold in cache:
+        fused = fuse(v, t, l, VW, BW, 25)
         per_source = []
         for c in q["citations"]:
             hit = next((fused.get((c["file"], p)) for p in c["pages"]
@@ -154,8 +196,8 @@ async def main():
     single = [c for c in cache if len(c[0]["citations"]) == 1]
     def rate(rows):
         ok = 0
-        for q, v, t, gold in rows:
-            fused = fuse(v, t, 0.7, 0.3, 25)
+        for q, v, t, l, gold in rows:
+            fused = fuse(v, t, l, VW, BW, 25)
             if all(any((c["file"], p) in fused for p in c["pages"]) for c in q["citations"]):
                 ok += 1
         return ok, len(rows)

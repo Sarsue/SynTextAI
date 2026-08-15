@@ -170,6 +170,14 @@ questions:
       Rows are measured liquid pressure, columns are required subcooling.
       251/10 is 74F. 251/6 is 78F, the same row two columns left, which is
       what a flattened table returns.
+    # Measured 2026-08-15 against the ingested corpus: Three manuals carry a subcooling charging table, and this question names none.
+    # Answering one of them is a guess with a citation attached, and
+    # declining is wrong too, because the documents DO cover it.
+    must_seek_clarification: true
+    candidates:
+      - carrier_hch6_heatpump_service.pdf
+      - goodman_gszc7_service.pdf
+      - goodman_gvxc_service.pdf
 
   - id: 7
     question: at 335 psig with 10 degrees of subcooling what liquid line temp am I looking for
@@ -177,6 +185,14 @@ questions:
       - file: carrier_hch6_heatpump_service.pdf
         pages: [9]
     must_include: ["94"]
+    # Measured 2026-08-15 against the ingested corpus: Same three. 335 psig is a meter reading, not a document.
+    # Answering one of them is a guess with a citation attached, and
+    # declining is wrong too, because the documents DO cover it.
+    must_seek_clarification: true
+    candidates:
+      - carrier_hch6_heatpump_service.pdf
+      - goodman_gszc7_service.pdf
+      - goodman_gvxc_service.pdf
 
   - id: 8
     question: 384 psig 6 degree subcooling liquid line temperature
@@ -184,6 +200,14 @@ questions:
       - file: carrier_hch6_heatpump_service.pdf
         pages: [9]
     must_include: ["108"]
+    # Measured 2026-08-15 against the ingested corpus: Same three.
+    # Answering one of them is a guess with a citation attached, and
+    # declining is wrong too, because the documents DO cover it.
+    must_seek_clarification: true
+    candidates:
+      - carrier_hch6_heatpump_service.pdf
+      - goodman_gszc7_service.pdf
+      - goodman_gvxc_service.pdf
 
   # ---------- tables: physical data, four models side by side ----------
   - id: 9
@@ -215,6 +239,15 @@ questions:
     must_include: ["670"]
     must_not_include: ["470"]
     notes: 470 is the close pressure. Open and close sit adjacent in the table.
+    # Measured 2026-08-15 against the ingested corpus: Four manuals document a high pressure switch.
+    # Answering one of them is a guess with a citation attached, and
+    # declining is wrong too, because the documents DO cover it.
+    must_seek_clarification: true
+    candidates:
+      - carrier_hch6_heatpump_service.pdf
+      - goodman_gszc7_service.pdf
+      - goodman_gvxc_service.pdf
+      - trane_dc_inverter_technical.pdf
 
   - id: 12
     question: PSC fan motor horsepower on the size 24
