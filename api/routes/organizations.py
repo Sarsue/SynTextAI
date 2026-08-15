@@ -250,6 +250,11 @@ async def organization_usage(
             "failed": documents.get("failed", 0),
             "never_retrieved": await usage.documents_never_retrieved(organization_id),
         },
+        # How long a document takes to become answerable once work starts. Time
+        # spent waiting in the queue is deliberately not folded in: it moves for
+        # reasons that have nothing to do with ingestion, and one number covering
+        # both cannot tell an owner which of the two got worse.
+        "ingestion": await usage.ingestion_time(organization_id, days),
         "feedback": await usage.answers_rated(organization_id, days),
     }
 
