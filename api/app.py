@@ -36,13 +36,25 @@ async def add_coop_coep_headers(request: Request, call_next):
 
 # Content-Security-Policy, built from the actual third-party origins this app
 # loads (frontend/index.html, frontend/src/services/analytics.ts, Firebase
-# Auth's fixed API domains, GCS-hosted uploaded files). Shipped in
-# Report-Only mode: it's observable (violations show in the browser devtools
-# console) without risking breaking Stripe checkout, Firebase auth, or
-# PostHog analytics in production on a policy that's never been run against
-# live traffic. Check the console for violations, then switch the header
-# name below from Content-Security-Policy-Report-Only to
-# Content-Security-Policy once it's confirmed clean.
+# Auth's fixed API domains, GCS-hosted uploaded files).
+#
+# ENFORCING as of 2026-08-15. It ran in Report-Only mode before that, which
+# sounds like an observation period and was not one: the policy carried no
+# report-uri, so every violation went to an individual user's devtools console
+# and nowhere else. Nobody was ever going to read those.
+#
+# Checked before switching it on: every external origin referenced anywhere in
+# frontend/src and index.html was matched against this policy. The only three
+# outside it are a bit.ly link href, schema.org inside a JSON-LD block, and
+# syntextai.com itself, none of which is a resource load. app.posthog.com was
+# added to script-src at the same time, for the recorder.js that session
+# recording fetches lazily.
+#
+# What is NOT verified: the signed-in paths. Stripe checkout, the Drive picker
+# and the citation iframes could not be exercised from here without account
+# credentials, so report-uri is what covers them. A violation now means a
+# feature broke for a real person, and it arrives in the logs rather than in
+# their console.
 #
 # The Google entries are for the Drive picker, added 2026-08-11 with the
 # import feature rather than after it. This policy is still Report-Only, so a
@@ -56,7 +68,12 @@ async def add_coop_coep_headers(request: Request, call_next):
 #   docs.google.com       the picker renders in an iframe from here
 _CSP_POLICY = "; ".join([
     "default-src 'self'",
-    "script-src 'self' https://js.stripe.com https://accounts.google.com https://apis.google.com",
+    # app.posthog.com is here as well as in connect-src: posthog-js is bundled,
+    # but session recording lazily fetches recorder.js from api_host, so
+    # enabling recording in the PostHog project would otherwise start failing
+    # the moment this policy became enforcing rather than advisory.
+    "script-src 'self' https://js.stripe.com https://accounts.google.com "
+    "https://apis.google.com https://app.posthog.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://storage.googleapis.com https://*.googleusercontent.com "
@@ -72,12 +89,50 @@ _CSP_POLICY = "; ".join([
     "https://docs.google.com https://accounts.google.com",
     "object-src 'none'",
     "base-uri 'self'",
+    # Without this, Report-Only reported to nobody. A violation appeared in one
+    # customer's devtools console, which nobody opens, so the observation period
+    # this policy was supposed to be having produced no observations at all. It
+    # stays on after enforcement, because that is when a violation means a
+    # feature just broke for somebody.
+    "report-uri /api/csp-report",
 ])
+
+@app.post("/api/csp-report", include_in_schema=False)
+@limiter.limit("30/minute")
+async def csp_report(request: Request):
+    """Where the browser posts a Content-Security-Policy violation.
+
+    Public by necessity: the browser sends these with no credentials, and a
+    violation is most interesting precisely when it happens to somebody who is
+    not signed in.
+
+    Deliberately narrow about what it keeps. Only three fields are logged, and
+    each is truncated. The body is attacker-controlled -- anyone can post here,
+    and a blocked URI is a URL the page tried to load -- so storing it whole
+    would put arbitrary text of arbitrary length into the logs on request.
+
+    Never raises. A malformed report is a report, not an incident, and this
+    endpoint failing must not show up as an error to the browser that sent it.
+    """
+    try:
+        body = await request.json()
+        report = body.get("csp-report") or body
+        logger.warning(
+            "CSP violation: directive=%s blocked=%s on=%s",
+            str(report.get("violated-directive") or report.get("effectiveDirective"))[:80],
+            str(report.get("blocked-uri") or report.get("blockedURL"))[:200],
+            str(report.get("document-uri") or report.get("documentURL"))[:200],
+        )
+    except Exception:
+        logger.debug("Unparseable CSP report", exc_info=True)
+    # 204: the browser wants nothing back, and an empty body cannot be reflected.
+    return Response(status_code=204)
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Content-Security-Policy-Report-Only"] = _CSP_POLICY
+    response.headers["Content-Security-Policy"] = _CSP_POLICY
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
