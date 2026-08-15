@@ -34,7 +34,13 @@ async def prompt_llm(text: str, max_tokens: int = MIN_COMPLETION_TOKENS) -> str:
     retrieval worse than not expanding at all.
     """
     try:
-        return await gradient_chat(text, max_tokens=max(max_tokens, MIN_COMPLETION_TOKENS)) or ""
+        # low, explicitly. These helpers rewrite and expand a question; none of
+        # them needs deliberation, and reasoning is charged against the same
+        # token budget as the output. At medium this call returned empty content
+        # and the expansion silently became [].
+        return await gradient_chat(
+            text, max_tokens=max(max_tokens, MIN_COMPLETION_TOKENS), reasoning_effort="low"
+        ) or ""
     except Exception as e:
         logger.warning(f"Query-processing prompt failed, continuing without it: {e}")
         return ""

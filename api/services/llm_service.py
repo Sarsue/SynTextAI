@@ -443,7 +443,9 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
         return ""
 
 
-async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
+async def gradient_chat(
+    prompt: str, max_tokens: int = 800, reasoning_effort: Optional[str] = None
+) -> str:
     """Generate text using OpenAI-compatible chat completions over HTTP."""
     if not MODEL_ACCESS_KEY:
         logger.error("MODEL_ACCESS_KEY not configured for chat")
@@ -460,8 +462,15 @@ async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
         "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
         "temperature": TEMPERATURE,
     }
-    if CHAT_REASONING_EFFORT:
-        data["reasoning_effort"] = CHAT_REASONING_EFFORT
+    # Callers may ask for less thinking than the answer path uses. Reasoning
+    # comes out of the SAME budget as the output, so a helper that only needs to
+    # emit a comma-separated list can spend its whole allowance thinking and
+    # return nothing at all. Measured 2026-08-15: raising the answer path to
+    # medium silently broke query expansion, which began returning "" and then
+    # [] — retrieval quietly lost an arm with no error anywhere.
+    effort = reasoning_effort if reasoning_effort is not None else CHAT_REASONING_EFFORT
+    if effort:
+        data["reasoning_effort"] = effort
 
     body = await _post_json(url, headers, data, accept=_has_content)
     if not body:
