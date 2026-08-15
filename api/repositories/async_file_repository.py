@@ -58,8 +58,10 @@ logger = logging.getLogger(__name__)
 # ts_rank_cd about rarity, which it has no mechanism for.
 _LITERAL_TOKEN = re.compile(r"\b(?:\d+(?:[./]\d+)?|[A-Za-z]{1,2}\d{1,4})\b")
 
-# Words that look like literals and identify nothing.
-_LITERAL_STOPWORDS = {"a1", "a2", "no", "in", "on", "at", "is", "it", "of", "to"}
+# Letter-digit pairs that are grid references or list markers rather than part
+# names. Kept deliberately short: the pattern above requires a digit, so ordinary
+# words like "in" and "at" can never reach here and listing them was noise.
+_LITERAL_STOPWORDS = {"a1", "a2", "b1", "b2"}
 
 
 def literal_tokens(query: str) -> List[str]:

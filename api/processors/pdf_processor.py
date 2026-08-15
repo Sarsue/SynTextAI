@@ -19,7 +19,6 @@ import fitz  # PyMuPDF
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.services.llm_service import (
-    get_text_embeddings_in_batches,
     read_page,
     VISION_CONCURRENCY,
     VISION_DPI,
