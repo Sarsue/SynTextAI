@@ -343,6 +343,22 @@ async def delete_workspace(
                 ),
             )
 
+        # The same question for people who have not arrived yet. The check above
+        # reads workspace_members, which only exists once somebody has accepted,
+        # so an invite naming this workspace passed it unnoticed and the invited
+        # person was left holding a link that seats them nowhere.
+        invited = await store.workspace_repo.invites_stranded_by_deleting(workspace_id)
+        if invited:
+            names = ", ".join(i["email"] for i in invited)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Deleting this workspace would leave the invite you sent to "
+                    f"{names} pointing at nothing. Invite them to another workspace, "
+                    "or wait for them to accept, then delete this one."
+                ),
+            )
+
         # Delete the workspace (files will cascade delete)
         success = await store.workspace_repo.delete_workspace(workspace_id)
 

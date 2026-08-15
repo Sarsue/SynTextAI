@@ -104,6 +104,69 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error counting workspaces for user {user_id}: {e}", exc_info=True)
                 return 0
 
+    async def invites_stranded_by_deleting(self, workspace_id: int) -> List[Dict[str, Any]]:
+        """Invites that would be left pointing at nothing.
+
+        The sibling below covers people who have accepted. Nothing covered the
+        people who have not, and the difference matters because the workspace an
+        invite names is held two ways and only one of them is a foreign key.
+
+        A legacy invite sets `workspace_id`, which cascades, so deleting the
+        workspace deletes the invite: the link dies and the invited person can
+        no longer join at all. Every invite this app creates now names its
+        workspaces in `workspace_ids`, a JSON array with no foreign key, so
+        nothing touches it. The invite survives, still pending, still naming a
+        workspace that no longer exists.
+
+        Measured 2026-08-15, accepting one of those: the insert into
+        workspace_members is refused by the foreign key, the whole transaction
+        rolls back, the exception is caught and logged, and the person joins
+        NOTHING. Not the workspace, not the company. `get_role` returns None.
+        The rollback also undoes `status = 'accepted'`, so the invite stays
+        pending and fails the same way on every later attempt, while showing in
+        the team panel forever as somebody who is coming and never arrives.
+
+        Only invites left with nowhere to go are returned, the same rule the
+        member guard uses. An invite naming Finance and Payroll still has
+        Finance after Payroll goes, and is nobody's problem.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = text("""
+                    SELECT DISTINCT i.email
+                    FROM workspace_invites i
+                    WHERE i.status = 'pending'
+                      AND i.expires_at > now()
+                      AND i.scope = 'workspace'
+                      -- names the workspace being deleted, either way it can
+                      AND (
+                        i.workspace_id = :workspace_id
+                        OR EXISTS (
+                          SELECT 1 FROM json_array_elements_text(i.workspace_ids) e
+                          WHERE e::int = :workspace_id
+                        )
+                      )
+                      -- and names no other workspace that will still be there
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM json_array_elements_text(i.workspace_ids) e
+                        JOIN workspaces ow ON ow.id = e::int
+                        WHERE ow.id <> :workspace_id
+                      )
+                    ORDER BY i.email
+                """)
+                rows = (await session.execute(stmt, {"workspace_id": workspace_id})).all()
+                return [{"email": r[0], "name": r[0]} for r in rows]
+            except Exception as e:
+                logger.error(
+                    f"Could not check invites against deleting workspace {workspace_id}: {e}",
+                    exc_info=True,
+                )
+                # An unreadable check must not block a deletion the owner is
+                # entitled to make. The accept path no longer strands anybody
+                # either way; this guard exists to say so before it happens.
+                return []
+
     async def members_stranded_by_deleting(self, workspace_id: int) -> List[Dict[str, Any]]:
         """People whose only access is this workspace, so deleting it leaves
         them with none.
@@ -770,8 +833,50 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                     granted = list(invite.workspace_ids or [])
                     if scope == "workspace" and not granted and invite.workspace_id is not None:
                         granted = [invite.workspace_id]
+                    # Whether the inviter named anything at all, kept before the
+                    # next two steps can empty the list for two different
+                    # reasons that must not be treated the same.
+                    named_workspaces = bool(granted)
                     if scope != "workspace" or not granted:
                         scope, granted = "organization", []
+
+                    # A workspace named by the invite may have been deleted while
+                    # it was pending, and the id lives in a JSON array with no
+                    # foreign key, so nothing removed it when the workspace went.
+                    #
+                    # Inserting it is refused by the foreign key, which rolls back
+                    # the whole acceptance. Measured 2026-08-15: the person joined
+                    # NOTHING, not the workspace and not the company, `get_role`
+                    # returned None, and because the rollback also undid
+                    # `status = 'accepted'` the invite stayed pending and failed
+                    # identically every time afterwards. Somebody who did nothing
+                    # wrong arrived as an account belonging to no tenant.
+                    #
+                    # So the dead ids are dropped and the rest of the invite is
+                    # honoured.
+                    if granted:
+                        alive = set((await session.execute(
+                            select(WorkspaceORM.id).where(WorkspaceORM.id.in_(granted))
+                        )).scalars().all())
+                        gone = [w for w in granted if w not in alive]
+                        if gone:
+                            logger.warning(
+                                f"Invite for {email} names workspace(s) {gone} that no "
+                                f"longer exist; joining with the rest"
+                            )
+                            granted = [w for w in granted if w in alive]
+
+                    # Every named workspace is gone. They still join the company,
+                    # with no workspace access, which is a state the team panel
+                    # shows and an owner can fix by ticking a box.
+                    #
+                    # Deliberately NOT falling through to organization scope here.
+                    # That branch exists for an invite that named nothing in the
+                    # first place, and reusing it would turn a deleted workspace
+                    # into a promotion: somebody offered one workspace would
+                    # arrive able to read every one of them.
+                    if named_workspaces and not granted:
+                        scope = "workspace"
 
                     # Assign every workspace the invite granted, not just one.
                     # Access is a set, and an invite naming three workspaces has

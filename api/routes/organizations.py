@@ -464,9 +464,19 @@ async def set_member_access(
         ok = await store.org_repo.set_member_access(
             organization_id, member_user_id, body.scope, body.workspace_ids
         )
-        # An admin reaches every workspace by role, so set_member_access
-        # declines to narrow them. That is not a failure of this request.
-        if not ok and body.role != "admin":
+        # A refusal is a refusal. This used to be tolerated when body.role was
+        # "admin", from a time when set_member_access declined to narrow an
+        # admin and a false meant "expected, carry on". Admins can be scoped
+        # now, and the only remaining falses are an owner, a member who is not
+        # there, and a scope that is not a scope. Every one of those deserves to
+        # be said out loud.
+        #
+        # It was also reading the wrong value, in the direction that hides
+        # failures rather than invents them: body.role is the role being SET,
+        # not the role held, so a request that happened to carry role="admin"
+        # would swallow a genuine failure and answer 200. Nothing sends both
+        # today, which is luck rather than design.
+        if not ok:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Could not change access for this member.",
