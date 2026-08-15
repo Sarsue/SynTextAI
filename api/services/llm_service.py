@@ -63,9 +63,27 @@ CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai/gpt-oss-20b")
 # characters of thinking rather than 800-1,100, and an answer of the same
 # quality. Bounding the thinking bounds the failure.
 #
-# If the citation benchmark shows "low" costs accuracy, raise it. The benchmark
-# decides this, not taste.
-CHAT_REASONING_EFFORT = os.getenv("CHAT_REASONING_EFFORT", "low").strip().lower()
+# MEASURED 2026-08-14, three independent benchmark invocations each. "low" was
+# set first, on latency alone, and never checked against accuracy. It cost four
+# citations:
+#
+#     effort   answers /20        citations /20
+#     low      11 11 11 11 13     13 13 13 13 15
+#     medium   14 14 14           17 17 17
+#     high     14 11 11           17 12 12
+#
+# Medium is the only setting stable across every run. High is not merely equal,
+# it is ERRATIC: more thinking makes the model wander off a factual lookup, which
+# is worth knowing before anyone treats this as a more-is-better dial.
+#
+# Costs about 3.7s per answer against 1.4s at low. Worth it for four citations in
+# a tool that reads torque values off service manuals, and still far better than
+# the 24 seconds to first token this endpoint replaced.
+#
+# Retrieval delivers the correct page for 16 of 20 questions, measured against
+# the database with no model involved. At 17 cited, generation is now converting
+# essentially all of it, so the remaining gap is retrieval's, not this setting's.
+CHAT_REASONING_EFFORT = os.getenv("CHAT_REASONING_EFFORT", "medium").strip().lower()
 
 # The model that reads a rendered page, chosen by measurement on 2026-08-12
 # against page 9 of the Carrier manual, a two-dimensional charging chart whose
