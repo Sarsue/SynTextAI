@@ -699,9 +699,18 @@ model configured now and rewrites `content_hash` to match, because the hash is
 the sha256 of the text that was actually embedded and a stale hash beside a new
 vector poisons the reuse cache for every document sharing that text.
 
-**Production was checked and is clean.** Run `--check` there again after any
-future change of embedding model or provider, because this failure presents as
-a customer saying the answers got worse rather than as an error anybody sees.
+**Production was checked and is clean**, with the tool rather than by argument:
+`--check` on the live box after the 2026-08-15 deploy returned every workspace
+above +0.95 and "0 workspace(s) need re-embedding". That same result settles a
+second question, which is why it is worth running after any removal and not only
+after a provider change: a corpus embedded from context plus text could not
+match a fresh embedding of the text alone, so it also proves
+`CONTEXTUALIZE_CHUNKS` was never on in production and that deleting the
+contextualiser changed nothing for any stored document.
+
+Run it again after any future change of embedding model or provider. This
+failure presents as a customer saying the answers got worse, never as an error
+anybody sees.
 
 **122 chunks could not be repaired.** They pre-date `chunks.content` (added
 2026-08-06), so the text they were made from is stored nowhere and they are
