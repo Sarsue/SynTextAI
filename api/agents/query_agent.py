@@ -168,6 +168,15 @@ class QueryAgent:
         # character 2460 of the page, and the first 600 characters are a block
         # of phone numbers, so the one page holding the answer was scored on
         # text that does not contain it and pushed out of the context.
+        #
+        # A REAL cross-encoder was then tried, 2026-08-14, Qwen3-Reranker-0.6B
+        # reading query and chunk together. In isolation it separates relevant
+        # from irrelevant by four orders of magnitude (0.97 against 0.000016) and
+        # end to end it changed nothing: same corpus, same rows, reranking on and
+        # off both scored 7/20 answers and 9/20 citations. Five service manuals
+        # are near the worst case for it, because every document genuinely
+        # resembles every other. Worth retrying on a mixed-document workspace;
+        # those numbers are what it has to beat.
         workflow.add_edge("dedupe_and_normalize", "check_coverage")
         # The only loop, and the only thing that distinguishes what used to be
         # two architectures. A question whose needs are all covered by the first

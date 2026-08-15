@@ -1,143 +1,56 @@
 # SyntextAI — Engineering Overview
 
-Read this before touching architecture, design decisions, or planning what to
-build next. Single source of truth for where the product actually stands,
-not a full API reference. If you're tempted to write a new standalone doc
-for a gap analysis, a feature list, or a product-direction question, put it
-here instead, this file is where that kind of thing lives.
+Orientation, current state, and the decisions worth not making twice.
+
+**This is not a changelog.** Git holds what changed and why, in commit messages
+written for that purpose, and the code holds the reasoning in comments beside
+the thing being reasoned about. What belongs here is what neither of those
+surface when you need it: how the parts fit together, what is shipped, what is
+next, and what was deliberately not built.
+
+Keep it lean. If an entry could be a commit message or a code comment, it
+should be one.
 
 ## What SyntextAI is
 
-SyntextAI makes a company's internal documents — SOPs, handbooks, policy manuals —
-instantly queryable by the whole team, with answers grounded in and cited back to the
-actual source documents. Think "ask a question, get an answer with a citation," not a
-generic chatbot.
+Internal documents, made instantly answerable by a whole team, with every
+answer cited back to the page it came from.
 
-**Target market:** SMBs, 10–100 employees, in document-heavy verticals — healthcare/dental,
-accounting, legal, property management, trades & HVAC, insurance, and (added 2026-07-29)
-manufacturing. One person's business (Osas), pre-revenue/early-revenue, moving fast.
+**Customers:** small businesses, 10 to 100 people, in document-heavy work:
+dental, accounting, legal, property management, trades, insurance,
+manufacturing. Live and taking money since 2026-08-03.
 
-**Positioning (restated 2026-08-01): AI for small and medium businesses, meeting
-them in the tools they already use.** Documents are where this starts, not where
-it stops. A 10–100 person company keeps what it knows in a handful of systems,
-and the ones that matter differ by vertical: a dental practice's practice
-management system, a firm's document management system, the shared drive
-everyone actually saves to. The direction is integrations into those systems for
-the domains we choose to serve, so the answer is grounded in what the business
-already has rather than in what somebody remembered to upload.
+**What it actually is, structurally:** an agent harness scoped to one company at
+a time, currently shipping with one tool, which is "know things about your
+documents". That is why it looks like document Q&A from outside.
 
-Two consequences for design decisions. Ingestion should stay indifferent to where
-bytes came from, because a connector is another source of documents and not a
-second product. And the tenant boundary has to hold for real, because a connector
-imports a company's whole drive, and the blast radius of getting access wrong
-stops being one uploaded file.
+The hard part is already done, and was done by being careful rather than by
+plan. An agent loop is a weekend; multi-tenancy touches every query and cannot
+be retrofitted. Hermes Agent's own issue reads *"one agent = one tenant. Memory
+is global, sessions don't scope by tenant, and there is no isolation between
+groups, channels, or users."* That sentence describes what this codebase has
+made impossible, and it is the thing to sell.
 
-**Manufacturing/maintenance-technician pivot considered and shelved (2026-07-29):** a
-narrower reposition toward manufacturing plant maintenance technicians (50-500 employee
-companies, $400-1,200/mo per facility) was drafted in detail — buyer persona, GTM,
-product gaps, pricing — and briefly marked "ready to GTM." Osas's call: one prior
-pilot (real, but a single data point) isn't enough validated demand to bet the whole
-product's positioning on. Staying broad SMB. The underlying product still works for a
-manufacturing user, RAG over any PDF is general-purpose, so "Manufacturing" was added
-as a named vertical in the site's vertical selector (additive, not a repositioning).
-If a real manufacturing customer materializes through that vertical tab, the shelved
-gaps (table/diagram-aware PDF ingestion, symptom/fault-code query tuning, revision
-control) are the ones to revisit, not before.
+### Four layers, so an idea sorts itself
 
-**Why it matters for design decisions:** this is a small team's product, not an
-enterprise platform yet. Prefer straightforward, debuggable solutions over
-infrastructure that only pays off at a scale we're not at. If you're choosing between
-"simple and slightly less elegant" and "correct in theory but adds an operational
-dependency," lean simple until there's a concrete reason not to.
+| Layer | What it is | Decides anything? |
+|---|---|---|
+| **Sources** | Ways knowledge gets in | No |
+| **Surfaces** | Places to ask | No |
+| **Tools** | Things the agent chooses to do | Yes |
+| **Memory** | Standing facts that are in no document | No, but changes every answer |
 
-## What this actually is: a harness for one small business at a time
-
-*(Framing settled 2026-08-11, while reading about Hermes Agent. It renames
-nothing and rewrites no code. It exists because the roadmap had become a list
-of features with no test for what belonged on it, and this is that test.)*
-
-SyntextAI is an agent harness whose every part is scoped to one company. It
-currently ships with one tool, which is "know things about your documents", and
-that is why it looks like a document Q&A product from the outside.
-
-**The part that is hard is already done, and it was done by accident of being
-careful.** An agent loop is a weekend. Multi-tenancy is not, because it touches
-every query and cannot be retrofitted. Hermes Agent's own open issue says *"one
-agent = one tenant. Memory is global, sessions don't scope by tenant, and there
-is no isolation between groups, channels, or users."* That sentence describes
-the thing this codebase has spent three weeks making impossible: organizations
-holding workspaces, one function answering *may you see it* and another
-answering *may you do it*, a queue with per-tenant fairness and leases, storage
-keyed by workspace, retrieval scoped by workspace, entitlement per company.
-
-The commercial version of that sentence: **your company's memory is yours, and
-there is no pile it can leak into.** For dental, legal and accounting that
-answers the objection before it is raised, and nobody building on an open agent
-runtime can say it honestly.
-
-### The four layers, and why the distinction earns its place
-
-Every idea for this product is one of four things. Sorting it first is what
-stops a surface being mistaken for a retention feature, which is the mistake
-that put a Slack bot at the top of the roadmap for a month.
-
-| Layer | What it is | Decides anything? | Examples |
-|---|---|---|---|
-| **Sources** | Ways knowledge gets in | No | Upload, Google Drive import, forward-to-an-address |
-| **Surfaces** | Places to ask | No | The web app, Find, a Slack bot, replying to an email |
-| **Tools** | Things the agent chooses to do | Yes | Search the documents (the only one today), later: draft a reply, check a portal |
-| **Memory** | What the company has told us that is in no document | No, but it changes every answer | "We bill through Delta Dental", "the 2019 protocol is void" |
-
-Memory is the fourth thing and it is genuinely missing. It appears nowhere in
-this product, and the roadmap has it parked in Tier 4 as "cross-chat memory",
-which undersells it. It is not chat history. It is the standing facts a practice
-manager repeats to every new hire, and the customers hand it to us already: a
-thumbs-down reading *"cited the 2019 policy, we are on the 2024 one"* is a
-memory being offered and thrown away.
+Memory does not exist yet and is the most valuable missing piece. Customers
+already offer it through feedback: *"cited the 2019 policy, we are on the 2024
+one"* is a standing fact being handed over and thrown away.
 
 ### The test for anything new
 
 **Can the person who benefits say yes by themselves?** If yes, build it. If
 somebody else has to approve it first, park it until a customer asks by name.
 
-That single question sorted a week of decisions cleanly. Email in needs nobody.
-Google Drive with the picker and `drive.file` needs the person using it, and no
-IT involvement, which is why it survived. SharePoint, Outlook, Slack and Teams
-all need a tenant administrator, which for a fifteen-person practice is an
-outsourced IT company and a wait, so they are parked with their adapters intact.
-
-### Computer-use, corrected
-
-An earlier version of this note dismissed computer-use as enterprise
-automation with no nameable job. **That was wrong, and the reason is worth
-keeping because it inverts the usual argument.**
-
-Enterprise software has APIs. Salesforce, Workday, NetSuite. *Small-business
-software does not.* Dentrix and Eaglesoft are Windows desktop applications.
-Insurance eligibility lives on payer web portals with no API and no plan for
-one. County recorder sites, state bar portals, QuickBooks Desktop. So the
-"UI automation as the fallback where no good API exists" layer is **more**
-relevant to a dental practice than to a bank, not less.
-
-The job is nameable, which is where the test should have caught the error: the
-front-desk person who logs into Delta Dental's portal every morning and checks
-eligibility for tomorrow's patients, one member id at a time.
-
-What holds, and what shape it should take when it is built:
-
-- **Read-only lookups, not writes.** A wrong click in practice-management
-  software is a billing incident, not a bad answer.
-- **Human-triggered, not unattended.** A batch of thirty eligibility checks
-  running overnight against a UI that changed is a support call for somebody
-  who has one employee.
-- **Results come back into the harness** as knowledge, so an answer can cite
-  what the portal said and when.
-- **Portal credentials are the real cost.** Holding a practice's login to their
-  payer portal is a heavier thing than holding a Drive token, and the answer to
-  it is the same as everywhere else here: do not store what you do not have to,
-  and if you must, decide deliberately and write down why.
-
-It is the hardest thing on this list and it stays last, but it is on the list.
+That one question sorted a week of decisions: it kept email and Drive, and
+parked SharePoint, Outlook, Slack and Teams.
 
 ## Stack
 
@@ -237,32 +150,35 @@ and the worker (`worker`), sharing a Postgres instance via `DATABASE_*` env vars
 
 ## Data model
 
-Core entities (see `api/models/orm_models.py`):
+Sixteen tables, all of them in `api/models/orm_models.py`. Verified against the
+live schema 2026-08-12.
 
-- **User** — one row per person, keyed to Firebase Auth via email lookup (auth itself
-  is delegated to Firebase; the backend re-derives the user from the verified token on
-  every request, it doesn't trust a client-supplied user ID).
-- **Workspace / WorkspaceMember / WorkspaceInvite** — teams. A user belongs to one or
-  more workspaces with a role (owner/staff). Invites are UUID tokens, 7-day expiry,
-  single-use.
-- **File / Segment / Chunk** — an uploaded document, broken into segments (logical
-  sections) and chunks (retrieval units, target 300–500 tokens, structure-aware —
-  chunk quality is most of what drives RAG answer quality here).
-- **KeyConcept / Flashcard / QuizQuestion** — derived learning content from an earlier
-  EdTech-flavored version of the product. Confirmed removed 2026-07-24: API routes
-  deleted from `files.py`, frontend side panel stripped out of `FileViewerComponent.tsx`.
-  The DB tables still exist (drop script written, not applied — see "Known gaps"), and
-  the LLM-generation functions still exist as orphaned code in `workflows/tasks.py`.
-- **ChatHistory / Message** — a conversation thread and its messages.
-- **AgentRun** — the job queue (see below).
-- **Subscription / CardDetails** — Stripe billing state.
+- **Organization / OrganizationMember** — the tenant. A company owns workspaces
+  and pays the subscription. A member has a role (owner, admin, staff) and a
+  reach (the whole organization, or named workspaces).
+- **Workspace / WorkspaceMember / WorkspaceInvite** — a set of documents and the
+  people who can see them. Invites are UUID tokens, 7 day expiry, single use.
+- **File / Segment / Chunk** — a document, its pages, and its retrieval units.
+  A citation names a page, so the page is what a reader opens; chunks are what
+  retrieval matches. `chunks.content_hash` is what stops the same text being
+  embedded twice.
+- **ChatHistory / Message / MessageFeedback** — a conversation, its messages,
+  and what somebody thought of an answer.
+- **AgentRun** — the job queue. Also the record of what each query did, which is
+  what a rating is read against.
+- **Subscription / CardDetails** — Stripe state, keyed to the organization.
 
-Multi-tenancy is enforced at the **application layer**, not the database layer — there's
-no Postgres RLS here (unlike a Supabase-style setup). Every query that touches
-user- or workspace-scoped data must filter by the authenticated user's ID at the query
-level. `histories.py` / `async_chat_repository.py` do this correctly (scope every query
-by `user_id` in the `WHERE` clause). Some of the learning-content endpoints in
-`files.py` didn't, until a recent fix — see "Known gaps" for what to watch for.
+**Multi-tenancy is enforced in the application, not the database.** There is no
+Postgres RLS here, so every query touching a document, conversation or rating
+must reach its organization explicitly. Those tables carry no organization of
+their own: they get there by joining through the workspace, and that join *is*
+the tenant boundary. Leaving it off is how one company sees another's data, and
+nothing underneath will catch it.
+
+Two questions, two functions, and nothing else. *May you see it* is
+`accessible_workspace_ids`. *May you do it* is `assert_workspace_capability` or
+`assert_organization_capability`. Every access bug in this codebase has been
+answering one of those some other way.
 
 ## How a request actually flows
 
@@ -274,14 +190,21 @@ because it is believed.
 ### Ingesting a document, once
 
 ```
-upload -> GCS
+upload, or import from Drive -> GCS      either way it is an ordinary file row
+       -> queued as an ingest run        the worker decides when, and for whom
        -> fitz: text per page, plus the table of contents -> files.outline
        -> chunk_text: 400 tokens, 20% overlap
-       -> embed each chunk (Voyage AI, voyage-3.5-lite, 1024-dim)
+       -> hash each chunk; embed only what this organization has not embedded before
        -> ONE segment per page      the citation unit, a page is what a reader opens
           N chunks beneath it       the retrieval unit, what gets embedded and searched
+       -> written batch by batch, 50 pages at a time, each batch its own transaction
        -> zero chunks means the file is marked FAILED, not processed
 ```
+
+Two consequences of writing per batch. A crash keeps the pages it reached and
+resumes from the first unstored page, because a page either has its segment or
+has nothing. And a long document is searchable while it is still ingesting,
+since retrieval scopes by workspace and never looks at processing status.
 
 `chunks.segment_id` is what ties a retrieved chunk back to the page it is cited
 as. Documents ingested before 2026-08-07 have a null `chunks.content` and
@@ -360,2524 +283,379 @@ openai-gpt-oss-20b   temperature 0.1   window 120k
 MAX_RETRIEVALS 1     RETRIEVAL_TOP_K 25   candidate pool 100   weights 0.7/0.3
 ```
 
-## What's promised vs. what's built
+## Shipped
 
-Osas Inc's marketing promises SyntextAI covers four capabilities. Checked against the
-code, not assumed, last checked 2026-07-29:
+Everything below is live in production. Read the commit if you need the why.
 
-| Promised | Reality |
-|---|---|
-| **Knowledge assistants** | Shipped, real, **and was silently broken until 2026-07-29** — see "Recent changes." Chat with citations, the RAG pipeline described above, workspace/invite. Fixed and live-verified against the real LLM endpoint now. |
-| **AI search** | Not a separate capability. No standalone search route exists anywhere in `api/routes/`. It's the same `HybridSearchEngine` chat uses, described as two things in copy. Either stop marketing it as separate, or build an actual standalone search route + view on top of the existing (already-good) retrieval engine. |
-| **Document processing** | PDF and DOCX work (`api/processors/factory.py`'s `processor_map`). `.txt`/`.md`/`.doc`/video/audio don't — `TextProcessor` is fully built at `api/processors/text_processor.py` but never imported by the factory, dead code. The site's file-type claims now match reality after the 2026-07-29 DOCX fix (see "Recent changes" below); check `Home.tsx`'s FAQ/pricing copy again before claiming `.txt`/`.md` support. |
-| **Workflow automation** | Doesn't exist as a product feature. `api/workflows/tasks.py` is internal job orchestration (ingest/query dispatch), not customer-facing automation, no approval workflows, SOP generation, or business-process logic anywhere. This is Phase 3 on the roadmap below, don't market it before it's built. |
+**The product**
+- Ask a question, get an answer cited to a page. PDF, DOCX, TXT, MD.
+- **Find**: search returning the pages that matched, in ~0.6s, no generation.
+- Workspaces inside organizations, invites, roles, per-workspace document access.
+- Stripe: trial, subscribe, plan changes, 3D Secure, card update.
+- Answer feedback: thumbs, four reasons, a comment, joined to the run that produced it.
+- **Usage** in Settings: questions asked, who is asking, documents including the
+  failed ones, what the team thought, which documents nothing has ever used.
+- **Import from Google Drive** through the picker, `drive.file` only.
 
-## Known gaps (read before you design around these)
+**Underneath**
+- Durable job queue in Postgres: leases, retries, per-tenant fairness, separate
+  query and ingest budgets.
+- Redis as a notification bus. Work is announced, so a queued job starts in
+  ~0.2s instead of waiting up to 10s to be noticed. Postgres remains the record.
+- Short-lived answer cache, invalidated the moment a workspace's documents change.
+- Ingestion writes each batch as it goes: a crash keeps the pages it reached and
+  a document is searchable while it finishes.
+- Text is embedded once per organization; re-uploads and repeats cost nothing.
+- Security: CORS locked, rate limits on paid endpoints, security headers,
+  no exception text returned to clients, signed URLs for documents.
 
-**Security — came out of a full security pass. The first four are now closed;
-verified 2026-08-01, listed because knowing they were once open is what stops
-them being reopened:**
-- ~~CORS wide open~~ **Closed.** `api/app.py` reads `CORS_ORIGINS`, falling back
-  to the real domains plus local dev ports. Never widen this back to `*` while
-  `allow_credentials=True`; that combination lets any site on the internet make
-  authenticated requests with a logged-in user's credentials.
-- ~~No rate limiting~~ **Closed.** `api/core/rate_limit.py` holds a shared
-  limiter; endpoints opt in, and the paid-API paths (chat, upload) are covered.
-- ~~Raw exception text returned to clients~~ **Closed.** No `detail=str(e)`
-  remains in `api/routes/`. Routes re-raise `HTTPException` before the broad
-  handler, so a 403 or 404 stays a refusal instead of being turned into a 500 that
-  reads as the app being broken.
-- ~~No security headers~~ **Closed.** CSP (Report-Only), HSTS, X-Frame-Options,
-  X-Content-Type-Options and Referrer-Policy are set in `api/app.py`. The CSP is
-  still Report-Only: check the browser console for violations, then flip the
-  header name. `frame-src` must keep `storage.googleapis.com` or every citation
-  breaks when it is enforced.
-- ~~An unauthenticated internal endpoint~~ **Closed 2026-08-11.**
-  `/api/v1/internal/notify-client` relays arbitrary event data to any user's
-  WebSocket and had no auth at all; it now requires `INTERNAL_API_SECRET` and
-  fails closed when that is unset. It is also no longer the normal path, only
-  the fallback when a Redis publish fails. See "Recent changes".
-- **Still open: no DB-level RLS.** See below. Scoped properly on 2026-08-11 and
-  it is roughly a week, not an afternoon: sessions carry no tenant today (91
-  `get_async_session()` call sites), the worker's queue poll is deliberately
-  cross-tenant, five tables reach their tenant only through a four-table chain,
-  and a policy on `chunks` lands on the vector search path that was rewritten
-  specifically to keep its index. Deprioritised behind the Slack bot, because
-  `permissions.py` plus the refusal tests in `test_route_authorization.py`
-  already cover the same ground; revisit when a customer's security
-  questionnaire asks for it in writing.
-- **Re-triaged 2026-08-03: down to 5 from 34, and the remaining ones have
-  nowhere to go.** The backend is clean, `pip-audit` finds nothing. The frontend
-  has two highs and neither has a fix that is worth taking:
-  - **react-router / react-router-dom**, GHSA-qwww-vcr4-c8h2, "RSC Mode CSRF
-    Bypass". The advisory covers `7.12.0 - 8.2.0` and **no patched version has
-    been published in any line** — npm's suggested "fix" is a downgrade to
-    6.30.4, a major-version break across the whole routing layer. The vulnerable
-    surface is React Server Components mode, and this app imports only
-    `HashRouter`, `Routes`, `Route`, `Navigate`, `Link`, `useNavigate`,
-    `useLocation`, `useSearchParams`, `useParams`. No server handler, no data
-    router, no actions or loaders. Not reachable. Recheck when a patched 7.x or
-    8.x appears; do not downgrade.
-  - **vite**, `server.fs.deny` bypass **on Windows**, in the dev server. A
-    devDependency that never ships, an OS nobody here develops on, and the fix
-    is vite 8 from 5.4.21 — three majors of build-tool risk for a hole that
-    cannot be reached in this setup. Worth taking when the build tooling is
-    upgraded deliberately, not as a security response.
+## Next
 
-- **Dependency vulnerabilities triaged 2026-07-29** (`gh` CLI wasn't available, ran
-  `npm audit`/`pip-audit` directly against the actual lockfiles instead — counts won't
-  match GitHub's Dependabot tally exactly, different scope/tooling, but same
-  underlying packages):
-  - **Frontend (`npm audit --omit=dev`): 40 findings originally, down to 30 after
-    the firebase upgrade below.** `tar` (critical, no fix available upstream) comes
-    in through `canvas` → `@mapbox/node-pre-gyp`, used only to extract prebuilt
-    native binaries during `npm install`, never runs against user input at runtime,
-    low practical risk despite the label. A second `undici` instance now comes from
-    `shadcn` (a devDependency CLI tool) → `@dotenvx/dotenvx`, same low-risk
-    reasoning: devDependency, doesn't ship to the browser bundle.
-  - **`firebase` upgraded `^10.7.1` → `^12.16.0`, closing the original undici
-    cluster (2026-07-29).** This app only imports `firebase/app` and
-    `firebase/auth` (checked every import site), never firestore/storage/functions,
-    which is where the vulnerable undici dependency chain actually lived — real
-    risk surface was narrower than the audit output suggested. Verified before
-    committing: `tsc --noEmit` against the whole app, zero errors; `npm run build`
-    (the real production build, not just type-check), succeeds cleanly. Firebase
-    12.x requires Node >=20; the actual Dockerfile already uses `node:20-alpine`,
-    so production is unaffected, but anyone developing locally on Node 18 needs to
-    upgrade. **Not yet tested: an actual live Google sign-in popup click-through**
-    — types and build passing doesn't guarantee runtime auth behavior is identical.
-    Osas is testing this live himself.
-  - **Backend (`pip-audit -r api/requirements.txt`): 2 findings at the time, one now
-    moot.** `dspy` 2.6.27 (`PYSEC-2026-1318`) — removed entirely 2026-07-29, see
-    "Recent changes," it was never actually functioning. `diskcache` 5.6.3
-    (`PYSEC-2026-2447`) isn't directly imported anywhere in this codebase, likely a
-    transitive dependency of another package; no fix version available yet.
-- **No DB-level RLS** — every new route touching a resource ID from the URL or query
-  needs an explicit check. There is no safety net underneath you if you skip it; a
-  broken-access-control bug in the flashcard/quiz endpoints shipped this way before
-  it was caught and fixed.
+In order. The first two need nothing from anybody.
 
-  Since 2026-08-01 there are exactly two questions and two ways to ask them.
-  *May you see it* is `accessible_workspace_ids`. *May you do it* is
-  `assert_workspace_capability` / `assert_organization_capability` from
-  `api/core/permissions.py`. Do not answer either from `files.user_id`, from
-  `list_workspaces_for_user`, or from a role string compared inline. Every
-  authorization bug in this codebase so far has been one of those three.
+1. **Email in.** Forward a document to an address and it is in the knowledge
+   base. No OAuth, no admin, no app to install. SendGrid Inbound Parse is the
+   same shape as the signed webhook `sendgrid_events.py` already receives.
+2. **Vision extraction.** Built on `develop`, unmerged, and **not yet proven**.
+   See the section below: the feature works, the speed does not, and there is
+   no benchmark number for it yet.
+3. **Memory.** Standing facts per organization and workspace, editable, fed by
+   the feedback that already arrives.
+4. **The agent tool layer.** Built and behind `AGENT_MODE=tools`, currently
+   losing on citations: 13-14 of 22 against the fixed pipeline's 16-18. It
+   replaces the pipeline when it wins, not before.
 
-**Product:**
-- ~~**DOCX ingestion**~~ **Closed.** `DocxProcessor` implemented 2026-07-29,
-  mirrors `PDFProcessor`'s shape, wired into the factory. The extraction logic
-  was tested against a generated sample doc (headings, body, table) at the time,
-  and the remaining doubt was whether it survived the real path. **Osas drove a
-  real DOCX through upload → GCS → worker on 2026-08-11 and it ingested.** The
-  one thing that was never in question is now also not in doubt.
-- ~~`TextProcessor` built and orphaned~~ **Closed.** Wired into
-  `factory.py`'s `processor_map` for `.txt` and `.md`.
-- ~~EdTech generator functions orphaned~~ **Closed.** Deleted.
-- **Whether Redis (in `requirements.txt`, imported in `files.py`) is meant to be doing
-  more than it currently is, or is leftover from an earlier design** — unconfirmed.
-  Only `RedisError` is imported, so today it is doing nothing.
-- **Integrations are not started.** The positioning above commits to meeting
-  businesses in the tools they use, and nothing in the codebase reads from an
-  external system yet. When it does, it should arrive as another source feeding the
-  same ingestion path, not as a parallel pipeline, and a connector's imported
-  documents belong to a workspace like any other. **Fourth in "What is next, in
-  order" as of 2026-08-11**, ahead of the Tier 3 automation work and behind the
-  efficiency backlog.
+## Vision extraction: in progress, not merged
 
-## Roadmap (prioritized, not a wishlist)
+On `develop` as of 2026-08-13. Written down here because most of what has been
+learned is negative, and a negative result is only worth anything if the reason
+is recorded.
 
-Update this section as items close or new ones turn up, don't spin up a new doc file
-for it.
+**The problem it exists for.** `page.get_text` returns characters in PDF storage
+order, so a table arrives as a column of loose values with every row destroyed.
+Measured on a 433-page corpus of HVAC service manuals (`api/evals/hvac_benchmark.yaml`):
 
-### What is next, in order (decided with Osas 2026-08-11)
-
-Tier 0 and Tier 1 are closed, so "what now" was an open question. This is the
-answer, and it deliberately does not start with the biggest idea on the page.
-The agentic platform and serving our own models stay where they are, below this
-list, because both are gated on a benchmark the tool layer is currently losing.
-
-1. **The efficiency backlog, items 18-22 below.** Every one of them is felt by a
-   customer as waiting, and none needs a decision from anybody. Start here.
-   **Closed 2026-08-11: all five, 18 through 22.** 10s down to 0.2s before a
-   question or an upload begins; a long document keeps the pages it got through
-   instead of starting again, and is searchable while it finishes; the same text
-   is embedded once per organization; and a repeated question is answered in
-   0.33s against 20.40s. Next is "AI search", item 2 in this list.
-2. ~~**"AI search."**~~ **Built 2026-08-11.** A `Find` mode beside `Ask`, and
-   one synchronous route returning the pages that matched instead of an answer.
-   0.57s against 11-20s for a generated answer. All four catches were handled;
-   writing the tests found two more. See "Recent changes".
-3. **The admin dashboard, item 14.** Today `GET /analytics/dashboard` returns
-   zeros somebody typed by hand. This is also the first thing that turns the
-   feedback data from 2026-08-08 into something an owner can look at.
-4. **Integrations. Started 2026-08-11, then narrowed by the test in "What this
-   actually is".** Sorted by who has to approve them:
-   - **Email in** (a source, needs nobody): next. Forward a document to an
-     address and it is in the knowledge base. SendGrid Inbound Parse is the
-     same shape as the signed webhook `sendgrid_events.py` already receives.
-   - ~~**Google Drive**~~ **Done 2026-08-12**, verified end to end against a
-     real account: picked in Drive, ingested, and cited in an answer.
-     `drive.file` and the picker, never `drive.readonly`. Needs
-     `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY` as GitHub secrets before
-     it works in production.
-   - **SharePoint, Outlook, Slack, Teams** (all need a tenant administrator):
-     parked. The SharePoint adapter and the Slack signature verification are
-     built and dormant, roughly forty lines and eleven tests, so a
-     Microsoft-heavy firm asking by name is a picker away rather than a
-     project. When it does, it arrives as
-   another source feeding the same ingestion path, never a parallel pipeline.
-5. **Workflow automation, Tier 3.** SOPs, meeting summaries, onboarding,
-   proposal drafting, approvals. Marketing already implies this exists. It does
-   not, and it stays last because everything above it is either felt sooner or
-   cheaper to close.
-
-The ordering logic worth keeping: **close the gaps between the promise and the
-product before adding new promises.** Items 2, 3 and 4 are all cases where the
-site says something the code does not do. Item 5 is the biggest of those and is
-also the most work, which is why it is last rather than first.
-
-**Tier 0 — blocking, not features, fix before a real customer touches this:**
-1. ~~Alembic migration for `workspace_members`/`workspace_invites` not run on the live DB~~ — **verified already applied 2026-07-29.** `alembic current` matches the single head, and a direct `information_schema.tables` query confirmed both tables exist live. The "multiple divergent heads, no tracked alembic.ini" gap was also stale: only one head exists (`b8f6b3f63f7d`), and `alembic.ini` is git-tracked. `docs/migrations/drop_learning_content_tables.sql` was redundant for the same reason, the `flashcards`/`quiz_questions`/`key_concepts` drop it described had already happened via the alembic migration of the same name, confirmed those tables no longer exist, removed the now-dead script.
-
-   **Correction, same day:** "applied on the live DB" was true but hid a real
-   problem. Those tables were created *by hand*, and the migration that was
-   supposed to create them was ordered before the one that creates `workspaces`,
-   so building a database from scratch failed outright. Checking `alembic current`
-   against a live database cannot catch this; only rebuilding from empty can.
-   Fixed and verified with a full drift check, see "Recent changes."
-2. ~~Pending invite lost after login~~ — **closed 2026-07-29**, see "Recent changes."
-3. ~~Staff role enforcement missing on the backend~~ — **closed 2026-07-29**, see "Recent changes."
-4. ~~Stripe: no 3D Secure / SCA handling~~ — **closed 2026-08-07**, built and
-   verified against Stripe test mode, see "Recent changes". The description
-   below is the original finding, kept because it is still the clearest
-   statement of what was wrong. Two things in it have since been corrected by
-   the build: the secret is on `latest_invoice.confirmation_secret`, not
-   `latest_invoice.payment_intent`, which is null on this API version; and
-   `isCardUpdateRequired` now lists the statuses it means instead of excluding
-   the ones it doesn't.
-
-   **Stripe reviewed 2026-07-29, real gap found: no 3D Secure / SCA handling.**
-   `create_subscription` in `subscriptions.py` creates the subscription with a
-   payment method directly and just returns whatever status Stripe gives back.
-   If a card requires additional authentication (SCA, common on EU/UK cards,
-   increasingly enforced elsewhere), Stripe returns status `"incomplete"`
-   rather than `"active"`, and the subscription needs a client-side
-   `stripe.confirmCardPayment(client_secret)` step to complete. Checked the
-   frontend (`PaymentView.tsx`): no `confirmCardPayment`, no `client_secret`,
-   no `requires_action` handling anywhere. `isCardUpdateRequired` (line ~292)
-   treats any status outside `['none','active','deleted','canceled','trialing']`
-   as "your card needs updating", which is the wrong message for a customer
-   stuck in SCA, they'd be told to enter a new card when they actually just
-   need to complete a 3D Secure popup. Net effect: some fraction of signups
-   from SCA-required cards likely fail silently with a confusing message.
-   Didn't attempt a blind fix, this needs live Stripe test-mode iteration
-   (test-mode has cards that specifically trigger 3D Secure) to get right,
-   not a guess. The rest of the trial → active → redirect flow (start-trial,
-   the webhook handler's subscription.updated/deleted handling, Auth.tsx's
-   status-based redirect) reads correctly on inspection; this SCA gap is the
-   one substantive finding.
-5. ~~CORS, rate limiting, exception leakage, security headers~~ — **closed 2026-07-29**, see "Recent changes."
-6. ~~Triage the 34 Dependabot vulnerabilities~~ — **triaged 2026-07-29**, see "Known gaps" above.
-
-**Tier 1 — cheap, closes an existing gap. Closed 2026-08-03.** All three items
-below are done. The efficiency backlog that follows is a separate list and is
-*not* closed: items 18-22 remain genuinely open.
-
-7. ~~Wire `TextProcessor` into the factory for `.txt`/`.md`~~ — **closed 2026-07-29.** Rewrote it, the old version was incompatible with the current codebase, not just unverified.
-8. ~~Demo workspace~~ — **not needed.** Osas already has a real test customer for demos instead of a synthetic one.
-9. ~~Clean up orphaned EdTech generator functions in `tasks.py`~~ — **closed 2026-07-29.**
-
-**Efficiency backlog (audited 2026-07-29 against a longer external review):**
-
-Closed, or moot after the EdTech and YouTube removals:
-
-| Item | Status |
-|---|---|
-| Prefer captions over Whisper; keep model warm | Moot, `faster-whisper`/`yt-dlp` gone |
-| Defer flashcards/quizzes until chat-ready | Moot, that stage no longer exists, so `processed` **is** chat-ready |
-| Heavy models loaded in API contexts | Moot, nothing heavy left to load |
-| Many sequential LLM calls for learning materials | Moot, same reason |
-| Per-stage timing metrics | **Done 2026-07-29**, see "Recent changes" |
-| Size/type-based worker concurrency | **Done 2026-07-29**, plus the batch barrier and lease bugs found alongside it |
-
-Premise checked and found wrong, so **do not act on these**:
-
-- *"Q&A sends a ~120k-token prompt."* It does not. `rag/pipeline.py` selects context at `token_budget=3000`, already inside the recommended 3k–8k. `MAX_TOKENS_CONTEXT=120000` is only a ceiling that triggers *reduction*. The one real sliver: chat history is not capped separately from document context.
-- *"Frontend duplicates status work via polling and WebSocket."* There is no `setInterval` anywhere in the frontend. WebSocket is the only continuous channel; `pollFileStatus` is a one-shot manual nudge that already skips terminal statuses.
-
-Genuinely still open, roughly in value order:
-
-18. ~~Large-PDF partial usability: no persisted progress (a crash restarts from page 1) and no fast path to unlock chat on the first N pages.~~ **Closed 2026-08-11**, both halves. Each batch of pages is stored as it finishes, so a crash keeps what it reached and a retry resumes from the first unstored page. Chat on the first N pages needed no work beyond not marking the file processed early, because retrieval never filtered on status. Proven by interrupting a 1,500-page PDF at page 550. See "Recent changes".
-19. ~~**The Redis wake-up.**~~ **Closed 2026-08-11**, see "Recent changes":
-    10.02s to 0.18s, measured. The description below is the original entry,
-    kept because two of its claims were wrong and the corrections are worth
-    carrying: the Python package was installed but no Redis server existed, and
-    production had been running at a 10s interval rather than the 30s default.
-
-    `POLL_INTERVAL` defaults to 30s at
-    `workers/worker.py:110`, so up to thirty seconds of an upload's apparent
-    slowness is the worker not having looked yet. Nothing is running during it.
-    `redis>=5.0.0` is already a dependency, so this is cheaper than it looks.
-
-    **What it is: a tap on the shoulder, not a new queue.** On enqueue, publish
-    the run id. The worker subscribes and wakes immediately instead of at the
-    next poll. That is the whole feature, and it removes idle latency without
-    touching how long any job actually takes.
-
-    **The database queue stays, and this is the part to hold.** The tempting
-    version replaces `agent_runs` with Redis and deletes the polling. Do not.
-    Redis pub/sub is fire and forget: publish while the worker is restarting and
-    that message is gone, the file is never processed, and nobody learns about
-    it until a customer asks why their upload has sat there since Tuesday. The
-    table already handles the ugly cases correctly, and each of those behaviours
-    was paid for in a real bug: lease reclaim for a worker killed mid-job
-    (`worker.py:507`), retries to `max_attempts`, per-user fairness so one
-    person uploading forty files does not starve everyone else.
-
-    So: **Redis is the notification, Postgres remains the record.** Keep the
-    30s poll as the safety net underneath. If a message is missed, the poll
-    still catches it and the only cost is the latency this feature was meant to
-    remove, in the rare case rather than every case. A missed tap is a slow job;
-    a missed queue entry is a lost one.
-
-    Redis Streams would be durable enough to be a queue, and that is exactly the
-    trap: it would mean rebuilding leases, retries and fairness in a second
-    place, against the "what not to do" note at the end of Tier 2.
-
-    **Side effect worth knowing when the RLS work happens.** The awkward part of
-    putting row-level security on the worker is that finding the next job means
-    reading across every tenant, which is what the policy forbids. If the
-    published message carries the organization id, the worker can set its tenant
-    before it touches anything and run under the same policy as the API. The
-    poll still needs the privileged read, but it becomes the fallback path
-    rather than the normal one.
-20. ~~Embedding dedupe by chunk hash~~ **Closed 2026-08-11.** Scoped to the organization, hashed over the text that is actually embedded rather than the `content` column, and it dedupes within a batch as well as against what is stored. See "Recent changes".
-21. ~~Short-TTL query cache~~ **Closed 2026-08-11.** 20.40s cold, 0.33s repeated, measured live. A new or deleted document invalidates the workspace's answers immediately rather than leaving them to expire. The expectation set here was right: it does nothing for uploads, which is where item 18 went instead.
-22. ~~Redis pub/sub for worker-to-API notifications instead of the current sync `requests.post` wrapped in `to_thread`.~~ **Closed 2026-08-11** alongside item 19, as planned. One difference from the plan: the HTTP call was kept as the fallback rather than deleted, because this is the notification whose loss a customer watches happen. It now needs a shared secret, which closed an unauthenticated endpoint nobody had noticed. See "Recent changes".
-
-Success metrics to watch once the TIMING logs have data: p50/p95 upload to chat-ready, p50/p95 query latency, queue wait, worker RSS peaks, and failed/retried runs per stage.
-
-**Tier 2 — Phase 2, stickiness (daily use, churn < 5%):**
-
-**1. The agentic platform. The Tier 2 initiative (direction set 2026-08-03).**
-
-Tier 2 is one thing: an agent that uses tools and skills, running open models we
-serve ourselves, with the DigitalOcean endpoint gone. Not a cost optimisation
-that happens to involve models. The product stops being "ask a question about
-your documents, get a cited answer" and becomes "give it something to do".
-
-This was previously written up as a self-hosted model platform gated on hosted
-inference passing $500-1,000/month. That framing was wrong about the reason.
-Waiting for a cost threshold made sense for a migration whose only payoff was a
-cheaper bill; it makes no sense for the thing the product is meant to become.
-The phases below survive intact, because they were always the right sequence.
-Only the trigger changed: it is a decision now, not a threshold.
-
-**What agentic means here, concretely.** A tool is something the model can call:
-search these documents, read this page, list the workspaces, draft this. A skill
-is a named procedure over tools that a customer recognises as their own work,
-which is where the vertical focus pays: "check this invoice against the contract"
-for accounting, "find every clause about termination" for legal. Orchestration is
-the model deciding which to use and in what order, then composing a cited answer.
-
-**Status, measured 2026-08-04: the tool layer is built and it is losing.**
-`AGENT_MODE=tools` exists, works, and scores **13-14/22** on citations against
-the fixed pipeline's **16-18/22**, on the same corpus with two runs each. It
-defaults to off. Two things it does are genuinely better and neither is a
-number the pipeline can reach by tuning: refusals hit 4/4, and a question
-spanning two documents cites both, because the model searched twice.
-
-Read that as a schedule, not a verdict. The pipeline has had a day of defect
-fixes behind it and the tool loop has had one. But the ordering stands: **the
-tool layer only replaces the pipeline when it beats it on citations**, and
-"the architecture is more interesting" is not a reason to ship it. The
-benchmark decides, and it now knows its own noise, so the decision is
-checkable rather than argued.
-
-**The job queue is not part of that, and must not be absorbed into it.** This is
-the one boundary to hold. The worker's tenant scoping, per-user fairness, lease
-reclaim and separated query/ingest budgets exist because a naive loop got all of
-them wrong, and they were paid for in real bugs. An agent harness knows none of
-it. The whole agent loop — many tool calls, several model round trips — runs
-*inside* a single queued job. The model decides what to do; the queue still
-decides when it runs and on whose behalf. Model orchestration and job
-orchestration are different words that happen to share a verb.
-
-**Why open models are load-bearing rather than incidental.** Agent loops make
-many more model calls than a single Q&A, so hosted per-token pricing scales
-badly with exactly the behaviour we are adding. Tool calling also wants a model
-chosen for it rather than whatever an endpoint offers. And on-prem, which is what
-closes HIPAA and privilege-sensitive deals, is impossible while inference leaves
-the building. Serving our own models is the enabling step, which is why phase 1
-comes first.
-
-**Hermes: what we take and what we leave (researched 2026-08-03).**
-
-Hermes is two things with one name, both from Nous Research.
-
-1. **Hermes 4** is a set of open models. You download them and run them yourself.
-2. **Hermes Agent** is a program that runs an agent. MIT licensed. Lots of parts
-   already built: skills, memory, 60+ tools, MCP, and adapters for Slack, Teams,
-   WhatsApp and about twenty other places.
-
-**Decision: take the models, leave the program.**
-
-Here is the whole reason, in one sentence. Hermes Agent puts everybody's memory
-in one pile.
-
-Their own open issue says it plainly: *"one agent = one tenant. Memory is
-global, sessions don't scope by tenant, and there is no isolation between
-groups, channels, or users."* Memory reads and writes skip the hook system, so
-a plugin cannot fix it. You would have to fork the project and then own that
-fork forever, as a one-person company with paying customers.
-
-That one pile is the exact thing we sell against. A dental practice's records
-must never be readable by a law firm. Making that true is what 2026-08-01 to
-2026-08-03 was spent on. Putting our agent on a component that does not have it
-would throw that away. The same issue thread records an agent reading one
-customer's competitor notes and publishing them in a public article, and the
-operator nearly being sued.
-
-The official workaround is one process per customer. That throws away the job
-queue, per-tenant fairness and lease reclaim, and it does not fit one box.
-
-What we take:
-
-| From Hermes | What we get | Cost to us |
+| group | overall | citations |
 |---|---|---|
-| Hermes 4 open weights | A model built for tool calling, run on our hardware | Two env vars, then the benchmark |
-| Its tool-call format | vLLM and SGLang already parse it (`--tool-call-parser hermes`) | Nothing. No parser to write |
-| The idea of skills | Named procedures over tools, per vertical | We build it inside our own worker |
-| MCP support | A standard way to plug in tools instead of a bespoke one | Adopt the protocol, not their runtime |
+| error codes | 3/5 | 3/5 |
+| charging chart | 0/3 | 1/3 |
+| physical data | 2/4 | 2/4 |
+| figures | 0/4 | 1/4 |
+| prose | 3/4 | 4/4 |
+| **total** | **8/20** | **11/20** |
 
-What we do not take: the agent runtime, its memory, its sessions, its adapters.
-We keep our own tenancy, our own queue, and our own membership model, because
-those are correct and theirs are not.
+Prose works. Tables are a coin flip. Figures are zero. The sharpest single
+result is question 6: the **right page was cited** and the answer still said 78
+where the page reads 74, because the row that value belongs to no longer existed
+by the time the model saw it.
 
-**When to look again.** If a `memory:scope` hook lands and the maintainers
-commit to real tenant isolation, reassess. The issue is currently labelled
-`needs-decision`. Until then this is settled, so do not reopen it without new
-evidence from that thread.
+**What is built.** A page goes to `llama-4-maverick` only when the text layer has
+probably failed it (digit density, image area, or empty). Every number the model
+returns is checked against the text layer; a page that introduces more than five
+numbers absent from the page is rejected outright. Proven on the charging chart:
+rows come back intact, including the 74 and 94 that questions 6 and 7 get wrong.
 
-Sources, so this can be checked rather than trusted:
-`github.com/NousResearch/hermes-agent/issues/34352` (the multi-tenant issue),
-`hermes-agent.nousresearch.com/docs`, `huggingface.co/NousResearch/Hermes-4-70B`.
+**What is not proven: whether any of that moves 8/20.** No measurement exists.
 
-**The model asks. We do the work. (added 2026-08-03, after checking the model
-card rather than the marketing.)**
+### The speed problem, and three wrong explanations
 
-Switching the endpoint to Hermes 4 gives the app no new powers on the day it
-happens. The model card is plain: it emits a tool call and *"the actual
-execution and response handling falls to the developer"*. It is text only. It
-cannot browse, click, or see. The 60+ tools, the browsing and the vision belong
-to Hermes Agent and Nous Portal, which we are not using.
+A page takes 120 to 180 seconds. 58 of the Carrier manual's 69 pages qualify, so
+one 69-page document is about an hour. Three explanations were proposed and
+measured, and the first two were wrong:
 
-What we get is a model that asks for tools cleanly and in a format vLLM and
-SGLang already parse. That is the hard part to retrofit and worth having. But
-everything the agent can actually *do*, we build.
+1. *"Routing is too loose."* No. Page-by-page digit density on the Carrier
+   manual: 58 pages qualify at the 0.12 threshold and **51 still qualify at
+   0.30**. It is genuinely a book of tables. Corpus-wide the rule picks 112 of
+   433, about a quarter. The threshold is fine.
+2. *"The model is writing too much."* No. Measured output is **490 to 700
+   tokens** per page, taking 122 to 169 seconds. That is 3 to 6 tokens/second
+   against a normal 25 to 60, so almost none of the time is generation.
+3. *"It is image prefill, so lower the DPI."* **Unproven, and the first attempt
+   to measure it was invalid.** A descending sweep (150, 110, 80, 60) had the
+   150 run succeed at 177s and every subsequent run fail: ReadTimeout, 408,
+   RemoteProtocolError. That is indistinguishable from the endpoint degrading
+   under repeated calls, so it says nothing about DPI. Any re-run must
+   interleave settings and repeat each one.
 
-**Every tool is one of our own functions, wrapped.**
+The endpoint's behaviour under load is now the open question, and it may also
+explain the earlier finding that `VISION_CONCURRENCY=8` produced timeouts.
 
-The hard part already exists. `accessible_workspace_ids`, the file search, the
-workspace list: each is a function that already knows who is asking and refuses
-what they may not have. Making one into a tool is three small things. Describe
-it to the model. Run it when the model asks. Hand the result back.
+### Resolved: moved to DeepInfra 2026-08-13, and it was the provider
 
-The property that matters: a tool closes over the caller. `search_documents`
-cannot reach another company's files because the function underneath already
-cannot. A general-purpose tool from somebody else's framework has no idea our
-tenants exist. That is the whole reason the tools have to be ours, and it is the
-same reason we took the model and left the program.
+Same model weights, same prompts, same pages:
 
-**Adding a tool, start to finish:**
-
-1. Pick a job a real person does by hand today.
-2. Find or write the function. It must take the caller's identity and enforce
-   it, like every repository method already does.
-3. Describe it to the model: a name, one line on what it does, its arguments.
-4. Run it when the model asks, inside the queued job, never outside the tenant
-   check.
-5. Feed the result back so the model can use it, and so the answer can cite it.
-
-A **skill** is a named bundle of these that a customer recognises as their own
-work. "Check this invoice against the contract" is a skill. It is three or four
-tools in an order, given a name the customer already uses.
-
-**Where the tool list comes from: the customer, not us.**
-
-Do not invent tools in an empty room. The list is discovered by sitting with a
-real business and watching what they repeat. That is what the vertical focus is
-for, and it is the part that cannot be bought or copied.
-
-| Vertical | The repeated work to look for |
-|---|---|
-| Dental | Which consent form applies. What our policy says about this code. |
-| Legal | Every clause about termination across these twelve contracts. |
-| Accounting | Does this invoice match the contract we signed. |
-
-The rule: **if we cannot name the person who does this by hand today, we are not
-building it yet.** A tool nobody asked for is worse than no tool, because it
-still has to be maintained and it still widens what the agent can reach.
-
-This is also the honest sales motion. We are not selling an agent that does
-everything. We are selling one that does the three things this business does
-every week, using their documents, with a citation. That is a conversation to
-have with customers, not a feature to guess at.
-
-**Still true, and still the gate on quality:** the 20-question citation benchmark
-below. An agent that calls five tools and cites the wrong page is worse than a
-single retrieval that cites the right one. Capture the baseline against the
-hosted endpoint before any of this starts.
-
-**2. Serving our own models: the three phases (agreed 2026-07-30, reframed
-2026-08-03 as the delivery path for the agentic platform above).**
-
-What were tracked separately as a knowledge layer, self-hosting and vision
-extraction are one migration: move the model work onto hardware we own, then
-spend the now-cheap inference on capabilities that were previously unaffordable.
-Sequenced, because each phase depends on the one before it.
-
-**These thresholds are no longer the trigger, and are kept as instrumentation.**
-Phase 1 used to wait for hosted inference to pass $500-1,000/month, for vision
-pricing to make ingestion uneconomic, for a customer to demand on-prem, or for
-latency to become a complaint. That was the right test for a migration whose
-only payoff was a cheaper bill. It is the wrong test for the platform the
-product is being built on, so the work starts when it is scheduled rather than
-when a bill crosses a line. Watch the numbers anyway: they say how urgent it is
-and they are the argument for the on-prem edition when a customer asks.
-
-**Serverless GPU was weighed on 2026-07-30 and declined; that still holds, and
-matters more now.** Cold starts of 30-120s are tolerable for background
-ingestion and fatal for interactive chat, and its single synchronous `/ask`
-endpoint would discard the job queue, per-tenant fairness and progress updates.
-An agent loop makes that worse rather than better: many model round trips per
-job, each paying the same tax. Own the box, or keep a hosted endpoint until you
-do, but do not route an agent through cold starts.
-
-**Order of work, corrected 2026-08-03. Tools first, model second.**
-
-The phases below read as though the model swap comes first. It does not, and
-doing it first teaches us nothing: with no tools defined, Hermes 4 behaves
-exactly like what we run today, because the only thing it adds is the ability to
-ask for tools we have not written.
-
-The right order, and the reason for each step:
-
-1. **Build the tool layer against the endpoint we already have.** Verified
-   2026-08-03: the current endpoint (`openai-gpt-oss-20b`) already accepts a
-   `tools` array and returns well-formed `tool_calls`. A probe asking it to
-   search documents came back with `search_documents({"query": "refund
-   policy"})` on the first try. So the whole agent loop can be built and
-   debugged for zero extra cost, on infrastructure that already works.
-2. **Run the loop beside the current pipeline, not instead of it.** Both answer
-   the same 20 benchmark questions. Compare citation correctness first.
-3. **Only then remove the hardcoded retrieval.** This is the step that carries
-   real risk, and it is worth being blunt about why. Today retrieval is
-   deterministic: every question searches, at a 3000-token budget, before the
-   model sees anything. Handing that choice to the model means it may not
-   search, or may search badly, and citation accuracy is the product. Do not
-   delete the deterministic path until the benchmark says the agent matches or
-   beats it. Keep it behind a flag afterwards.
-4. **Then swap the model**, and re-run the same benchmark. Now the comparison
-   means something: it measures tool-calling quality between two models on an
-   identical loop, which is the actual question.
-
-Written down because the tempting order is the reverse. Swapping an endpoint is
-a satisfying afternoon and changes nothing a customer can see. Writing the first
-tool is duller and is the whole feature.
-
-**Phase 1 costs nothing to start, and does not need a GPU (priced 2026-08-03).**
-Hermes 4 70B is served by OpenAI-compatible providers at roughly $0.13 per
-million input tokens and $0.40 per million output. At three seats and a hundred
-questions each a day, that is under $20 a month even allowing ten model round
-trips per agent job. Renting a 24GB GPU is about $108 a month and would not run
-a 70B anyway, so the self-hosted comparison is really a 14B against a hosted
-70B. Break-even against owning is somewhere near 270 million output tokens a
-month, roughly a hundred times current size.
-
-So phase 1 starts as a **hosted swap**: repoint the endpoint at a provider
-serving Hermes 4, run the benchmark, learn whether it is actually better for our
-documents. Zero capex, and the same two environment variables either way.
-
-Owning hardware is a **sales decision, not a cost decision**. Do it when a
-customer's contract requires that data never leaves the building, price it as a
-premium tier, and let their money buy the box. One warning: the cheapest rented
-GPUs are marketplaces of other people's machines. Fine for benchmarking, never
-for customer documents, since that buys the cost of self-hosting with worse
-privacy than we have today.
-
-**Phase 1 — Serve our own models.** `gradient_chat` posts OpenAI-shaped payloads
-to `{INFERENCE_BASE_URL}/chat/completions`, and embeddings to
-`{DO_EMBEDDINGS_URL}/embeddings`. vLLM serves exactly those, so switching is a
-**config change, not a code change**: repoint the two env vars. That portability
-was accidental and is now deliberate. Never let provider-specific calls leak past
-`llm_service.py`.
-
-This is three models, not one, and that drives the hardware:
-
-| Role | Used by | Today |
+| | DigitalOcean | DeepInfra |
 |---|---|---|
-| Text generation | answers, concept compilation | DigitalOcean endpoint |
-| **Vision** | phase 2 page extraction | none yet, new requirement |
-| Embeddings | chunk and query vectors | Voyage AI |
+| vision, page 9 (charging chart) | 165s | **16.5s** |
+| vision, page 62 (physical data) | 148-186s | **12.3s** |
+| chat, time to first token | 23.8s / 26.7s | 2.1s total |
+| embeddings | Voyage, 11-18ms/chunk | Qwen3-0.6B, 0.2s, 1024-dim |
 
-Text and vision are separate weights held in VRAM simultaneously, so size the box
-for both rather than for the chat model alone. Embeddings are cheap and Voyage is
-good, so keeping them hosted is reasonable until the on-prem edition, which by
-definition forces all three local. A hosted-hybrid is a legitimate intermediate
-state; do not treat self-hosting as all-or-nothing.
+All hand-verified values survived on both pages, including the 74 that benchmark
+question 6 gets wrong. The Carrier manual goes from 2.7 hours of extraction to
+about five minutes.
 
-**The benchmark is the gate on the whole initiative, not a formality.** A weaker
-model degrades three things at once: answer quality in phase 1, transcription
-fidelity in phase 2, where hallucinated digits are the worst failure available,
-and contradiction detection in phase 3, where being wrong is worse than being
-absent. Citation accuracy is the product and it degrades first.
+**The lesson worth keeping.** Four explanations were proposed and measured for a
+165-second page — pages routed, output length, image size, request queueing —
+and every one was about what we send. All four were wrong. The check that found
+it in five minutes was "is this speed normal for this model", against a public
+throughput figure. Ask that first next time.
 
-Make it concrete rather than impressionistic:
+**What did not just work: reasoning models spend the answer's budget thinking.**
+`gpt-oss-20b` returned 1,394 characters of `reasoning_content`,
+`finish_reason=length`, and `content: ""` — a successful HTTP 200 with no answer.
+`_post_json`'s `accept()` already existed for this, so it is not new, but it is
+intermittent, which surfaces as an answer that is occasionally blank rather than
+as something obviously broken. `CHAT_REASONING_EFFORT=low` bounds it: 1.4s
+instead of 3.7-5.4s, 138 characters of thinking instead of 800-1,100, same
+answer. Raise it if the benchmark says less thinking costs accuracy.
 
-1. Take roughly 20 real questions against a document already ingested, with known
-   correct answers and known correct source pages.
-2. Record the current hosted model's answer and cited page for each. This is the
-   baseline, and it should be captured **before** any migration work begins.
-3. Re-run against the self-hosted model and compare on citation correctness
-   first, answer quality second. A prettier answer citing the wrong page is a
-   regression.
-4. For phase 2, additionally diff the extracted text against the PDF text layer
-   on numeric-dense pages.
+**Model ids are matched exactly and are namespaced with a slash.** The live
+config had a trailing space on `MODEL_CHAT_ID`, which DigitalOcean tolerated. A
+wrong id returns "model not found", which reads like an outage rather than a
+typo.
 
-Model sizing advice dates quickly, so verify current options rather than trusting
-a figure written here: as of this writing, very large mixture-of-experts models
-need hundreds of GB of VRAM even quantised, which is not a single cheap GPU, and a
-mid-sized quantised open model is the realistic starting point. Check what is
-current when the work actually starts.
+### The measurements that led there, 2026-08-13
 
-**Phase 2 — Vision extraction for every PDF.** Replace the text-layer, OCR-
-fallback escalation with a single vision pass over each rendered page. Removes the
-heuristic, the OCR branch, and eventually `pytesseract` and `Pillow`.
+Every speed hypothesis was measured and every one was wrong, because they were
+all about *what we send*. The cause is *where we send it*.
 
-`page.get_text("text")` returns characters in PDF storage order, not reading
-order: multi-column layouts interleave and tables collapse into soup. IRS
-Publication 15, used to test ingestion on 2026-07-30, is exactly that shape. This
-is the difference between a citation quoting a coherent passage and one quoting
-three columns spliced together. The comparison is not perfect versus risky, it is
-Tesseract's errors versus a vision model's, and on dense rate tables Tesseract is
-worse.
+`llama-4-maverick`, the model we already run, has a published median of **123
+output tokens/second** across providers; Azure serves the same weights at 368.
+**We measure 3.** Not a slow model: an ordinary model on a provider serving it
+roughly forty times slower than anybody else.
 
-One safeguard, because it is nearly free: **when a text layer exists, compare the
-digits.** If the vision pass and the text layer disagree on a number, trust the
-text layer and flag the page. A confidently cited wrong figure in a tax or
-clinical document is the one failure that loses a customer. Note that self-hosting
-does not reduce hallucination; it addresses cost, privacy and vendor dependence
-only.
+Costed on our own numbers — the Carrier manual, 69 pages, 58 to vision, ~412k
+input and ~35k output tokens:
 
-Determinism is not a real concern here: extraction happens once per document and
-the chunks are then fixed, so sampling variance cannot move citations under a
-customer during normal use.
+| option | speed | this document | cost/document |
+|---|---|---|---|
+| DigitalOcean (today) | 3 t/s | **2.7 hours** | ~$0.14 |
+| same model, DeepInfra | 98 t/s | ~6 min serial | $0.11 |
+| same model, Azure FP8 | 368 t/s | **~3 min serial** | $0.12 |
+| same model, Bedrock | 230 t/s | ~4 min | $0.13 |
+| Mistral OCR 4 | purpose-built | seconds | $0.28, $0.14 batched |
 
-**Phase 3 — Compiled knowledge layer.** A distilled, entity-centric layer between
-chunks and the query, adapted from the "LLM wiki" pattern with its token-savings
-argument discarded: that saving is measured against re-uploading whole documents,
-which retrieval at a 3000-token budget already avoids.
+**Cost is not the variable.** Everything lands between 11 and 28 cents a
+document. The variable is a factor of fifty in time, paid for no saving.
 
-What survives is worth more than the saving:
+`VISION_BASE_URL` and `VISION_API_KEY` now exist so vision can move providers
+without touching chat, which is a different model with different behaviour.
+Moving is two environment variables.
 
-- **Contradiction detection.** A 2023 handbook and a 2025 memo disagree about a
-  sterilisation setting. Chunk retrieval returns whichever ranks higher and
-  answers confidently, with no notion that sources conflict or that one is newer.
-  For dental, legal and accounting, "your documents disagree about X, here is
-  both, dated" is a compliance finding, often worth more than the answer. No
-  competitor in [[competitive-landscape]] markets this.
-- **Cross-document synthesis.** "What is our onboarding process" may span an SOP,
-  a checklist and a policy email. Chunks are extractive; concepts merge.
+Mistral OCR 4 is the strategic option rather than the quick one: $4/1,000 pages,
+86.2% on table extraction (ahead of GPT-5.4 Pro, Claude Opus 4.6 and Gemini
+3.1), and it returns **block types, bounding boxes and per-block confidence**,
+which is precisely what `chunk_markdown` wants as input rather than having to
+infer from pipes. Its documented weakness is merged cells and nested headers,
+which is exactly what a charging chart is, so it gets measured against page 9's
+48 hand-verified cells before it ships. Those benchmark numbers are somebody
+else's measurement.
 
-**Concepts route and reason; they are never the citation target.** In the original
-pattern answers cite wiki pages. An audited practice needs the citation to resolve
-to page 14 of the real protocol, not to a summary a model wrote. Retrieval
-consults concepts to decide what is relevant and whether sources conflict, then
-pulls the underlying segments. The citation guarantee is the product; do not trade
-it for elegance.
+**Do not tune anything else against the current endpoint.** The same prompt on
+the same page returned byte-identical output in 188s and 113s, a 66% spread.
+That is wider than any prompt or DPI effect worth having, so no A/B run here can
+resolve anything. Two prompt comparisons were abandoned for this reason.
 
-Concept bodies are **markdown, not a rigid schema**: a model writes markdown more
-naturally than it fills columns, the customer can read and correct their own
-knowledge base, and a new section does not need a migration.
+### Three bugs this work exposed, all fixed 2026-08-13
 
-```
-concepts         id, organization_id, title, body_markdown, summary, embedding
-concept_sources  concept_id -> segment_id      (provenance, many-to-one)
-concept_links    concept_id <-> concept_id     (relation, incl. contradiction)
-```
+None were introduced by vision. All three were latent and invisible while
+extraction took milliseconds.
 
-**Per-workspace compilation rules are a product feature, not a config file.** A
-dental practice and a law firm want different emphasis, vocabulary and
-contradiction sensitivity. "Your knowledge base follows your firm's rules" is
-sellable for very little work.
+- **A running job did not hold its lease.** `lease_expires_at` meant "started
+  less than 15 minutes ago", not "somebody is holding this". An hour-long
+  extraction was reclaimed at 15, 30 and 45 minutes and then failed as "worker
+  presumed dead" while the worker was alive and working. Each reclaim started a
+  **second concurrent extraction of the same document** against a metered
+  endpoint. `_hold_lease` now renews while the job runs, conditional on the row
+  still being ours.
+- **Extraction was not resumable.** Item 18 made *storage* resumable, but all
+  extraction completes before the first batch is written, so a crash discarded
+  every page already paid for. Roughly three hours of vision calls bought
+  nothing on 2026-08-12. `page_reads` now stores each page as it lands.
+- **One refused page killed the whole document.** `asyncio.gather` without
+  `return_exceptions` returns the instant one page raises, with its siblings
+  still in flight, and the bare exception fell through to the handler that
+  returns `[]`. Found by the cache test, which expected pages 1 and 2 on disk
+  and found only page 1.
 
-Compile from the **stored chunks**, never by re-reading the raw file, so a concept
-always resolves back to the exact segment it came from. `generate_key_concepts`
-already did most of the extraction and deduplication; it fed flashcards, was never
-wired to retrieval, and was removed as dead code in `f0a45b2`. Recover the logic
-from there rather than rewriting it.
+## Parked, and why
 
-**Why this order.** Phase 3 was originally called the first thing to tackle, but
-it depends on the two before it. Compiling concepts from multi-column soup
-produces soup concepts, so extraction quality must come first, and concept
-compilation is the expensive step that only becomes affordable on owned hardware.
-Phase 1 is also the cheapest and least risky, being two environment variables.
+Nothing here is abandoned. Each is one customer request away.
 
-**The commercial payoff: an on-prem edition.** Dental (HIPAA), legal (privilege)
-and accounting all have buyers for whom "your documents never leave your building"
-closes deals hosted inference cannot, and it supports premium pricing. It also
-multiplies support burden for a one-person company, since every customer is a
-different box, so treat it as a later-stage offering for a small number of larger
-accounts.
-
-**What not to do:** move orchestration into a general agent harness. The worker's
-tenant scoping, per-user fairness, lease reclaim and separated query/ingest
-budgets exist because a naive loop got all of them wrong. Swapping the model
-provider is nearly free; rewriting orchestration would discard that and
-reintroduce those bugs. Extraction and compilation are model work. The job queue
-is not.
-
-*Audio transcription remains a separate product decision.* Whisper would run well
-on the same GPU, but video and audio ingestion was deliberately removed on
-2026-07-29 and named the largest cost sink. Owning a GPU is not a reason to bring
-it back.
-
-**3. Onboarding that makes membership legible from the first screen (raised
-2026-08-03, demoted below the agentic platform 2026-08-03).**
-
-Sign-up should ask for the company name and take payment as one flow starting at
-the home page. Today it creates a company named after the email prefix, then
-sends the person to settings to pay, so the two halves of becoming a customer
-happen on different screens with a redirect between them, and the name is
-something they discover rather than choose.
-
-The deeper reason is that joining and starting are still easy to confuse.
-Somebody sent an invite link ended up creating their own company alongside the
-one they were invited to, because every route through a signed-in state with no
-organization leads to sign-up. The screens now say which is which (see "Recent
-changes", 2026-08-03), and the database refuses a second owned company, so this
-is no longer a correctness problem. It is a clarity problem, which is why it is
-Tier 2 rather than Tier 0.
-
-Shape agreed with Osas: *sign up* names a company and pays for it; *invite*
-means accept, sign in, and land in the company that invited you, never being
-offered one of your own; an owner can remove a member; a member can delete their
-account freely; an owner must cancel the subscription before deleting theirs.
-
-**Closed 2026-08-07.** All of it is built. The sign-up screen now names the
-company and pays for it in one submit; see "Recent changes".
-
-11. Slack/Teams/WhatsApp bot — previously identified as the highest-impact SMB retention hook
-12. Activity history
-13. ~~Answer feedback (thumbs up/down)~~ — **closed 2026-08-08**, see "Recent
-    changes". Thumbs on every answer, four chips and a comment on thumbs-down,
-    and a CLI that reads a complaint next to the run that caused it. The
-    case-study argument for it still holds and is now waiting on volume rather
-    than on code.
-14. ~~Admin dashboard with search analytics~~ **Built 2026-08-11** as a Usage
-    section in Settings, owner and admin only, from this database rather than
-    PostHog. See "Recent changes" for why PostHog was the wrong source. The old
-    placeholder in `api/routes/analytics.py` is still there and still returns
-    zeros; nothing calls it, and it should be deleted next time that file is
-    opened.
-15. Saved prompts
-
-**Tier 3 — Phase 3, automation (search → action; this is where "workflow automation" becomes real, don't market it before it's here):**
-16. AI-generated SOPs
-17. Meeting summaries
-18. Onboarding assistant
-19. Proposal drafting
-20. Approval workflows
-
-**Tier 4 — Phase 4, AI operating layer (only plan for this once there are 50+ customers):**
-21. CRM/email integrations, cross-chat memory, audit logs, API access
-
-**Explicitly not being built right now:**
-- Manufacturing-specific ingestion (table/diagram-aware PDF parsing, symptom/fault-code
-  query tuning, revision control) — shelved with the manufacturing pivot, see above.
-  Revisit only if a real manufacturing customer shows up through the vertical tab.
-- ~~Standalone AI search UI~~ **Built 2026-08-11**, straight after the
-  efficiency backlog, as decided. What follows is the reasoning it was built
-  on, which held up. The
-  alternative was deleting the claim from the site. Building won because it is
-  a toggle on the chat screen and one route, not a project, and because it
-  cannot hallucinate: it is the demo for a buyer who does not trust a generated
-  answer yet. They see their own document, on the right page, with their own
-  words in it. Same engine either way.
-
-  Search and chat are different products to a user, which is why this is worth
-  a surface rather than a setting. Search is "where is that clause", where
-  somebody wants the document and will read it themselves. Chat is "what does
-  our policy say", where they want the answer.
-
-  **The shape: chat with the expensive half removed.** Embed the question once,
-  call `hybrid_search`, render the rows. No query rewriting, no term expansion,
-  no model call, no message saved, no queued job. It can be an ordinary
-  synchronous route answering in well under a second, while chat keeps going
-  through the worker.
-
-  Four things stop it being a literal passthrough of the retrieval list, all
-  small, all worth knowing before it is estimated at an afternoon:
-
-  1. **Chunks are not results.** `hybrid_search` returns slices of a page, so
-     twenty rows can be five near-identical snippets from page 12 of the same
-     file. Group by file and page, keep the best-scoring snippet per page, then
-     count.
-  2. **Never show the score.** It is a reciprocal rank fusion number on an
-     arbitrary scale, not a percentage match. Rank by it, do not print it.
-  3. **The same scoping as chat, or it is a leak.** Pass `workspace_id` or
-     `accessible_workspace_ids` exactly as `query_agent.py` does. A new route
-     reading documents is precisely where the missing-`WHERE` class of bug has
-     shown up before.
-  4. **Entitlement and a rate limit.** Chat refuses an organization that has not
-     paid (2026-08-07) and is rate limited because it costs money per call.
-     Search calls the embedding service, so it costs money too, and a search
-     route without both checks is a free door into the product beside the
-     locked one.
-- Voice interface — deferred, not in current scope.
-
-Compliance is a stated differentiator (Canadian data residency option, no training on
-customer data, SOC2 as a target, on-prem LLM option for regulated verticals) — keep
-that in mind when weighing "fastest to ship" against "closer to what a
-compliance-sensitive customer will eventually ask for," especially given the security
-gaps above and the healthcare/legal verticals in the target market.
-
-## The tenant model (decided 2026-07-29, built 2026-07-31 → 2026-08-01)
-
-**Built.** Organizations exist, subscriptions are keyed to them, workspaces live
-inside them, storage mirrors them, and access is answered in one place. What
-follows is the model as designed; the differences between it and what shipped are
-called out in "As built" at the end of the section.
-
-It was the single biggest structural gap in the product. There was no
-organization entity, so `Workspace` did three unrelated jobs at once: billing
-entity (`workspaces.user_id` implied who pays), security boundary (membership
-granted access), and document container. `Subscription` attached to a *user*, not
-a company. Every multi-user defect found on 2026-07-29 traced back to that.
-
-Target model, tenant and objects, in the Entra sense:
-
-| Table | Purpose | Change |
+| Parked | Why | What exists already |
 |---|---|---|
-| `organizations` | The tenant. Billing entity and security boundary. | **new** |
-| `organization_members` | user ↔ org with role: `owner`, `admin`, `member` | **new** |
-| `subscriptions` | Keyed to `organization_id`, gains `seats` | re-key from `user_id` |
-| `workspaces` | Document container inside an org, many per org | `organization_id` replaces `user_id` |
-| invites | Invite to the **org**, not a single workspace | re-scope |
-| `files` | `workspace_id` is the boundary; `user_id` becomes "uploaded by" | semantics change |
+| SharePoint, Outlook | Need a tenant admin to consent | Working SharePoint adapter, tested |
+| Slack, Teams | Need an admin, and SMBs mostly are not there | Signature verification, 11 tests |
+| Computer-use on portals | Hardest thing on the list, and credentials are heavy | Nothing |
+| Self-hosting models | A sales decision, not a cost one, at this size | Nothing |
+| Manufacturing-specific ingestion | Shelved with that pivot | Nothing |
 
-Decisions already made:
+**Computer-use is parked, not dismissed.** An earlier note called it enterprise
+automation with no nameable job and had the argument backwards: enterprise
+software has APIs, small-business software does not. Dentrix is a Windows
+application and insurance eligibility lives on portals with no API. The job is
+nameable, which is the test: the front-desk person checking eligibility on a
+payer portal every morning. When it is built: read-only, human-triggered,
+results returning as citable knowledge, and portal credentials treated as the
+heaviest thing we would ever hold.
 
-- **Signup creates an organization**, not just a user. You always act inside an
-  org, and the switcher is an org-and-workspace switcher.
-- **Invites are org-level**, since seats are an org property and membership
-  should grant access to the org's workspaces.
-- **Org membership initially grants access to all the org's workspaces.** Add
-  per-workspace ACLs ("HR docs are managers-only") only when a customer asks.
-- **Three roles**, because `admin` is cheap now and expensive to retrofit:
-  `owner` (billing plus everything), `admin` (manage members, no billing),
-  `member` (use it). This is the admin view versus user view split.
-- **Settings splits in two**: Account for everyone (theme, sign out, delete own
-  account), Admin for owners only (billing, members, workspace management). Staff
-  should not have a billing route to reach, rather than having a hidden button.
-- **A person can be staff in one org and own another.** Entitlement is therefore
-  **per organization, never a global per-user boolean**. They can be premium in
-  one context and free in another simultaneously.
+## Consolidating onto one inference provider, decided 2026-08-13
 
-Cases to handle that nothing covers today:
+Three providers today: DigitalOcean (chat, vision), Voyage (embeddings), and
+that is one bill and one status page too many. Moving to DeepInfra. The reasons
+differ per piece, and two of the three are not what they look like.
 
-- Staff must **never** be shown a payment form when the *owner's* subscription
-  lapses. They get "this workspace's plan needs attention, contact the owner."
-- Removing someone from an org leaves their uploads with the org. A departing
-  employee does not take the SOPs.
+**Chat and vision: moving because the current provider is broken.** Measured:
 
-### As built (2026-08-01)
-
-Four things ended up different from the sketch above, each for a reason worth
-keeping.
-
-**The roles are `owner`, `admin`, `staff`.** Not `member`, which was a third word
-for the same idea and got introduced by accident before being removed. Owner pays
-and can do everything. Admin runs the company inside the product but cannot touch
-billing, because somebody has to be unable to cancel the subscription. Staff read
-and ask, and change nothing: uploading and deleting are the same permission as
-managing, since a knowledge base nobody may add to does not need a role of its
-own. A migration rewrote the existing `member` rows; the word is still accepted as
-a synonym so an old row resolves, and nothing writes it.
-
-**Permissions are a capability table, not role strings.** `api/core/permissions.py`
-holds one map from role to capabilities, consulted everywhere. Role comparisons
-used to be written inline at nineteen call sites, so adding a role meant finding
-all nineteen and missing one meant a silent grant or a silent denial. Adding a
-role is now a row; adding a capability is an enum member plus the roles that hold
-it. Neither requires touching a route.
-
-**Reach is a per-member property, not a second kind of invite.** An
-`organization_members.scope` of `organization` sees every workspace in the
-company; `workspace` sees only what has been assigned. So a person is invited to
-the company once and the owner turns their visibility up or down afterwards,
-rather than the invite deciding forever. `accessible_workspace_ids` is the single
-answer to "what may this person see", and documents, retrieval, conversations and
-the workspace picker all ask it. Most bugs in this area were some other function
-being asked that question, `list_workspaces_for_user` ("what do you own") seven
-separate times.
-
-**Storage mirrors the tenant.** Objects live at
-`workspaces/{workspace_id}/{file_id}-{filename}`. Deleting a workspace deletes a
-prefix, deleting a person touches no storage at all, and renaming a workspace is
-free because the path is keyed by id. The file id leads the name because the
-folder is shared: without it, two people uploading `invoice.pdf` into one
-workspace wrote the same object and the second silently replaced the first. A
-document may also carry only one name per workspace, refused at upload, because
-two files with one name make a citation ambiguous.
-
-Documents are private. `files.file_url` is a stable identity and is deliberately
-not fetchable; reads go through a 30-minute signed URL minted per request after
-the caller's access is checked. Before this, every uploaded document was
-world-readable to anyone holding the URL.
-
-**Still open:** per-document ACLs. Deliberately not built. Organizing sensitive
-material into its own workspace covers the cases seen so far, and per-document
-access is a fourth boundary to keep correct for a demand no customer has stated.
-
-### Pricing (agreed 2026-07-29, site copy not yet updated)
-
-Moving to base plus included seats plus overage. Headline prices unchanged:
-
-| Plan | Now | Agreed |
+| call | DigitalOcean measured | DeepInfra published |
 |---|---|---|
-| Starter | $99, up to 10 members | **$99, 10 seats included, +$9/seat** |
-| Business | $249, unlimited members | **$249, 30 seats included, +$7/seat** |
-
-Reasoning worth preserving: pure per-seat suppresses the adoption that makes a
-knowledge base sticky, because the buyer declines to add the receptionist and
-then the receptionist keeps interrupting people, which is the problem the
-product sells against. Marginal cost tracks documents and queries, not headcount,
-so seats are a value metric and should be priced cheaply. But "unlimited" at
-$249 caps revenue exactly on the largest, best-served accounts, which is the
-real leak. 30 included covers most of the 10-50 target, so the overage catches
-outliers rather than nickel-and-diming the median.
-
-Also agreed: annual prepay at two months free, and seat removal must be instant
-and self-serve so customers trust the overage.
-
-Shipped. Two graduated tiered prices, not the four originally sketched: one
-price per plan whose first tier is a flat amount covering the included seats and
-whose second charges per seat beyond them. A base item plus a separate per-seat
-item would have meant two quantities to keep in step; this way the subscription
-item's quantity is simply the headcount and Stripe does the arithmetic, which
-also produces an invoice a customer can read.
-
-`api/core/plans.py` is the single definition of the amounts, and the Stripe
-prices were built to match it. A Stripe price is immutable, so changing an
-amount means creating a new price and repointing `STRIPE_PRICE_ID_<PLAN>`.
-Quantity is synced on invite accept and member removal, both invoiced
-immediately so an added seat is not free until renewal and a removed one stops
-costing money at once. The sync never raises: the membership change has already
-happened, and drift is corrected by the next sync or the webhook.
-
-The trial was dropped rather than built. Access is bought with a card, or
-granted by being invited into an organization that already pays. There is no
-third path: a billing-exemption flag was built and then removed, because it was
-a second way to be entitled that would have needed testing forever and could
-only be exercised in production. Everything is now verifiable end to end in
-develop, where Stripe test mode makes subscribing free.
-
-**There is no free tier, and as of 2026-08-01 there is no code for one.** An
-organization has a subscription or it has nothing. Subscribed means the plan's
-seats apply and nothing else is capped; unsubscribed means no app at all, and the
-only refusal is `SUBSCRIPTION_REQUIRED`.
-
-This had to be removed rather than left dormant. `api/core/limits.py` still
-enforced five documents, 500 MB and one workspace, and the UI still carried an
-upgrade banner, a usage meter and a create button that disabled itself. None of
-it could fire for a customer arriving through the product, because signup takes a
-card and an unsubscribed organization is bounced to billing before it reaches the
-app. What it could do was fire against a *paying* company whose status had not
-loaded, which is exactly how it was found: an owner looking at "Free plan: 1
-workspace. Upgrade for more!" on an active subscription. Dormant code that can
-only run when something else is already broken makes the broken thing harder to
-see.
-
-The one real state left is a lapse. `SubscriptionNotice` says the plan needs
-attention and points at settings; staff are never shown a payment form for
-somebody else's subscription.
-
-Deliberately still uncapped: storage per organization. Per-file is 100 MB and
-uploads are rate limited, so this is not urgent, but if a ceiling is ever wanted
-it belongs in `plans.py` as an attribute of a paid plan, not as a revived free
-tier.
-
-Granting an account access outside the normal flow is a database operation, not
-a product feature: insert a subscription row for the organization with status
-'active'. Deliberately not an endpoint, so it cannot be reached by a bug.
-
-Not doing yet: usage-based query pricing. It tracks cost best but makes bills
-unpredictable, which SMBs punish. The TIMING logs will reveal a runaway account;
-answer that with fair-use limits rather than repricing everyone.
-
-## Recent changes (chronological, most recent first)
-
-- **2026-08-12 (Drive import works end to end, and the two bugs that stood in
-  the way):** Verified against a real Google account and a real document:
-  1,073,763 bytes fetched from Drive, stored under
-  `workspaces/1/839-…pdf`, ingested to 71 pages and 100 chunks, and returned by
-  search on page 6 within a minute of being picked. Same storage, same queue,
-  same citations as an upload.
-
-  **The picker had no app id, so every import came back empty.** Google
-  answered 404 for a file the customer was looking at, which reads as
-  nonsense until the scope is understood: `drive.file` grants access *per file,
-  to a named app*, and the picker has to be told which app. Without
-  `setAppId`, the picker returns ids and no grant is ever created. Fixed with
-  the project number derived from the client id, because it is the same number
-  and two copies of one fact drift.
-
-  **The popup was blocked, silently.** The first version loaded Google's
-  libraries inside the click handler and then asked for a token. Two network
-  requests happen in between, so the popup opened outside the user gesture and
-  the browser refused it: no error, no popup, a button reading "Opening
-  Drive…" forever. The libraries now load on mount and the click handler
-  awaits nothing. Found by pressing the button, which is the only way it could
-  have been found.
-
-  **And it asked for authorisation on every click.** The browser flow issues
-  short-lived tokens with no refresh token, so one per session is unavoidable,
-  but one per *click* reads as the app having forgotten you. The token is now
-  held for its lifetime less a minute, and the account chooser is skipped with
-  a hint, since anybody who can reach the button is already signed in.
-
-  **`origin_mismatch` is a configuration answer, not a bug.** The OAuth
-  client's Authorised JavaScript origins are a different list from Firebase's
-  Authorised domains, and Firebase already showing localhost makes it look
-  done. There is no gcloud command for it; OAuth client management is console
-  only.
-
-  **A skip reason is now logged as well as returned.** The first empty import
-  could only be diagnosed by enabling httpx debug logging and reading a 404 out
-  of a request trace.
-
-
-- **2026-08-11 (the Drive picker, and the four places a build-time value has to
-  be listed):** The browser half of the Drive import. An "Import from Google
-  Drive" button in the knowledge base panel, hidden for anybody who cannot add
-  documents, exactly as the paperclip is.
-
-  **`drive.file` through the picker, never `drive.readonly`.** The customer
-  signs in with their own Google account and picks documents; the app receives
-  access to those documents and nothing else. The restricted scope would mean
-  asking a dental practice for read access to their whole Drive to import four
-  policies, and a paid third-party security assessment before it could ship.
-
-  **The button does not render when the credentials are absent.** A control
-  that always fails teaches people the feature is broken, so an unconfigured
-  deploy simply does not offer it.
-
-  **The Content-Security-Policy was updated in the same change, not later.**
-  The picker needs `accounts.google.com` and `apis.google.com` for scripts,
-  `www.googleapis.com` to talk to Drive, and `docs.google.com` because the
-  picker is an iframe. The policy is still Report-Only, so a missing origin
-  costs nothing today and breaks the feature silently on the day the header
-  name is flipped. That is the worst kind of bug to leave behind: it works in
-  development and refuses in production, months after anybody remembers why.
-
-  **A build-time value has to be listed in four places here**, and missing any
-  one of them fails quietly. The workflow writes it into the frontend `.env`
-  and passes it as a build arg; the Dockerfile has to declare `ARG` and `ENV`
-  for it or the arg is accepted and ignored; and the local compose file needs
-  it to build the same way. Checked all four rather than assuming, because the
-  failure mode is a button that never appears in production with nothing in any
-  log.
-
-  **Two GitHub secrets are needed before this works in production:**
-  `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY`. Both are public by design:
-  they identify the app and authorise nothing on their own.
-
-  182 tests. **Not yet driven end to end**, because that needs the Google
-  credentials; the backend import path is covered by its own tests with a fake
-  provider.
-
-
-- **2026-08-11 (the Slack surface: the security half first):**
-  `api/services/slack.py`. Slack and Teams were confirmed as a *surface*, not a
-  source: somewhere to ask, not another place to read documents from.
-
-  **Built the part that must be right before the part that is visible.** This
-  endpoint will be a public URL that takes an instruction and answers with the
-  contents of private documents, so the request signature is the only thing
-  between those two facts. Verified before the body is parsed, with
-  `compare_digest`, plus a five minute window so a captured request cannot be
-  replayed tomorrow, and **refusal when the secret is unset**, so one missing
-  environment variable is never the difference between private and public.
-
-  11 tests, each checked by removing its guard: not comparing the signature
-  fails 3, dropping the replay window fails 2, treating an unconfigured secret
-  as permission fails 1.
-
-  **The design decision that matters is not Slack, it is who is asking.**
-  Everything else here answers as a *person*, scoped to what that person may
-  see. A Slack message carries a Slack user id, which means nothing to us.
-  Bridged carelessly, a company's whole document set becomes readable by
-  anybody who can type in their Slack, including guests and, in a shared
-  channel, another company entirely. So: an owner links a Slack workspace once,
-  deliberately; every question resolves the asker to a member by verified
-  email; an unrecognised email is refused. Adding somebody to Slack must never
-  add them to the knowledge base, and an administrator has to be able to say
-  that plainly.
-
-  **Still to build:** the events route, the installation table linking a Slack
-  team to an organization, and the worker posting the answer back into the
-  thread. The answer path itself needs almost nothing new: a Slack question
-  becomes a chat history and an ordinary queued run, so entitlement, retrieval,
-  citations and feedback all work as they already do.
-
-  Local testing goes through a cloudflared tunnel, since Slack needs a public
-  URL to call.
-
-
-- **2026-08-11 (documents can come from Drive and SharePoint):** The backend
-  half of the first connectors. A customer picks documents in the provider's
-  own picker and they arrive here as ordinary files: same storage, same
-  workspace, same ingestion queue, same citations. `POST /api/v1/files/import`.
-
-  **Nothing is stored to keep access, deliberately.** The browser hands us a
-  short-lived token for one import, we fetch the bytes with it, and it is gone
-  when the request ends. No refresh token in the database, no standing grant
-  against a customer's Drive, nothing to leak. The cost is real and named: no
-  automatic sync. Continuous sync means holding a credential that opens a law
-  firm's document store, which is worth doing when a customer asks and not
-  before.
-
-  **The Google scope decision is the one that saves weeks.** `drive.readonly`
-  is a *restricted* scope and production use requires a third-party security
-  assessment. The picker flow needs only `drive.file`, which reaches the
-  documents the customer chose and nothing else: no assessment, and a better
-  answer in a sales conversation.
-
-  **An import is another way in, not a way around.** It calls the same
-  functions an upload calls, in the same order: the workspace upload
-  permission, `assert_can_create_doc`, the duplicate-name rule, the file-type
-  list and the size ceiling. Mutation-tested, because "it looks like the upload
-  path" is not the same as being it: removing the permission check fails two
-  tests, removing the subscription check fails one.
-
-  **Partial success is reported as such.** Ten documents where one was deleted
-  in Drive since the customer picked it imports nine and names the tenth,
-  rather than refusing all ten. A provider error is never passed through to the
-  customer or the log, because those messages can carry a URL with the access
-  token in it.
-
-  Google Docs are exported to PDF on the way in, since a Doc has no bytes of
-  its own and PDF keeps the pagination a citation needs. Other Google-native
-  types are refused with a reason rather than imported as something unreadable.
-
-  10 tests, 171 total. **Still to do: the pickers in the browser, which need an
-  OAuth client id from Osas for Google and an Azure app for Microsoft.**
-
-
-- **2026-08-11 (the dashboard shows real numbers, and they are the customer's
-  own):** `GET /analytics/dashboard` returned zeros somebody had typed by hand
-  and nothing called it. There is now a Usage section in Settings, owner and
-  admin only, answered from this database.
-
-  **Not from PostHog, and the reason is worth keeping.** PostHog is set up, but
-  the key configured is a project key (`phc_...`), which writes. Reading events
-  back needs a personal API key with query scope that does not exist here. More
-  importantly it is the wrong source: PostHog holds page views and clicks,
-  while an owner wants to know how much their team asks, which documents answer
-  nothing, and which answers were called wrong, all of which are already here
-  and already scoped by organization. Serving a customer their own numbers out
-  of a shared analytics account would mean filtering someone else's data out
-  afterwards, which is the tenancy shape this codebase spends its effort
-  avoiding. PostHog stays the right tool for the *other* dashboard, the one
-  about all customers, and that one needs no code because it has a UI.
-
-  **Every figure joins through the workspace**, because documents,
-  conversations and ratings carry no organization of their own. That join is
-  the tenancy boundary; there is a test that another company's document is
-  never counted.
-
-  **Three findings on the way, all from checking rather than reading.**
-  `agent_runs.result` records `retrievals` as a *count*, not a list, so "which
-  documents have never been used" could not be answered at all: the first
-  version of the query crashed on it. Recording the file ids then failed twice
-  more, because the chunk dictionary is rebuilt in two places in
-  `agents/evidence.py` and neither carried `file_id`, so by the time a run was
-  stored the document that answered was known only by name. Both fixed, and a
-  name is not an identity: two workspaces may each hold a policy.pdf.
-
-  **The panel lied on its first render, and only the screen showed it.** Every
-  document was listed as never used, including one that had just been cited.
-  The guard treated a run recording an *empty* citation list as evidence, which
-  it is not, so the metric switched on with nothing behind it. It now requires
-  a non-empty list, which also means the section stays silent for accounts
-  whose runs all predate this, rather than alarming them. Tested, and the test
-  fails without the guard.
-
-  7 tests, 161 total.
-
-
-- **2026-08-11 (search exists now, not just on the pricing page):** "AI search"
-  has been sold as a separate capability since before there was any such thing
-  in the code. There is now a `Find` mode beside `Ask`: the same box, and
-  instead of an answer it returns the pages that matched, each opening the
-  document at that page.
-
-  **0.57 seconds against 11 to 20 for an answer.** It is chat with the
-  expensive half removed: embed the question once, run the same
-  `hybrid_search` the answer path runs, render the rows. No query rewriting, no
-  term expansion, no model call, no message saved, no queued job, which is why
-  it can be an ordinary request while chat goes through the worker.
-
-  **Chunks are grouped back into pages.** A chunk is a slice of a page, so
-  twenty rows are routinely five pages, and ungrouped the list shows the same
-  page three times with near-identical snippets. The count is shown as "3
-  passages", which is countable and checkable, unlike a relevance score.
-
-  **The score never leaves the backend**, and there is a test asserting the
-  number does not appear in the response body. It is a reciprocal rank fusion
-  value on an arbitrary scale; shown, "0.87" reads as 87% confident, which it
-  is not.
-
-  **No query rewriting, deliberately.** Chat rewrites a question because a
-  rewritten question retrieves better before a model reads the results.
-  Somebody typing "termination clause" into a search box means those words, and
-  quietly searching for something else is the fastest way to make search feel
-  broken.
-
-  **Four findings, none from reading the code.** Two came from writing the
-  tests: the document check sat behind the "you belong to no workspaces"
-  shortcut, so somebody with no memberships asking about a document they may
-  not see got 200 and an empty list rather than a refusal; and removing
-  `assert_can_ask` broke no test at all, because every other case was refused
-  earlier for not being a member, so an unpaid organization could have searched
-  for free.
-
-  The other two came from Osas asking why search was not gated exactly as chat
-  is. **It answered 403 where chat answers 404**, which for a resource named by
-  an id in a URL is the difference between confirming a workspace exists to a
-  stranger and telling them nothing. And it asked *may you do it*
-  (`assert_workspace_capability`) for what is a read, where the rule in this
-  codebase is that *may you see it* is `accessible_workspace_ids`. The two
-  agree today, which is precisely why having both answer one question is how
-  they stop agreeing later. It also carried an extra branch letting a
-  workspace-less document through on its uploader, which chat does not have.
-
-  The gating block is now copied from `messages.py` rather than reasoned out
-  again, and there is a test that asks both routes the same question and
-  asserts they refuse identically, plus one that an organization-wide member
-  (who owns no workspace and is assigned to none) is *not* refused, since that
-  is the half that broke chat once. Verified live: an unreachable workspace and
-  an unreachable document both answer 404 with no hint that either exists.
-
-  **The interface.** A two-state control above the composer, because the choice
-  changes what the button does and both options deserve naming. Switching to
-  `Find` changes the placeholder, the button, and the panel: results replace the
-  conversation rather than appearing inside it, since a search is not a message
-  and filling the thread list with searches would be the wrong record. The query
-  stays in the box afterwards, unlike a sent message, because searching is
-  iterative and the usual next move is changing one word.
-
-  Matched terms are highlighted by splitting on them rather than building HTML,
-  so no page of a customer's PDF is ever handed to `dangerouslySetInnerHTML`.
-  Results are buttons, not clickable divs, so they are reachable by keyboard.
-
-  **Opening a result reuses the citation path exactly.** Documents are private
-  in storage, so a result carries the document's identity and never a readable
-  link; the signed URL is minted at the moment of opening. Verified in the
-  browser: the viewer's iframe carried a signed URL ending `#page=35`, matching
-  the result clicked. The PDF itself did not paint in the automated browser
-  pane, which does not render embedded PDFs, so that last hop is the one thing
-  here confirmed by inspection rather than by eye.
-
-  12 tests, 154 total, plus a clean `tsc --noEmit` and production build.
-
-- **2026-08-11 (paying once for the same work):** The last two efficiency items.
-  Embedding is no longer bought twice for the same text, and the same question
-  asked twice within a few minutes is answered from a cache.
-
-  **The query cache, measured live: 20.40s cold, 0.33s repeated.** Keyed on
-  workspace, a documents version, file scope, language, level, the question and
-  a hash of the conversation. Every one of those is in there because leaving it
-  out returns somebody else's answer. Only cached when a workspace is given:
-  without one the document set is "everything this person can reach", which
-  varies per person and has no single version to invalidate against.
-
-  **A new document drops the workspace's cached answers at once**, rather than
-  leaving five minutes where "I just uploaded it" meets "I cannot find it". The
-  version counter is bumped on ingest and on delete, and it is part of the key,
-  so old entries become unreachable and expire on their own. Verified live: the
-  0.33s answer went back to 11.17s after an upload.
-
-  **The cache silently did not work at first, and the tests were green.**
-  `format_user_chat_history` returns a list of dictionaries, not a string, so
-  `.encode()` raised on every read and every write, was swallowed by the
-  never-fail guard, and logged a warning nobody was reading. The tests passed a
-  string. Asking the running app the same question twice found it immediately.
-  There are now tests for the shape the application actually passes.
-
-  **The question normalisation buys nothing today, and that is written down in
-  the module rather than left to be rediscovered.** The route saves the question
-  before queueing the run, so the conversation the worker formats already
-  contains it verbatim, and the raw text reaches the key through the history
-  fingerprint whatever the normalisation does. Retyping the same question with
-  different capitals misses: 14.92s. Kept anyway, because it costs three lines
-  and becomes load-bearing the moment the current turn stops being part of the
-  hashed history, which is the obvious way to raise the hit rate later.
-
-  **Embedding reuse is scoped to the organization.** Text this organization has
-  already embedded is reused from `chunks.content_hash` instead of being sent to
-  the embedder again, which is a customer re-uploading a corrected policy, or
-  the same standard terms across twenty contracts. Crossing tenants would leak
-  nothing, since the vector is derived from text the caller already holds, but a
-  cache that crosses tenants is something somebody has to keep proving safe, and
-  nearly all the saving is same-tenant. The narrow version buys the benefit and
-  none of the argument.
-
-  **The hash is over what is embedded, not over `content`.** That is the passage
-  with its context sentence in front where it has one. Hashing the column alone
-  would hand back a vector computed from different text. The backfill in
-  `20260811_chunk_content_hash` can only hash `content`, so rows embedded with
-  context simply never match, which costs an embedding call rather than
-  returning a wrong vector.
-
-  **A real bug found by a test that could not fail.** The first version of the
-  reuse test used a stub returning the same vector every time, so "the reused
-  vector is the same vector" was true whether or not anything was reused.
-  Giving the stub a unique vector per call turned it red and exposed that
-  identical text repeated *within one batch* was still embedded once per
-  occurrence. Fixed, and the two savings are now counted apart, because
-  "already stored" and "repeated in this batch" mean different things and
-  adding them together makes both unreadable.
-
-  **`create_file` silently dropped `workspace_id`.** It accepted the key in its
-  dict and never passed it to the row, so a file created that way belonged to no
-  workspace and was invisible to everyone in the organization, since visibility
-  follows the workspace. The one production caller is the recreate path in
-  `_process_file_data_impl`. Found because test fixtures used it and the reuse
-  lookup, which joins through workspaces, quietly matched nothing.
-
-  19 tests, 143 total. Each checked by putting the bug back: dropping the
-  organization scope from the lookup fails the isolation test, removing the
-  reuse fails two, and removing the workspace, the history or the error guard
-  from the cache key each fail their own.
-
-- **2026-08-11 (a long document keeps what it got through):** Ingestion writes
-  each batch of pages as it finishes instead of holding everything and writing
-  once at the end. **Verified by killing the worker mid-document**, not by
-  reasoning about it: a 1,500-page PDF was interrupted at page 550, and 550
-  pages and 1,100 chunks were on disk. Before this change that number was zero,
-  every time, however far it had got.
-
-  The restart resumed at 551 (`Resuming big.pdf: 550 page(s) already stored,
-  950 to go`) and finished at 1,500 segments, 1,500 distinct pages, 3,000
-  chunks, **zero pages written twice**. The 550 already-embedded pages were not
-  paid for a second time.
-
-  **The second half of the item came free.** Retrieval scopes by workspace and
-  has never looked at `processing_status`, so a chunk is findable the moment
-  its transaction commits. While that document sat at 550 of 1,500, a question
-  about page 400 was answered and cited correctly. What had to be added was the
-  opposite guarantee: `update_file_with_chunks` takes `mark_processed=False`
-  for intermediate batches, because a file that says "processed" after its
-  first fifty pages is worse than one that says nothing.
-
-  **How resuming knows where it got to: it asks the rows, not a counter.** A
-  batch is one transaction, so a page either has its segment or has nothing.
-  `stored_page_numbers` reads the page numbers already present and skips them.
-  No progress column, no migration, and nothing that can disagree with what is
-  actually stored.
-
-  **The batching was only ever half true.** The old loop batched the work and
-  then accumulated the results, holding every chunk and every 1024-dimension
-  vector until the end, while a comment said peak memory was bounded by the
-  batch. Now it really is.
-
-  **One loop, not three.** PDF, DOCX and TXT each carried their own copy of
-  that loop, identical apart from one string, and the copies had already
-  drifted into a silent bug: `page_text` was added to the PDF version on
-  2026-08-07 referring to a variable the others did not have. Rather than fix
-  the PDF copy and leave two more to drift, the loop moved to
-  `FileProcessor.embed_and_store_pages` and the three copies were deleted, 287
-  lines of duplication for 173 of shared code. All three formats got resuming
-  and early searchability as a side effect.
-
-  **Also verified: the emptiness guard still fires.** It had to change meaning,
-  from "the loop returned no chunks" to "nothing was stored and nothing was
-  skipped", or a resumed run that found every page already present would have
-  marked a finished document failed.
-
-  5 tests, 124 total, each checked by putting the old behaviour back: writing
-  only at the end fails 3, ignoring already-stored pages fails 1, letting a
-  batch mark the file processed fails 1.
-
-  **A separate bug found by driving the API, now fixed.** `messages.py` used
-  `status.HTTP_422_UNPROCESSABLE_ENTITY` without importing `status`, so a
-  request missing `history_id` raised NameError while *building its own
-  refusal*, and the broad handler turned that into a 500. The customer was told
-  the app was broken when the answer was "you left out a field". One import,
-  plus a test that fails without it. Every other route file was checked for the
-  same missing import; this was the only one.
-
-- **2026-08-11 (the worker stops waiting to be asked):** Queueing a run now
-  announces it over Redis and the worker wakes at once. **Ten seconds becomes
-  two tenths of a second**, measured rather than assumed: three probes each
-  way, alternating, on the same idle worker.
-
-  | | readings | mean |
-  |---|---|---|
-  | Announced | 0.49, 0.03, 0.03 | **0.18s** |
-  | Poll only | 10.03, 10.03, 10.02 | **10.02s** |
-
-  **This was never only about uploads.** Every chat question is a queued run
-  too (`routes/messages.py:142`), so a question asked while the worker had
-  nothing to do sat for up to ten seconds before the pipeline even started.
-  Nothing was running during it. The roadmap entry described it as upload
-  latency, which undersold it.
-
-  **Two corrections to what that entry claimed.** "`redis>=5.0.0` is already a
-  dependency, so this is cheaper than it looks" was half true: the Python
-  package was installed, but no Redis server existed anywhere, no `REDIS_URL`
-  was configured, and the only import in the codebase was a dead `RedisError`.
-  So this added a container to both compose files, not just a call. And the
-  interval it quoted was the code default of 30s; production has run at 10s
-  since the compose file was written.
-
-  **Postgres LISTEN/NOTIFY was offered as the no-new-infrastructure
-  alternative and Osas chose Redis**, on the grounds that item 21's query cache
-  wants one anyway. Recorded because the reasoning matters if that cache is
-  ever dropped: without it, this is a container earning its keep on one feature.
-
-  **The queue did not move.** `agent_runs` is still the record of what needs
-  doing. Redis carries "look now" and nothing else, the announcement is only a
-  run id, and the worker still claims work through `SELECT ... FOR UPDATE SKIP
-  LOCKED` in priority order under the per-tenant cap. Chasing the announced id
-  directly would sidestep leases, retries and fairness, all three of which were
-  paid for in real bugs. `POLL_INTERVAL` stays as the safety net, so a missed
-  announcement costs seconds and never costs a job.
-
-  **Proven by taking Redis away, not by reasoning about it.** With the
-  container stopped: work was still claimed every time, in 1.39s, 9.04s, 9.04s
-  and 9.02s, which is whatever remained of the ten second window. Client
-  notifications fell back to the HTTP call and were delivered. When Redis came
-  back the listener reconnected on its own, backoff and all, with no restart,
-  and the fast path returned to 0.16s.
-
-  **The notification path back to the browser moved too, and closed a hole on
-  the way.** `/internal/notify-client` takes a user id and arbitrary event data
-  and pushes it down that person's WebSocket, and it had no authentication at
-  all: "internal" was the intent, and nothing enforced it while the container
-  publishes port 3000 and the router sits on the same public prefix as
-  everything else. Anybody who could reach the API could push whatever they
-  liked into a signed-in customer's browser. It now requires a shared secret
-  (`INTERNAL_API_SECRET`), compared with `compare_digest`, and **refuses
-  everything when the secret is unset** rather than treating unconfigured as
-  open.
-
-  **The HTTP path was kept as the fallback rather than deleted**, which is the
-  one place here where more code was the right answer. A published message
-  reaches only a listener connected at that instant, and this is the path whose
-  loss a customer sees directly: they watch a spinner for an answer that is
-  already saved. So the worker publishes, and on failure posts as before.
-
-  **A comment I wrote was wrong and is now corrected in place.** It claimed
-  clearing the wake flag before the fetch rather than after the wait prevented
-  a lost announcement. Checked by making the change: the tests stayed green,
-  because every wake is followed by a fetch either way, so the ordering is
-  tidiness and not a race. The test that claimed to cover it was renamed to
-  what it actually proves, which is that an announcement drives the loop at
-  all. That one has teeth: replacing the wake in the loop's wait with a plain
-  sleep turns it red and leaves the other seven green.
-
-  13 tests, 118 total. Each was checked by putting its bug back: dropping the
-  auth check fails 3, letting a publish failure raise fails 1, removing the
-  handler guard hangs the listener in its reconnect loop. One gap found this
-  way and then closed: nothing covered "announce only after the commit", which
-  is the ordering the module rests on, so there is now a test that announces
-  from a second database session and asserts the row is already visible.
-  Driven in the browser afterwards: signed in, asked a question, and the answer
-  arrived live over the socket.
-
-  **Before deploying, `INTERNAL_API_SECRET` must be in production `.env` for
-  both the API and the worker** (`openssl rand -hex 32`). Without it the
-  fallback notifications are refused, which only bites while Redis is down.
-
-- **2026-08-08 (customers can say an answer was wrong):** Thumbs on every
-  answer, four chips and an optional comment on thumbs-down, and a CLI that
-  reads them next to what the pipeline did.
-
-  **The design turned on one finding.** `agent_runs` already recorded every
-  query: the question in `payload`, and `retrievals`, `covered_needs`,
-  `context_chunks`, `expanded_terms` in `result`. But it stored
-  `chat_history_id` and not `message_id`, so tying a rating to the run that
-  produced it meant matching on timestamps inside a conversation, which is a
-  guess. Migration `20260808_message_feedback` adds that column and the worker
-  writes it. Without it this is a tally; with it, it is a diagnosis.
-
-  **Separate table, not columns on `messages`.** `messages` is read in full on
-  every conversation load, and feedback is sparse and carries a reason and a
-  comment that have no business widening that read. Unique on
-  `(message_id, user_id)`, so the other thumb replaces rather than
-  accumulating.
-
-  **One link, not two.** The first version also stored `agent_run_id` on the
-  feedback row. It was derivable by joining through the rated message, so it
-  duplicated a fact rather than adding one, and two copies of a fact are what
-  drift. Dropped before it shipped, and the report derives the run from
-  `agent_runs.message_id` instead. The migration was corrected in place rather
-  than followed by a second one undoing it, because it had only ever run on a
-  local database; production never sees the churn.
-
-  **Deleted rather than added alongside:** `Message.liked` / `Message.disliked`
-  were dead scaffolding from an earlier attempt, set to `false` in four places
-  and read once as `m.is_liked === 1` against a field the API never sent, so
-  permanently false and never rendered. Replaced by `feedback` rather than left
-  beside it.
-
-  **Chips and a comment, both.** The chip is countable, so "eleven of fourteen
-  complaints were wrong_source" is a sentence the report can produce. The
-  comment is where the diagnosis lives, because "cited the 2019 policy, we are
-  on the 2024 one" is not on any fixed list. The form only opens on
-  thumbs-down: somebody happy with an answer has moved on, and asking them to
-  categorise their happiness costs the rating already earned.
-
-  **Not gated on entitlement**, deliberately. An unpaid organization cannot ask
-  anything new, but telling us an old answer was wrong is the last thing to
-  refuse: it is the only signal we get from somebody on their way out.
-
-  **Comments never reach the logs.** `safe_text` on the write path, same rule
-  as questions.
-
-  **Four bugs of my own, three of them found by Osas driving it.** The chips
-  rendered where the composer covered the comment box, so the form looked like
-  it ended at the chips; it now scrolls itself into view. The pressed state used
-  `color: var(--primary)`, a token this app never defines, so it fell back to
-  #111 against a resting thumb of rgb(28,31,35): eleven points of grey apart and
-  invisible. A background on the same selector then lost to the button's own
-  utility classes and would have needed an `!important` to win, so the signal is
-  now a filled icon, which needs neither and reads in both themes. Worst of the
-  four: the second press on a pressed thumb cleared the rating, the usual toggle,
-  which here silently destroyed a chip and a comment that are invisible once the
-  form closes. Observed in the logs as `reason=incomplete, comment=len 19`
-  followed by a bare `-1`. Pressing a set thumbs-down now reopens what was said,
-  the comment box is seeded from the stored value, and removing a rating is a
-  deliberate button inside the form. And the report's summary counted
-  complaints with no run at all as "a run that had not satisfied the question",
-  which would have read as a pipeline failure on the very first report when the
-  truth was an answer predating the link.
-
-  **A real finding on the first run**, with synthetic data: a complaint where
-  the pipeline reported `covered=yes` while the answer was "I couldn't find
-  enough evidence in your documents." Coverage said the need was satisfied and
-  the generator refused anyway. Worth chasing when the quality work starts.
-
-  15 tests, 105 total. The isolation cases were checked by removing the
-  ownership condition from `_authorized_message`, which turned both red.
-  Verified end to end in the browser: rate, chip, comment, reload, still
-  pressed; and a fresh question through the real worker linked its run.
-
-- **2026-08-07 (a test for the card-update path):** `api/tests/test_card_update.py`.
-  This is the recovery path for a locked-out paying customer, and since
-  `past_due` now blocks chat as well as uploads it is the whole way back in. It
-  had three independent defects and no coverage, and nobody noticed because
-  nobody reaches that screen until their card fails.
-
-  **It hits Stripe test mode rather than a mock, and defect 3 is the argument.**
-  A mocked `PaymentMethod.attach_async` accepts a PaymentMethod object as
-  happily as an id, so a mocked version of this test would have passed green for
-  months while the real call was malformed. Same reasoning this suite already
-  uses for running against a real Postgres. Module-level guards skip unless
-  `STRIPE_SECRET` starts with `sk_test` and a price id is configured, so a
-  misconfigured environment skips instead of creating customers in live mode.
-
-  **Each test was checked by reintroducing the bug it exists for**, because four
-  passing tests prove nothing on their own:
-
-  | Defect put back | Result |
-  |---|---|
-  | PaymentMethod object passed where an id belongs | 1 failed |
-  | Route reads `payment_method_id`, browser sends `payment_method` | 2 failed |
-  | `/setup-intent` endpoint deleted | 2 failed |
-  | Customer's `invoice_settings` default not updated | 1 failed |
-
-  That last one is the subtle one: setting only the subscription's default
-  leaves Stripe retrying the card that just failed, so the customer replaces
-  their card and is charged on the old one anyway.
-
-  90 tests pass. The file restores to byte-identical after each mutation, and a
-  run leaves nothing behind in Postgres or Stripe.
-
-- **2026-08-07 (settings names the plan):** The billing panel said "Your
-  subscription is active" and nothing else, so an owner could not tell Starter
-  from Business anywhere in the product, including when working out whether they
-  had run out of seats.
-
-  Nothing needed to be computed. `plan_key` and `seats` were written on every
-  subscribe and by the webhook's plan sync, and `get_subscription` simply did
-  not copy them out of the ORM row, so no caller could see them. Added there,
-  surfaced by `/subscriptions/status` as `plan`, `plan_name` and
-  `seats_included`.
-
-  The name is resolved by the backend through `get_plan`, not mapped from a key
-  in the browser: the names and prices live in `core/plans.py` next to the
-  Stripe price ids they were created from, and a second copy of that mapping in
-  the frontend is how a page ends up naming a plan the customer is not on.
-
-  Reads "You are on Business, 30 seats included." One line rather than two,
-  because the organization section below already shows "1 member of 30 seats"
-  and two numbers saying 30 on one screen is noise.
-
-  Verified against both live subscriptions: org 1 returns starter/Starter/10,
-  org 4358 returns business/Business/30, and the panel renders the Business one.
-  A contradictory "this organization has no plan yet" banner seen alongside it
-  turned out to be an artifact of the dev sign-in harness, which skips
-  organization selection; once the organization resolves the banner is gone.
-
-- **2026-08-07 (an unpaid organization could still ask questions):** Found by
-  checking a condition rather than asserting it. The signup flow above keeps the
-  company when a card is declined instead of rolling it back, on the grounds
-  that settings can take the card later; Osas accepted that "as long as the
-  unpaid company has no access". It had access.
-
-  **Uploading and creating a workspace both went through `_assert_subscribed`.
-  Asking a question did not.** `create_message` checked who you are and what you
-  own, and nothing else. Verified against a real unpaid tenant, not read off the
-  code: creating a workspace returned 402 `SUBSCRIPTION_REQUIRED`, and the same
-  account posting a message returned 201 and ran the entire pipeline. From the
-  worker's own log, `TIMING {"event": "query", "ms": 7348, "chunks": 0}` — 7.3
-  seconds of retrieval, coverage loop and generation, including the metered
-  model call, for an organization that had never paid.
-
-  **Why it survived this long.** An unpaid tenant looks harmless. It cannot
-  upload, so it has no documents, so every answer is "I couldn't find relevant
-  information in your documents." Nothing leaks and nothing looks broken. It
-  only costs money, quietly, per question, and it means an account that never
-  paid still gets to use the product.
-
-  Closed with `assert_can_ask` in `core/limits.py`, the same shape as
-  `assert_can_create_doc`: the governing organization is the workspace's, not
-  the asker's, so staff stay covered by the company that pays for them. Called
-  after the ownership checks and before anything is written or queued, so a
-  refused caller stores no message and spends no model call. Deliberately not
-  first: a history belonging to somebody else answers 404 whether or not the
-  asker pays, rather than confirming it exists.
-
-  Verified: unpaid asks → 402, and the message count in that history is
-  unchanged after the attempt; the same organization marked active → 201 and the
-  answer runs. 86 tests pass.
-
-- **2026-08-07 (signup names the company and pays for it, on one screen):**
-  Closes Tier 2 item 3, which was held for "before real marketing spend". That
-  condition became true this week.
-
-  **What it was.** Pressing sign up parked `auth_intent=signup`, and the
-  sign-in listener created the organization the moment Firebase reported the
-  account, named `email.split("@")[0] + "'s Organization"`. Then a redirect to
-  settings to pay. So becoming a customer happened on two screens, and the
-  company arrived already named something they never chose but their colleagues
-  would see in the chooser and in every invite email.
-
-  **What it is.** One form: company name, plan, card, one submit. It creates the
-  organization with the chosen name, subscribes it, handles a 3D Secure
-  challenge if the card needs one, and lands in `/chat`. The listener no longer
-  creates anything: `auth_intent` is simply not set on this path, so it
-  registers the user and stops.
-
-  **`POST /users` takes an optional `company_name`.** Optional because the same
-  endpoint is called by the sign-in listener with nothing to say, and the
-  derived name stays as the fallback so a blank field cannot stop somebody
-  buying. `SignUpRequest` is defined at module level, not between the decorator
-  and the handler, which registers the route against the model and crash-loops
-  the app on boot; that has happened here once already.
-
-  **Two things extracted rather than copied.** `services/subscribe.ts` holds the
-  subscribe-and-confirm sequence, because two screens now take a card and the
-  awkward part is 3D Secure: four steps, two failure modes, and a copy on each
-  screen would drift, with the untested screen drifting first and the symptom
-  being a customer told their card was declined when it was not.
-  `components/PlanPicker.tsx` holds the prices, because two copies eventually
-  advertise two different numbers. `PaymentView` now uses both and got shorter.
-
-  **A retry after a declined card would have lied.** The organization is created
-  before the charge, and an account owns exactly one company, so posting the
-  name again returns the existing organization unchanged and an edited name
-  would be silently ignored. The screen now remembers the id, skips creation on
-  the retry, disables the name field and says the company already exists.
-
-  **Found by driving it:** the card field mounted with no border or padding and
-  was invisible, because `PaymentView.css` scoped `.StripeElement` under
-  `.PaymentView` and signup is not inside it. Only a screenshot showed this;
-  every type check passed.
-
-  Verified end to end against Stripe test mode on both paths: signup created
-  "Northgate Dental Group" (the typed name, not the derived one), active on
-  starter, landing in `/chat`; the settings path still subscribes after the
-  refactor; and `POST /users?intent=signup` with no body at all still produces
-  the derived name. 86 tests pass, tsc clean, test data removed from the
-  database, Stripe and Firebase.
-
-- **2026-08-07 (the second John Smith could not sign up):** Found while testing
-  the 3D Secure work, not looked for. Two throwaway test accounts happened to
-  share a display name and the second signup returned 500.
-
-  **`users.username` is not a username.** Nobody chooses it and nobody types it.
-  It is the `name` claim off the Google sign-in token, a display name, and it
-  carried a UNIQUE constraint. So the second person named John Smith to ever
-  sign up could not. `add_user` hit the constraint, returned None, and
-  `POST /users` turned that into `500 Could not create user.` They saw a generic
-  error, got no account, and no retry helped, because the name comes from their
-  Google profile. Silent, permanent for that person, and more likely with every
-  signup. Live in production the whole time; the cold email campaign starting
-  this week is what made it urgent.
-
-  Reproduced against the real table before changing anything:
-
-      add_user('alice.smith@…', 'John Smith')  -> 7395
-      add_user('bob.smith@…',   'John Smith')  -> None
-
-  **The constraint protected nothing.** Identity is the email, which has its own
-  unique index and is what `get_user_id_from_email` uses to turn a request into
-  a user. `username` is read in exactly one query in the entire codebase, the
-  "who would be stranded" list in `async_workspace_repository`, as a label for a
-  human, already written `COALESCE(NULLIF(u.username, ''), u.email)` because it
-  was never trusted to be meaningful. Dropped in migration
-  `20260807_username_not_unique`. NOT NULL stays: signup substitutes the email
-  when the token carries no name, so the column is always populated.
-
-  **The downgrade will fail if two people now share a name, deliberately.**
-  There is no safe automatic way back, and deleting one of two real accounts to
-  restore a cosmetic index would be worse than a failed downgrade.
-
-  **Two things fixed alongside, because they are why it stayed invisible.** The
-  log line said "User with email X or username Y already exists", naming two
-  possibilities and committing to neither, so the message never pointed at the
-  constraint that was actually firing; it now names the violated constraint. And
-  `add_user` returned None for every IntegrityError, including the race where
-  two requests for the same new account cross between the caller's existence
-  check and the insert; it now re-reads by email and returns the id the winner
-  created, the same shape `_start_organization` already uses. That re-read is
-  deliberately outside the session block, since taking a second connection while
-  holding the first is how the pool runs dry under the exact burst that causes
-  the race.
-
-  Verified end to end through the real route: two Firebase users sharing the
-  display name "John Smith" both signed up, 201, separate users and separate
-  organizations. 86 tests pass, single alembic head.
-
-- **2026-08-07 (3D Secure: the cards that could never pay):** Closes the last
-  open Tier 0 item, found in the 2026-07-29 Stripe review and left alone since
-  because it needed live test-mode iteration rather than a guess.
-
-  **The failure.** A card that requires authentication does not decline. Stripe
-  accepts the subscription, leaves it `incomplete`, and waits for the cardholder
-  to pass their bank's challenge. `create_subscription` returned whatever status
-  Stripe gave it and stopped there, and `PaymentView` classified the card-update
-  branch as *anything that is not one of five known-good statuses*, which swept
-  up `incomplete`. So the customer was shown "your payment method needs to be
-  updated due to an expired card or other issue", entered the same working card,
-  and got the same message. Common on EU and UK cards, and spreading.
-
-  **`latest_invoice.payment_intent` is the wrong field, and fails silently.**
-  Every guide reaches for it. On this account's pinned API version
-  (`2026-07-29.dahlia`, from stripe-python 15.4.0) it is **null** — removed in
-  the Basil-era invoice rewrite. Expanding it costs nothing, raises nothing and
-  yields nothing, so the code would have looked correct and never found a
-  secret. Verified by probing test mode before writing any of this:
-  `latest_invoice.confirmation_secret.client_secret` is where it lives now. This
-  is the single most useful thing on this entry; do not "fix" `_client_secret`
-  back to the documented field.
-
-  **`requires_action` cannot be derived from the secret's presence.** First cut
-  returned `requires_action = bool(client_secret)`, which testing the *ordinary*
-  card immediately disproved: a payment that succeeds outright comes back
-  `active` **with a confirmation secret attached**, so every normal customer was
-  being sent through a `confirmCardPayment` round trip against an intent that had
-  already succeeded. Gated on `status == 'incomplete'` instead. Only found
-  because the non-3DS path was retested after the 3DS path passed.
-
-  **A confirm endpoint, not a wait for the webhook.** `customer.subscription.updated`
-  already carries incomplete → active and the webhook already handles it, but it
-  arrives on Stripe's schedule and the browser asks "am I in?" the instant the
-  popup closes. Reading our own row at that moment still says `incomplete`, so a
-  customer who just authenticated correctly gets bounced back to the payment
-  screen. `POST /subscriptions/confirm` asks Stripe directly. Verified against
-  the real race: Stripe `active`, database `incomplete`, no webhook able to reach
-  localhost, and the endpoint healed the row. Idempotent, since it writes
-  whatever Stripe currently says.
-
-  **The retry guard had to ask Stripe, not the row.** Retrying after an abandoned
-  challenge used to stack another `incomplete` subscription each time, so that got
-  a "cancel the stale one first" guard — which, keyed off our own row, would have
-  cancelled a *paying* customer whose webhook was still in flight and charged them
-  again. The row is a cache; Stripe is the fact. It now retrieves first, and when
-  Stripe says active it refreshes the stale row and refuses the second sale.
-  Tested in exactly that mismatched state: no duplicate, nothing cancelled, row
-  healed.
-
-  **Found while reading: the card-update branch had never worked.** Three
-  independent defects, any one fatal. `clientSecret` was declared and never
-  assigned, so `confirmCardSetup('')` failed on contact and no SetupIntent
-  endpoint existed to give it one. The browser sent `payment_method_id` where the
-  route reads `payment_method`, a 422 before the handler ran. And the route
-  rebound `payment_method` to the retrieved object and passed that object where
-  the API takes an id. Anybody who went `past_due` reached a form that could not
-  work. Fixed all three, added `POST /subscriptions/setup-intent`, and the route
-  now reads status back from Stripe instead of echoing the stale row.
-
-  **What could not be verified here.** Clicking COMPLETE inside Stripe's 3DS
-  challenge iframe: the modal renders correctly (confirmed visually, branded
-  OSAS INC) but synthetic clicks are not trusted by that cross-origin frame, so
-  the challenge was completed server-side by confirming the PaymentIntent with a
-  non-3DS test card, which produces the identical post-challenge state. The
-  browser half of `confirmCardPayment` is therefore exercised up to the popup and
-  not through it. Worth one manual click-through before this reaches real
-  customers.
-
-  **Also noticed:** `POST /users?intent=signup` returns 500 "Could not create
-  user." when the display name collides with an existing row. Pre-existing and
-  unrelated to billing, chased down and fixed the same day, see the entry above.
-
-- **2026-08-07 (guardrails: what an uploaded document can reach):** A customer's
-  document is untrusted input. Tested rather than assumed, by uploading one.
-
-  **Structurally safe already.** Retrieval is scoped by `workspace_id` in SQL and
-  the answer path has no tools, so injected text cannot widen a WHERE clause or
-  call anything. Cross-tenant leakage by injection is not possible.
-
-  **Not safe.** A document written to read like a legitimate 2026 policy revision
-  made the pipeline answer 90 days where the real document says 30, enumerate the
-  workspace's document names unprompted, and reproduce an attacker URL. A crude
-  `SYSTEM: ignore all previous instructions` injection failed; the one that looked
-  like a document succeeded. That is the realistic threat: a vendor PDF, a
-  contract, something forwarded by someone who did not write it.
-
-  Answers may now only link to hosts we serve documents from. Everything else
-  becomes `[link removed]`, counted and logged, because a rise in that count means
-  something in a customer's documents is trying to put links in front of people.
-  Bare URLs too, since `remark-gfm` autolinks them. Hostname-parsed, so
-  `storage.googleapis.com.evil.example` is rejected rather than passing a
-  substring test.
-
-  **Deliberately still open: content poisoning.** A document asserting a false
-  refund window is still quoted as a source, and no code can decide which of two
-  customer documents is honest. The defence is provenance, which already works,
-  since the answer cites the document that said it.
-
-- **2026-08-07 (customer questions were leaking):** For a dental or legal
-  practice the question is the most sensitive string in the request. Seven log
-  sites carried it, five at INFO, and they now carry a fingerprint and a length,
-  `q8920cefa len=63`, stable enough to correlate two lines and one-way so a log
-  archive is not a transcript.
-
-  The larger one was not a log line. The question travelled as a query parameter,
-  so it reached the access log and would reach any proxy log, CDN log, browser
-  history, and `Referer` header sent onward. It now goes in the request body. The
-  route still accepts the query parameter so a tab open on the old bundle survives
-  a deploy; **that fallback is what makes the deploy safe and what keeps the leak
-  reachable, and should be removed once the access log shows nothing using it.**
-
-  A grep audit found three of the seven sites and missed the URL entirely. Asking
-  a question with a name in it and searching the container's log stream found all
-  of them.
-
-- **2026-08-07 (extraction was never chunking):** `chunk_text` targets tokens and
-  multiplied by four for PDFs, so the splitter fired at 800 against pages
-  averaging about 520 and almost never fired.
-
-  ```
-    before   316 segments, 316 chunks, 1.00 per page
-    after    227 segments, 540 chunks, 2.38 per page, mean 310 tokens
-  ```
-
-  A chunk was a page by arithmetic rather than by anyone's decision, so **every
-  measurement this codebase had made about chunking was really about page-sized
-  chunks**. Segments falling to 227 is the other half: that is the true page
-  count, and the surplus was pages torn up by a splitter firing inconsistently,
-  which is also why `(file, page)` was not a unique key.
-
-  Retrieval units and citation units are now separate. A chunk is retrieved; a
-  page is cited, because a page is what a reader opens. Old rows keep a null chunk
-  content and fall back to the segment, so they keep working until re-ingested.
-
-  Measured, three runs each: **18.0 → 19.0 of 27**, and with retrieval per
-  information need on re-chunked documents, **21.0**. That last setting stays off
-  by default: the same loop measured 15.3 against 17.0 on page-sized units, and
-  every document uploaded before this is still page-sized. Raise `MAX_RETRIEVALS`
-  to 3 per deployment once its documents have been re-ingested.
-
-  **A regression shipped in the middle of this.** Adding `page_text` to the three
-  processors used the PDF processor's variable name in all three; the other two
-  call it `section_content`. Every section of every `.docx` and `.txt` raised
-  `NameError`, was caught per section as designed, and the file was marked
-  processed with zero chunks. It looked ready in the list and answered nothing.
-  The verification that missed it used PDFs only. A processor that extracts
-  nothing now fails the file, because this shape had shipped twice and both times
-  the only trace was a log line nobody reads.
-
-- **2026-08-05, later (one pipeline that sometimes loops):** There were two
-  systems calling the same `hybrid_search` and scoring 17.0 and 16.2.
-  Everything separating them was the code around it, and three of the
-  session's regressions came from that code drifting apart:
-
-  | | |
-  |---|---|
-  | citations 8/22 | the agent transcribed `file.pdf, page 15` while the pipeline emits `[Segment N]` and resolves it in code |
-  | ranking lost | the agent accumulated retrieval its own way and discarded the global ordering the pipeline gets for free |
-  | 0.83 / 0.17 | a silent fallback made a benchmark run measure a mixture of two systems and report one number |
-
-  The graph is now one path with an optional loop:
-
-  ```
-  question -> needs? -> retrieve -> accumulate -> coverage -+- gap  -> retrieve
-                                                            +- done -> answer
-  ```
-
-  A single-need question takes exactly the path the shipped pipeline takes.
-  A question joining two things gets a retrieval aimed at each.
-
-  **Coverage is ensured, not inferred.** The first attempt credited the broad
-  opening search with covering every need, so the loop existed and could never
-  fire. No model decides whether a need is satisfied: that judgement was tried
-  as an evidence selector and regressed the agent from 16.2 to 11.2 while
-  looking perfectly reasonable on a four-question spot check.
-
-  **Decomposition is gated by regex before any model is asked.** Without it the
-  model split "how long do i keep tax records" into two needs and turned one
-  lookup into three retrievals. All five multi-document benchmark questions
-  contain a coordinating conjunction; only three of seventeen single-document
-  ones do. The guard removes a model call rather than adding one.
-
-  Deleted: `tool_agent.py`, `document_tools.py`, `AGENT_MODE`, and the
-  duplicate citation and answer paths. Net 804 lines fewer.
-
-- **2026-08-05 (what the measurements were actually worth):** Several
-  conclusions reported during this work were wrong, and the corrections are
-  worth more than the conclusions.
-
-  Three prompt variants were compared at one run each before anyone checked
-  whether the benchmark could see a difference that small. Identical code then
-  scored 17/25 and 16/25 with five questions flipping. `--repeat N` now reports
-  the spread and states how large a change has to be to count.
-
-  A per-document diversity cap looked obviously right and lost at all nine
-  settings it was swept at. Contextual retrieval, the highest-expected-value
-  item from the literature, measured neutral to slightly negative here, because
-  its gains restore context that chunking destroys and our chunker almost never
-  fires: a chunk is a whole page already.
-
-  The agent's multi-document advantage, reported twice as the strongest
-  argument for the direction, was a two-run artifact. At four runs it is 1.8
-  against the pipeline's 1.8.
-
-  **Five multi-document questions is too thin a sample to steer by.** Two
-  confident claims came from it and neither survived four runs.
-
-- **2026-08-05 (backend modernization: six items, three surprises):** A review
-  of the backend found six things worth changing. Doing them found three
-  things nobody was looking for.
-
-  **The event loop was never concurrent.** `llm_service` used `requests` and
-  `time.sleep` while every caller was an `async def`. The worker declares
-  `asyncio.Semaphore(QUERY_CONCURRENCY=4)` and starts a task per query, so it
-  believed it ran four at a time; a blocking POST with a 120-second timeout
-  stopped the loop, so it ran one, and nothing else on that loop ran either.
-  Now `httpx.AsyncClient` end to end: **2.6x on four concurrent calls**,
-  measured warm so the figure is not just TLS setup.
-
-  **There was no vector index.** None: the only entry on `chunks` was its
-  primary key. Every question scanned every chunk and re-tokenised every
-  segment. Adding an index alone would have done nothing, because
-  `ORDER BY 0.7*vector + 0.3*text` is not a distance and no index describes
-  it. The query was reshaped into two indexed searches fused by reciprocal
-  rank: **140-204ms → 10-20ms, and recall 18/21 → 19/21.**
-
-  **There has never been a temperature.** Every call ran at the endpoint's
-  sampling default. Four runs of identical code scored 12-18 of 22. At 0.1 the
-  spread halves to 13-16 with the mean unchanged, which is the expected shape.
-  A customer asking the same question twice was getting different pages.
-
-  Also: `format_user_chat_history` had raised `NameError` on every call since
-  `fafc428`, swallowed by its own handler, so **conversation history has never
-  reached the model** and every question was answered as if it were the first.
-
-  **What did not work, and is recorded so it is not tried again.**
-  Contextual retrieval, the highest-expected-value item on the list, measured
-  neutral to slightly negative here (@5: 17/21 without, 16/21 with). The
-  reason says when to revisit: the gains come from restoring context that
-  chunking destroyed, and our chunker almost never fires, so a chunk is a
-  whole page already coherent under its own heading. It belongs with small
-  chunks. Kept behind `CONTEXTUALIZE_CHUNKS`, off, with a backfill and a
-  `--strip` that undoes it, because a change to ingestion that cannot be
-  turned off cannot be tested.
-
-  **Deleted:** `rag/` scaffolding (a pipeline holding two classes, a factory
-  building the pipeline, interfaces with one implementation each, a search
-  engine imported by nothing), and `query_chunks_by_embedding`, a
-  pre-pgvector search that pulled every one of a user's embeddings into Python
-  to loop over. Those four lines were the only reason the API depended on
-  numpy, scipy and scikit-learn; all three are gone from requirements.
-
-- **2026-08-05 (the model would not navigate, so it was handed the map):**
-  Extraction opened every PDF with fitz, read its pages, and closed it without
-  asking what it contained. Three of five benchmark documents carry a real
-  embedded table of contents, 118 entries in one. All discarded.
-
-  That absence is why the ADA failure survived three retrieval levers: asked
-  whether a shop must be wheelchair accessible, retrieval returned page 8,
-  which uses "readily achievable" while explaining parking, rather than page
-  6, where the rule is defined. Both contain the phrase and no ranking
-  function can tell which is the section about it.
-
-  Outlines are now extracted at upload, from the document's own contents where
-  it has one and from type size where it does not, with a backfill for
-  documents already uploaded. `outline()` and `search_within()` are tools.
-
-  **The model then ignored them: zero calls, exactly as it ignored
-  `read_page`.** That is three prompt revisions that changed nothing. So the
-  contents pages of every document now go into the system prompt instead. At
-  SMB scale that is affordable and at web scale it is not, which is the point:
-  five documents and 281 headings is about 4k tokens against a 120k window. It
-  matches the finding from the literature that small open models want more
-  structure, not more freedom.
-
-- **2026-08-04 (the pipeline was broken, not badly tuned):** The first
-  benchmark baseline scored 10/25 with 11/21 citations, and three questions
-  answered *"I couldn't find enough evidence in your documents"*. Running
-  `hybrid_search` by hand for those three put the correct page at rank 1,
-  rank 4 and rank 1. Retrieval had found them. Every stage after it threw
-  them away.
-
-  Six defects, none of them a tuning knob:
-
-  | what | effect |
-  |---|---|
-  | `CrossEncoderReRanker` re-embedded `content[:600]` with the same bi-encoder that made the score it claimed to improve | deleted correct pages; the ADA guide states its 15-employee threshold at character 2460, and the first 600 are phone numbers |
-  | `chunk_selector.select()` ran on its 3000-token default | ~6 of 15 chunks reached a 120,000-token window |
-  | `plainto_tsquery('simple', …)` ANDed stopwords | matched **zero rows**; the keyword half of "hybrid search" had never worked |
-  | `1 - (emb <-> emb)` used Euclidean under a cosine formula | negative scores, two halves with no shared scale |
-  | `text_chunk[:max_context_length]` | a token budget slicing characters |
-  | the citation gate | told customers their document was empty when the answer was at rank 1 |
-
-  Result: citations **11/21 → 16-18/22**. The reranker is deleted, not fixed.
-
-  **A per-document cap was built, measured, and thrown away.** A 98-page
-  handbook was taking 14 of 15 slots, so capping its share looked obviously
-  right. Swept at top_k 15/25/40 against caps of off, /3 and /4, uncapped won
-  or tied at every single point. `top_k` went to 25 instead. Room, not
-  rationing. The sweep is in the commit; the cap is not in the code.
-
-- **2026-08-04 (the benchmark had to be made honest before it could be used):**
-  Three things were wrong with the instrument, and each one had already
-  produced a false conclusion.
-
-  **It could not see its own noise.** Two runs of identical code scored 17/25
-  and 16/25, five questions flipping. Three prompt variants had already been
-  compared at one run each and reported as improvements and regressions; none
-  of those comparisons could see what they claimed. `--repeat N` now reports
-  the range and states outright how large a change has to be to count.
-
-  **It was wrong about its own corpus.** Question 24, "how do i register a
-  trademark", was written as a refusal on the note *"plausibly small-business,
-  genuinely absent"*. The SBA guide has a `Trademarks/Service Marks` section on
-  page 10. Nobody checked, which is the exact failure the file's own header
-  warns about. Found by the tool agent, which searched, quoted the passage, and
-  added that the guide gives no step-by-step procedure. Only one of the four
-  refusal questions had ever been verified; all four now are, and the new one
-  was checked against the corpus before being written.
-
-  **It scored typography.** A correct answer failed for writing
-  `self‑inspection` with U+2011, and a citation was read as absent because the
-  marker came back as `[Segment 1]` with U+202F. Rescoring the original
-  baseline answers with the fixed scorer gives 14/25 rather than 10/25 with
-  citations unchanged at 11/21, which is the point: **the scorer fix bought no
-  product improvement and is not counted as one.**
-
-  It also scored an expired Firebase token as a catastrophic regression: a full
-  three-run sweep returned 0/26 because every request was a 401. One cheap
-  authenticated call now runs first.
-
-- **2026-08-04 (tools: built, measured, switched off):** `AGENT_MODE=tools`
-  gives the model `search_documents`, `read_page` and `list_documents` and lets
-  it decide how often to call them. Same benchmark, same corpus, two runs each:
-
-  ```
-                        citations        refusals   overall
-    fixed pipeline      16-18/22 (17.0)   3/4       18-20/26
-    tool agent          13-14/22 (13.5)   3-4/4     13/26
-  ```
-
-  The pipeline wins by more than either side's noise, so the flag defaults to
-  `pipeline` and this ships off. It is kept because two things it does are new:
-  refusals reached **4/4** for the first time, and question 17 cites both OSHA
-  and the ADA guide where the fixed pipeline retrieves fourteen OSHA chunks and
-  one ADA chunk.
-
-  **Citations are verified, not trusted.** The model names a page; the code
-  checks that claim against the passages the tools actually returned and drops
-  any citation to a page it was never shown. The first run scored 8/22 because
-  the model wrote "Publication 583, page 12", which names no file and cannot
-  become a link, so every citation was discarded **in silence**. Each passage
-  now carries the exact string to copy, and drops are counted and logged. That
-  one fix moved citations from 8 to 13-14.
-
-  **The model never names a workspace.** Scope is bound once from the
-  authenticated request and the tool schemas have no field for it, so an
-  instruction hidden inside an uploaded PDF has nothing to address.
-
-  **The obvious explanation was tested and is wrong.** The tool agent sees 8
-  passages per search where the pipeline puts 25 in front of the model at
-  once, so the gap looked like context width rather than architecture. Raising
-  `TOOL_SEARCH_RESULTS` to 20:
-
-  ```
-    per search   citations        refusals
-      8          13-14/22 (13.5)   3-4/4
-     20          12-13/22 (12.5)   2/4
-  ```
-
-  Slightly worse on citations and clearly worse on refusals, which matches
-  what the fixed pipeline showed earlier: more context makes a 20B model more
-  willing to answer from adjacent material. The default stays 8. **The
-  remaining gap is the loop, not the width of what it sees**, so the next
-  attempt has to change how the model decides, not how much it is handed.
-
-  A concrete lead: asked whether a shop must be wheelchair accessible, it
-  cited ADA page 8, accessible parking, rather than page 6, where "readily
-  achievable" is defined. It takes the first passage matching a phrase instead
-  of the page that defines the concept. `read_page` exists to fix exactly that
-  and the model is not reaching for it.
-
-  **Extraction was never the problem.** IRS Table 3 extracts cleanly, header
-  and all. The only unicode fault was in the scorer.
-
-- **2026-08-03, later (an invite says what somebody will be):** Every invite
-  produced an organization-wide staff member, because that is what the accept
-  path hardcoded. An owner who meant to add an admin, or to confine somebody to
-  two workspaces, let them in with more access than intended and then corrected
-  it on another screen. The invite now carries role (`staff` or `admin`) and
-  reach (`organization`, or a chosen set in `workspace_ids`), both still
-  changeable afterwards in the members list.
-
-  **Scope applies to admins now.** It did not before: `admin` implied the whole
-  company whatever the column said, which made "confine this admin to two
-  workspaces" impossible to express. Admin describes what somebody may do, not
-  how much they can see. Owner stays unbounded, because the company is theirs.
-
-  **And the read and write paths disagreed about it.**
-  `accessible_workspace_ids` hid the workspaces a confined admin had not been
-  given, while `get_user_role_in_workspace` still returned `"owner"` for any
-  admin regardless of scope. So they could not see Payroll and could upload into
-  it by naming its id, holding *owner* capabilities while doing so. Seeing and
-  doing are two questions and only one had been tightened. This is the third
-  time that shape has produced a bug (see `list_workspaces_for_user`, and the
-  `role`/`can_manage` conflation): when a rule changes, find every function that
-  answers a version of the same question, not just the one that was reported.
-
-  Also: workspace ids in a request body are checked against the organization
-  doing the inviting, so an owner cannot grant their invitee access to a
-  workspace in somebody else's tenant. The partial unique index is declared on
-  the model as well as in its migration, because autogenerate compares the
-  database against the models and would otherwise propose dropping it, silently
-  restoring the race that gave one email two companies. And the invite email
-  sends the link as text: a styled button was reported as "this site doesn't
-  support a secure connection" while the same URL pasted into a browser worked,
-  which is what mail clients rewriting link targets through their own
-  redirectors does.
-
-- **2026-08-03 (the day live Stripe was exercised, and what it cost):** The
-  payment path ran against real money for the first time. Almost everything that
-  broke was invisible in test mode.
-
-  **Seats had never been billed at all.** `seats.py` called `item.get("quantity")`
-  on a StripeObject, which raises AttributeError rather than returning a default,
-  inside a function that swallows exceptions on purpose. So the sync failed at
-  its first line every single time and logged it as a Stripe problem. An
-  organization with two members sat at quantity 1 while every call site believed
-  it had synced. Found by comparing a live subscription against its member count.
-  A dict-like object that is not a dict, inside a function designed never to
-  raise, is how a revenue path stays broken without anyone seeing it. `_read()`
-  in `subscriptions.py` now exists so nothing reads a Stripe object any other way.
-
-  **And the seat sync fired on the path almost nobody takes.** It ran on the
-  explicit accept-invite route, but signing in accepts every invite waiting for
-  the address, so by the time the link is revisited the token is spent and that
-  route never runs. Members who joined the ordinary way were free forever.
-
-  **One email owned two companies.** Signing up with Google fired two
-  `POST /users?intent=signup` at once — the auth listener sends one, and the
-  sign-up screen sent another after the popup closed. Both asked whether the
-  person already owned a company, both asked before either had inserted its
-  membership row, both created one. The subscription then attached to whichever
-  the person happened to be standing in, which is how $99 landed on an
-  organization the customer was not looking at. The duplicate call is gone, and
-  a partial unique index on `organization_members (user_id) WHERE role = 'owner'`
-  makes it impossible rather than unlikely.
-
-  **Deleting an account destroyed a paid subscription, silently.** The task
-  cancels the Stripe subscription, deletes the customer and deletes every
-  organization the person solely owns, and refunds nothing. An account deleted
-  four minutes after paying took the whole month with it, with the cancel button
-  unused on the same screen. That is where the $99 went. Deletion is now refused
-  with a 409 while an owned company still pays. Refusing is the only option that
-  moves no money on its own, and it makes the order deliberate. Staff are never
-  blocked, since somebody else's subscription is not theirs to be trapped by.
-
-  **Entitlement answered about the person when asked about a company.**
-  `resolve_entitlement` asks "does any company of yours pay", which is right for
-  an unscoped call and wrong for a scoped one, so an owner of a paying company
-  was told their unpaid second company was entitled — "no plan yet" in the
-  banner, "your subscription is active" in the panel below.
-  `entitlement_for_organization` answers about the company actually named.
-
-  **And `organization_id` on that endpoint was never checked**, so any signed-in
-  person could read any company's subscription status and renewal date by
-  guessing a small integer. Found while testing the fix above.
-
-  **Signing in with no company signed you out.** Authentication had worked
-  perfectly; the missing thing was a company. Ending the session threw away the
-  one part that succeeded and made it look like a rejected login — reported as
-  "can't sign in", which is exactly how it felt. It now goes to sign-up, still
-  signed in. Sign-up in turn stops offering a company to somebody who has one.
-
-  **Removal told nobody.** It deleted the membership, the workspace assignments
-  and the seat correctly, then said nothing, so the person's browser kept
-  showing what it had loaded at sign-in. Narrowing access already sent a socket
-  event; removing entirely did not, so the stronger act was the quieter one.
-
-  **Email was never being delivered, for a reason no code change could fix, and
-  it is fixed now.** Ten messages requested, ten processed, zero delivered, zero
-  bounced, empty sending IP, nothing in any suppression list. Not the sender
-  identity, not DNS, not credits, not reputation: the account itself was not
-  releasing mail, which has no API and was a support matter. Osas raised it, the
-  hold was lifted, and the same day closed with 12 delivered, 36 opens and a
-  click. Worth recording that messages from the *unverified* sender delivered
-  too once the hold went, so the from-address was never the blocker either.
-
-  The lesson is the diagnosis, not the fault. SendGrid's own stats answered this
-  in one call and nobody had looked; `requests` and `processed` climbing while
-  `delivered` stays at zero, with an empty sending IP and empty suppression
-  lists, is an account that is accepting mail and not sending it. No amount of
-  reading application code would have found that.
-
-  Two real faults were found on the way. The app sent from an address that was
-  not a verified sender, now `noreply@syntextai.com`. And the SendGrid event
-  webhook had been configured against an endpoint that did not exist, so every
-  delivery event had been posting into a 405 since it was set up. That endpoint
-  exists now (`/api/sendgrid/events`), which is what makes the next failure
-  explain itself instead of being noticed weeks later.
-
-- **2026-08-01 (why mail fails, and the end of the dependency triage):** Added
-  `POST /api/sendgrid/events`, SendGrid's event webhook. A 202 from the send API
-  means SendGrid accepted the message, not that anybody received it: rejection by
-  the recipient's server, spam filing from an unauthenticated domain, and
-  suppression from an old bounce all happen afterwards and silently, which is why
-  invites could read as sent and never arrive. Failures now log with the
-  `reason` field, which is the one that explains them. Public and unauthenticated
-  by necessity, so it verifies the ECDSA signature when
-  `SENDGRID_WEBHOOK_PUBLIC_KEY` is set, and always answers 2xx otherwise —
-  SendGrid retries any non-2xx, and a batch holds up to a thousand events for
-  unrelated messages, so one malformed entry must not cost the rest. Not stored
-  in the database on purpose: the question is "why did this not arrive", the logs
-  already have timestamps, and a table needs a migration, a retention policy and
-  a screen before it beats grep.
-
-  **The endpoint must be deployed before the webhook is configured in SendGrid**,
-  or every event posts into a 404.
-
-  **Dependency triage closed, 2026-08-01.** Backend `pip-audit`: clean, no known
-  vulnerabilities. Frontend, two highs left and neither is actionable:
-
-  - `react-router-dom` 7.18.2 — GHSA-qwww-vcr4-c8h2, RSC-mode CSRF. The advisory
-    covers `7.12.0 - 8.2.0` and **no patched version exists in any line**; npm's
-    suggested "fix" is a downgrade to 6.30.4, a major break across the whole
-    routing layer. The vulnerable surface is React Router's RSC server runtime.
-    This app imports `HashRouter`, `Route`, `Routes`, `Navigate`, `Link`,
-    `useNavigate`, `useLocation`, `useSearchParams` and `useParams`, and nothing
-    else — no server handler, no data-router actions or loaders, no RSC. Not
-    reachable. Revisit when a patched 7.x or 8.x ships.
-  - `vite` 5.4.21 — `server.fs.deny` bypass **on Windows alternate paths**, in
-    the dev server. A devDependency that never ships, on a team running macOS and
-    Linux. The fix is vite 8, three majors up, which is a deliberate build-tool
-    upgrade rather than a security response.
-
-  Both are recorded rather than suppressed, so the count staying non-zero is a
-  known state and not an unread warning. What moved the number from 34 to 5 was
-  the firebase 10 → 12 upgrade and the orphan-dependency removals, both earlier.
-
-- **2026-08-01 (the free tier is gone, and two labels stopped lying):** Removed
-  `FREE_DOC_LIMIT`, `FREE_STORAGE_LIMIT_BYTES`, `FREE_WORKSPACE_LIMIT` and every
-  branch behind them, the upgrade banner and workspace-limit prompts,
-  `useLimitHandler` (already unreferenced), and `UsageQuota`, which now exists as
-  `SubscriptionNotice` and reports only a lapse. Reasoning in the pricing section
-  above.
-
-  **`list_accessible_workspaces` reported `role: "owner"` for admins**, because
-  every caller wanted "may you manage this" and the field was named for something
-  else. Two callers read the name literally and were wrong for it: the
-  last-workspace guard counted an admin as owning workspaces they do not own and
-  let them delete the organization's last one, and the free-plan count charged
-  them for the owner's workspaces. Now `role` is what you are and `can_manage` is
-  what you may do, and the guard asks whether the *organization* would be left
-  with none, which is the invariant it was always about.
-
-  `can_manage` then vanished on the way out, because `WorkspaceResponse` did not
-  declare it and `response_model` silently drops undeclared fields. The Team
-  button disappeared for the owner of the company. Worth remembering: a field
-  added to a route's dict is not a field the browser receives.
-
-  **The app looped between two organizations.** `fetchSubscriptionStatus`
-  refreshed the org context using the `activeOrganizationId` captured when the
-  callback was built, which right after a switch is the *previous* organization.
-  That alone flips once. It ran forever because the Firebase auth subscription
-  listed callbacks in its dependencies that are rebuilt whenever the active
-  organization changes, so every change tore the listener down and re-subscribed
-  it, and re-subscribing fires immediately. 245 registrations and 412 context
-  loads in one sitting, and it paused when the tab was backgrounded because
-  browsers throttle it there. Invisible until an account owned one company while
-  belonging to another: with one organization, the stale id was the right id.
-
-  Killing that loop removed an accidental refresh it was doing, which is what
-  produced the free-plan banner on a paid account. Entitlement is now re-fetched
-  deliberately when the active organization changes, through a ref, so the
-  refresh happens without the identity churn.
-
-- **2026-07-31 → 2026-08-01 (storage moved to the tenant):** Objects were keyed
-  by the uploader's firebase uid while access, retrieval and citations were all
-  keyed by workspace. That one mismatch is why deleting a person deleted
-  documents belonging to a company they had merely joined, and why the worker
-  reversed an uploader's uid out of a URL to fetch bytes it already had the id
-  for. Details in "As built" above. Also fixed in passing: deleting a workspace
-  never removed its objects, deleting a document authorized by uploader so an
-  owner could not remove an admin's file (and a file whose uploader was deleted
-  carried `user_id NULL` and could never be deleted by anyone), and moving a
-  document between workspaces left the object under the old prefix, so deleting
-  the old workspace would have destroyed a document belonging to the new one.
-
-- **2026-07-29 (multi-user actually works now):** Invited staff could join a
-  workspace and then **do nothing in it**. Both read paths filtered on
-  `files.user_id` with `workspace_id` only ANDed on top, and documents belong to
-  whoever uploaded them, normally the owner. So a staff member listed zero
-  documents, retrieved zero chunks, and got no answers at all. Collaboration was
-  not missing polish, it did not function. Visibility now follows the workspace
-  via `accessible_workspace_ids()`, with `check_can_read_workspace` authorizing
-  any requested workspace, since `workspace_id` alone now scopes reads.
-
-  **Two authorization holes closed.** `update_workspace` and `delete_workspace`
-  both said owner-only in their docstrings, then checked
-  `list_workspaces_for_user`, which returns workspaces the caller merely belongs
-  to. Any invited staff member could rename and **permanently delete** the
-  owner's workspace and every document in it. The role was in that response and
-  simply unused. The delete route's "cannot delete your last workspace" guard
-  also counted memberships, so one owned plus one joined looked like two.
-
-  Also fixed: staff were pushed through trial signup because entitlement was
-  per-user. `resolve_entitlement` now follows workspace membership to the owner's
-  plan for app access, and `assert_can_create_doc` resolves limits against the
-  workspace's billing owner with usage counted per workspace. Note the
-  deliberate asymmetry: app access is a global question, but quota and the
-  workspace-creation limit stay keyed to the user's own subscription, because a
-  person can be premium in someone else's org and free in their own.
-
-  Verified against the local stack: staff see 1 document where they saw 0, an
-  outsider sees 0 and resolves no accessible workspaces, reads allow owner and
-  staff and 403 outsiders, uploads stay owner-only, rename/delete admits the
-  owner and blocks staff.
-
-  **This is interim.** The correct fix is the tenant model above.
-
-- **2026-07-29 (worker concurrency, stage timing, dead-code sweep):** The worker
-  used one global semaphore for every run type, so with the production
-  `MAX_CONCURRENT_TASKS=1` a **chat question queued behind a document upload**.
-  One tenant uploading a large PDF stopped every other tenant from getting an
-  answer. Queries and ingests now have separate budgets (`QUERY_CONCURRENCY=4`,
-  `INGEST_CONCURRENCY=2`), and a file at or above `HEAVY_FILE_BYTES` (8MB) takes
-  an exclusive slot so two large documents never overlap.
-
-  The loop also had a **batch barrier** that defeated the priority ordering
-  entirely: it claimed a batch then waited on `ALL_COMPLETED` before polling
-  again, so the batch moved at the speed of its slowest member and nothing new
-  was claimed meanwhile. Queries are enqueued at `priority=10` against `200` for
-  ingests, but a query arriving a second after a big PDF was not *looked at*
-  until that PDF finished. The loop now wakes on `FIRST_COMPLETED` and refills
-  the freed slot immediately.
-
-  Also added: a per-tenant cap (`MAX_RUNS_PER_USER=3`) so one user queueing
-  twenty files cannot starve others, and **lease reclaim** —
-  `lease_expires_at` was written but never read, so a worker killed mid-job left
-  runs stuck in `running` forever, never retried, never surfaced, with the user's
-  upload silently stalled.
-
-  On the old "sequential processing prevents OOM" rationale: it was stricter
-  than necessary. `PDFProcessor` already batches 50 pages, so peak memory per
-  job is bounded by the batch, not the document size. The heavy slot is the
-  belt-and-braces guard. **Watch worker RSS against the TIMING logs before
-  raising `INGEST_CONCURRENCY` further**; the container is capped at 2GB.
-
-  The worker also had a permanently-failing healthcheck: it shares an image
-  whose `HEALTHCHECK` curls port 3000, which the worker never serves. It was
-  always red, so real stalls were invisible. The loop now writes a heartbeat and
-  the compose healthcheck asserts freshness.
-
-  **Verified against the local stack**, not just reasoned about: expired leases
-  reclaimed and requeued, per-user cap held (claimed 3, deferred 3), and
-  in-flight top-up observed at 2/6 while jobs were still running, which is the
-  batch barrier being gone. All three containers healthy.
-
-  New `api/core/timing.py` emits structured `TIMING` log lines per stage: queue
-  wait (upload or question until work actually starts), download,
-  extract/embed/store, and query latency with chunk counts. Log-based rather
-  than PostHog so it survives analytics failures and behaves identically in the
-  worker, which has no request context. Read them with:
-
-  ```bash
-  docker logs syntextai-worker-local 2>&1 | grep TIMING
-  ```
-
-  Dead code: AST reachability analysis from the four externally-called entry
-  points in `llm_service.py` found **13 unreachable functions, 744 lines** — the
-  entire key-concepts and MCQ cluster. Removed, along with four now-unused
-  imports, the dead `generating_concepts` status in `files.py`, and its three
-  frontend handlers. Note the earlier orphan audit missed all of this because it
-  worked at file level ("is this file imported?") and `llm_service.py` obviously
-  is; vulture does not flag unused module-level functions at default confidence.
-  **For function-level dead code, do the reachability pass, not a grep.**
-
-- **2026-07-29 (migration chain fixed, local Postgres added):** A fresh
-  `alembic upgrade head` did not work at all. `add_workspace_members_invites`
-  revised `fix_key_concepts_is_custom`, but both tables it creates carry a foreign
-  key to `workspaces.id`, and `workspaces` is not created until `b2d181e6791f`,
-  much later in the chain. Upgrading an empty database died on
-  `UndefinedTable: relation "workspaces" does not exist`. Production never
-  surfaced this because those two tables were created by hand, so the bad ordering
-  was invisible for as long as nobody built a database from scratch. Fixed by
-  repointing `down_revision` at `b2d181e6791f`, which keeps the existing merge at
-  `befb0c5f5d70` valid because `20260227_teaching_agent` also descends from it.
-  Does not replay in production: alembic stores only the current revision and prod
-  is already at head.
-
-  **Drift check result: clean.** All 30 migrations now apply to a fresh database
-  reaching `b8f6b3f63f7d`, and the resulting schema matches live production
-  exactly, 154 of 154 objects across columns, indexes, constraints and extensions.
-  So production's hand-created tables happen to match what the migration produces,
-  and prod needs no remediation. Worth re-running this check after any future
-  hand-edit to the production schema; the comparison uses `information_schema` and
-  `pg_indexes`/`pg_constraint` queries rather than `pg_dump`, so client/server
-  version skew cannot introduce false differences.
-
-  Added a `pgvector/pgvector:pg16` service to `docker-compose.local.yml` on host
-  port 5433, with the app and worker gated on its healthcheck. Its credentials are
-  **hardcoded, not interpolated**. Compose substitutes `${...}` from `.env`, which
-  is the production file, so `${DATABASE_PASSWORD}` there would inject the real
-  managed-database password into a local container. Local testing no longer touches
-  production data.
-
-  Also pinned the local stack to `.env.dev` in all four places (both services,
-  both `env_file` and the `load_dotenv()` volume mount). Environment now follows
-  the compose file instead of being hand-swapped. A branch cannot select an
-  environment, because `.env*` files are gitignored and therefore identical no
-  matter what is checked out; binding it in compose means the local stack always
-  gets test-mode Stripe and can never reach live payment infrastructure.
-
-  Note: the local image must be rebuilt after any `requirements.txt` change. The
-  `./api:/app/api` mount refreshes code but not site-packages, so a stale image
-  fails at import with `ModuleNotFoundError` for newer deps such as `slowapi`.
-
-- **2026-07-29 (orphan code and package audit):** Removed `pdfminer.six` (imported
-  in `pdf_processor.py` but never called; PyMuPDF does all extraction), ~12 unused
-  Python imports across 8 files, 15 npm packages with no importer, and four dead
-  files: `alembic/env_temp.py` (a debugging hack that mocked out pgvector),
-  `models/db.py` (old sync session module superseded by `async_db.py`, zero
-  importers), `routes/init.py` (empty), and `services/flashcard_quiz_utils.py`
-  (EdTech leftovers whose backing tables no longer exist).
-
-  Three packages that read as unused are **not**, and must stay. Now recorded inline
-  in `requirements.txt`: `scikit-learn` (`cosine_similarity` imported lazily inside
-  functions in `rag/search_engine.py` and `rag/reranker.py`), `nltk` (hard
-  dependency of `llama-index-core`), `python-multipart` (required implicitly by
-  FastAPI's `UploadFile` parsing). Likewise `tailwindcss`, `shadcn` and
-  `tw-animate-css` on the frontend, which `depcheck` flags because they arrive via
-  CSS `@import` in `src/index.css` rather than from TS. Lesson: neither `vulture`
-  nor `depcheck` sees lazy imports or CSS imports, so verify every flagged package
-  by hand before removing it.
-
-  `alembic/versions/c9530c25560e_*.py` is an empty autogenerate stub (`pass`/`pass`).
-  Left in place deliberately: `20260215_add_agent_runs` revises it, so deleting it
-  would break the chain for no benefit.
-
-- **2026-07-29 (multi-tenancy verified, invite gap fixed):** Checked whether the
-  workspace model correctly handles a real scenario: someone invited as staff to
-  workspace A later wants their own SyntextAI account and to invite others to their
-  own workspace B. Verified sound at the schema and repository level:
-  `count_workspaces_for_user` (used by the free-plan 1-workspace limit) only counts
-  `Workspace.user_id == user_id`, i.e. *owned* workspaces, staff memberships in
-  other people's workspaces never count against it. `list_workspaces_for_user`
-  correctly merges owned + staff-membership workspaces into one list with the right
-  role on each. `list_members` correctly synthesizes the owner (from
-  `Workspace.user_id`) plus staff (`WorkspaceMember` rows) into one members list.
-  No conflict, no double-counting, this works as expected.
-
-  Found one real gap while checking this: `accept_invite` never verified the
-  invite's target email matched the authenticated user's actual email, it just
-  added whoever was logged in (with a valid, unexpired token) as staff. The token
-  being an unguessable UUID4 was the only real protection, a forwarded email,
-  pasted link, or leaked URL would let anyone with it join as staff regardless of
-  who it was actually sent to. Fixed in `workspaces.py`'s `accept_invite` route:
-  now compares the invite's email against the authenticated user's verified email
-  (case-insensitive) before accepting, returns a clear 403 naming the expected
-  email on mismatch.
-
-- **2026-07-29 (critical fix):** Chat answer generation was silently broken in
-  production. `generate_explanation_dspy` (called from `SyntextAgent.query_pipeline`,
-  which is called from every live chat query via `QueryAgent._generate`) depended on
-  a DSPy predictor (`explain_predictor`) that was never actually configured, the
-  "configuration" code was a no-op `pass`. Every call fell through to a hardcoded
-  placeholder string ("This section discusses X... (Explanation generated via
-  fallback method)") that never contained a `[Segment N]` citation. `query_pipeline`
-  requires at least one valid citation whenever context was retrieved, so **every
-  real chat query with retrieved context was being refused** with "I couldn't find
-  enough evidence in your documents to answer that confidently," regardless of what
-  was actually in the uploaded documents. Fixed by renaming the function to
-  `generate_explanation` and pointing it at `gradient_chat`, the already-working
-  LLM-calling function used everywhere else in `llm_service.py` except this one path.
-  Live-verified against the real DigitalOcean inference endpoint (not just compiled):
-  a direct test call returned the exact expected output. Side finding from that same
-  test: a 10-token `max_tokens` budget returned empty content from the model
-  (`openai-gpt-oss-20b` appears to consume some budget on internal reasoning before
-  output), 1500 worked reliably, worth keeping in mind for any other low-`max_tokens`
-  call elsewhere in this file. This also made `dspy` genuinely removable, it was
-  imported but never functionally exercised, removed from `requirements.txt` and the
-  dead `explain_predictor`/`gemini_lm` scaffolding deleted.
-- **2026-07-29 (Tier 0 sprint):** fixed the pending-invite-lost-after-login bug in
-  `Auth.tsx`; added workspace-owner authorization to file upload (`files.py` had no
-  membership check at all before this, any authenticated user could upload into any
-  workspace_id); locked CORS to real domains; fixed 12 instances of raw exception
-  leakage across 5 route files and, while doing that, found and fixed a real bug where
-  4 Stripe subscription routes were re-catching their own legitimately-raised
-  `HTTPException`s in a generic handler and mangling the status code/message; added
-  security headers (CSP in report-only mode, HSTS, X-Frame-Options, etc.); added
-  IP-based rate limiting to chat and upload; verified the `workspace_members`/
-  `workspace_invites` migration was already applied (docs previously said otherwise),
-  and that the "multiple divergent Alembic heads" gap was stale, only one head exists.
-  DOCX processing implemented and closed. Manufacturing added as a named vertical
-  (positioning stayed broad SMB, see "What SyntextAI is" above). Capability gap
-  analysis performed against the four promised capabilities.
-- **2026-07-29 (earlier):** YouTube/Whisper ingestion removed.
-- **2026-07-24:** Manufacturing/maintenance-technician reposition drafted in detail,
-  briefly marked "ready to GTM," then shelved. Flashcard/quiz/key-concept feature
-  removal executed (routes + frontend panel; DB tables confirmed dropped and the
-  `tasks.py` generator functions are the one remaining cleanup item).
+| vision, one page | 165s, ~3 tok/s | ~6.6s, 98 tok/s |
+| chat, first token | **23.8s / 26.7s** | ~0.5s |
+| chat, generation | 3.9-4.5 tok/s | 98 tok/s |
+
+24 seconds before a customer sees the first word of an answer. That is the real
+reason the app feels slow, not the absence of streaming. `openai/gpt-oss-20b` is
+the identical model on DeepInfra ($0.03/$0.14 per M), so chat is a URL change
+with nothing stored to migrate.
+
+**Embeddings: NOT moving for speed or money, and this needs saying plainly so
+nobody "optimises" it later on a false premise.** Measured 2026-08-13,
+voyage-3.5-lite: 11-18ms per chunk at batch 128, ~2s for a 100-chunk document.
+It is nowhere near a bottleneck. Price is $0.02/M against Qwen3's $0.01/M, and
+the entire local corpus (1,833 chunks, ~733k tokens) is **1.5 cents against 0.7
+cents.**
+
+The actual reason is lock-in. `voyage-3.5-lite` is proprietary and single-source:
+only Voyage serves it, so every vector ever stored depends on one company's
+pricing and roadmap, and leaving means re-embedding everything under duress.
+`Qwen3-Embedding-0.6B` is open weights served by many providers and self-hostable
+— same weights, same vectors, so a future provider change costs nothing. It is
+also 1024 dimensions, matching the existing pgvector column.
+
+**Embeddings are a data migration, not a config change.** A Voyage vector and a
+Qwen vector for identical text are unrelated numbers. Embedding queries with one
+model while documents hold the other does not error; it silently returns
+confident citations to the wrong pages, which is the worst failure this product
+has. So: second column, backfill, switch reads, and the citation benchmark as
+the gate. If Qwen retrieves worse, keep Voyage and we are still down to two
+providers.
+
+Order: vision (no stored data), chat (no stored data), embeddings (its own
+migration, its own measurement). Doing them in one change would make a retrieval
+regression impossible to attribute.
+
+## Retrieval, 2026-08-14: four ideas measured, four rejected
+
+The benchmark answers the same question the same way now, so a one-question
+difference is a fact rather than a coin flip. That is what made this possible
+and it is the only thing here that shipped.
+
+**Answering temperature is 0.** It was 0.1. Measured 2026-08-13, three
+consecutive runs of the same questions over the same corpus: 6, 7 and 8 out of
+20. Two questions flipped with nothing changed but the dice. That is not
+benchmark noise to average away, it is the product being non-deterministic about
+facts, in a tool that reads torque values off service manuals.
+
+It also means **every number quoted before this is suspect**, including the
+"8/20 baseline". That was one draw from a distribution centred near 7.
+
+### The four, on one corpus, all repeatable to the question
+
+| config | overall | citations |
+|---|---|---|
+| **untouched pipeline** | **8/20** | **9/20** |
+| truncate candidates to 15 | 7/20 | 9/20 |
+| cross-encoder rerank + truncate 15 | 6/20 | 8/20 |
+| cross-encoder rerank, no truncate | 7/20 | 9/20 |
+| model-written chunk context | 6/20 | 7/20 |
+| deterministic "<file>, page N" context | 6/20 | 7/20 |
+
+**A real cross-encoder does not help here.** `Qwen3-Reranker-0.6B` separates
+relevant from irrelevant by four orders of magnitude in isolation (0.97 against
+0.000016) and still loses to Reciprocal Rank Fusion end to end. Five HVAC
+service manuals are near the worst case for reranking: every document genuinely
+resembles every other, so there is little for a relevance judgement to separate.
+Worth retrying on a mixed-document workspace; the table above is what it has to
+beat. Note this is NOT the reranker deleted earlier — that one re-embedded
+`content[:600]` with the same bi-encoder and was rightly removed.
+
+**Contextual retrieval made it worse, twice, for two different reasons.**
+Model-written context said "the heat-pump service manual", which is true of all
+five manuals, and said it near-identically for every chunk of a page. Replacing
+it with the exact filename failed too, and one query says why:
+
+    to_tsvector('carrier_hch6_heatpump_service.pdf, page 62')
+      -> 'carrier_hch6_heatpump_service.pdf':1  'page':2  '62':3
+    to_tsquery('carrier') matches it?  -> FALSE
+
+**The filename is one indivisible token.** Searching "carrier" cannot match it.
+So the label added no discrimination while promoting `page` and a page number
+above the content at weight 'A', in every chunk in the corpus. Anything put in a
+weighted field has to survive tokenisation to be worth anything; split the
+filename on underscores first if this is retried.
+
+**Enabling the contextualiser also costs the embedding-reuse saving**, which is
+not a bug: reuse works because embedding is a pure function of its input, and a
+per-chunk context sentence makes that input document-specific. Identical
+boilerplate across twenty documents stops sharing a vector.
+
+### What the failures point at
+
+Nine of fourteen failures are "did not cite". Extraction and chunking are
+verified correct on stored rows, so the bottleneck is retrieval, and none of the
+usual levers moved it. Questions 6-8 ask "at 335 psig with 10 degrees of
+subcooling" without naming a manufacturer, against five manuals holding five
+near-identical charging charts. That is not a retrieval defect. It is a product
+question: the workspace should scope to one unit, or the answer should ask which.
+
+## Decisions not to re-litigate
+
+One line each. The reasoning is in the commit or the code comment beside it.
+
+- **Redis is a notification bus, never the queue.** Leases, retries and
+  per-tenant fairness were each paid for in a bug. See `core/events.py`.
+- **Publish after the commit, never inside it**, or the worker wakes and finds
+  nothing.
+- **Take Hermes 4's weights, not Hermes Agent.** Its memory is one pile shared
+  across tenants, which is the thing we sell against.
+- **`drive.file` and the picker, never `drive.readonly`**, which is a restricted
+  scope needing a paid third-party security assessment.
+- **Never store a standing credential to a customer's systems** unless there is
+  no alternative. The Drive import holds a token for one request and nothing else.
+- **Retrieval scopes by workspace, never by uploader.** Checking the uploader
+  refused invited staff every document their owner had added.
+- **Two questions, two functions.** *May you see it* is
+  `accessible_workspace_ids`. *May you do it* is `assert_*_capability`. Every
+  access bug so far has been answering one of them some other way.
+- **A refusal is 404 when naming a resource by id**, so a stranger cannot
+  enumerate what a company owns.
+- **A document that extracts nothing fails loudly.** It used to be marked
+  processed and answer nothing.
+- **Do not widen CORS while credentials are allowed.**
+
+## Known gaps
+
+- **No database-level RLS.** Application-layer only, so every new route needs
+  its explicit check. Scoped 2026-08-11: roughly a week, because sessions carry
+  no tenant, the worker's queue poll is deliberately cross-tenant, five tables
+  reach their tenant only through a join chain, and a policy on `chunks` lands
+  on the vector search path. Deprioritised: `permissions.py` plus the refusal
+  tests cover the same ground. Revisit when a security questionnaire asks in
+  writing.
+- **CSP is Report-Only.** Check the browser console for violations, then flip
+  the header name. `frame-src` must keep `storage.googleapis.com` and
+  `docs.google.com` or citations and the Drive picker break.
+- **"Workflow automation" is marketed and does not exist.** It is the last item
+  on the roadmap for a reason.
+- **A browser build value has to be correct in five places**: the workflow's
+  env file, its build args, the Dockerfile `ARG` and `ENV`, the compose file,
+  and the secret itself. Every one fails silently and green. The deploy now
+  refuses rather than shipping a promise it cannot keep.
 
 ## Questions to bring to Osas, not guess at
 
-- Rate limiting budget (30/min chat, 10/min upload, IP-based) is a first-pass default,
-  confirm or adjust once there's real usage data
-- Whether Redis is meant to be doing more than it currently is, or is leftover
-- Whether the firebase v12 upgrade's live Google sign-in flow actually works
-  end to end (types and build pass; Osas is testing this live)
-- ~~Standalone AI search: build the surface, or fix the copy?~~ **Answered
-  2026-08-11: build it**, after the efficiency backlog. See "Explicitly not
-  being built right now" for the shape and the four catches.
-- Whether the report-only CSP policy is clean (check browser console for violations)
-  before switching it to enforced
+- Rate limits (30/min chat, 10/min upload, per IP) are a first-pass guess.
+- Whether Redis should be doing more than notifications and the answer cache.
+- Whether the Report-Only CSP is clean enough to enforce.
+

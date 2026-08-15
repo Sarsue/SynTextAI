@@ -21,10 +21,13 @@ One shared AsyncClient, so connections are pooled and TLS is negotiated once
 rather than per call. Close it on shutdown with `aclose_client()`.
 """
 import asyncio
+import json
 import logging
 from typing import Callable, List, Dict, Any, Optional
+import base64
 import httpx
 import os
+import time
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -39,7 +42,130 @@ EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY") or MODEL_ACCESS_KEY
 logger = logging.getLogger(__name__)
 
 # Active models
-CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai-gpt-oss-20b")
+CHAT_MODEL = os.getenv("MODEL_CHAT_ID", "openai/gpt-oss-20b")
+
+# How much of its token budget the chat model may spend thinking before it
+# answers. "low" | "medium" | "high"; empty sends nothing and takes the
+# provider's default.
+#
+# WHY THIS IS SET RATHER THAN LEFT ALONE
+#
+# gpt-oss-20b is a reasoning model, and its reasoning comes out of the SAME
+# budget as the answer. Measured 2026-08-13 on DeepInfra, one short question at
+# max_tokens=400: 1,394 characters of `reasoning_content`, finish_reason=length,
+# and `content: ""`. A perfectly successful HTTP 200 carrying no answer.
+#
+# Not a new failure — `_post_json`'s accept() exists because this happened
+# occasionally before — but it is intermittent, which is worse than constant: it
+# surfaces as an answer that is sometimes simply blank.
+#
+# Same question with reasoning_effort=low: 1.4s rather than 3.7-5.4s, 138
+# characters of thinking rather than 800-1,100, and an answer of the same
+# quality. Bounding the thinking bounds the failure.
+#
+# MEASURED 2026-08-14, three independent benchmark invocations each. "low" was
+# set first, on latency alone, and never checked against accuracy. It cost four
+# citations:
+#
+#     effort   answers /20        citations /20
+#     low      11 11 11 11 13     13 13 13 13 15
+#     medium   14 14 14           17 17 17
+#     high     14 11 11           17 12 12
+#
+# Medium is the only setting stable across every run. High is not merely equal,
+# it is ERRATIC: more thinking makes the model wander off a factual lookup, which
+# is worth knowing before anyone treats this as a more-is-better dial.
+#
+# Costs about 3.7s per answer against 1.4s at low. Worth it for four citations in
+# a tool that reads torque values off service manuals, and still far better than
+# the 24 seconds to first token this endpoint replaced.
+#
+# Retrieval delivers the correct page for 16 of 20 questions, measured against
+# the database with no model involved. At 17 cited, generation is now converting
+# essentially all of it, so the remaining gap is retrieval's, not this setting's.
+CHAT_REASONING_EFFORT = os.getenv("CHAT_REASONING_EFFORT", "medium").strip().lower()
+
+# The model that reads a rendered page, chosen by measurement on 2026-08-12
+# against page 9 of the Carrier manual, a two-dimensional charging chart whose
+# every cell had already been verified by hand.
+#
+#   llama-4-maverick          146s/page   0 wrong in 48 cells
+#   nemotron-nano-12b-v2-vl    59s/page   3 wrong in 48 cells
+#   gemma-4-31B-it            timed out
+#
+# The fast one invents digits: it returned 82/28/78 for a row that reads
+# 82/28/80. In a service manual a wrong charge or torque value is a safety
+# claim, not a typo, so accuracy wins and the cost is paid in routing rather
+# than in a cheaper model. Anything swapped in here must be measured the same
+# way before it ships.
+VISION_MODEL = os.getenv("MODEL_VISION_ID", "llama-4-maverick")
+
+# Vision can be pointed at a different provider from chat, and needs to be.
+#
+# Measured 2026-08-13: this endpoint writes at ~3 tokens/second. The published
+# median for llama-4-maverick across providers is 123 t/s, and Azure serves the
+# same weights at 368. We are not running a slow model, we are running an
+# ordinary model roughly forty times slower than everybody else, and the pricing
+# is the same either way (~$0.11-0.14 per 69-page manual whichever provider).
+#
+# The consequence is not only speed. The same prompt on the same page returned
+# byte-identical output in 188s and in 113s, a 66% spread, which is wider than
+# any prompt or DPI difference worth measuring. Nothing about this call can be
+# measured here.
+#
+# Chat is a different model with different behaviour and is left alone, so
+# moving vision is two environment variables and no code.
+VISION_BASE_URL = os.getenv("VISION_BASE_URL") or INFERENCE_BASE_URL
+VISION_API_KEY = os.getenv("VISION_API_KEY") or MODEL_ACCESS_KEY
+
+# 150 worked; 110 made the small model burn its budget on reasoning and return
+# nothing. Higher costs image tokens for no measured gain on these pages.
+VISION_DPI = int(os.getenv("VISION_DPI", "150"))
+
+# A token budget is a TIME budget at this endpoint, which is the thing the
+# original 8,000 here missed.
+#
+# Measured 2026-08-13: this endpoint writes at roughly 3 tokens/second, so 8,000
+# tokens is not "headroom for a dense page", it is a 44-minute page. And that is
+# not hypothetical: a prompt A/B run was killed after 33 minutes on a single
+# page whose sibling prompt finished the same page in 148 seconds. The model had
+# started rambling and the budget let it.
+#
+# The densest page measured in the HVAC corpus produced about 700 tokens. 2,500
+# is more than three times the worst real page and caps a runaway at about 14
+# minutes, with VISION_DEADLINE below as the actual backstop.
+VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "2500"))
+
+# Gap between chunks, not total request time. Since the response is streamed,
+# httpx resets this on every chunk that arrives, so it only catches a stalled
+# connection. It cannot bound a slow-but-alive stream, which is what
+# VISION_DEADLINE is for.
+VISION_TIMEOUT = float(os.getenv("VISION_TIMEOUT", "900"))
+
+# Total wall-clock budget for one page, enforced by hand in the streaming loop.
+# A page takes 120-180s when it is behaving; 600 leaves generous room for a slow
+# one and still stops a run away.
+VISION_DEADLINE = float(os.getenv("VISION_DEADLINE", "600"))
+
+# How many pages are read at once.
+#
+# Eight was tried first and was worse than useless: the endpoint queues these
+# server side, so every request slowed until all eight passed the timeout and
+# the whole document fell back to the text layer. Concurrency here does not buy
+# throughput past a small number, it converts one slow page into eight failed
+# ones.
+#
+# Three, with a timeout long enough that a queued request still lands. The real
+# ceiling is the endpoint, not this process.
+VISION_CONCURRENCY = int(os.getenv("VISION_CONCURRENCY", "3"))
+
+VISION_PROMPT = (
+    "Transcribe this page as markdown. Reproduce every table as a real markdown "
+    "table with all rows and columns in their original order. Do not summarise, "
+    "do not omit rows, and do not correct anything you think is wrong. "
+    "For a diagram, describe what it shows and transcribe every label, keeping "
+    "each label with the part it points to."
+)
 
 # Max tokens allowed for combined context in syntext_agent
 try:
@@ -147,7 +273,19 @@ def _has_content(body: Dict[str, Any]) -> bool:
 # into a degenerate loop, and this endpoint gives no seed to make runs
 # genuinely reproducible anyway. Low enough to be near-deterministic in
 # practice, and overridable for anything that ever wants variety.
-TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
+# ZERO, because every answer this product gives is read off a document.
+#
+# 0.1 is a small amount of sampling, and it was enough to make the same question
+# over the same corpus score 6, 7 and 8 out of 20 on three consecutive runs
+# (measured 2026-08-13). Two questions flipped between passing and failing with
+# nothing changed but the dice.
+#
+# That is not benchmark noise to be averaged away, it is the product being
+# non-deterministic about facts. A vision model was disqualified yesterday for
+# returning 78 where the page reads 80; sampling in the answering path is the
+# same failure with a friendlier name. If a technician asks the same question
+# twice they should get the same torque value.
+TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0"))
 
 
 # The configured chat model reasons before it answers, and that reasoning is
@@ -162,7 +300,152 @@ TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0.1"))
 MIN_COMPLETION_TOKENS = 500
 
 
-async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
+async def read_page(image_png: bytes, hint: str = "") -> str:
+    """Read one rendered page and return it as markdown.
+
+    WHY THIS EXISTS
+
+    `page.get_text()` returns characters in PDF storage order, so a table
+    arrives as a column of loose values with every row destroyed. Measured on
+    a 433-page corpus of HVAC service manuals: prose questions scored 4/4 on
+    citations, table questions 5/12, figure questions 0/4. One question cited
+    the correct page and still answered 78 where the page reads 74, because
+    the row that value belongs to no longer existed by the time retrieval or
+    the model saw it.
+
+    A vision model reads the page as a page. The same chart came back with
+    every row intact.
+
+    NEVER RAISES
+
+    An empty string means "use the text layer", and every caller must treat it
+    that way. A page that fails here should cost accuracy, never the document.
+
+    `hint` is the text layer for this page, passed to the model as a
+    transcription aid rather than as truth: the characters are all correct, it
+    is only their order that is wrong.
+    """
+    if not VISION_API_KEY:
+        logger.error("No API key configured for vision (VISION_API_KEY or MODEL_ACCESS_KEY)")
+        return ""
+
+    content: List[Dict[str, Any]] = [{"type": "text", "text": VISION_PROMPT}]
+    if hint:
+        content.append({
+            "type": "text",
+            "text": (
+                "The text layer of this page is below. Every character in it is "
+                "correct and its order is not. Use it to resolve anything "
+                "ambiguous in the image, never to decide the layout:\n\n"
+                + hint[:4000]
+            ),
+        })
+    content.append({
+        "type": "image_url",
+        "image_url": {
+            "url": "data:image/png;base64," + base64.b64encode(image_png).decode()
+        },
+    })
+
+    data = {
+        "model": VISION_MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": VISION_MAX_TOKENS,
+        # Zero, because this is transcription. Any creativity here is a
+        # hallucinated digit in somebody's refrigerant charge.
+        "temperature": 0,
+        # STREAMED, AND NOT FOR THE REASON STREAMING IS USUALLY ADDED.
+        #
+        # Nobody watches this output arrive; it goes into a database. It is
+        # streamed because a page takes two to three minutes and a request that
+        # sends nothing for three minutes is an idle connection. Idle
+        # connections get closed by whatever sits between here and the model,
+        # and that is what the 408s and RemoteProtocolErrors were: measured
+        # 2026-08-13, a second image in one request died with HTTP 408 after
+        # exactly 601 seconds, which is a proxy timeout, not a model failing.
+        # A stream is never idle.
+        #
+        # It is also the only way to see where the time goes. Measured the same
+        # day: the first token arrives in 1.5 to 3 seconds and the rest write
+        # out at roughly 3 tokens/second. That single number ruled out image
+        # size, routing and queueing as explanations for a slow page, all three
+        # of which had been guessed at and two of which had been wrong.
+        "stream": True,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {VISION_API_KEY}",
+    }
+    url = f"{VISION_BASE_URL.rstrip('/')}/chat/completions"
+
+    try:
+        parts: List[str] = []
+        finish_reason = None
+        started = time.monotonic()
+        first_token_at = None
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(VISION_TIMEOUT, read=VISION_TIMEOUT)) as client:
+            async with client.stream("POST", url, headers=headers, json=data) as response:
+                if response.status_code != 200:
+                    # The body has not been read yet on a streamed response, and
+                    # httpx refuses to look at it until it has been.
+                    await response.aread()
+                    logger.warning("Vision read refused: %s", response.status_code)
+                    return ""
+                async for line in response.aiter_lines():
+                    if time.monotonic() - started > VISION_DEADLINE:
+                        # Discarded, not truncated. A cut-off table looks exactly
+                        # like a complete one: the rows that never arrived leave
+                        # no trace, and the number guardrail only catches numbers
+                        # that were invented, never rows that are missing. The
+                        # text layer is the honest fallback.
+                        logger.warning(
+                            "Vision read exceeded %ss and was discarded; the page "
+                            "keeps its text layer", VISION_DEADLINE,
+                        )
+                        return ""
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(payload)
+                    except ValueError:
+                        # A malformed keepalive or comment frame is not worth
+                        # losing a two-minute page over.
+                        continue
+                    choice = (event.get("choices") or [{}])[0]
+                    piece = (choice.get("delta") or {}).get("content")
+                    if choice.get("finish_reason"):
+                        finish_reason = choice["finish_reason"]
+                    if piece:
+                        if first_token_at is None:
+                            first_token_at = time.monotonic() - started
+                        parts.append(piece)
+
+        text = "".join(parts)
+        if not text:
+            # Seen in practice: a reasoning model spends the whole budget
+            # thinking and returns no content at all.
+            logger.warning(
+                "Vision read returned nothing (finish_reason=%s). Falling back "
+                "to the text layer.", finish_reason
+            )
+        else:
+            logger.debug(
+                "Vision page read in %.0fs (first token %.1fs, %d chars)",
+                time.monotonic() - started, first_token_at or 0, len(text),
+            )
+        return text.strip()
+    except Exception as e:
+        logger.warning("Vision read failed: %s", type(e).__name__)
+        return ""
+
+
+async def gradient_chat(
+    prompt: str, max_tokens: int = 800, reasoning_effort: Optional[str] = None
+) -> str:
     """Generate text using OpenAI-compatible chat completions over HTTP."""
     if not MODEL_ACCESS_KEY:
         logger.error("MODEL_ACCESS_KEY not configured for chat")
@@ -179,6 +462,15 @@ async def gradient_chat(prompt: str, max_tokens: int = 800) -> str:
         "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
         "temperature": TEMPERATURE,
     }
+    # Callers may ask for less thinking than the answer path uses. Reasoning
+    # comes out of the SAME budget as the output, so a helper that only needs to
+    # emit a comma-separated list can spend its whole allowance thinking and
+    # return nothing at all. Measured 2026-08-15: raising the answer path to
+    # medium silently broke query expansion, which began returning "" and then
+    # [] — retrieval quietly lost an arm with no error anywhere.
+    effort = reasoning_effort if reasoning_effort is not None else CHAT_REASONING_EFFORT
+    if effort:
+        data["reasoning_effort"] = effort
 
     body = await _post_json(url, headers, data, accept=_has_content)
     if not body:

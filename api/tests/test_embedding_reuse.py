@@ -22,6 +22,27 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 DIM = 1024
 
 
+@pytest.fixture(autouse=True)
+def _context_off(monkeypatch):
+    """Reuse is measured with the contextualiser OFF, deliberately.
+
+    Contextual retrieval and embedding reuse are in direct tension, and this is
+    not a bug in either. Reuse works because embedding is a pure function of its
+    input; a context sentence makes that input document-specific, so the same
+    standard terms appearing in twenty contracts get twenty different context
+    sentences and can no longer share a vector. The content_hash migration
+    already says this: the hash is over embedding_text(), not content.
+
+    These tests are about the reuse mechanism, so they pin the flag rather than
+    inherit whatever the environment happens to have. Before this, turning
+    CONTEXTUALIZE_CHUNKS on in .env.dev made this file fail with a message about
+    vectors not being reused, which described a real behaviour change as a
+    regression.
+    """
+    from api.services import contextualizer
+    monkeypatch.setattr(contextualizer, "CONTEXTUALIZE", False)
+
+
 @pytest.fixture
 def counting_embedder(monkeypatch):
     """Counts what is sent to the paid API, and never repeats a vector.

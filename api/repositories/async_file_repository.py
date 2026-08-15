@@ -9,6 +9,7 @@ import asyncio
 from .async_base_repository import AsyncBaseRepository
 from ..models import File as FileORM, Chunk as ChunkORM
 from ..models import Segment as SegmentORM
+from ..models import PageRead as PageReadORM
 
 # Import SQLAlchemy async components
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,11 +18,66 @@ from sqlalchemy.exc import IntegrityError
 
 import json
 import os
+import re
 import requests
 
 from api.core.websocket_manager import websocket_manager
 
 logger = logging.getLogger(__name__)
+
+
+# Tokens that identify an answer rather than describe it: numbers, error codes,
+# model designations, fractions.
+#
+# WHY THIS EXISTS, MEASURED 2026-08-14
+#
+# The text arm ranks with ts_rank_cd, which scores COVER DENSITY -- how tightly
+# the query's words cluster in a chunk -- and has no inverse document frequency.
+# It is not BM25, despite what the code called it. BM25's defining property is
+# that a rare term counts for more than a common one, and Postgres full-text
+# ranking does not do that at all.
+#
+# On the HVAC corpus, 1,528 chunks, for the question "liquid pressure is 251
+# psig and subcooling is 10 degrees":
+#
+#     251            3 chunks      <- the discriminator
+#     degrees        9
+#     subcooling    29
+#     psig          49
+#     liquid       123
+#     pressure     196
+#     temperature  215
+#
+# All weighted equally, so eight chunks thick with "liquid pressure temperature"
+# outranked the single chunk in the corpus containing 251, and NONE of those
+# eight contained it. Every failing benchmark question had this shape: 4350 in 1
+# chunk, 670 in 1, E4 in 2, F8 in 3, 335 in 3, 1600 in 5.
+#
+# Ranking by the rare token alone puts the right page first. So this arm exists
+# to give those tokens a vote of their own, rather than trying to teach
+# ts_rank_cd about rarity, which it has no mechanism for.
+_LITERAL_TOKEN = re.compile(r"\b(?:\d+(?:[./]\d+)?|[A-Za-z]{1,2}\d{1,4})\b")
+
+# Letter-digit pairs that are grid references or list markers rather than part
+# names. Kept deliberately short: the pattern above requires a digit, so ordinary
+# words like "in" and "at" can never reach here and listing them was noise.
+_LITERAL_STOPWORDS = {"a1", "a2", "b1", "b2"}
+
+
+def literal_tokens(query: str) -> List[str]:
+    """The identifying tokens in a question, most specific first."""
+    seen: List[str] = []
+    for raw in _LITERAL_TOKEN.findall(query or ""):
+        tok = raw.lower()
+        if tok in _LITERAL_STOPWORDS or tok in seen:
+            continue
+        # A bare 0-10 is a quantity ("10 degrees"), not an identifier, and
+        # matches a large share of a technical corpus.
+        if tok.isdigit() and len(tok) <= 2 and int(tok) <= 10:
+            continue
+        seen.append(tok)
+    return seen[:8]
+
 
 class AsyncFileRepository(AsyncBaseRepository):
     """Async repository for file operations."""
@@ -86,6 +142,72 @@ class AsyncFileRepository(AsyncBaseRepository):
                 select(SegmentORM.page_number).where(SegmentORM.file_id == int(file_id))
             )
             return {r for (r,) in rows.all() if r is not None}
+
+    async def cached_page_reads(self, file_id: int) -> Dict[int, Dict[str, Any]]:
+        """Pages of this file that extraction has already produced.
+
+        Read once at the start of extraction. A page that is here does not go
+        to the vision model again, which is the whole point: that call costs
+        about three minutes and real money, and until now an interrupted ingest
+        threw away every one of them.
+        """
+        async with self.get_async_session() as session:
+            rows = await session.execute(
+                select(
+                    PageReadORM.page_number,
+                    PageReadORM.text,
+                    PageReadORM.source,
+                    PageReadORM.flags,
+                ).where(PageReadORM.file_id == int(file_id))
+            )
+            return {
+                int(n): {"text": t, "source": s, "flags": f}
+                for (n, t, s, f) in rows.all()
+                if n is not None
+            }
+
+    async def save_page_read(
+        self,
+        file_id: int,
+        page_number: int,
+        text_content: str,
+        source: str,
+        flags: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Keep one extracted page, as soon as it exists.
+
+        Called per page rather than per document on purpose. Saving at the end
+        would keep exactly the runs that did not need saving.
+
+        Never raises. This is a cache, and failing to write it must not fail an
+        ingest that is otherwise going fine.
+        """
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            async with self.get_async_session() as session:
+                stmt = (
+                    pg_insert(PageReadORM.__table__)
+                    .values(
+                        file_id=int(file_id),
+                        page_number=int(page_number),
+                        text=text_content,
+                        source=source,
+                        flags=flags or None,
+                    )
+                    # A re-run that got further than a previous one should be
+                    # able to overwrite a page rather than collide with it.
+                    .on_conflict_do_update(
+                        index_elements=["file_id", "page_number"],
+                        set_={"text": text_content, "source": source, "flags": flags or None},
+                    )
+                )
+                await session.execute(stmt)
+                await session.commit()
+        except Exception as e:
+            logger.warning(
+                f"Could not cache page {page_number} of file {file_id}: {type(e).__name__}: {e}"
+            )
 
     async def embeddings_for_hashes(self, file_id: int, hashes: List[str]) -> Dict[str, Any]:
         """Vectors this organization has already paid to compute.
@@ -513,6 +635,10 @@ class AsyncFileRepository(AsyncBaseRepository):
     # --- Hybrid Search (vector + BM25 via Postgres full text) ---
     DEFAULT_VECTOR_WEIGHT = 0.7
     DEFAULT_BM25_WEIGHT = 0.3
+    # Equal to the vector arm, because when a question carries an identifying
+    # token that token IS the answer's address: 4350 appears in one chunk of
+    # 1,528, E4 in two. Measured 2026-08-14.
+    DEFAULT_LITERAL_WEIGHT = float(os.getenv("LITERAL_WEIGHT", "0.7"))
     DEFAULT_TOP_K = 10
     # How deep each of the two searches goes before the results are fused. Has
     # to exceed top_k by enough that a chunk ranked well by one search and
@@ -542,6 +668,7 @@ class AsyncFileRepository(AsyncBaseRepository):
         """
         vw = self.DEFAULT_VECTOR_WEIGHT if vector_weight is None else float(vector_weight)
         bw = self.DEFAULT_BM25_WEIGHT if bm25_weight is None else float(bm25_weight)
+        lw = self.DEFAULT_LITERAL_WEIGHT
         k = self.DEFAULT_TOP_K if top_k is None else int(top_k)
 
         async with self.get_async_session() as session:
@@ -577,7 +704,11 @@ class AsyncFileRepository(AsyncBaseRepository):
                         -- terms a page contains instead of needing all of them.
                         REPLACE(
                           plainto_tsquery('english', :keywords)::text, ' & ', ' | '
-                        )::tsquery AS keywords
+                        )::tsquery AS keywords,
+                        -- An empty string is not a valid tsquery, so an
+                        -- unmatchable placeholder stands in when a question has
+                        -- no identifying tokens; :has_literals gates the arm.
+                        CAST(:literals AS tsquery) AS literals
                     ),
                     -- Two searches, each in the shape its index can answer,
                     -- rather than one blended expression no index can.
@@ -596,6 +727,24 @@ class AsyncFileRepository(AsyncBaseRepository):
                       CROSS JOIN query q
                       WHERE """ + where_sql + """
                       ORDER BY c.embedding <=> q.embedding
+                      LIMIT :candidates
+                    ),
+                    -- The identifying tokens, given a vote of their own.
+                    -- ts_rank_cd has no IDF, so in the text arm "251" counts
+                    -- exactly as much as "temperature"; here only the rare
+                    -- tokens are searched, so a chunk containing them cannot
+                    -- be outranked by one merely dense in ordinary words.
+                    lit AS (
+                      SELECT c.id AS chunk_id,
+                             ROW_NUMBER() OVER (
+                               ORDER BY ts_rank_cd(c.tsv, q.literals, 32) DESC
+                             ) AS rank
+                      FROM chunks c
+                      JOIN files f ON f.id = c.file_id
+                      CROSS JOIN query q
+                      WHERE """ + where_sql + """ AND :has_literals
+                        AND c.tsv @@ q.literals
+                      ORDER BY ts_rank_cd(c.tsv, q.literals, 32) DESC
                       LIMIT :candidates
                     ),
                     txt AS (
@@ -630,6 +779,9 @@ class AsyncFileRepository(AsyncBaseRepository):
                         UNION ALL
                         SELECT chunk_id, rank,
                                CAST(:bm25_weight AS double precision) AS weight FROM txt
+                        UNION ALL
+                        SELECT chunk_id, rank,
+                               CAST(:literal_weight AS double precision) AS weight FROM lit
                       ) ranked
                       GROUP BY chunk_id
                     )
@@ -658,7 +810,11 @@ class AsyncFileRepository(AsyncBaseRepository):
                 # search raised before touching the index.
                 embedding_literal = "[" + ",".join(str(float(x)) for x in (query_embedding or [])) + "]"
 
+                tokens = literal_tokens(query)
                 params = {
+                    "literals": " | ".join(tokens) if tokens else "zzzznomatchzzzz",
+                    "has_literals": bool(tokens),
+                    "literal_weight": lw,
                     "embedding": embedding_literal,
                     "keywords": query,
                     "vector_weight": vw,

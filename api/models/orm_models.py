@@ -291,6 +291,32 @@ class Segment(Base):
     def __repr__(self):
         return f"<Segment(id={self.id}, file_id={self.file_id}, page_number={self.page_number}, content={self.content[:50]}...)>"
 
+class PageRead(Base):
+    """One page as extraction produced it, kept so a crash does not re-buy it.
+
+    A vision-read page costs roughly 150 to 200 seconds against a metered
+    endpoint. Extraction completes in full before the first batch of chunks is
+    written, so without this an interrupted ingest threw away every page it had
+    already paid for. See alembic/versions/20260812_page_reads.py.
+
+    Cache, not record. Safe to delete; costs money, not correctness.
+    """
+    __tablename__ = "page_reads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    page_number = Column(Integer, nullable=False)
+    text = Column(String, nullable=False)
+    # "vision", "text" or "ocr".
+    source = Column(String(16), nullable=False)
+    flags = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("file_id", "page_number", name="idx_page_reads_file_page"),
+    )
+
+
 class Chunk(Base):
     __tablename__ = "chunks"
     

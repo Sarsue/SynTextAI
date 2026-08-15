@@ -414,6 +414,160 @@ def clean_text(text: str, content_type: str) -> str:
         text = re.sub(r'[^\w,.\n ]+', '', text)
     return text.strip()
 
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+
+
+def _split_markdown_blocks(text: str) -> List[Dict[str, Any]]:
+    """Separate a page into table blocks and everything else.
+
+    A markdown table is a run of consecutive lines that all start and end with
+    a pipe. The heading line immediately above it, if there is one, belongs to
+    the table: a chunk reading "| 251 | 78 | 76 | 74 |" is useless without
+    something saying it is the required liquid line temperature.
+    """
+    lines = text.splitlines()
+    blocks: List[Dict[str, Any]] = []
+    buf: List[str] = []
+
+    def flush_prose():
+        if buf:
+            blocks.append({"kind": "prose", "lines": list(buf)})
+            buf.clear()
+
+    i = 0
+    while i < len(lines):
+        if _TABLE_ROW.match(lines[i]):
+            j = i
+            while j < len(lines) and (_TABLE_ROW.match(lines[j]) or not lines[j].strip()):
+                # A blank line inside a table ends it only if nothing pipe-shaped
+                # follows, so a stray blank between header and body is survivable.
+                if not lines[j].strip():
+                    k = j + 1
+                    while k < len(lines) and not lines[k].strip():
+                        k += 1
+                    if k >= len(lines) or not _TABLE_ROW.match(lines[k]):
+                        break
+                j += 1
+
+            # The caption or heading directly above the table comes with it.
+            # Blank lines in between are skipped: "## Required Liquid Line
+            # Temperature\n\n| ... |" is one thing, and losing the heading to a
+            # newline leaves every chunk of the table unlabelled.
+            caption: List[str] = []
+            while buf and not buf[-1].strip():
+                buf.pop()
+            if buf and not _TABLE_ROW.match(buf[-1]):
+                caption = [buf.pop()]
+            flush_prose()
+            blocks.append({
+                "kind": "table",
+                "caption": caption,
+                "lines": [ln for ln in lines[i:j] if ln.strip()],
+            })
+            i = j
+            continue
+        buf.append(lines[i])
+        i += 1
+
+    flush_prose()
+    return blocks
+
+
+def _chunk_table(block: Dict[str, Any], count_tokens, target_chunk_tokens: int) -> List[str]:
+    """Cut a table on row boundaries, repeating its header in every piece.
+
+    WHY THIS EXISTS
+
+    Measured 2026-08-13 on a reconstructed Carrier charging chart. The general
+    splitter turned a 1,725-character table into three chunks: the second began
+    "| 80 | 78 | 76 | 74 | 72 | 70 |" with the row's own pressure value left
+    behind in the first chunk, and neither the second nor the third carried the
+    header row. A chunk of numbers with no row key and no column names cannot
+    answer anything.
+
+    That is the same failure the vision model is bought to fix, one stage later,
+    and it explains a baseline result that otherwise made no sense: benchmark
+    question 6 cited the correct page and still answered 78 instead of 74. No
+    extraction quality could have saved it, because the retrieved chunk could
+    not have held an intact row.
+
+    So: never cut inside a row, and every piece repeats the caption, the header
+    and the separator. A single row wider than the budget is emitted alone and
+    over-length rather than cut, because half a row is worse than a long one.
+    """
+    caption = block.get("caption") or []
+    rows = block["lines"]
+    if not rows:
+        return []
+
+    # Header is the first row plus the |---|---| separator when present.
+    header = rows[:1]
+    body_start = 1
+    if len(rows) > 1 and set(rows[1].replace("|", "").strip()) <= set("-: "):
+        header = rows[:2]
+        body_start = 2
+    body = rows[body_start:]
+    if not body:
+        return ["\n".join(caption + rows)]
+
+    prefix = caption + header
+    prefix_tokens = count_tokens("\n".join(prefix))
+
+    out: List[str] = []
+    current: List[str] = []
+    current_tokens = prefix_tokens
+    for row in body:
+        row_tokens = count_tokens(row)
+        if current and current_tokens + row_tokens > target_chunk_tokens:
+            out.append("\n".join(prefix + current))
+            current = []
+            current_tokens = prefix_tokens
+        current.append(row)
+        current_tokens += row_tokens
+    if current:
+        out.append("\n".join(prefix + current))
+    return out
+
+
+def chunk_markdown(text: str, target_chunk_tokens: int = 400) -> List[Dict[str, Any]]:
+    """Chunk a page that came from the vision model, respecting its tables.
+
+    Prose in the page still goes through the ordinary splitter, because it is
+    ordinary prose and that splitter handles it well; the prose questions in the
+    HVAC benchmark score 4/4 on citations today and must not move.
+    """
+    from tiktoken import get_encoding
+
+    enc = get_encoding("cl100k_base")
+
+    def count_tokens(content: str) -> int:
+        return len(enc.encode(content))
+
+    blocks = _split_markdown_blocks(text)
+    pieces: List[str] = []
+    for block in blocks:
+        if block["kind"] == "table":
+            pieces.extend(_chunk_table(block, count_tokens, target_chunk_tokens))
+            continue
+        prose = "\n".join(block["lines"]).strip()
+        if not prose:
+            continue
+        if count_tokens(prose) <= target_chunk_tokens:
+            pieces.append(prose)
+            continue
+        splitter = RecursiveTextSplitter(
+            chunk_size=target_chunk_tokens,
+            chunk_overlap=int(target_chunk_tokens * 0.2),
+        )
+        pieces.extend(splitter.split_text(prose))
+
+    return [
+        {"content": p, "metadata": {"section": i + 1, "doc_type": "markdown"}}
+        for i, p in enumerate(pieces)
+        if p.strip()
+    ]
+
+
 def chunk_text(
     text: str,
     content_type: str = None,

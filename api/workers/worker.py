@@ -120,6 +120,18 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "30"))
 # are returned to the queue.
 LEASE_MINUTES = int(os.getenv("LEASE_MINUTES", "15"))
 
+# A running job pushes its own lease forward this often. Without it the lease
+# means "this job started less than LEASE_MINUTES ago", not "a worker is alive
+# and holding it", so anything slower than the lease gets reclaimed while it is
+# still working. Measured 2026-08-12: vision extraction on the 69-page Carrier
+# manual takes about an hour, so the sweeper requeued it at 15, 30 and 45
+# minutes and then marked it "worker presumed dead. Out of attempts." The worker
+# was alive the whole time, and each requeue started a SECOND live extraction of
+# the same document against a metered vision endpoint. Renewing at a third of
+# the lease leaves two missed renewals of slack before a genuinely dead worker
+# is reclaimed.
+LEASE_RENEW_SECONDS = max(30, (LEASE_MINUTES * 60) // 3)
+
 # API base URL for internal notifications (docker-compose sets this to http://syntextaiapp:3000)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/")
 
@@ -542,6 +554,55 @@ async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> 
     await asyncio.to_thread(_post)
 
 
+async def renew_lease(run_id: uuid.UUID) -> bool:
+    """Push one running run's lease forward. False means we no longer hold it.
+
+    Deliberately conditional on the row still being ours and still running: if
+    the sweeper already reclaimed this run, renewing would drag a row somebody
+    else now owns, and two workers would believe they hold the same job.
+    """
+    try:
+        from sqlalchemy import update as sa_update
+
+        store = get_repository_manager()
+        worker_id = os.getenv("WORKER_ID") or str(os.getpid())
+        now = datetime.utcnow()
+        async with store.agent_run_repo.get_async_session() as session:
+            res = await session.execute(
+                sa_update(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == "running",
+                    AgentRun.locked_by == str(worker_id),
+                )
+                .values(lease_expires_at=now + timedelta(minutes=LEASE_MINUTES), updated_at=now)
+            )
+            await session.commit()
+            return res.rowcount > 0
+    except Exception as e:
+        logger.warning(f"Could not renew lease for run {run_id}: {e}")
+        # Not fatal on its own. A single failed renewal still leaves most of the
+        # lease in hand, and the next tick will try again.
+        return True
+
+
+async def _hold_lease(run_id: uuid.UUID) -> None:
+    """Renew a run's lease for as long as its job is running."""
+    while True:
+        await asyncio.sleep(LEASE_RENEW_SECONDS)
+        still_ours = await renew_lease(run_id)
+        if not still_ours:
+            # The job is still executing here, so this is the moment the run got
+            # taken away from us. Say so loudly: the alternative is two workers
+            # doing the same paid work and neither of them mentioning it.
+            logger.error(
+                f"Run {run_id} was reclaimed while this worker is still executing it. "
+                "Lease renewal is losing to the sweeper."
+            )
+            emit("lease_lost_while_running", run_id=str(run_id))
+            return
+
+
 async def reclaim_expired_runs() -> int:
     """Return abandoned runs to the queue.
 
@@ -671,11 +732,13 @@ async def _run_tracked(run_id: uuid.UUID, user_id: Optional[int]) -> None:
     """Run one job while maintaining the per-user in-flight count."""
     if user_id is not None:
         inflight_by_user[user_id] = inflight_by_user.get(user_id, 0) + 1
+    keepalive = asyncio.create_task(_hold_lease(run_id))
     try:
         await process_agent_run(run_id)
     except Exception:
         logger.exception(f"Agent run {run_id} raised")
     finally:
+        keepalive.cancel()
         if user_id is not None:
             remaining = inflight_by_user.get(user_id, 1) - 1
             if remaining > 0:
