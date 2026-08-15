@@ -192,8 +192,11 @@ because it is believed.
 ```
 upload, or import from Drive -> GCS      either way it is an ordinary file row
        -> queued as an ingest run        the worker decides when, and for whom
-       -> fitz: text per page, plus the table of contents -> files.outline
-       -> chunk_text: 400 tokens, 20% overlap
+       -> fitz: text per page
+          PDF pages the text layer probably lost also go to the vision model
+          DOCX tables are rendered as markdown; .md keeps its own structure
+       -> chunk_markdown where the page has structure, chunk_text otherwise
+          both 400 tokens, 20% overlap; a table is cut on rows, never mid-row
        -> hash each chunk; embed only what this organization has not embedded before
        -> ONE segment per page      the citation unit, a page is what a reader opens
           N chunks beneath it       the retrieval unit, what gets embedded and searched
@@ -201,15 +204,35 @@ upload, or import from Drive -> GCS      either way it is an ordinary file row
        -> zero chunks means the file is marked FAILED, not processed
 ```
 
+**Ingestion makes exactly two kinds of model call, and neither is generation.**
+Embeddings, once per batch of new chunks, which is what makes a document
+findable at all; and the vision model, PDFs only and only for pages the text
+layer probably failed. No chat call happens anywhere in this path.
+
+It used to. A contextualiser wrote a sentence per chunk describing what the
+passage was about, one LLM call per chunk plus one per document, so a 500-page
+manual bought roughly 1,500 calls at ingest. Measured 2026-08-15 it retrieved
+nothing extra and ranked slightly worse, and it destroyed the embedding-reuse
+saving as a side effect, so it was deleted rather than parked behind a flag. See
+"Contextual retrieval, measured properly and then removed".
+
 Two consequences of writing per batch. A crash keeps the pages it reached and
 resumes from the first unstored page, because a page either has its segment or
 has nothing. And a long document is searchable while it is still ingesting,
 since retrieval scopes by workspace and never looks at processing status.
 
 `chunks.segment_id` is what ties a retrieved chunk back to the page it is cited
-as. Documents ingested before 2026-08-07 have a null `chunks.content` and
-retrieval falls back to the segment's text for them, so they behave as
-page-sized until re-uploaded.
+as.
+
+**Documents ingested before 2026-08-07 have a null `chunks.content`, and there
+is no fallback.** This section used to claim retrieval falls back to the
+segment's text for them; checked 2026-08-15, nothing does. `hybrid_search`
+selects `COALESCE(c.content, '')` and no later stage substitutes the page. Both
+keyword arms rank `chunks.tsv`, which is generated from that same null column,
+so those chunks cannot be matched by words at all, and they cannot be
+re-embedded either, because the text they were made from is stored nowhere. They
+are reachable only by a vector nothing can rewrite. The only fix is uploading
+the document again. `reembed_chunks --check` counts them per workspace.
 
 ### Asking a question
 
@@ -412,9 +435,38 @@ throughput figure. Ask that first next time.
 `finish_reason=length`, and `content: ""` — a successful HTTP 200 with no answer.
 `_post_json`'s `accept()` already existed for this, so it is not new, but it is
 intermittent, which surfaces as an answer that is occasionally blank rather than
-as something obviously broken. `CHAT_REASONING_EFFORT=low` bounds it: 1.4s
-instead of 3.7-5.4s, 138 characters of thinking instead of 800-1,100, same
-answer. Raise it if the benchmark says less thinking costs accuracy.
+as something obviously broken.
+
+**This is a hazard for the next short call somebody writes, not a live defect.**
+Read it before adding any helper that asks the model for one line.
+
+Thinking and answer come out of the same `max_tokens`, and thinking length is
+set by the task rather than by the budget. So a *smaller* request is a *more*
+dangerous one: ask for 150 tokens because that is what a sentence costs and the
+deliberation eats all of it. The chunk contextualiser asked for 200 and had 308
+of 316 chunks come back empty.
+
+Three defences, all in `llm_service.py`:
+
+- `MIN_COMPLETION_TOKENS = 500`, applied inside `gradient_chat` so a caller
+  cannot undercut it. It took the contextualiser from 97% empty to 14%.
+- `_has_content` is passed to `_post_json` as `accept`, so an empty body is a
+  failed request and is retried three times. That 14% was *after* the retries,
+  so this is not random: some prompts reliably send the model into long thinking.
+- `reasoning_effort` per call, because the setting is shared. Raising the answer
+  path from low to medium on 2026-08-14 was right and bought four citations, and
+  it silently broke query expansion, which began returning `""`, then `[]`, and
+  retrieval quietly lost an arm with no error anywhere.
+
+Current exposure, checked 2026-08-15: two callers of `gradient_chat`.
+`query_processor.prompt_llm` passes `low` explicitly; `generate_explanation`
+asks for 1,500 tokens. Neither is at risk. Ingestion makes no generation calls
+at all.
+
+The reason both incidents stayed invisible is that `""` means both "the model
+said nothing" and "the model failed to answer". If this bites a third time, make
+an empty completion loud at the boundary rather than letting each caller inherit
+silence.
 
 **Model ids are matched exactly and are namespaced with a slash.** The live
 config had a trailing space on `MODEL_CHAT_ID`, which DigitalOcean tolerated. A
