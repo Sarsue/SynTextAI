@@ -394,24 +394,52 @@ def delete_workspace_objects(workspace_id: int) -> int:
 
 
 def detect_content_type(text: str) -> str:
-    """Heuristically detect content type from text."""
+    """Heuristically detect content type from text.
+
+    There used to be a "csv_like" answer here, returned for any text with a
+    comma and more than three lines. See clean_text for what it then did and
+    why both halves are gone.
+    """
     if re.search(r'Page \d+', text, re.IGNORECASE):
         return "pdf"
     if re.search(r'^#+\s|\n#{1,6}\s', text):
         return "markdown"
-    if "," in text and "\n" in text and len(text.splitlines()) > 3:
-        return "csv_like"
     return "text"
 
 def clean_text(text: str, content_type: str) -> str:
-    """Clean irrelevant elements or markers from text."""
+    """Clean irrelevant elements or markers from text.
+
+    WHAT WAS REMOVED HERE, AND WHY, 2026-08-15
+
+    A third branch stripped every character except letters, digits, commas,
+    dots, spaces and newlines, on the theory that it was cleaning up a CSV. It
+    fired on any text holding a comma and four lines, which is ordinary business
+    prose, and it never fired on a PDF at all: a PDF page carries its "Page N"
+    marker and matched the branch above first. So the documents it damaged were
+    exactly the DOCX and TXT files, and the benchmark corpus is PDFs, which is
+    why nothing measured it.
+
+    Run over a policy section, it produced:
+
+        Fees are non-refundable (see Schedule A).  -> Fees are nonrefundable see Schedule A.
+        Contact billing@acme.com or call 555-0134. -> Contact billingacme.com or call 5550134.
+        1.5% interest, above $1,200/month          -> 1.5 interest, above 1,200month
+        | Plan | Price |                           ->   Plan  Price
+
+    That text is not only what a reader sees behind a citation. It is what gets
+    embedded, what the keyword index is built from, and what the model is given
+    to answer from. It also defeats the literal-token arm of the search, which
+    exists to let a rare token like an error code or a part number decide the
+    ranking: a customer searching 555-0134 cannot match 5550134.
+
+    Nothing downstream wanted this. Real CSV files are not a supported upload
+    type, and if they become one they need a parser, not a regex that deletes
+    punctuation from everything else on the way past.
+    """
     if content_type == "pdf":
         text = re.sub(r'Page \d+(?: of \d+)?\s*\n?', '', text, flags=re.IGNORECASE)
     elif content_type == "markdown":
         text = re.sub(r'#.*?\n', '', text)
-    elif content_type == "csv_like":
-        # Keep commas, dots, newline, alphanumeric
-        text = re.sub(r'[^\w,.\n ]+', '', text)
     return text.strip()
 
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")

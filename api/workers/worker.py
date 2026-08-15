@@ -318,11 +318,13 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
     too early" and "it asked the same thing three times", which are four
     different fixes that look identical from the answer alone.
     """
+    # "turns", "searches", "reads" and "outlines" were tool-agent counters and
+    # went with it in 40ca829. Nothing has produced them since, so they were
+    # names describing a system that no longer exists. Removed 2026-08-15.
     keep = {
         k: result.get(k)
-        for k in ("mode", "turns", "searches", "reads", "outlines",
-                  "rewritten_query", "expanded_terms", "information_needs",
-                  "covered_needs", "retrievals", "error")
+        for k in ("mode", "rewritten_query", "expanded_terms",
+                  "information_needs", "covered_needs", "retrievals", "error")
         if result.get(k) is not None
     }
     chunks = result.get("context_chunks") or []

@@ -23,8 +23,6 @@ from api.services.llm_service import (
     VISION_CONCURRENCY,
     VISION_DPI,
 )
-from api.services.contextualizer import add_context, embedding_text
-from api.services.outline import extract_pdf_outline
 from api.core.utils import chunk_text
 logger = logging.getLogger(__name__)
 
@@ -73,16 +71,6 @@ class PDFProcessor(FileProcessor):
         page_data = await self.extract_text_with_page_numbers(file_data, file_id=int(file_id))
         logger.info(f"PDF extraction complete. Pages: {len(page_data)}")
 
-        # And what the document says it contains. Cheap, one call on a document
-        # already being opened, and the only thing that lets an answer cite the
-        # section that defines a rule rather than a page that mentions it.
-        try:
-            outline = extract_pdf_outline(file_data)
-            if outline:
-                await self.store.file_repo.set_outline(int(file_id), outline)
-        except Exception as outline_error:
-            logger.warning(f"Outline extraction skipped for {filename}: {outline_error}")
-        
         if not page_data:
             logger.error(f"Failed to extract content from PDF: {filename}")
             return {
@@ -449,7 +437,7 @@ class PDFProcessor(FileProcessor):
                             logger.debug(f"OCR extracted: {len(text)} chars")
                             await remember(page_num, text, "ocr")
 
-                    page_texts.append({
+                    page = {
                         "page_num": page_num,
                         "text": f"Page {page_num}\n{text.strip()}",  # Use 'text' for consistency
                         # Tells the chunker this page has structure worth
@@ -459,7 +447,23 @@ class PDFProcessor(FileProcessor):
                         # chunker over PDF character soup would find pipes that
                         # are not tables.
                         "is_markdown": page_num in vision_pages,
-                    })
+                    }
+                    # How this page was read, when there is anything to say
+                    # about it. A figure page kept despite carrying numbers the
+                    # text layer could not confirm is the case this exists for:
+                    # somebody following that citation deserves to know the page
+                    # was transcribed rather than read directly.
+                    #
+                    # Collected and dropped on the floor until 2026-08-15. The
+                    # flags reached `page_reads`, which is an extraction cache
+                    # nothing queries at answer time, and went no further, so
+                    # the deliberate decision to keep an unverified page and say
+                    # so said nothing to anybody. On the page they reach the
+                    # segment's meta_data, which hybrid_search already returns
+                    # with every result.
+                    if page_flags.get(page_num):
+                        page["flags"] = page_flags[page_num]
+                    page_texts.append(page)
 
             logger.info(
                 f"Extracted {len(page_texts)} pages, {read_by_vision} of them read "

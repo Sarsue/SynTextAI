@@ -8,6 +8,15 @@ across twenty contracts, used to be charged for every copy.
 Against a real Postgres: the reuse is a query joining chunks to files to
 workspaces, and whether it stays inside one organization is the part worth
 proving.
+
+These tests used to pin `CONTEXTUALIZE_CHUNKS` off, because contextual
+retrieval and embedding reuse are in direct tension: reuse works because
+embedding is a pure function of its input, and a per-chunk context sentence
+makes that input document-specific, so identical boilerplate across twenty
+contracts could no longer share a vector. Turning the flag on in .env.dev made
+this file fail and report a deliberate behaviour change as a regression. The
+contextualiser was removed on 2026-08-15 after it was measured and did not
+help, so there is nothing left to pin.
 """
 import uuid
 
@@ -20,27 +29,6 @@ from api.processors.text_processor import TextProcessor
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 DIM = 1024
-
-
-@pytest.fixture(autouse=True)
-def _context_off(monkeypatch):
-    """Reuse is measured with the contextualiser OFF, deliberately.
-
-    Contextual retrieval and embedding reuse are in direct tension, and this is
-    not a bug in either. Reuse works because embedding is a pure function of its
-    input; a context sentence makes that input document-specific, so the same
-    standard terms appearing in twenty contracts get twenty different context
-    sentences and can no longer share a vector. The content_hash migration
-    already says this: the hash is over embedding_text(), not content.
-
-    These tests are about the reuse mechanism, so they pin the flag rather than
-    inherit whatever the environment happens to have. Before this, turning
-    CONTEXTUALIZE_CHUNKS on in .env.dev made this file fail with a message about
-    vectors not being reused, which described a real behaviour change as a
-    regression.
-    """
-    from api.services import contextualizer
-    monkeypatch.setattr(contextualizer, "CONTEXTUALIZE", False)
 
 
 @pytest.fixture

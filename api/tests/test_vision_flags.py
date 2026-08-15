@@ -1,0 +1,142 @@
+"""A page the vision model read but could not have verified says so downstream.
+
+WHY IT MATTERS
+
+`_read_page_with_vision` makes a deliberate, costly choice. On a page whose text
+layer is a credible record, a transcription that introduces numbers absent from
+the page is rejected outright, because a confident wrong torque value is a
+safety claim rather than a typo. On a figure-dominant page the text layer is
+incomplete rather than merely disordered, so it cannot arbitrate, and the read
+is kept and flagged instead. Enforcing the strict rule there cost four benchmark
+questions on 2026-08-14.
+
+"Flagged" was doing no work. The flags went into `page_reads`, an extraction
+cache that nothing queries while answering, and the in-run collection was
+assigned twice and read nowhere. So a page kept precisely because it could not
+be verified looked exactly like one that had been.
+
+WHAT IS ASSERTED
+
+The journey, in the two steps it actually takes:
+
+  - extraction puts the flags on the page
+  - storage puts them on the segment, which is what `hybrid_search` returns
+    alongside every result and what a citation is built from
+
+Displaying them to a reader is a separate decision and is not made here.
+"""
+import uuid
+
+import pytest
+import pytest_asyncio
+from sqlalchemy import text as sql_text
+
+from api.processors.pdf_processor import PDFProcessor
+
+pytestmark = pytest.mark.asyncio(loop_scope="session")
+
+UNVERIFIED = {
+    "vision_unverified_page": "figure page; text layer cannot verify",
+    "vision_unverified_numbers": ["21", "410"],
+}
+
+
+def _pdf_bytes(pages: int = 2) -> bytes:
+    import fitz
+
+    doc = fitz.open()
+    for n in range(1, pages + 1):
+        page = doc.new_page()
+        page.insert_text((72, 100), f"Page {n} nomenclature chart")
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def doc_file(store, tenant):
+    workspace_id = await tenant.workspace("VisionFlags")
+    file_id = await store.file_repo.add_file(
+        user_id=tenant.owner,
+        file_name=f"diagram-{uuid.uuid4().hex[:8]}.pdf",
+        file_url="",
+        workspace_id=workspace_id,
+    )
+    return {"id": file_id, "owner": tenant.owner}
+
+
+async def test_extraction_puts_the_flags_on_the_page(store, doc_file, monkeypatch):
+    """Page 1 could not be verified, page 2 was read cleanly."""
+    processor = PDFProcessor(store)
+
+    async def fake_vision(page, text_layer):
+        n = page.number + 1
+        return f"| col |\n| --- |\n| {n} |", (UNVERIFIED if n == 1 else {})
+
+    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
+
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(2), file_id=doc_file["id"]
+    )
+
+    assert pages[0]["flags"] == UNVERIFIED
+    assert "flags" not in pages[1], "a clean page should carry no flags at all"
+
+
+async def test_a_resumed_page_is_no_more_trusted_than_a_fresh_one(
+    store, doc_file, monkeypatch
+):
+    """The flags come back out of the cache with the text they belong to. A
+    second attempt at a document must not quietly launder an unverified page."""
+    processor = PDFProcessor(store)
+
+    async def fake_vision(page, text_layer):
+        n = page.number + 1
+        return f"| col |\n| --- |\n| {n} |", (UNVERIFIED if n == 1 else {})
+
+    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
+    await processor.extract_text_with_page_numbers(_pdf_bytes(2), file_id=doc_file["id"])
+
+    async def must_not_run(page, text_layer):
+        raise AssertionError("a cached page was read again")
+
+    monkeypatch.setattr(processor, "_read_page_with_vision", must_not_run)
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(2), file_id=doc_file["id"]
+    )
+
+    assert pages[0]["flags"] == UNVERIFIED
+
+
+async def test_storage_puts_the_flags_where_a_citation_can_reach_them(store, doc_file):
+    """hybrid_search already returns segments.meta_data with every row."""
+    ok = await store.file_repo.update_file_with_chunks(
+        user_id=doc_file["owner"],
+        filename="diagram.pdf",
+        file_type="pdf",
+        file_id=doc_file["id"],
+        mark_processed=True,
+        extracted_data=[
+            {
+                "text": "Cabinet width 21 inches, refrigerant R-410A.",
+                "page_text": "Cabinet width 21 inches, refrigerant R-410A.",
+                "page_num": 1,
+                "flags": UNVERIFIED,
+                "embedding": [0.1] * 1024,
+                "content_hash": uuid.uuid4().hex,
+            },
+        ],
+    )
+    assert ok
+
+    async with store.file_repo.get_async_session() as session:
+        meta = (await session.execute(
+            sql_text(
+                "SELECT meta_data FROM segments WHERE file_id = :f AND page_number = 1"
+            ),
+            {"f": doc_file["id"]},
+        )).scalar()
+
+    assert meta and meta.get("flags") == UNVERIFIED

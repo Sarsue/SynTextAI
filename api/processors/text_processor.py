@@ -20,7 +20,6 @@ from typing import Dict, List, Any
 from api.repositories.repository_manager import RepositoryManager
 from api.processors.base_processor import FileProcessor
 from api.services.llm_service import get_text_embeddings_in_batches
-from api.services.contextualizer import add_context, embedding_text
 from api.core.utils import chunk_text
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ class TextProcessor(FileProcessor):
         """
         logger.info(f"Processing text file: {filename} (ID: {file_id}, User: {user_id})")
 
-        section_data = self.extract_text_with_sections(file_data)
+        section_data = self.extract_text_with_sections(file_data, filename)
         logger.info(f"Text extraction complete. Sections: {len(section_data)}")
 
         if not section_data:
@@ -127,7 +126,9 @@ class TextProcessor(FileProcessor):
             }
         }
 
-    def extract_text_with_sections(self, file_data: bytes) -> List[Dict[str, Any]]:
+    def extract_text_with_sections(
+        self, file_data: bytes, filename: str = ""
+    ) -> List[Dict[str, Any]]:
         """
         Decode the file and split into logical sections at Markdown headings
         (# through ######). Plain .txt files have no heading syntax, so they
@@ -135,8 +136,14 @@ class TextProcessor(FileProcessor):
         Same "section stands in for a page number" approach as DocxProcessor,
         for the same reason: something to anchor a citation to.
 
+        A .md file's sections are marked as markdown, so a table in one is cut
+        on row boundaries with its header repeated rather than at a token count.
+        Taken from the extension rather than guessed from the text, because the
+        uploader already told us what the file is.
+
         Args:
             file_data: Raw file data in bytes
+            filename: The uploaded name, used only to tell .md from .txt
 
         Returns:
             List of dictionaries with section numbers and text content
@@ -154,6 +161,8 @@ class TextProcessor(FileProcessor):
             logger.error(f"Error reading text file: {e}", exc_info=True)
             return []
 
+        is_markdown = filename.lower().endswith((".md", ".markdown"))
+
         sections: List[Dict[str, Any]] = []
         current_heading = None
         current_lines: List[str] = []
@@ -169,7 +178,8 @@ class TextProcessor(FileProcessor):
                     label += f": {current_heading}"
                 sections.append({
                     "page_num": section_num,
-                    "text": f"{label}\n{content}"
+                    "text": f"{label}\n{content}",
+                    "is_markdown": is_markdown,
                 })
 
         for line in text.splitlines():
@@ -192,7 +202,8 @@ class TextProcessor(FileProcessor):
         Extract raw content from the text file.
 
         Args:
-            **kwargs: Must include 'file_data' as bytes
+            **kwargs: Must include 'file_data' as bytes. 'filename' is optional
+                and only tells .md from .txt.
 
         Returns:
             Dict containing extracted section content
@@ -201,7 +212,9 @@ class TextProcessor(FileProcessor):
         if not file_data:
             raise ValueError("Missing required 'file_data' parameter")
 
-        section_data = self.extract_text_with_sections(file_data)
+        section_data = self.extract_text_with_sections(
+            file_data, kwargs.get('filename', '')
+        )
         return {"pages": section_data}
 
     async def generate_embeddings(self, content: Dict[str, Any]) -> Dict[str, Any]:

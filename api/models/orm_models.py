@@ -258,11 +258,7 @@ class File(Base):
         index=True
     )
     file_size_bytes = Column(Integer, nullable=True)  # Size of the original source file in bytes
-    # [{level, title, page}] taken from the document at upload: its own table of
-    # contents where it has one, headings inferred from type size where it does
-    # not. What lets a model navigate to a section instead of guessing words.
-    outline = Column(JSON, nullable=True)
-    
+
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
@@ -274,11 +270,13 @@ class Segment(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
     page_number = Column(Integer)  # This represents the page number within the file
-    content = Column(String)  # Content of the segment/page (optional, or could be derived from chunks)
-    # A sentence written at ingestion saying what this passage is and where it
-    # sits in its document. Embedded and indexed with the content, never shown
-    # in place of it. See services/contextualizer.py.
-    context = Column(String, nullable=True)
+    # The page as extracted. This is what a citation opens, so it is the whole
+    # page and not the chunks rejoined, which would repeat their overlap.
+    #
+    # A segment holds no context sentence and no tsvector of its own any more.
+    # Both moved to the chunk, which is the unit all three arms of hybrid_search
+    # actually rank. See migration 20260815_drop_unread.
+    content = Column(String)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"))
     meta_data = Column(JSON, nullable=True) 
     
@@ -332,10 +330,13 @@ class Chunk(Base):
     # is what a reader opens.
     content = Column(Text, nullable=True)
 
-    # sha256 of the text that was actually embedded, which is the passage with
-    # its context sentence in front where it has one, not `content` alone. Lets
-    # the same text be embedded once and reused, so a re-uploaded document is
-    # not billed twice. See migration 20260811_chunk_content_hash.
+    # sha256 of the text that was embedded, which is `content`. Lets the same
+    # text be embedded once and reused, so a re-uploaded document is not billed
+    # twice. See migration 20260811_chunk_content_hash.
+    #
+    # That migration describes the hash as covering a context sentence in front
+    # of the passage. It no longer does: the contextualiser was measured and
+    # removed on 2026-08-15, so the hash is over the chunk's text alone.
     #
     # Declared without index=True: the migration creates idx_chunks_content_hash
     # under that name, and declaring one here too makes autogenerate propose

@@ -16,7 +16,6 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 
 from api.core.utils import chunk_text, chunk_markdown
-from api.services.contextualizer import add_context, embedding_text
 from api.services.llm_service import get_text_embeddings_in_batches
 
 logger = logging.getLogger(__name__)
@@ -117,7 +116,7 @@ class FileProcessor(ABC):
                         content = chunk.get("content") or ""
                         if not content.strip():
                             continue
-                        batch_chunks.append({
+                        unit = {
                             "text": content,
                             # The whole page, carried alongside each of its
                             # chunks. Storage groups by page to build the
@@ -126,7 +125,14 @@ class FileProcessor(ABC):
                             "page_text": page_content,
                             "page_num": page_num,
                             "source_type": file_type,
-                        })
+                        }
+                        # Anything the extractor wants to say about how this
+                        # page was read, on its way to the segment's meta_data.
+                        # Today that is only the vision model's verification
+                        # flags; a processor with nothing to say sets nothing.
+                        if page_item.get("flags"):
+                            unit["flags"] = page_item["flags"]
+                        batch_chunks.append(unit)
                 except Exception as e:
                     logger.error(
                         f"Error processing page {page_item.get('page_num', 'unknown')}: {e}"
@@ -135,17 +141,17 @@ class FileProcessor(ABC):
             if not batch_chunks:
                 continue
 
-            # Give each chunk a sentence of context before embedding it, so a
-            # page is searchable by what it is about and not only by the words
-            # that happen to be on it. No-op unless CONTEXTUALIZE_CHUNKS is on,
-            # and never fatal: a document with no context is merely harder to
-            # find, a document that failed to ingest is not there at all.
-            try:
-                await add_context(batch_chunks, filename)
-            except Exception as ctx_error:
-                logger.warning(f"Contextualisation skipped: {ctx_error}")
-
-            chunk_texts = [embedding_text(chunk) for chunk in batch_chunks]
+            # What gets embedded is the chunk's text and nothing else.
+            #
+            # A sentence of model-written context used to go in front of it,
+            # the idea being that a passage is then searchable by what it is
+            # about rather than only by the words on it. Measured 2026-08-15
+            # with the mechanism complete for the first time and on a corpus
+            # whose vectors were correct: it retrieved no more than this does
+            # and ranked slightly worse. The reasons are in the overview, and
+            # the short one is that context describing the document cannot
+            # separate documents that are all alike.
+            chunk_texts = [chunk["text"] for chunk in batch_chunks]
             hashes = [
                 hashlib.sha256(t.encode("utf-8")).hexdigest() for t in chunk_texts
             ]
