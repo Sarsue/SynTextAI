@@ -49,12 +49,6 @@ interface Workspace {
     updated_at: string;
 }
 
-interface Member {
-    user_id: number;
-    email: string;
-    role: string;
-}
-
 /** A member of the organization, with how far their access reaches. */
 interface OrgMember {
     user_id: number;
@@ -97,7 +91,9 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
     // Invite / members state
     const [showMembersModal, setShowMembersModal] = useState(false);
-    const [members, setMembers] = useState<Member[]>([]);
+    // The workspace's own member list was fetched and then never rendered: the
+    // panel has read reach from the organization endpoint since that endpoint
+    // existed. Removed rather than kept warm for a caller that never came.
     const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
     // Reach belongs to the organization, not to one workspace, so it is read
     // from the organization endpoint rather than the workspace's member list.
@@ -134,24 +130,24 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // whether you may manage rather than whether you are the owner.
     const canManageWorkspace = currentWorkspace?.can_manage ?? false;
 
-    // Who can actually see the workspace this panel is about.
+    // THIS PANEL IS ABOUT THE COMPANY, NOT ABOUT ONE WORKSPACE
     //
-    // The panel is titled "Team — <workspace>" and listed everybody in the
-    // company, so somebody confined to Finance appeared under Payroll as
-    // though they could read it. The owner reasonably read that as a leak. It
-    // was not one, the backend has never let them near it, but a screen that
-    // says a person is somewhere they cannot go is its own kind of wrong, and
-    // it is the screen an owner uses to decide who to remove.
+    // It used to be titled "Team — <workspace>" and filtered to whoever could
+    // already see that workspace. The filter was added for a real reason:
+    // listing everybody under Payroll made somebody confined to Finance look
+    // like they could read it, which an owner reasonably read as a leak.
     //
-    // Same rule the backend uses: organization-wide reach, or named on this
-    // workspace. The owner is always in it.
-    const canSeeCurrentWorkspace = (m: OrgMember) =>
-        m.role === 'owner'
-        || m.scope === 'organization'
-        || (currentWorkspace ? m.workspace_ids.includes(currentWorkspace.id) : false);
-
-    const workspaceMembers = orgMembers.filter(canSeeCurrentWorkspace);
-    const elsewhereInCompany = orgMembers.length - workspaceMembers.length;
+    // But hiding them fixed the wrong half. The row is also where a workspace
+    // is granted, so filtering by who already has access hid the control from
+    // exactly the people who needed it, and anybody assigned to no workspace
+    // at all appeared on no screen anywhere and could never be assigned one.
+    // There was no workspace to switch to, which is what the old "switch
+    // workspace to manage them" note was asking for.
+    //
+    // So: everyone in the company, every time, and each row states its own
+    // reach and carries the checkboxes that change it. Nobody is hidden and
+    // nobody appears somewhere they cannot go, because the row says where they
+    // can go rather than the list implying it.
 
     // Fetch workspaces on mount, and again whenever access changes.
     //
@@ -428,23 +424,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         setError(null);
     };
 
-    const fetchMembers = async (wsId: number) => {
-        if (!user) return;
-        try {
-            const idToken = await user.getIdToken();
-            const res = await fetch(`/api/v1/workspaces/${wsId}/members`, {
-                headers: { Authorization: `Bearer ${idToken}` },
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setMembers(data.members || []);
-                setPendingInvites(data.pending_invites || []);
-            }
-        } catch (err) {
-            console.error('Error fetching members:', err);
-        }
-    };
-
     /** Remove somebody from the company, not just from one workspace. */
     const removeFromOrganization = async (memberUserId: number, email: string) => {
         const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
@@ -461,7 +440,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 // which is the question they had when they opened the dialog.
                 addToast(`${email} removed. They no longer have access.`, 'success');
                 await fetchOrgMembers();
-                if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Could not remove member', 'error');
@@ -499,6 +477,26 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             console.error('Error fetching organization members:', err);
             setMembersError('Could not load the team.');
         }
+
+        // Who has been invited and not yet arrived. Read from the organization
+        // rather than from a workspace: an invite to the company names no
+        // workspace, so the workspace listing returned none of them and an
+        // invited person appeared on no screen at all until they signed in.
+        //
+        // Not fatal to the panel. Failing to list who is coming should not stop
+        // an owner managing the people already here.
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/organizations/${orgId}/invites`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setPendingInvites(data.items || []);
+            }
+        } catch (err) {
+            console.error('Error fetching pending invites:', err);
+        }
     };
 
     /** Move somebody between "every workspace" and a chosen set. */
@@ -531,7 +529,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             if (res.ok) {
                 addToast('Access updated', 'success');
                 await fetchOrgMembers();
-                if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Could not change access', 'error');
@@ -545,7 +542,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
 
     const handleOpenMembers = async () => {
         if (currentWorkspace) {
-            fetchMembers(currentWorkspace.id);
             fetchOrgMembers();
             setShowMembersModal(true);
             setShowDropdown(false);
@@ -605,7 +601,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 setInviteScope('organization');
                 setInviteWorkspaceIds([]);
                 await fetchOrgMembers();
-                if (currentWorkspace) await fetchMembers(currentWorkspace.id);
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Failed to send invite', 'error');
@@ -617,24 +612,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
         }
     };
 
-    const handleRemoveMember = async (targetUserId: number) => {
-        if (!currentWorkspace || !user) return;
-        try {
-            const idToken = await user.getIdToken();
-            const res = await fetch(`/api/v1/workspaces/${currentWorkspace.id}/members/${targetUserId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${idToken}` },
-            });
-            if (res.ok) {
-                addToast('Member removed', 'success');
-                await fetchMembers(currentWorkspace.id);
-            } else {
-                addToast('Failed to remove member', 'error');
-            }
-        } catch {
-            addToast('Failed to remove member', 'error');
-        }
-    };
+    // handleRemoveMember was here: a DELETE to the workspace's member list, with
+    // no caller. The X on a row removes somebody from the COMPANY, which is the
+    // decision an owner is actually making, and taking a workspace away is
+    // unticking it. Removing from one workspace while leaving them in the
+    // company is the same operation as unticking that box, and having two ways
+    // to do it is how they drift.
 
     if (isLoading) {
         return (
@@ -835,7 +818,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                     once you have a team is worse than not having one. */}
                 <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Team — {currentWorkspace?.name}</DialogTitle>
+                        {/* The company, not the workspace being viewed. An
+                            invite makes somebody a member of the organization,
+                            and which workspaces they reach is set per person on
+                            the rows below, so naming a workspace here promised
+                            a scope this panel never had. */}
+                        <DialogTitle>Team</DialogTitle>
                     </DialogHeader>
 
                     <div className="form-group" style={{ display: 'flex', gap: 8 }}>
@@ -942,14 +930,12 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                             {membersError && (
                                 <div className="error-message" style={{ fontSize: 13, marginBottom: 8 }}>{membersError}</div>
                             )}
-                            {!membersError && workspaceMembers.length === 0 && (
+                            {!membersError && orgMembers.length === 0 && (
                                 <div style={{ fontSize: 13, color: '#888' }}>
-                                    {orgMembers.length === 0
-                                        ? 'Nobody else yet. Invite someone above.'
-                                        : `Nobody can see ${currentWorkspace?.name} yet. Invite someone, or give an existing member access.`}
+                                    Nobody else yet. Invite someone above.
                                 </div>
                             )}
-                            {workspaceMembers.map(m => {
+                            {orgMembers.map(m => {
                                 const isSaving = savingAccessFor === m.user_id;
                                 // One workspace selected, or every workspace.
                                 // A multi-select belongs here eventually; until
@@ -1033,6 +1019,17 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                                         ? 'Uploads, deletes, and manages people, in the workspaces below.'
                                                         : 'Reads and asks questions. Changes nothing.'}
                                                 </div>
+                                                {/* Said plainly rather than left
+                                                    to be inferred from a column
+                                                    of empty boxes. This is the
+                                                    person the panel exists to
+                                                    act on, and they used to be
+                                                    the one it hid. */}
+                                                {m.scope !== 'organization' && m.workspace_ids.length === 0 && (
+                                                    <div style={{ fontSize: 12, color: '#b45309', marginBottom: 6 }}>
+                                                        No workspace yet, so they can see no documents. Tick one below.
+                                                    </div>
+                                                )}
                                                 {/* Checkboxes, not one-of-many: access is a
                                                     set. Somebody can belong to three of five
                                                     workspaces, which a single select cannot
@@ -1104,15 +1101,6 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                 );
                             })}
 
-                            {/* Says where everyone else went, so a filtered list
-                                does not read as people having disappeared. */}
-                            {elsewhereInCompany > 0 && (
-                                <div style={{ fontSize: 12, color: '#888', marginTop: 10 }}>
-                                    {elsewhereInCompany} other {elsewhereInCompany === 1 ? 'person' : 'people'} in
-                                    this company {elsewhereInCompany === 1 ? 'does' : 'do'} not have access to{' '}
-                                    {currentWorkspace?.name}. Switch workspace to manage {elsewhereInCompany === 1 ? 'them' : 'them'}.
-                                </div>
-                            )}
                         </div>
                     )}
 

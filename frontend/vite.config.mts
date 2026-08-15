@@ -17,11 +17,13 @@ export default defineConfig({
     outDir: 'build',
   },
   server: {
-    // Overridable so a dev server can run beside the Docker stack rather than
-    // instead of it: the container already holds port 3000 and serves the API
-    // on it, so the automated sign-in harness runs Vite on 5173 and proxies to
-    // the container. Defaults are unchanged for anyone running the API alone.
-    port: Number(process.env.VITE_DEV_PORT ?? 3000),
+    // 5173, Vite's own default, because the container holds 3000 and serves the
+    // API there. This defaulted to 3000, which is the one port the dev server
+    // can never have while the stack it proxies to is running: starting it
+    // collided with Colima's forwarder every time, and tooling that reads this
+    // file for the port concluded the dev server wanted a busy port and
+    // refused. Overridable with VITE_DEV_PORT either way.
+    port: Number(process.env.VITE_DEV_PORT ?? 5173),
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET ?? 'http://localhost:5000',

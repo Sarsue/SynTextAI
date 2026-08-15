@@ -912,6 +912,55 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 logger.error(f"Error accepting invite {token}: {e}", exc_info=True)
                 return None
 
+    async def list_pending_organization_invites(
+        self, organization_id: int
+    ) -> List[Dict[str, Any]]:
+        """Everyone invited to this company who has not arrived yet.
+
+        WHY THIS EXISTS, FOUND 2026-08-15
+
+        `list_pending_invites` below filters on `workspace_id`, and an invite to
+        the organization names no workspace, so that column is null on every one
+        of them. There was no other listing, which meant an invite to the whole
+        company appeared on no screen anywhere: sent, stored, expiring in seven
+        days, and invisible to the person who sent it. The owner's only evidence
+        that they had invited somebody was remembering that they had.
+
+        Both kinds are returned, because "who is coming" is one question. An
+        invite naming a workspace is included by way of that workspace's
+        organization.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = (
+                    select(WorkspaceInvite)
+                    .outerjoin(WorkspaceORM, WorkspaceORM.id == WorkspaceInvite.workspace_id)
+                    .where(
+                        or_(
+                            WorkspaceInvite.organization_id == organization_id,
+                            WorkspaceORM.organization_id == organization_id,
+                        ),
+                        WorkspaceInvite.status == "pending",
+                        WorkspaceInvite.expires_at > datetime.utcnow(),
+                    )
+                    .order_by(WorkspaceInvite.expires_at)
+                )
+                invites = (await session.execute(stmt)).scalars().all()
+                return [
+                    {
+                        "id": inv.id,
+                        "email": inv.email,
+                        "expires_at": inv.expires_at,
+                    }
+                    for inv in invites
+                ]
+            except Exception as e:
+                logger.error(
+                    f"Error listing invites for organization {organization_id}: {e}",
+                    exc_info=True,
+                )
+                return []
+
     async def list_pending_invites(self, workspace_id: int) -> List[Dict[str, Any]]:
         """Return pending invites for a workspace."""
         async with self.get_async_session() as session:

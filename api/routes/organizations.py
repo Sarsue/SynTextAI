@@ -273,6 +273,34 @@ class OrganizationInviteRequest(BaseModel):
     workspace_ids: List[int] = []
 
 
+@organizations_router.get("/{organization_id}/invites")
+async def list_organization_invites(
+    organization_id: int = Path(...),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Who has been invited to this company and has not arrived yet.
+
+    There was no way to ask this. Invites to the organization carry no
+    workspace, and the only listing that existed filtered on one, so an invite
+    was sent, stored, and then visible nowhere: the owner's only record that
+    they had invited somebody was remembering it. That is the shape of "I added
+    a team member and lost them".
+
+    Anyone who may invite may see who is coming, which is the same people:
+    owners and admins. Staff seeing the list would be a different product
+    decision and this is not the place to make it.
+    """
+    user_id = user_data["user_id"]
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.INVITE_MEMBER
+    )
+    invites = await store.workspace_repo.list_pending_organization_invites(
+        organization_id
+    )
+    return {"items": invites}
+
+
 @organizations_router.post("/{organization_id}/invites", status_code=status.HTTP_201_CREATED)
 async def invite_to_organization(
     organization_id: int = Path(...),
