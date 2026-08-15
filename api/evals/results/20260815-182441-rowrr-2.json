@@ -1,0 +1,895 @@
+{
+  "label": "rowrr-2",
+  "when": "20260815-182441",
+  "base_url": "http://localhost:3000",
+  "workspace": 7354,
+  "repeat": 1,
+  "spread": {
+    "citations_correct": [
+      13
+    ],
+    "passed": [
+      11
+    ]
+  },
+  "totals": {
+    "questions": 20,
+    "passed": 11,
+    "grounded": 20,
+    "citations_correct": 13,
+    "refusals": 0,
+    "refusals_honoured": 0
+  },
+  "results": [
+    {
+      "id": 1,
+      "question": "what does error code E4 mean",
+      "answer": "**Error code E4**\n\nE4 is a failure code that indicates an **abnormal AC cooling system**.  \nThe most common cause is that the refrigerant charge is insufficient \u2013 for example, a gas leak or a valve that is blocked or otherwise not functioning properly.  \n\nWhen E4 appears you should:\n\n1. **Check the refrigerant pressure** \u2013 it should be **0.8\u20131.3\u202fMPa in cooling** and **2.0\u20133.6\u202fMPa in heating**. If it is lower, add gas.  \n2. **Verify that the valves are open** and that the system is not blocked.  \n3. **Inspect the pressure sensor** for short or open circuits; replace it if faulty.  \n4. If the problem persists, **replace the main PCB**.  \n\nThese steps are outlined in the Trane minisplit hardware inverter manual:  \n- \u201cE4 --- AC Cooling system abnormal (Gas not enough)\u201d and the troubleshooting flow for E4.  \n- \u201cE4 AC Cooling system abnormal Gas leakage? 2\u2011way or 3\u2011way valve blocked etc.\u201d  \n\n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=36)\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 36)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=36)",
+      "cited": [
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 36
+        }
+      ],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[32]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4111
+    },
+    {
+      "id": 2,
+      "question": "what does E5 mean on a Goodman GSZC7",
+      "answer": "E5 on a Goodman\u202fGSZC7 indicates that the unit\u2019s fuse is **open (blown)**.  \nThe troubleshooting guide says:\n\n- **Error Code:**\u202fE5 \u2013 Open Fuse  \n- **Applicable Models:**\u202fOutdoor units, Indoor units  \n- **Method of Error Detection:**\u202fIntegrated control module LED display shows the code  \n- **Corrective Actions:**\u202fReplace the fuse (F1U), and check the wiring to the AUX alarm, heater kit, and communication connection.  \n\n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=96)\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 96)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=96)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 96
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4112
+    },
+    {
+      "id": 3,
+      "question": "what is fault F8 on the mini split",
+      "answer": "**Fault F8 on a Trane mini\u2011split**\n\n- **What it means**  \n  F8 is the code for a *4\u2011way valve reversing abnormality*. It is usually triggered in heating mode when the indoor unit (IDU) coil temperature falls more than about 5\u202f\u00b0C below the room temperature after the compressor has been running for roughly 8\u202fminutes. This indicates that the 4\u2011way valve is not reversing correctly, which can prevent the unit from delivering heat. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=55)\n\n- **Typical causes**  \n  * 4\u2011way valve coil resistance is wrong (open or shorted).  \n  * Wiring to the valve is loose, damaged, or incorrectly connected.  \n  * The ODU PCB (outdoor unit printed\u2011circuit board) is faulty.  \n  * The valve is not fully opened or is stuck.  \n  * The 4\u2011way valve coil is damaged or the valve itself is defective.  \n  * The 4\u2011way valve wiring connection is incorrect.  \n  * The ODU cooling system is abnormal (e.g., compressor running with high current).  \n  * The 4\u2011way valve is not fully opened.  \n  * The condenser or evaporator is dirty, or the capillary is blocked.  \n  These are the troubleshooting items listed for F8. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)\n\n- **How to troubleshoot / fix**  \n  1. **Check the 4\u2011way valve coil** \u2013 measure its resistance with a multimeter; it should be within the specified range.  \n  2. **Inspect the wiring** \u2013 ensure all connections to the valve are secure and undamaged.  \n  3. **Replace the ODU PCB** if the coil and wiring are fine but the fault persists.  \n  4. **Verify the valve is fully opened** \u2013 manually open it if possible.  \n  5. **Clean the condenser/evaporator** and check for capillary blockage.  \n  6. **Check the ODU cooling system** \u2013 look for abnormal compressor current (e.g., 9\u201312\u202fkW: 6\u20137\u202fA, 18\u201324\u202fkW: 7\u20139\u202fA).  \n  7. **Re\u2011power the unit** after each change to see if the fault clears.  \n  These steps are taken from the troubleshooting table for F8. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)\n\n- **Result**  \n  Once the valve, coil, wiring, or PCB is corrected, the F8 code should disappear and the unit will resume normal heating operation. If the fault reappears, re\u2011check the valve and related components.\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 55)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=55)\n2. [trane_minisplit_hw_inverter.pdf (Page 54)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)",
+      "cited": [
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 55
+        },
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 54
+        }
+      ],
+      "failures": [
+        "did not cite: trane_minisplit_hw_inverter.pdf p[33]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4113
+    },
+    {
+      "id": 4,
+      "question": "F7 protection meaning",
+      "answer": "F7 protection is the **IPM (Integrated Power Module) temperature protection** code.  \nIt is displayed when the IPM temperature rises above the safe limit (about **95\u202f\u00b0C**).  \n\n- \u201cIPM overtemperature protection, when IPM temperature more than 95\u202f\u2103, it will show F7.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)  \n- \u201cF7\u202fIPM Module temperature PROTECTION.\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=33)\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 54)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)\n2. [trane_minisplit_hw_inverter.pdf (Page 33)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=33)",
+      "cited": [
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 54
+        },
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 33
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4114
+    },
+    {
+      "id": 5,
+      "question": "E7 error on outdoor unit",
+      "answer": "**E7 on the outdoor unit**\n\n| What it means | What to check | What to do |\n|----------------|---------------|------------|\n| **E7 = ODU Ambient Temperature sensor failure** \u2013 the outdoor unit\u2019s ambient\u2011temperature sensor (or its circuit) is not reading correctly. | 1. **Sensor connection** \u2013 is the sensor cable securely attached to the ODU PCB? <br>2. **Sensor resistance** \u2013 use a multimeter to test the sensor\u2019s resistance; it should be within the manufacturer\u2019s spec. <br>3. **PCB or sampling circuit** \u2013 if the sensor is fine, the fault may be in the ODU PCB or its sampling circuit. | 1. **Reconnect** the sensor cable and tighten any loose connections. <br>2. **Replace** the sensor if the resistance is open or shorted. <br>3. If the problem persists after sensor replacement, **replace the ODU PCB** (or the control board) as the fault may lie in the board\u2019s circuitry. |\n\n**Why the unit shows E7**\n\n- When the sensor resistance is open or shorted, the unit displays E7 (or E3/E8 for other temperature sensors) and the indoor and outdoor units shut down. Once the sensor\u2019s resistance is restored, the unit returns to standby and can be restarted. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=38)  \n- The fault can also arise from a loose connection, a failed sensor, or a failure in the sampling circuit. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=53)  \n\n**Typical troubleshooting steps**\n\n1. **Power off** the system.  \n2. **Inspect** the ambient temperature sensor wiring for loose or damaged connections.  \n3. **Measure** the sensor resistance with a multimeter; compare to spec.  \n4. **Replace** the sensor if the resistance is out of spec.  \n5. **Re\u2011power** the unit; if E7 clears, the issue was the sensor.  \n6. If E7 remains, **replace the ODU PCB** (control board) as the fault may be in the board\u2019s circuitry.  \n\nThese steps are drawn directly from the manufacturer\u2019s fault\u2011code tables and troubleshooting guides.  \n\n**References**  \n- [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=32) \u2013 E7 listed as \u201cODU Ambient Temperature sensor failure.\u201d  \n- [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=38) \u2013 Explanation of E3/E7/E8 faults and the effect of sensor resistance.  \n- [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=53) \u2013 Detailed causes and remedies for the outdoor ambient temperature sensor fault.\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 38)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=38)\n2. [trane_dc_inverter_technical.pdf (Page 53)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=53)\n3. [trane_minisplit_hw_inverter.pdf (Page 32)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=32)",
+      "cited": [
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 38
+        },
+        {
+          "file": "trane_dc_inverter_technical.pdf",
+          "page": 53
+        },
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 32
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4115
+    },
+    {
+      "id": 6,
+      "question": "liquid pressure is 251 psig and subcooling is 10 degrees, what should the liquid line temperature be",
+      "answer": "The tables in the service manuals give the liquid\u2011line temperature that corresponds to a specified subcooling at a given pressure.  \nFor a liquid pressure of **251\u202fpsig** and a required subcooling of **10\u202f\u00b0F**, the required liquid\u2011line temperature is **74\u202f\u00b0F**.\n\n- In the Goodman\u202fGSZC7 service manual the row for 251\u202fpsig lists 74\u202f\u00b0F under the 10\u202f\u00b0F subcooling column.  \n  [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)  \n- The same value appears in the Goodman\u202fGVXC service manual.  \n  [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)  \n- The R\u2011410A charging chart in the Carrier\u202fHCH6 manual shows 74\u202f\u00b0F for 251\u202fpsig at 10\u202f\u00b0F subcooling.  \n  [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=9)  \n\nSo, with 251\u202fpsig and 10\u202f\u00b0F subcooling, the liquid line temperature should be **74\u202f\u00b0F**.\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 55)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)\n2. [goodman_gvxc_service.pdf (Page 103)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)\n3. [carrier_hch6_heatpump_service.pdf (Page 9)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=9)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 55
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 103
+        },
+        {
+          "file": "carrier_hch6_heatpump_service.pdf",
+          "page": 9
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4116
+    },
+    {
+      "id": 7,
+      "question": "at 335 psig with 10 degrees of subcooling what liquid line temp am I looking for",
+      "answer": "The required liquid\u2011line temperature for a 335\u202fpsig R\u2011410A system with 10\u202f\u00b0F of subcooling is **86\u202f\u00b0F**.  \nThis comes from the \u201cRequired Liquid Line Temperature\u201d charts, where the 10\u202f\u00b0F subcooling column for 335\u202fpsig lists 86\u202f\u00b0F.  \n\n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)  \n[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)\n\n\n\n**Sources:**\n1. [goodman_gvxc_service.pdf (Page 103)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)\n2. [goodman_gszc7_service.pdf (Page 55)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)",
+      "cited": [
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 103
+        },
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 55
+        }
+      ],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+        "missing required text: '94'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4117
+    },
+    {
+      "id": 8,
+      "question": "384 psig 6 degree subcooling liquid line temperature",
+      "answer": "The required liquid\u2011line temperature for a 384\u202fpsig R\u2011410A system with 6\u202f\u00b0F of subcooling is **106\u202f\u00b0F**.  \n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)\n\n\n\n**Sources:**\n1. [goodman_gvxc_service.pdf (Page 103)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)",
+      "cited": [
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 103
+        }
+      ],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+        "missing required text: '108'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4118
+    },
+    {
+      "id": 9,
+      "question": "what is the SEER rating on the size 36",
+      "answer": "The 36\u2011BTU unit has a SEER rating of **17.0**\u202fSEER.  \n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62) shows the SEER column for the 36\u2011size model as 17.0, and [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=2) indicates that the \u201c7\u201d digit in the model number corresponds to a 17\u202fSEER rating for the 36\u2011BTU size.\n\n\n\n**Sources:**\n1. [carrier_hch6_heatpump_service.pdf (Page 62)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)\n2. [carrier_hch6_heatpump_service.pdf (Page 2)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=2)",
+      "cited": [
+        {
+          "file": "carrier_hch6_heatpump_service.pdf",
+          "page": 62
+        },
+        {
+          "file": "carrier_hch6_heatpump_service.pdf",
+          "page": 2
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4119
+    },
+    {
+      "id": 10,
+      "question": "fan CFM for the 48",
+      "answer": "The documents give two different fan\u2011CFM figures for a 48\u2011model unit:\n\n* **Carrier HCH6 heat\u2011pump service manual** \u2013 the 48\u2011model (48\u202f000\u202fBTU, 4\u202ftons) has a fan rated at **4\u202f350\u202fCFM**. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)  \n* **Goodman gszc7 service manual** \u2013 the 48\u2011model (4\u202ftons) has a maximum airflow of **1\u202f760\u202fCFM**. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=46)\n\nWhich figure applies depends on the specific brand/model you are working with.\n\n\n\n**Sources:**\n1. [carrier_hch6_heatpump_service.pdf (Page 62)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)\n2. [goodman_gszc7_service.pdf (Page 46)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=46)",
+      "cited": [
+        {
+          "file": "carrier_hch6_heatpump_service.pdf",
+          "page": 62
+        },
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 46
+        }
+      ],
+      "failures": [
+        "missing required text: '4350'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": true,
+      "history_id": 4120
+    },
+    {
+      "id": 11,
+      "question": "at what pressure does the high pressure switch open",
+      "answer": "The high\u2011pressure switch is designed to open at **610\u202fPSIG \u00b1\u202f10\u202fPSIG** (and it closes at 420\u202fPSIG \u00b1\u202f25\u202fPSIG)\u3010Segment\u202f1\u3011.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [goodman_gszc7_service.pdf (Page 34)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=34)\n- [goodman_gvxc_service.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=14)\n- [goodman_gvxc_service.pdf (Page 92)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=92)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 34
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 14
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 92
+        }
+      ],
+      "failures": [
+        "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+        "missing required text: '670'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4121
+    },
+    {
+      "id": 12,
+      "question": "PSC fan motor horsepower on the size 24",
+      "answer": "The PSC fan motor for a size\u201124 unit is rated at **1/12 horsepower**\u3010Segment 1\u3011.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [carrier_hch6_heatpump_service.pdf (Page 62)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)\n- [goodman_gszc7_service.pdf (Page 33)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=33)\n- [goodman_gvxc_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5)",
+      "cited": [
+        {
+          "file": "carrier_hch6_heatpump_service.pdf",
+          "page": 62
+        },
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 33
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 5
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4122
+    },
+    {
+      "id": 13,
+      "question": "in the modular blower model number what does 16 mean for airflow",
+      "answer": "The \u201c16\u201d in the modular blower model number indicates an airflow of **1,600\u202fCFM** (cubic feet per minute)\u202f[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7).\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 7
+        }
+      ],
+      "failures": [
+        "missing required text: '1600'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": true,
+      "history_id": 4123
+    },
+    {
+      "id": 14,
+      "question": "what cabinet width is code C",
+      "answer": "The cabinet width for code **C** is **21\u202finches**.  \n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7) shows \u201cC\u202f|\u202f21\u201d in the cabinet\u2011width table.  \n[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=6) lists \u201cC\u202f|\u202f21\u202fWidth\u201d under nominal width for gas furnaces.  \n[[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5) also lists \u201cC\u202f=\u202f21\u201d in the cabinet\u2011width column.\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7)\n2. [goodman_gszc7_service.pdf (Page 6)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=6)\n3. [goodman_gvxc_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 7
+        },
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 6
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 5
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4124
+    },
+    {
+      "id": 15,
+      "question": "what refrigerant does a 4 in the model number mean",
+      "answer": "The digit \u201c4\u201d in the model number indicates that the unit uses **R\u2011410A refrigerant**.  \n- In the Trane nomenclature table, Digit\u202f1 = Refrigerant, and \u201c4\u201d = R410a\u3010Segment\u202f1\u3011.  \n- The Goodman service manual lists the refrigerant code \u201c4\u201d as R\u2011410A\u3010Segment\u202f7\u3011\u3010Segment\u202f8\u3011\u3010Segment\u202f13\u3011.  \n\nSo whenever you see a \u201c4\u201d in the first digit of the model number, the system is designed for R\u2011410A.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [trane_dc_inverter_technical.pdf (Page 9)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=9)\n- [goodman_gvxc_service.pdf (Page 6)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=6)\n- [trane_dc_inverter_technical.pdf (Page 41)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=41)",
+      "cited": [
+        {
+          "file": "trane_dc_inverter_technical.pdf",
+          "page": 9
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 6
+        },
+        {
+          "file": "trane_dc_inverter_technical.pdf",
+          "page": 41
+        }
+      ],
+      "failures": [
+        "did not cite: goodman_gszc7_service.pdf p[7]"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4125
+    },
+    {
+      "id": 16,
+      "question": "expansion device V in the model number",
+      "answer": "The letter **\u201cV\u201d in a Goodman model number identifies the type of expansion device that is installed in the unit.**  \nIt stands for an **Inverter\u2011Tuned Expansion Valve** (sometimes abbreviated ITX or ITV).  \n\nThis is shown in the service manuals:\n\n- In the expansion\u2011device table for the GSZC7 series, \u201cV\u201d is listed as *Inverter Tuned Expansion Valve*\u3010Segment\u202f1\u3011.  \n- In the product\u2011identification section for the GVXC series, the \u201cV\u201d code is again described as *Inverter Tuned Expansion Valve*\u3010Segment\u202f2\u3011.  \n\nSo whenever you see a \u201cV\u201d in the expansion\u2011device position of a model number, the unit uses an inverter\u2011tuned expansion valve.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [goodman_gszc7_service.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7)\n- [goodman_gvxc_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5)\n- [goodman_gszc7_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=5)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 7
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 5
+        },
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 5
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4126
+    },
+    {
+      "id": 17,
+      "question": "what signal starts the outdoor unit in cooling mode",
+      "answer": "The outdoor unit is started in cooling mode when the thermostat sends a **high\u2011level Y\u2011C signal** (the compressor signal). When Y\u2011C is high, the outdoor unit receives the start command and begins cooling operation. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=65)\n\n\n\n**Sources:**\n1. [trane_dc_inverter_technical.pdf (Page 65)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=65)",
+      "cited": [
+        {
+          "file": "trane_dc_inverter_technical.pdf",
+          "page": 65
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4127
+    },
+    {
+      "id": 18,
+      "question": "how do the indoor and outdoor units communicate",
+      "answer": "The indoor and outdoor units of a ComfortBridge/ComfortNet system exchange data over a **two\u2011wire digital link** that is powered by 24\u202fVAC.  \n* The two wires are labeled **1** and **2** and are the only data lines required between the indoor and outdoor units. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=28)  \n* The thermostat supplies 24\u202fVAC to the indoor and outdoor control boards and also sends analog 24\u202fVAC commands to both units. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=13)  \n* Over the 1\u20112 wire link the indoor board can **request and receive information** from the outdoor unit, and the outdoor unit can also send commands back to the indoor unit, creating a two\u2011way\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 28)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=28)\n2. [goodman_gvxc_service.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=13)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 28
+        },
+        {
+          "file": "goodman_gvxc_service.pdf",
+          "page": 13
+        }
+      ],
+      "failures": [
+        "did not cite: trane_dc_inverter_technical.pdf p[65]",
+        "missing required text: '24V'"
+      ],
+      "kind": "grounded",
+      "passed": false,
+      "cited_correctly": false,
+      "history_id": 4128
+    },
+    {
+      "id": 19,
+      "question": "what does a run capacitor actually do",
+      "answer": "A run capacitor is wired across the auxiliary and main windings of a single\u2011phase permanent\u2011split capacitor motor. Its primary job is to reduce the line current while greatly improving the motor\u2019s torque characteristics. It does this by using the 90\u00b0 phase relationship between the capacitor current and voltage together with the motor windings, so that the motor behaves as if it were running on two phases even though it is connected to a single\u2011phase circuit. The capacitor also improves the power factor, which further lowers the line current to the motor. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=35)\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 35)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=35)",
+      "cited": [
+        {
+          "file": "goodman_gszc7_service.pdf",
+          "page": 35
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4129
+    },
+    {
+      "id": 20,
+      "question": "when should I take the cap off the connecting pipe",
+      "answer": "The cap on the connecting pipe should **not be removed until the pipe is actually being connected**. Keeping the cap on prevents dampness or dirt from entering the pipe. When you are ready to attach the pipe, you can then remove the cap and proceed with the connection. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=29)\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 29)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=29)",
+      "cited": [
+        {
+          "file": "trane_minisplit_hw_inverter.pdf",
+          "page": 29
+        }
+      ],
+      "failures": [],
+      "kind": "grounded",
+      "passed": true,
+      "cited_correctly": true,
+      "history_id": 4130
+    }
+  ],
+  "runs": [
+    [
+      {
+        "id": 1,
+        "question": "what does error code E4 mean",
+        "answer": "**Error code E4**\n\nE4 is a failure code that indicates an **abnormal AC cooling system**.  \nThe most common cause is that the refrigerant charge is insufficient \u2013 for example, a gas leak or a valve that is blocked or otherwise not functioning properly.  \n\nWhen E4 appears you should:\n\n1. **Check the refrigerant pressure** \u2013 it should be **0.8\u20131.3\u202fMPa in cooling** and **2.0\u20133.6\u202fMPa in heating**. If it is lower, add gas.  \n2. **Verify that the valves are open** and that the system is not blocked.  \n3. **Inspect the pressure sensor** for short or open circuits; replace it if faulty.  \n4. If the problem persists, **replace the main PCB**.  \n\nThese steps are outlined in the Trane minisplit hardware inverter manual:  \n- \u201cE4 --- AC Cooling system abnormal (Gas not enough)\u201d and the troubleshooting flow for E4.  \n- \u201cE4 AC Cooling system abnormal Gas leakage? 2\u2011way or 3\u2011way valve blocked etc.\u201d  \n\n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=36)\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 36)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=36)",
+        "cited": [
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 36
+          }
+        ],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[32]"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4111
+      },
+      {
+        "id": 2,
+        "question": "what does E5 mean on a Goodman GSZC7",
+        "answer": "E5 on a Goodman\u202fGSZC7 indicates that the unit\u2019s fuse is **open (blown)**.  \nThe troubleshooting guide says:\n\n- **Error Code:**\u202fE5 \u2013 Open Fuse  \n- **Applicable Models:**\u202fOutdoor units, Indoor units  \n- **Method of Error Detection:**\u202fIntegrated control module LED display shows the code  \n- **Corrective Actions:**\u202fReplace the fuse (F1U), and check the wiring to the AUX alarm, heater kit, and communication connection.  \n\n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=96)\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 96)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=96)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 96
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4112
+      },
+      {
+        "id": 3,
+        "question": "what is fault F8 on the mini split",
+        "answer": "**Fault F8 on a Trane mini\u2011split**\n\n- **What it means**  \n  F8 is the code for a *4\u2011way valve reversing abnormality*. It is usually triggered in heating mode when the indoor unit (IDU) coil temperature falls more than about 5\u202f\u00b0C below the room temperature after the compressor has been running for roughly 8\u202fminutes. This indicates that the 4\u2011way valve is not reversing correctly, which can prevent the unit from delivering heat. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=55)\n\n- **Typical causes**  \n  * 4\u2011way valve coil resistance is wrong (open or shorted).  \n  * Wiring to the valve is loose, damaged, or incorrectly connected.  \n  * The ODU PCB (outdoor unit printed\u2011circuit board) is faulty.  \n  * The valve is not fully opened or is stuck.  \n  * The 4\u2011way valve coil is damaged or the valve itself is defective.  \n  * The 4\u2011way valve wiring connection is incorrect.  \n  * The ODU cooling system is abnormal (e.g., compressor running with high current).  \n  * The 4\u2011way valve is not fully opened.  \n  * The condenser or evaporator is dirty, or the capillary is blocked.  \n  These are the troubleshooting items listed for F8. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)\n\n- **How to troubleshoot / fix**  \n  1. **Check the 4\u2011way valve coil** \u2013 measure its resistance with a multimeter; it should be within the specified range.  \n  2. **Inspect the wiring** \u2013 ensure all connections to the valve are secure and undamaged.  \n  3. **Replace the ODU PCB** if the coil and wiring are fine but the fault persists.  \n  4. **Verify the valve is fully opened** \u2013 manually open it if possible.  \n  5. **Clean the condenser/evaporator** and check for capillary blockage.  \n  6. **Check the ODU cooling system** \u2013 look for abnormal compressor current (e.g., 9\u201312\u202fkW: 6\u20137\u202fA, 18\u201324\u202fkW: 7\u20139\u202fA).  \n  7. **Re\u2011power the unit** after each change to see if the fault clears.  \n  These steps are taken from the troubleshooting table for F8. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)\n\n- **Result**  \n  Once the valve, coil, wiring, or PCB is corrected, the F8 code should disappear and the unit will resume normal heating operation. If the fault reappears, re\u2011check the valve and related components.\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 55)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=55)\n2. [trane_minisplit_hw_inverter.pdf (Page 54)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)",
+        "cited": [
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 55
+          },
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 54
+          }
+        ],
+        "failures": [
+          "did not cite: trane_minisplit_hw_inverter.pdf p[33]"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4113
+      },
+      {
+        "id": 4,
+        "question": "F7 protection meaning",
+        "answer": "F7 protection is the **IPM (Integrated Power Module) temperature protection** code.  \nIt is displayed when the IPM temperature rises above the safe limit (about **95\u202f\u00b0C**).  \n\n- \u201cIPM overtemperature protection, when IPM temperature more than 95\u202f\u2103, it will show F7.\u201d [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)  \n- \u201cF7\u202fIPM Module temperature PROTECTION.\u201d [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=33)\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 54)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=54)\n2. [trane_minisplit_hw_inverter.pdf (Page 33)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=33)",
+        "cited": [
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 54
+          },
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 33
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4114
+      },
+      {
+        "id": 5,
+        "question": "E7 error on outdoor unit",
+        "answer": "**E7 on the outdoor unit**\n\n| What it means | What to check | What to do |\n|----------------|---------------|------------|\n| **E7 = ODU Ambient Temperature sensor failure** \u2013 the outdoor unit\u2019s ambient\u2011temperature sensor (or its circuit) is not reading correctly. | 1. **Sensor connection** \u2013 is the sensor cable securely attached to the ODU PCB? <br>2. **Sensor resistance** \u2013 use a multimeter to test the sensor\u2019s resistance; it should be within the manufacturer\u2019s spec. <br>3. **PCB or sampling circuit** \u2013 if the sensor is fine, the fault may be in the ODU PCB or its sampling circuit. | 1. **Reconnect** the sensor cable and tighten any loose connections. <br>2. **Replace** the sensor if the resistance is open or shorted. <br>3. If the problem persists after sensor replacement, **replace the ODU PCB** (or the control board) as the fault may lie in the board\u2019s circuitry. |\n\n**Why the unit shows E7**\n\n- When the sensor resistance is open or shorted, the unit displays E7 (or E3/E8 for other temperature sensors) and the indoor and outdoor units shut down. Once the sensor\u2019s resistance is restored, the unit returns to standby and can be restarted. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=38)  \n- The fault can also arise from a loose connection, a failed sensor, or a failure in the sampling circuit. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=53)  \n\n**Typical troubleshooting steps**\n\n1. **Power off** the system.  \n2. **Inspect** the ambient temperature sensor wiring for loose or damaged connections.  \n3. **Measure** the sensor resistance with a multimeter; compare to spec.  \n4. **Replace** the sensor if the resistance is out of spec.  \n5. **Re\u2011power** the unit; if E7 clears, the issue was the sensor.  \n6. If E7 remains, **replace the ODU PCB** (control board) as the fault may be in the board\u2019s circuitry.  \n\nThese steps are drawn directly from the manufacturer\u2019s fault\u2011code tables and troubleshooting guides.  \n\n**References**  \n- [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=32) \u2013 E7 listed as \u201cODU Ambient Temperature sensor failure.\u201d  \n- [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=38) \u2013 Explanation of E3/E7/E8 faults and the effect of sensor resistance.  \n- [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=53) \u2013 Detailed causes and remedies for the outdoor ambient temperature sensor fault.\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 38)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=38)\n2. [trane_dc_inverter_technical.pdf (Page 53)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=53)\n3. [trane_minisplit_hw_inverter.pdf (Page 32)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=32)",
+        "cited": [
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 38
+          },
+          {
+            "file": "trane_dc_inverter_technical.pdf",
+            "page": 53
+          },
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 32
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4115
+      },
+      {
+        "id": 6,
+        "question": "liquid pressure is 251 psig and subcooling is 10 degrees, what should the liquid line temperature be",
+        "answer": "The tables in the service manuals give the liquid\u2011line temperature that corresponds to a specified subcooling at a given pressure.  \nFor a liquid pressure of **251\u202fpsig** and a required subcooling of **10\u202f\u00b0F**, the required liquid\u2011line temperature is **74\u202f\u00b0F**.\n\n- In the Goodman\u202fGSZC7 service manual the row for 251\u202fpsig lists 74\u202f\u00b0F under the 10\u202f\u00b0F subcooling column.  \n  [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)  \n- The same value appears in the Goodman\u202fGVXC service manual.  \n  [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)  \n- The R\u2011410A charging chart in the Carrier\u202fHCH6 manual shows 74\u202f\u00b0F for 251\u202fpsig at 10\u202f\u00b0F subcooling.  \n  [[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=9)  \n\nSo, with 251\u202fpsig and 10\u202f\u00b0F subcooling, the liquid line temperature should be **74\u202f\u00b0F**.\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 55)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)\n2. [goodman_gvxc_service.pdf (Page 103)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)\n3. [carrier_hch6_heatpump_service.pdf (Page 9)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=9)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 55
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 103
+          },
+          {
+            "file": "carrier_hch6_heatpump_service.pdf",
+            "page": 9
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4116
+      },
+      {
+        "id": 7,
+        "question": "at 335 psig with 10 degrees of subcooling what liquid line temp am I looking for",
+        "answer": "The required liquid\u2011line temperature for a 335\u202fpsig R\u2011410A system with 10\u202f\u00b0F of subcooling is **86\u202f\u00b0F**.  \nThis comes from the \u201cRequired Liquid Line Temperature\u201d charts, where the 10\u202f\u00b0F subcooling column for 335\u202fpsig lists 86\u202f\u00b0F.  \n\n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)  \n[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)\n\n\n\n**Sources:**\n1. [goodman_gvxc_service.pdf (Page 103)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)\n2. [goodman_gszc7_service.pdf (Page 55)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=55)",
+        "cited": [
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 103
+          },
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 55
+          }
+        ],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+          "missing required text: '94'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4117
+      },
+      {
+        "id": 8,
+        "question": "384 psig 6 degree subcooling liquid line temperature",
+        "answer": "The required liquid\u2011line temperature for a 384\u202fpsig R\u2011410A system with 6\u202f\u00b0F of subcooling is **106\u202f\u00b0F**.  \n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)\n\n\n\n**Sources:**\n1. [goodman_gvxc_service.pdf (Page 103)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=103)",
+        "cited": [
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 103
+          }
+        ],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[9]",
+          "missing required text: '108'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4118
+      },
+      {
+        "id": 9,
+        "question": "what is the SEER rating on the size 36",
+        "answer": "The 36\u2011BTU unit has a SEER rating of **17.0**\u202fSEER.  \n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62) shows the SEER column for the 36\u2011size model as 17.0, and [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=2) indicates that the \u201c7\u201d digit in the model number corresponds to a 17\u202fSEER rating for the 36\u2011BTU size.\n\n\n\n**Sources:**\n1. [carrier_hch6_heatpump_service.pdf (Page 62)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)\n2. [carrier_hch6_heatpump_service.pdf (Page 2)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=2)",
+        "cited": [
+          {
+            "file": "carrier_hch6_heatpump_service.pdf",
+            "page": 62
+          },
+          {
+            "file": "carrier_hch6_heatpump_service.pdf",
+            "page": 2
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4119
+      },
+      {
+        "id": 10,
+        "question": "fan CFM for the 48",
+        "answer": "The documents give two different fan\u2011CFM figures for a 48\u2011model unit:\n\n* **Carrier HCH6 heat\u2011pump service manual** \u2013 the 48\u2011model (48\u202f000\u202fBTU, 4\u202ftons) has a fan rated at **4\u202f350\u202fCFM**. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)  \n* **Goodman gszc7 service manual** \u2013 the 48\u2011model (4\u202ftons) has a maximum airflow of **1\u202f760\u202fCFM**. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=46)\n\nWhich figure applies depends on the specific brand/model you are working with.\n\n\n\n**Sources:**\n1. [carrier_hch6_heatpump_service.pdf (Page 62)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)\n2. [goodman_gszc7_service.pdf (Page 46)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=46)",
+        "cited": [
+          {
+            "file": "carrier_hch6_heatpump_service.pdf",
+            "page": 62
+          },
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 46
+          }
+        ],
+        "failures": [
+          "missing required text: '4350'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": true,
+        "history_id": 4120
+      },
+      {
+        "id": 11,
+        "question": "at what pressure does the high pressure switch open",
+        "answer": "The high\u2011pressure switch is designed to open at **610\u202fPSIG \u00b1\u202f10\u202fPSIG** (and it closes at 420\u202fPSIG \u00b1\u202f25\u202fPSIG)\u3010Segment\u202f1\u3011.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [goodman_gszc7_service.pdf (Page 34)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=34)\n- [goodman_gvxc_service.pdf (Page 14)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=14)\n- [goodman_gvxc_service.pdf (Page 92)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=92)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 34
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 14
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 92
+          }
+        ],
+        "failures": [
+          "did not cite: carrier_hch6_heatpump_service.pdf p[62]",
+          "missing required text: '670'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4121
+      },
+      {
+        "id": 12,
+        "question": "PSC fan motor horsepower on the size 24",
+        "answer": "The PSC fan motor for a size\u201124 unit is rated at **1/12 horsepower**\u3010Segment 1\u3011.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [carrier_hch6_heatpump_service.pdf (Page 62)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/911-carrier_hch6_heatpump_service.pdf#page=62)\n- [goodman_gszc7_service.pdf (Page 33)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=33)\n- [goodman_gvxc_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5)",
+        "cited": [
+          {
+            "file": "carrier_hch6_heatpump_service.pdf",
+            "page": 62
+          },
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 33
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 5
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4122
+      },
+      {
+        "id": 13,
+        "question": "in the modular blower model number what does 16 mean for airflow",
+        "answer": "The \u201c16\u201d in the modular blower model number indicates an airflow of **1,600\u202fCFM** (cubic feet per minute)\u202f[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7).\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 7
+          }
+        ],
+        "failures": [
+          "missing required text: '1600'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": true,
+        "history_id": 4123
+      },
+      {
+        "id": 14,
+        "question": "what cabinet width is code C",
+        "answer": "The cabinet width for code **C** is **21\u202finches**.  \n[[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7) shows \u201cC\u202f|\u202f21\u201d in the cabinet\u2011width table.  \n[[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=6) lists \u201cC\u202f|\u202f21\u202fWidth\u201d under nominal width for gas furnaces.  \n[[3]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5) also lists \u201cC\u202f=\u202f21\u201d in the cabinet\u2011width column.\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7)\n2. [goodman_gszc7_service.pdf (Page 6)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=6)\n3. [goodman_gvxc_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 7
+          },
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 6
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 5
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4124
+      },
+      {
+        "id": 15,
+        "question": "what refrigerant does a 4 in the model number mean",
+        "answer": "The digit \u201c4\u201d in the model number indicates that the unit uses **R\u2011410A refrigerant**.  \n- In the Trane nomenclature table, Digit\u202f1 = Refrigerant, and \u201c4\u201d = R410a\u3010Segment\u202f1\u3011.  \n- The Goodman service manual lists the refrigerant code \u201c4\u201d as R\u2011410A\u3010Segment\u202f7\u3011\u3010Segment\u202f8\u3011\u3010Segment\u202f13\u3011.  \n\nSo whenever you see a \u201c4\u201d in the first digit of the model number, the system is designed for R\u2011410A.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [trane_dc_inverter_technical.pdf (Page 9)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=9)\n- [goodman_gvxc_service.pdf (Page 6)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=6)\n- [trane_dc_inverter_technical.pdf (Page 41)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=41)",
+        "cited": [
+          {
+            "file": "trane_dc_inverter_technical.pdf",
+            "page": 9
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 6
+          },
+          {
+            "file": "trane_dc_inverter_technical.pdf",
+            "page": 41
+          }
+        ],
+        "failures": [
+          "did not cite: goodman_gszc7_service.pdf p[7]"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4125
+      },
+      {
+        "id": 16,
+        "question": "expansion device V in the model number",
+        "answer": "The letter **\u201cV\u201d in a Goodman model number identifies the type of expansion device that is installed in the unit.**  \nIt stands for an **Inverter\u2011Tuned Expansion Valve** (sometimes abbreviated ITX or ITV).  \n\nThis is shown in the service manuals:\n\n- In the expansion\u2011device table for the GSZC7 series, \u201cV\u201d is listed as *Inverter Tuned Expansion Valve*\u3010Segment\u202f1\u3011.  \n- In the product\u2011identification section for the GVXC series, the \u201cV\u201d code is again described as *Inverter Tuned Expansion Valve*\u3010Segment\u202f2\u3011.  \n\nSo whenever you see a \u201cV\u201d in the expansion\u2011device position of a model number, the unit uses an inverter\u2011tuned expansion valve.\n\n_I could not tie each statement above to a specific page. These are the pages I searched, so you can check it yourself:_\n- [goodman_gszc7_service.pdf (Page 7)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=7)\n- [goodman_gvxc_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=5)\n- [goodman_gszc7_service.pdf (Page 5)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=5)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 7
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 5
+          },
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 5
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4126
+      },
+      {
+        "id": 17,
+        "question": "what signal starts the outdoor unit in cooling mode",
+        "answer": "The outdoor unit is started in cooling mode when the thermostat sends a **high\u2011level Y\u2011C signal** (the compressor signal). When Y\u2011C is high, the outdoor unit receives the start command and begins cooling operation. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=65)\n\n\n\n**Sources:**\n1. [trane_dc_inverter_technical.pdf (Page 65)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/909-trane_dc_inverter_technical.pdf#page=65)",
+        "cited": [
+          {
+            "file": "trane_dc_inverter_technical.pdf",
+            "page": 65
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4127
+      },
+      {
+        "id": 18,
+        "question": "how do the indoor and outdoor units communicate",
+        "answer": "The indoor and outdoor units of a ComfortBridge/ComfortNet system exchange data over a **two\u2011wire digital link** that is powered by 24\u202fVAC.  \n* The two wires are labeled **1** and **2** and are the only data lines required between the indoor and outdoor units. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=28)  \n* The thermostat supplies 24\u202fVAC to the indoor and outdoor control boards and also sends analog 24\u202fVAC commands to both units. [[2]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=13)  \n* Over the 1\u20112 wire link the indoor board can **request and receive information** from the outdoor unit, and the outdoor unit can also send commands back to the indoor unit, creating a two\u2011way\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 28)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=28)\n2. [goodman_gvxc_service.pdf (Page 13)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/908-goodman_gvxc_service.pdf#page=13)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 28
+          },
+          {
+            "file": "goodman_gvxc_service.pdf",
+            "page": 13
+          }
+        ],
+        "failures": [
+          "did not cite: trane_dc_inverter_technical.pdf p[65]",
+          "missing required text: '24V'"
+        ],
+        "kind": "grounded",
+        "passed": false,
+        "cited_correctly": false,
+        "history_id": 4128
+      },
+      {
+        "id": 19,
+        "question": "what does a run capacitor actually do",
+        "answer": "A run capacitor is wired across the auxiliary and main windings of a single\u2011phase permanent\u2011split capacitor motor. Its primary job is to reduce the line current while greatly improving the motor\u2019s torque characteristics. It does this by using the 90\u00b0 phase relationship between the capacitor current and voltage together with the motor windings, so that the motor behaves as if it were running on two phases even though it is connected to a single\u2011phase circuit. The capacitor also improves the power factor, which further lowers the line current to the motor. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=35)\n\n\n\n**Sources:**\n1. [goodman_gszc7_service.pdf (Page 35)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/907-goodman_gszc7_service.pdf#page=35)",
+        "cited": [
+          {
+            "file": "goodman_gszc7_service.pdf",
+            "page": 35
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4129
+      },
+      {
+        "id": 20,
+        "question": "when should I take the cap off the connecting pipe",
+        "answer": "The cap on the connecting pipe should **not be removed until the pipe is actually being connected**. Keeping the cap on prevents dampness or dirt from entering the pipe. When you are ready to attach the pipe, you can then remove the cap and proceed with the connection. [[1]](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=29)\n\n\n\n**Sources:**\n1. [trane_minisplit_hw_inverter.pdf (Page 29)](https://storage.googleapis.com/docsynth-fbb02.appspot.com/workspaces/7354/910-trane_minisplit_hw_inverter.pdf#page=29)",
+        "cited": [
+          {
+            "file": "trane_minisplit_hw_inverter.pdf",
+            "page": 29
+          }
+        ],
+        "failures": [],
+        "kind": "grounded",
+        "passed": true,
+        "cited_correctly": true,
+        "history_id": 4130
+      }
+    ]
+  ],
+  "stability": {
+    "1": 0,
+    "2": 1,
+    "3": 0,
+    "4": 1,
+    "5": 1,
+    "6": 1,
+    "7": 0,
+    "8": 0,
+    "9": 1,
+    "10": 0,
+    "11": 0,
+    "12": 1,
+    "13": 0,
+    "14": 1,
+    "15": 0,
+    "16": 1,
+    "17": 1,
+    "18": 0,
+    "19": 1,
+    "20": 1
+  }
+}
