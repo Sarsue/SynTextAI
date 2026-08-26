@@ -348,8 +348,18 @@ body {
 /* ─── How it works ─────────────────────────────────────────────────────── */
 .home-steps {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 40px;
+    /* Four now, not three. A fixed repeat(3) left the fourth step orphaned on
+       a row of its own, which reads as an afterthought rather than a step. */
+    grid-template-columns: repeat(4, 1fr);
+    gap: 36px;
+}
+
+@media (max-width: 980px) {
+    .home-steps { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 560px) {
+    .home-steps { grid-template-columns: 1fr; }
 }
 
 .home-step-n {
@@ -658,4 +668,138 @@ body {
 .home-vpanel-writes li::before {
     content: '+';
     font-weight: 600;
+}
+
+/* Product shots, the price, and the founder note
+   ==================================================================
+   Added when the page stopped being a wall of claims. Everything here
+   exists to answer a question a stranger actually has: what does it
+   look like, what does it cost, and who is behind it. */
+
+/* The price, stated. It was 10px grey under the buttons, which is how a
+   page looks when it is apologising for its own number. */
+.home-price-line {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin: 22px 0 0;
+}
+
+.home-price-line strong {
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+/* A shot on its own, under the hero. */
+.home-shot {
+    max-width: 940px;
+    margin: 0 auto;
+    padding: 0 24px 72px;
+    text-align: center;
+}
+
+.home-shot img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    /* Lifted off the page, because a screenshot flat on a white background
+       reads as a diagram rather than a thing that exists. */
+    box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.28);
+}
+
+.home-shot-caption {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin: 16px auto 0;
+    max-width: 46ch;
+    line-height: 1.5;
+}
+
+/* One thing, said and then shown. */
+.home-thing {
+    display: grid;
+    grid-template-columns: 0.85fr 1.15fr;
+    gap: 56px;
+    align-items: center;
+    padding: 56px 0;
+}
+
+.home-thing + .home-thing {
+    border-top: 1px solid var(--border-color);
+}
+
+.home-thing--reverse .home-thing-text { order: 2; }
+.home-thing--reverse .home-thing-shot { order: 1; }
+
+.home-thing-n {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.home-thing-text h3 {
+    font-size: 1.4rem;
+    line-height: 1.25;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+}
+
+.home-thing-text p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0 0 12px;
+}
+
+.home-thing-note {
+    font-size: 0.85rem !important;
+    color: var(--text-muted) !important;
+    padding-left: 12px;
+    border-left: 2px solid var(--border-color);
+}
+
+.home-thing-shot img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 18px 44px -20px rgba(0, 0, 0, 0.24);
+}
+
+/* The one signed part of the page. */
+.home-note {
+    max-width: 60ch;
+    margin: 0 auto;
+    padding: 34px 0;
+}
+
+.home-note p {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    margin: 0 0 16px;
+}
+
+.home-note-sign {
+    font-size: 0.88rem !important;
+    color: var(--text-muted) !important;
+    margin-top: 26px !important;
+}
+
+@media (max-width: 860px) {
+    .home-thing {
+        grid-template-columns: 1fr;
+        gap: 28px;
+        padding: 40px 0;
+    }
+    /* On one column the words come first, always. Reversing on mobile puts
+       a picture above the sentence that explains it. */
+    .home-thing--reverse .home-thing-text { order: 1; }
+    .home-thing--reverse .home-thing-shot { order: 2; }
+    .home-shot { padding-bottom: 48px; }
 }

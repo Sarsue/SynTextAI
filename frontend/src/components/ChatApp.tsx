@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { parseServerTime } from '../utils/serverTime';
 
 import { useNavigate, useLocation } from 'react-router-dom';
 import ConversationView from './ConversationView';
@@ -808,7 +809,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     id: m.id ?? Date.now(),
                     content: m.content,
                     sender: m.sender === 'bot' ? 'bot' : 'user',
-                    timestamp: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString(),
+                    // parseServerTime, because the API sends naive UTC and new Date()
+                    // would read it as local, shifting every message by the
+                    // viewer's own offset.
+                    timestamp: (parseServerTime(m.timestamp) ?? new Date()).toISOString(),
                     feedback: m.feedback ?? null,
                 }))
             : [];
