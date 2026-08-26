@@ -16,6 +16,7 @@ than by a flag somebody remembers to check.
 """
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
@@ -28,7 +29,7 @@ from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from ..core.utils import upload_bytes_to_gcs
 from ..repositories.repository_manager import RepositoryManager
 from ..services.document_export import markdown_to_docx, markdown_to_pdf, safe_filename
-from ..services.llm_service import generate_explanation
+from ..services.llm_service import gradient_chat
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,30 @@ drafts_router = APIRouter(prefix="/api/v1/drafts", tags=["drafts"])
 # document wants the breadth of what the workspace says on the subject.
 DRAFT_TOP_K = 30
 
+# A document is several times longer than an answer, and this is NOT the chat
+# path's budget.
+#
+# Drafting went through generate_explanation first, which hardcodes 1500
+# completion tokens because that is right for an answer. Reasoning is spent from
+# the SAME allowance as the output, so a two-page SOP with a table sometimes
+# reasoned its way through the whole budget and returned an empty string: the
+# request succeeded, `_has_content` rejected it, all three attempts failed, and
+# the customer got "Could not write the document. Try again." on roughly one
+# attempt in four. The same trap is recorded in llm_service beside
+# reasoning_effort, where raising the answer path to medium silently broke query
+# expansion.
+DRAFT_MAX_TOKENS = int(os.getenv("DRAFT_MAX_TOKENS", "4000"))
+# And spend that allowance writing rather than thinking. The grounding rules are
+# explicit instructions to follow, not a problem to reason about.
+DRAFT_REASONING_EFFORT = os.getenv("DRAFT_REASONING_EFFORT", "low").strip().lower()
+
 
 class GenerateRequest(BaseModel):
     workspace_id: int
     prompt: str = Field(..., min_length=3, max_length=2000)
-    title: Optional[str] = Field(None, max_length=200)
+    # No title field. A draft names itself from its own opening heading, and the
+    # document view renames it afterwards, so a third way to set it was an
+    # argument nothing could pass.
     # Whether the conversation so far is part of what this is written from.
     # Off by default: most drafts are written from documents, and silently
     # folding in an unrelated chat is a surprising way to get a wrong document.
@@ -129,10 +149,10 @@ async def generate_draft(
         )
 
     numbered, sources = _context_and_sources(passages)
-    content = await generate_explanation(
+    content = await gradient_chat(
         _draft_prompt(body.prompt, numbered, history_text),
-        language="English",
-        comprehension_level="professional",
+        max_tokens=DRAFT_MAX_TOKENS,
+        reasoning_effort=DRAFT_REASONING_EFFORT,
     )
     if not content or not content.strip():
         raise HTTPException(
@@ -147,7 +167,7 @@ async def generate_draft(
         # hygiene quick reference for new staff. Use a table for when to..." is
         # what somebody typed; "Hand Hygiene Quick Reference" is what they
         # wanted, and it is also the filename of the .docx they download.
-        title=(body.title or _heading_of(content) or _title_from(body.prompt)),
+        title=(_heading_of(content) or _title_from(body.prompt)),
         prompt=body.prompt,
         content=content.strip(),
         sources=sources,

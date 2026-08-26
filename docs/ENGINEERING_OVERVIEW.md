@@ -162,8 +162,15 @@ it ranked them identically and cited whichever matched better. `files` carried
 a document became true. The customer's own feedback was the only thing that ever
 noticed: *"cited the 2019 policy, we are on the 2024 one"*.
 
-`files` now carries `effective_date` and `superseded_by_id`, and `hybrid_search`
-skips any file with a replacement.
+`files` now carries `superseded_by_id`, and `hybrid_search` skips any file with
+a replacement.
+
+An `effective_date` column shipped here first and was removed before release.
+Nothing set it, nothing displayed it, and retrieval did not read it: a date that
+looks like it decides which document answers, and does not, is a trap. The
+supersede link answers "which one is true" definitively and is enforced in the
+query. If a customer asks to see effective dates, that is a column plus a UI
+plus a decision about ranking, and it starts from measurement.
 
 **The link points forward, from the old file to the new one.** Retrieval asks
 "is this still current?" about every candidate row it has already joined `files`
@@ -335,6 +342,69 @@ had already written rather than markdown the model produced:
 ### Not done
 
 Nothing on this feature. Both formats ship.
+
+## Finishing the two features, 2026-08-26
+
+Both shipped with edges left open. Every one below is closed; they are recorded
+because each was invisible from the tests and visible the moment somebody used
+the app.
+
+**A dead column.** `files.effective_date` had a migration, an ORM field, an API
+field and a TypeScript type, and no reader anywhere. Removed rather than
+completed, for the reason above. The migration was amended rather than followed
+by a drop, because none of this had reached master.
+
+**Writing a document failed roughly one attempt in four.** Drafting went through
+`generate_explanation`, which hardcodes 1500 completion tokens because that is
+right for a chat answer. Reasoning is spent from the SAME allowance as the
+output, so a two-page SOP with a table sometimes reasoned through the whole
+budget and returned an empty string: the request succeeded, `_has_content`
+rejected it, all three attempts failed, and the customer got "Could not write
+the document. Try again." Drafting now calls `gradient_chat` directly with
+`DRAFT_MAX_TOKENS` (4000) and `DRAFT_REASONING_EFFORT` (low). Two failures in
+about seven attempts before; six for six after. The identical trap is recorded
+in `llm_service` beside `reasoning_effort`, where raising the answer path to
+medium silently broke query expansion.
+
+**Writing from the conversation was unreachable.** `history_id` was built,
+tenant-scoped and never sent by the app, and had no test. There is now a
+checkbox, offered only when a conversation is on screen and never applied
+silently, and three tests: the conversation reaches the prompt when asked for,
+does not when it is not, and a conversation belonging to another workspace is
+not read at all.
+
+**The drafts list was fetched once per mount.** A document written in another
+tab, or approved from the document view, stayed invisible until the whole page
+was reloaded. It now reloads when the panel is opened and when the tab comes
+back to the front, and pages beyond the first twenty.
+
+**Opening a document hid the chat with no reliable way back.** The X sits in a
+corner a toast can cover, which is how this was found: there was a moment with
+no reachable route to the answer. Escape closes it now, except while a
+confirmation is up or a field has focus, and asking a question or running a
+search closes it too, because the result renders where the document was.
+
+**The request that produced a draft was stored and never shown**, though the
+schema comment claimed it was kept so the customer could see it. Now a collapsed
+"What this was asked for".
+
+**An unsettable `title` on the generate endpoint.** A draft names itself from
+its own opening heading and the document view renames it, so a third route was
+an argument nothing could pass.
+
+### One that was not ours, and two wrong diagnoses before it
+
+Every local session logged "WebSocket connection failed" while the indicator
+read Connected. The first guess was that Vite does not proxy `ws://`; it does,
+with `ws: true`. The second was React StrictMode double-mounting; there is no
+StrictMode in this app.
+
+The actual cause: `initializeWebSocket` checked `socketRef.current` BEFORE
+awaiting `getIdToken()` and assigned it after, so two calls both saw null, both
+opened a socket, and the first was orphaned mid-handshake with nothing holding a
+reference to close it. A `connectingRef` claimed synchronously fixes it.
+Measured after: one socket per page load, accepted and authenticated, where
+there had been two.
 
 ## Decisions not to re-litigate
 

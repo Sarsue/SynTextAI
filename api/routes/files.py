@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, date
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
 from typing import List, Dict, Optional, Any, TypeVar
 from sqlalchemy.orm import Session
@@ -429,7 +429,6 @@ async def retrieve_files(
                 "created_at": f.get("created_at"),
                 "file_type": f.get("file_type"),
                 "status": f.get("processing_status", "uploaded"),
-                "effective_date": f.get("effective_date"),
                 # The list is the only place a customer can find out that a
                 # document has been replaced. Retrieval already skips it, so
                 # without this the row looks healthy and is silently never
@@ -658,16 +657,13 @@ class MoveFileRequest(BaseModel):
     workspace_id: int = Field(..., description="Target workspace ID")
 
 class CurrencyRequest(BaseModel):
-    """When a document became true, and what replaced it.
+    """Which document replaced this one.
 
-    Both fields are optional and both accept null, which is why the route reads
-    `model_fields_set` rather than checking for None: clearing a supersede link
-    is how a customer says "this is current again", and that is a different
-    request from one that never mentioned the field.
+    The field accepts null, which is why the route reads `model_fields_set`
+    rather than checking for None: clearing the link is how a customer says
+    "this is current again", and that is a different request from one that never
+    mentioned the field.
     """
-    effective_date: Optional[date] = Field(
-        None, description="The date this document takes effect. Null clears it."
-    )
     superseded_by_id: Optional[int] = Field(
         None, description="The document that replaced this one. Null clears it."
     )
@@ -680,7 +676,7 @@ async def set_file_currency(
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
 ):
-    """Mark a document's effective date, or the document that replaced it.
+    """Mark the document that replaced this one.
 
     A replaced document stops answering questions. That is the point: a
     workspace holding both the 2019 policy and the 2024 one cited whichever
@@ -743,8 +739,6 @@ async def set_file_currency(
 
     ok = await store.file_repo.set_document_currency(
         file_id,
-        effective_date=body.effective_date if 'effective_date' in fields else None,
-        set_effective_date='effective_date' in fields,
         superseded_by_id=superseded_by_id,
         set_superseded_by='superseded_by_id' in fields,
     )
@@ -766,7 +760,6 @@ async def set_file_currency(
     updated = await store.file_repo.get_file_by_id(file_id)
     return {
         "file_id": file_id,
-        "effective_date": updated.get('effective_date'),
         "superseded_by_id": updated.get('superseded_by_id'),
     }
 

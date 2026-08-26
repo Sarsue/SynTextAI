@@ -176,13 +176,20 @@ async def test_owner_can_mark_a_document_replaced(store, tenant, policies, clien
     assert res.json()["superseded_by_id"] == policies["new"]
 
 
-async def test_effective_date_round_trips(store, tenant, policies, client):
+async def test_a_field_the_route_does_not_know_is_not_an_update(
+    store, tenant, policies, client
+):
+    """An `effective_date` column shipped here first and was removed before
+    release: nothing set it, nothing showed it, and retrieval did not read it.
+
+    A body carrying only unknown fields must be refused rather than silently
+    accepted, or a caller written against a field that no longer exists gets a
+    200 back and believes it worked."""
     res = await client.as_(tenant.owner).patch(
-        f"/api/v1/files/{policies['new']}/currency",
+        f"/api/v1/files/{policies['old']}/currency",
         json={"effective_date": "2024-03-01"},
     )
-    assert res.status_code == 200, res.text
-    assert res.json()["effective_date"] == "2024-03-01"
+    assert res.status_code == 400
 
 
 async def test_an_empty_body_is_refused(store, tenant, policies, client):

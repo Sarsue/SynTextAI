@@ -84,6 +84,27 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
     const [saved, setSaved] = useState({ title: '', content: '' });
     const dirty = title !== saved.title || content !== saved.content;
 
+    // Escape closes the document. The X is in the corner and a toast can sit on
+    // top of it, which is how this was found: there was a moment with no
+    // reachable way back to the chat.
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return;
+            // Not while a confirmation is up: Escape belongs to the dialog then.
+            if (confirmIngest || confirmDelete) return;
+            const el = document.activeElement as HTMLElement | null;
+            // Not while editing, or Escape would throw away what they typed
+            // with no warning.
+            if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) {
+                el.blur();
+                return;
+            }
+            onClose();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose, confirmIngest, confirmDelete]);
+
     const authFetch = useCallback(async (url: string, init: RequestInit = {}) => {
         const idToken = await user!.getIdToken();
         return fetch(url, {
@@ -289,6 +310,16 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
                     Check it before anyone relies on it.
                 </span>
             </div>
+
+            {/* What was asked for. Somebody reviewing a document a colleague
+                generated cannot judge it without knowing the request it
+                answers, and the draft has carried this since it was written. */}
+            {draft.prompt && (
+                <details className="draft-request">
+                    <summary>What this was asked for</summary>
+                    <p>{draft.prompt}</p>
+                </details>
+            )}
 
             {inKnowledgeBase ? (
                 <div className="draft-ingested-note">

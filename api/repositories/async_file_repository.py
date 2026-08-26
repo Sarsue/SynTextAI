@@ -97,7 +97,6 @@ def _serialize_file(file_orm) -> Dict[str, Any]:
         'workspace_id': file_orm.workspace_id,
         'processing_status': file_orm.processing_status,
         'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None,
-        'effective_date': file_orm.effective_date.isoformat() if file_orm.effective_date else None,
         'superseded_by_id': file_orm.superseded_by_id,
     }
 
@@ -546,7 +545,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                     FileORM.processing_status,
                     FileORM.file_type,
                     FileORM.workspace_id,
-                    FileORM.effective_date,
                     FileORM.superseded_by_id
                 ).where(*conditions).order_by(FileORM.created_at.desc()).offset(skip).limit(limit)
                 result = await session.execute(stmt)
@@ -563,7 +561,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                         "file_type": file.file_type,
                         "workspace_id": file.workspace_id,
                         "created_at": file.created_at.isoformat() if file.created_at else None,
-                        "effective_date": file.effective_date.isoformat() if file.effective_date else None,
                         # Present so the list can mark a document as replaced.
                         # Retrieval already skips these; without it here a
                         # customer sees the document sitting in the list and
@@ -918,8 +915,6 @@ class AsyncFileRepository(AsyncBaseRepository):
         self,
         file_id: int,
         *,
-        effective_date=None,
-        set_effective_date: bool = False,
         superseded_by_id: Optional[int] = None,
         set_superseded_by: bool = False,
     ) -> bool:
@@ -940,8 +935,6 @@ class AsyncFileRepository(AsyncBaseRepository):
                 file_orm = (await session.execute(stmt)).scalar_one_or_none()
                 if not file_orm:
                     return False
-                if set_effective_date:
-                    file_orm.effective_date = effective_date
                 if set_superseded_by:
                     file_orm.superseded_by_id = superseded_by_id
                 await session.commit()

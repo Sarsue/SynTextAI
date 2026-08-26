@@ -155,6 +155,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     // Placeholder chat handlers - implement actual logic as needed
     const handleSendMessage = async (messageContent: string, historyId: number | null, attachments?: File[]) => {
+        // Asking a question means the answer is what they want to look at, and
+        // the answer renders where the document is. Leaving the document open
+        // sent the reply somewhere they could not see.
+        setOpenDraftId(null);
         console.log('handleSendMessage called with:', { messageContent, historyId, attachments });
         trackAction('send_message', 'chat', historyId?.toString());
         setIsSending(true);
@@ -482,6 +486,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
      * at, the same as everything else on this screen.
      */
     const handleSearch = async (query: string) => {
+        // Same reason as sending a message: results render in the main area.
+        setOpenDraftId(null);
         const trimmed = query.trim();
         if (!trimmed) return;
 
@@ -997,6 +1003,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                     <DraftsPanel
                         workspaceId={currentWorkspaceId}
                         canManageDocuments={orgContext ? orgContext.can_manage_documents : true}
+                        historyId={currentHistory}
                         onOpenDraft={(id) => { setOpenDraftId(id); setActiveTab('chat'); }}
                         refreshKey={draftsRefreshKey}
                     />

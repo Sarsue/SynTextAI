@@ -290,10 +290,10 @@ async def test_a_generated_draft_is_saved_but_not_retrievable(
 ):
     async def fake_embedding(text):
         return QUERY_VEC
-    async def fake_generate(prompt, language=None, comprehension_level=None):
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
         return "# Fire Safety\n\nExtinguishers are checked every 77 months."
     monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
-    monkeypatch.setattr(drafts_route, "generate_explanation", fake_generate)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
 
     res = await client.as_(tenant.owner).post(
         "/api/v1/drafts/generate",
@@ -499,10 +499,10 @@ async def test_the_title_comes_from_the_document_not_the_request(
     and it is also the filename of the .docx they download."""
     async def fake_embedding(text):
         return QUERY_VEC
-    async def fake_generate(prompt, language=None, comprehension_level=None):
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
         return "# Hand Hygiene Quick Reference\n\n## When to wash\n\nWhen visibly soiled."
     monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
-    monkeypatch.setattr(drafts_route, "generate_explanation", fake_generate)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
 
     res = await client.as_(tenant.owner).post(
         "/api/v1/drafts/generate",
@@ -758,3 +758,159 @@ def test_a_list_still_ends_when_the_document_moves_on():
     )
     kinds = [b.kind for b in blocks]
     assert kinds == ["list", "paragraph", "list"], kinds
+
+
+# --- writing from the conversation --------------------------------------------
+
+async def test_the_conversation_reaches_the_prompt_when_asked_for(
+    store, tenant, paying, workspace, client, monkeypatch
+):
+    """A document written "from this conversation" has to actually see it.
+
+    The capability shipped with no way to reach it from the app and no test, so
+    it worked by inspection only. This is the test that says it works.
+    """
+    history_id = await store.chat_repo.add_chat_history(
+        "Sterilisation", tenant.owner, workspace_id=workspace["id"]
+    )
+    await store.chat_repo.add_message(
+        "We autoclave at 134 for 3 minutes.", "user", tenant.owner, history_id
+    )
+
+    seen = {}
+
+    async def fake_embedding(text):
+        return QUERY_VEC
+
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
+        seen["prompt"] = prompt
+        return "# SOP\n\nSomething."
+
+    monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/drafts/generate",
+        json={"workspace_id": workspace["id"], "prompt": "write an SOP",
+              "history_id": history_id},
+    )
+    assert res.status_code == 201, res.text
+    assert "autoclave at 134 for 3 minutes" in seen["prompt"], (
+        "the conversation was asked for and did not reach the model"
+    )
+
+
+async def test_the_conversation_is_left_out_unless_asked_for(
+    store, tenant, paying, workspace, client, monkeypatch
+):
+    """Folding a chat in by default is a surprising way to get a wrong document."""
+    history_id = await store.chat_repo.add_chat_history(
+        "Unrelated", tenant.owner, workspace_id=workspace["id"]
+    )
+    await store.chat_repo.add_message(
+        "Discussing the office coffee machine.", "user", tenant.owner, history_id
+    )
+
+    seen = {}
+
+    async def fake_embedding(text):
+        return QUERY_VEC
+
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
+        seen["prompt"] = prompt
+        return "# SOP\n\nSomething."
+
+    monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/drafts/generate",
+        json={"workspace_id": workspace["id"], "prompt": "write an SOP"},
+    )
+    assert res.status_code == 201, res.text
+    assert "coffee machine" not in seen["prompt"]
+
+
+async def test_a_conversation_from_another_workspace_is_not_read(
+    store, tenant, paying, workspace, client, monkeypatch
+):
+    """The id arrives from the browser and is not evidence of anything.
+
+    Without the workspace check, another workspace's conversation would be read
+    straight into a document, which is that conversation leaving the room it
+    belongs to.
+    """
+    elsewhere = await tenant.workspace("Elsewhere")
+    history_id = await store.chat_repo.add_chat_history(
+        "Private", tenant.owner, workspace_id=elsewhere
+    )
+    await store.chat_repo.add_message(
+        "Confidential settlement figure is 45000.", "user", tenant.owner, history_id
+    )
+
+    seen = {}
+
+    async def fake_embedding(text):
+        return QUERY_VEC
+
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
+        seen["prompt"] = prompt
+        return "# SOP\n\nSomething."
+
+    monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/drafts/generate",
+        json={"workspace_id": workspace["id"], "prompt": "write an SOP",
+              "history_id": history_id},
+    )
+    assert res.status_code == 201, res.text
+    assert "45000" not in seen["prompt"], (
+        "a conversation from another workspace was read into the document"
+    )
+
+
+def test_drafting_asks_for_more_room_than_a_chat_answer():
+    """The budget is the whole reason drafting stopped failing intermittently.
+
+    generate_explanation hardcodes 1500 completion tokens, which is right for an
+    answer. Reasoning is spent from the same allowance as the output, so a
+    two-page SOP with a table sometimes reasoned through the entire budget and
+    came back empty: the request succeeded, the content check rejected it, and
+    the customer saw "Could not write the document" on roughly one attempt in
+    four. If a refactor routes drafting back through the chat helper, this fails
+    rather than the customer finding out.
+    """
+    assert drafts_route.DRAFT_MAX_TOKENS >= 3000, (
+        "a document does not fit in a chat answer's budget"
+    )
+    assert drafts_route.DRAFT_REASONING_EFFORT in ("low", "none", ""), (
+        "reasoning is spent from the same allowance as the writing"
+    )
+
+
+async def test_the_budget_actually_reaches_the_model(
+    store, tenant, paying, workspace, client, monkeypatch
+):
+    """Asserting the constant is not the same as asserting it is passed."""
+    seen = {}
+
+    async def fake_embedding(text):
+        return QUERY_VEC
+
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
+        seen["max_tokens"] = max_tokens
+        seen["reasoning_effort"] = reasoning_effort
+        return "# SOP\n\nSomething."
+
+    monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/drafts/generate",
+        json={"workspace_id": workspace["id"], "prompt": "write an SOP"},
+    )
+    assert res.status_code == 201, res.text
+    assert seen["max_tokens"] == drafts_route.DRAFT_MAX_TOKENS
+    assert seen["reasoning_effort"] == drafts_route.DRAFT_REASONING_EFFORT
