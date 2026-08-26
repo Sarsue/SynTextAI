@@ -989,66 +989,6 @@ class AsyncFileRepository(AsyncBaseRepository):
         # Ran out of hops without terminating, which is itself a broken chain.
         return True
 
-    async def degraded_files(self, workspace_id: int) -> Dict[int, str]:
-        """Documents in this workspace that cannot answer questions properly.
-
-        Two different faults, and they need different words to the customer
-        because only one of them is fixable from our side.
-
-        DEAD: `chunks.content` is NULL. That column only exists from
-        2026-08-06, so anything ingested before it has vectors made from text
-        stored nowhere. Both keyword arms rank `chunks.tsv`, which is generated
-        from that same column, so those chunks cannot be matched by words at
-        all, and they cannot be re-embedded either because the text they were
-        made from is gone. The only fix is uploading the document again, and
-        the customer is the only one who can do that.
-
-        STALE: the vectors were written by a different embedding model. Same
-        dimensions, so nothing errors: the distance calculation is perfectly
-        happy and the answer cites confidently from whatever landed nearest. On
-        one benchmark corpus this stopped 11 of 17 questions retrieving their
-        source. Repairable by re-embedding, which `reembed_chunks.py` does.
-
-        A NULL `embedding_model` is UNKNOWN, not stale, and is deliberately not
-        reported. The column is new, so almost every existing row is NULL:
-        counting those as stale flagged 2,528 of 2,650 chunks on the local
-        database, which is a badge on nearly every document a customer owns and
-        therefore no signal at all. Some of those vectors are perfectly current.
-        Deciding which needs the cosine sample in `reembed_chunks.py --check`,
-        and that script stamps the model when it repairs, so the unknowns
-        resolve as they are touched rather than by guessing about them now.
-
-        Returns {file_id: "dead" | "stale"}. Dead wins when a file has both,
-        because it is the one the customer has to act on.
-        """
-        async with self.get_async_session() as session:
-            rows = (await session.execute(
-                text(
-                    """
-                    SELECT c.file_id,
-                           count(*) FILTER (WHERE c.content IS NULL) AS dead,
-                           count(*) FILTER (
-                               WHERE c.content IS NOT NULL
-                                 AND c.embedding_model IS NOT NULL
-                                 AND c.embedding_model <> :model
-                           ) AS stale
-                    FROM chunks c
-                    JOIN files f ON f.id = c.file_id
-                    WHERE f.workspace_id = :workspace_id
-                    GROUP BY c.file_id
-                    """
-                ),
-                {"workspace_id": int(workspace_id), "model": CURRENT_EMBEDDING_MODEL},
-            )).all()
-
-        out: Dict[int, str] = {}
-        for file_id, dead, stale in rows:
-            if dead:
-                out[int(file_id)] = "dead"
-            elif stale:
-                out[int(file_id)] = "stale"
-        return out
-
     async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get a file record by ID.
 

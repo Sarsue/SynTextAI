@@ -31,11 +31,6 @@ export interface UploadedFile {
     // answering questions, so the list has to say so: otherwise it sits there
     // looking healthy and is never cited, with nothing explaining why.
     superseded_by_id?: number | null;
-    /** Why this document cannot answer questions properly, if it cannot.
-     *  'dead'  the text it was made from is not stored, so it is invisible to
-     *          keyword search and cannot be repaired. Only a re-upload fixes it.
-     *  'stale' its vectors came from a retired embedding model. Repairable. */
-    health?: 'dead' | 'stale' | null;
 }
 
 export interface KeyConcept {

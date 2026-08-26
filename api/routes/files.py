@@ -447,24 +447,6 @@ async def retrieve_files(
         db_files = paginated_result.get('items', [])
         total_files = paginated_result.get('total', 0)
 
-        # Which of these cannot actually answer questions. One query for the
-        # page, not one per file, and only when a workspace is in scope: the
-        # unscoped listing spans workspaces and this is a per-workspace
-        # question.
-        #
-        # Surfaced here because the file list is the ONLY place a customer
-        # would ever find out. A document with dead chunks looks completely
-        # healthy: it lists, it opens, it says Ready. It simply never comes
-        # back in an answer, and the customer concludes the product is bad at
-        # its job rather than that this one file needs uploading again.
-        degraded = {}
-        if workspace_id is not None:
-            try:
-                degraded = await store.file_repo.degraded_files(workspace_id)
-            except Exception as e:
-                # A diagnostic must never take the list down with it.
-                logger.warning(f"Could not check document health in {workspace_id}: {e}")
-
         # Construct the response to match the frontend's expectation
         response_items = [
             {
@@ -479,9 +461,6 @@ async def retrieve_files(
                 # without this the row looks healthy and is silently never
                 # cited, which is the confusion this feature exists to remove.
                 "superseded_by_id": f.get("superseded_by_id"),
-                # "dead" needs re-uploading and only the customer can do it.
-                # "stale" is repairable from our side. None means healthy.
-                "health": degraded.get(f["id"]),
             }
             for f in db_files
         ]

@@ -156,28 +156,26 @@ enough until a customer says otherwise.
   consults it correctly, and it does nothing about a bad query inside an
   authorized route. Verified to fail on a deliberately unscoped route before
   being trusted.
-- **Vectors from a retired model, and documents whose text was never stored,
-  are now visible in the product.** Both used to need somebody to remember to
-  run `reembed_chunks.py --check`, which had never been run in production.
+- **The next embedding model change will be visible.** `chunks.embedding_model`
+  records which model wrote each vector, written on ingest and stamped by
+  `reembed_chunks.py` when it repairs. The move from voyage-3.5-lite to
+  Qwen3-Embedding-0.6B errored nowhere, cost 11 of 17 benchmark questions their
+  source, and was found by hand days later. Next time it is a column
+  comparison.
 
-  `chunks.embedding_model` records which model wrote each vector, so staleness
-  is a column comparison rather than an inference call per workspace. The file
-  list reports `health` per document: `dead` (text never stored, invisible to
-  keyword search, only a re-upload fixes it) or `stale` (retired model,
-  repairable from our side). The knowledge base shows a badge for each, with
-  different words, because only one of them is the customer's to act on.
+  **Measured on production 2026-08-26, and it is clean.** 881 chunks across 2
+  documents in one workspace, 0 with a null `content`, everything ingested
+  2026-08-15, which is after the model move. The two files that predate it never
+  ingested at all. Retrieval verified against the live API: "service procedure"
+  returns 20 pages, "torque" and "temperature" both hit.
 
-  **A NULL `embedding_model` is "not measured", not "stale", and is not
-  reported.** The column is new, so almost every existing row is NULL: counting
-  those as stale flagged 2,528 of 2,650 chunks locally, a warning on nearly
-  every document somebody owns, which is no signal at all. Some of those vectors
-  are current. Deciding which still needs the cosine sample, and
-  `reembed_chunks.py` now stamps the model when it repairs, so unknowns resolve
-  as they are touched rather than by guessing about them now.
+  Detection and a UI badge for those faults were built and then removed the same
+  day. A new dead chunk cannot be created since `chunks.content` started being
+  written on 2026-08-06, so that half guarded a condition that neither exists nor
+  can recur. The lesson is not "do not build defences", it is that the question
+  "how many are there in production" was a database query available the whole
+  time, and it was asked after the code rather than before it.
 
-  Still outstanding: nobody has run the check against production, and the 122
-  dead chunks on the local database have production equivalents nobody has
-  counted.
 - **Rate limits** (30/min chat, 10/min upload, per IP) are a first-pass guess.
 
 **Parked, one customer away**

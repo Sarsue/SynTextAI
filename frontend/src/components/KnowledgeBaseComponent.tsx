@@ -16,7 +16,6 @@ import {
     Trash2,
     Archive,
     RotateCcw,
-    AlertTriangle,
     ChevronLeft,
     ChevronRight,
 } from 'lucide-react';
@@ -345,28 +344,6 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
                                                 cited. Without it the row looks
                                                 healthy and silently answers
                                                 nothing. */}
-                                            {/* A document that lists, opens and says
-                                                Ready, and never comes back in an
-                                                answer. Without this the customer
-                                                concludes the product is bad at its
-                                                job rather than that this one file
-                                                needs uploading again. */}
-                                            {currentFile.health === 'dead' && (
-                                                <span
-                                                    className="file-health-badge is-dead"
-                                                    title="This document was added before we stored the text alongside its index, so it cannot be searched by keyword and cannot be repaired. Upload it again to fix it."
-                                                >
-                                                    <AlertTriangle className="size-3" /> Re-upload needed
-                                                </span>
-                                            )}
-                                            {currentFile.health === 'stale' && (
-                                                <span
-                                                    className="file-health-badge is-stale"
-                                                    title="This document was indexed with an older model, so it may not be found by questions it should answer. We can repair this without you doing anything."
-                                                >
-                                                    <AlertTriangle className="size-3" /> Needs reindexing
-                                                </span>
-                                            )}
                                             {currentFile.superseded_by_id && (
                                                 <span className="file-replaced-badge" title="Replaced by a newer document, so it is not used in answers">
                                                     <Archive className="size-3" /> Replaced

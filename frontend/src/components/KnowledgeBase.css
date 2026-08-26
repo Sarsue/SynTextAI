@@ -275,31 +275,3 @@
     background: transparent;
     white-space: nowrap;
 }
-
-/* Documents that cannot answer questions properly
-   ------------------------------------------------------------------
-   Both of these look completely healthy otherwise: they list, they open,
-   they say Ready. They simply never come back in an answer. Amber, not
-   red: nothing is broken, something needs doing. */
-
-.file-health-badge {
-    margin-left: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    line-height: 1;
-    padding: 2px 6px;
-    border-radius: 999px;
-    white-space: nowrap;
-    color: #8a5a00;
-    border: 1px solid rgba(180, 120, 0, 0.4);
-    background: rgba(180, 120, 0, 0.08);
-}
-
-/* The one the customer has to act on themselves. */
-.file-health-badge.is-dead {
-    color: #9a4a00;
-    border-color: rgba(180, 80, 0, 0.45);
-    background: rgba(180, 80, 0, 0.09);
-}
