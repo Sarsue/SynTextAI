@@ -202,11 +202,21 @@ const Home: React.FC = () => {
                     no subscription is entitled to nothing. Promising otherwise
                     sold the one thing the product does not do, and the person
                     who believed it found out at the payment form. */}
-                <div className="home-price">
-                    <span className="home-price-num">$99</span>
-                    <span className="home-price-per">a month, the whole practice</span>
-                    <span className="home-price-meta">10 seats included · Cancel anytime</span>
-                </div>
+                {/* A price in the hero, because Guru and Glean cannot put one on a
+                    page at all and making somebody scroll past four sections to
+                    learn the cost throws that away.
+
+                    But not a giant $99 shouting "the whole practice". There are
+                    two plans and $99 covers ten seats, so a twenty-five person
+                    practice read the hero, scrolled to the cards, and found
+                    $249: a small broken promise discovered at the exact moment
+                    they were deciding. The cards carry the detail; this says
+                    enough to know it is affordable and nothing it has to walk
+                    back. */}
+                <p className="home-price">
+                    <strong>$99 a month</strong> for 10 people, then $9 each.
+                    <span className="home-price-meta">Cancel anytime.</span>
+                </p>
             </section>
 
             {/* The product, in the first screen. A real answer, from real
