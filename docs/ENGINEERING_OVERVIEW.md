@@ -80,6 +80,8 @@ Live in production.
 - Import from Google Drive through the picker, `drive.file` only.
 - **Document currency**: mark a document as replaced by a newer one, and it
   stops answering questions. See below.
+- **Vision cautions reach the reader**: a page read off a figure that the text
+  layer could not confirm now says so, in the answer and on the citation.
 - **Documents SyntextAI writes**: ask for an SOP or a summary, get it written
   from the workspace's own documents, edit it, download it as Word, and approve
   it into the knowledge base. Approval is the only way one ever answers a
@@ -117,15 +119,12 @@ enough until a customer says otherwise.
    SyntextAI where it applies, custom-built everywhere else". syntextai.com
    claims only cited answers from your documents, which is what ships. Do not
    re-raise this as a liability.
-4. **Vision verification flags have no UI.** The data reaches
-   `segments.meta_data` and comes back from `hybrid_search` on every result.
-   Whether a citation to an unverified figure should say so, and how, is an
-   unmade design decision, not a build.
-5. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
+
+4. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
    code around them drifting.
-6. **Activity history, admin dashboard, saved prompts.** Nothing exists.
+5. **Activity history, admin dashboard, saved prompts.** Nothing exists.
 
 **Not doing, decided 2026-08-26**
 - **Email-in.** Proposed and dropped. Upload plus Drive covers ingress.
@@ -137,13 +136,46 @@ enough until a customer says otherwise.
 
 **Known risks, carried deliberately**
 - **No database-level RLS.** Application layer only, so every new route needs
-  its explicit check. ~1 week to fix. Revisit when a security questionnaire asks
-  in writing.
-- **A workspace can silently hold vectors from a retired embedding model.**
-  `api/scripts/reembed_chunks.py --check` detects it, wired into nothing.
-- **Documents ingested before 2026-08-07 have a null `chunks.content`** and no
-  fallback. Unreachable by keyword, unrepairable by re-embedding. Only fix is
-  re-upload. `reembed_chunks --check` counts them.
+  its explicit check. Revisit when a security questionnaire asks in writing.
+
+  It is a week, and the week is code rather than schema. Enabling RLS and
+  writing a policy per table is an hour. The app must then stop connecting as
+  `syntext`, which is a SUPERUSER: Postgres bypasses every policy for
+  superusers, so without a new role the policies do nothing at all. Then every
+  session has to set the tenant and reliably clear it, because connections are
+  pooled and a leaked setting means one request inherits the previous request's
+  tenant, which is worse than having none. The worker's queue poll is
+  deliberately cross-tenant and needs an explicit bypass, five tables reach
+  their tenant only through a join chain, and a policy on `chunks` lands on the
+  vector search path.
+
+  `test_every_route_is_scoped.py` covers the realistic failure in the meantime:
+  it fails when a new route neither reaches its tenant nor says in EXEMPT why it
+  needs none. That is a smoke alarm, not a sprinkler. It reads source rather
+  than behaviour, so it proves a handler CONSULTS the boundary, not that it
+  consults it correctly, and it does nothing about a bad query inside an
+  authorized route. Verified to fail on a deliberately unscoped route before
+  being trusted.
+- **The next embedding model change will be visible.** `chunks.embedding_model`
+  records which model wrote each vector, written on ingest and stamped by
+  `reembed_chunks.py` when it repairs. The move from voyage-3.5-lite to
+  Qwen3-Embedding-0.6B errored nowhere, cost 11 of 17 benchmark questions their
+  source, and was found by hand days later. Next time it is a column
+  comparison.
+
+  **Measured on production 2026-08-26, and it is clean.** 881 chunks across 2
+  documents in one workspace, 0 with a null `content`, everything ingested
+  2026-08-15, which is after the model move. The two files that predate it never
+  ingested at all. Retrieval verified against the live API: "service procedure"
+  returns 20 pages, "torque" and "temperature" both hit.
+
+  Detection and a UI badge for those faults were built and then removed the same
+  day. A new dead chunk cannot be created since `chunks.content` started being
+  written on 2026-08-06, so that half guarded a condition that neither exists nor
+  can recur. The lesson is not "do not build defences", it is that the question
+  "how many are there in production" was a database query available the whole
+  time, and it was asked after the code rather than before it.
+
 - **Rate limits** (30/min chat, 10/min upload, per IP) are a first-pass guess.
 
 **Parked, one customer away**
@@ -413,6 +445,49 @@ opened a socket, and the first was orphaned mid-handshake with nothing holding a
 reference to close it. A `connectingRef` claimed synchronously fixes it.
 Measured after: one socket per page load, accepted and authenticated, where
 there had been two.
+
+## The vision caution, 2026-08-26
+
+`_read_page_with_vision` makes a costly, deliberate choice. On a page whose text
+layer is a credible record, a transcription introducing numbers absent from the
+page is rejected outright, because a confident wrong torque value is a safety
+claim rather than a typo. On a figure-dominant page the text layer is incomplete
+rather than merely disordered, so it cannot arbitrate: the read is KEPT and
+flagged. Enforcing the strict rule there cost four benchmark questions on
+2026-08-14.
+
+"Flagged" was doing no work. The flag reached `segments.meta_data`, came back
+from `hybrid_search` with every result, was read into a local named `meta` in
+`_format_context_and_sources`, and was never used again. Nothing in the frontend
+referenced `meta_data` at all. So a page kept PRECISELY because nothing could
+check it produced a citation identical to a verified one: same link, same page
+number, same confidence.
+
+Now told in both places, because they fail differently.
+
+**The model is told, in the segment header it already reads.** It is the only
+thing that knows which figure it is about to quote, and instruction 8 tells it
+to say so in one short sentence naming what should be checked. Only for headers
+carrying the flag: cautioning everything is the same as cautioning nothing, and
+there is a test for that.
+
+**The citation says so too**, because a reader may skip the sentence and click
+the link. The link still resolves to the page; a caution is not a reason to
+break a citation.
+
+**And the box says once, in words, what the marker means.** "Unverified" beside
+a filename is easy to read straight past.
+
+Five tests, including one asserting that one unverified page among three does
+not taint the other two.
+
+### The reason to do it at all
+
+This is the defence, not the disclaimer. Every competitor's pitch is that their
+answers can be trusted; Guru's homepage headline is literally about confidently
+wrong AI. A product that says which of its own answers it could not verify is
+making a stronger claim than one that says nothing, and it is the claim a
+compliance-minded buyer actually wants.
 
 ## Decisions not to re-litigate
 

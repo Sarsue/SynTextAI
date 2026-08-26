@@ -510,3 +510,21 @@
 .answer-feedback-remove:hover {
     opacity: 1;
 }
+
+/* Said in words, not just a marker on the filename.
+   ------------------------------------------------------------------
+   A page kept because nothing could verify it produced a citation that
+   looked exactly like a verified one. Amber rather than red: this is a
+   "go and look", not an error. */
+.citation-caution {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0 0;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-color, #111);
+    background: rgba(180, 120, 0, 0.08);
+    border-left: 2px solid rgba(180, 120, 0, 0.55);
+    border-radius: 4px;
+}

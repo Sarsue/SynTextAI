@@ -25,6 +25,11 @@ from api.core.websocket_manager import websocket_manager
 
 logger = logging.getLogger(__name__)
 
+# Read once, here, so every row written in this process agrees. Imported lazily
+# inside the module rather than at import time would risk two chunks in one
+# batch disagreeing if the setting changed underneath them.
+from ..services.llm_service import MODEL_EMBEDDING_ID as CURRENT_EMBEDDING_MODEL
+
 
 # Tokens that identify an answer rather than describe it: numbers, error codes,
 # model designations, fractions.
@@ -435,6 +440,15 @@ class AsyncFileRepository(AsyncBaseRepository):
                                 u.get('text') or u.get('content') or ''
                             ),
                             embedding=embedding,
+                            # Which model produced that vector. A vector only
+                            # means anything beside other vectors from the same
+                            # model, and mixing them errors nowhere: same
+                            # dimensions, happy distance calculation, confident
+                            # answer from whatever landed nearest. Written down
+                            # so the next change of model is a column
+                            # comparison rather than something somebody has to
+                            # remember to go looking for.
+                            embedding_model=CURRENT_EMBEDDING_MODEL,
                             # What was embedded, so the next document holding
                             # this same text can reuse the vector instead of
                             # buying it again.

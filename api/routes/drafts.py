@@ -27,6 +27,7 @@ from ..core.limits import assert_can_create_doc
 from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from ..core.utils import upload_bytes_to_gcs
+from ..core.websocket_manager import websocket_manager
 from ..repositories.repository_manager import RepositoryManager
 from ..services.document_export import markdown_to_docx, markdown_to_pdf, safe_filename
 from ..services.llm_service import gradient_chat
@@ -73,6 +74,37 @@ class GenerateRequest(BaseModel):
 class UpdateRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=200)
     content: Optional[str] = None
+
+
+
+async def _announce(store: RepositoryManager, workspace_id: int, action: str,
+                    draft_id: Optional[int] = None) -> None:
+    """Tell everyone looking at this workspace that its documents changed.
+
+    The list used to be fetched once per mount, so a document written on one
+    screen was invisible on a colleague's until they reloaded the page. Reloading
+    on open and on tab focus covered the common case and still left two people
+    working side by side out of step.
+
+    Sent to every member with a live socket, not just whoever acted, because the
+    point is the colleague who did not. The API process holds the sockets, so
+    this goes straight through the manager rather than back out over HTTP the way
+    the worker has to.
+
+    Never raises. A notification that fails must not fail the request that earned
+    it: the document is written either way, and the list still reloads when the
+    panel is next opened.
+    """
+    try:
+        members = await store.workspace_repo.list_members(int(workspace_id))
+        payload = {"workspace_id": int(workspace_id), "action": action, "draft_id": draft_id}
+        for m in members:
+            uid = m.get("user_id")
+            if uid is None:
+                continue
+            await websocket_manager.send_message(str(uid), "draft_changed", payload)
+    except Exception as e:
+        logger.warning(f"Could not announce draft change in workspace {workspace_id}: {e}")
 
 
 async def _authorized_draft(
@@ -181,6 +213,7 @@ async def generate_draft(
         {"event": "draft.generated", "draft_id": draft["id"],
          "workspace_id": body.workspace_id, "passages": len(passages)}
     )
+    await _announce(store, body.workspace_id, "created", draft["id"])
     return draft
 
 
@@ -233,6 +266,11 @@ async def update_draft(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not update the document",
         )
+    if "title" in fields:
+        # Only a rename changes what the list shows. Announcing every keystroke
+        # of an edit would have colleagues' lists flickering while somebody
+        # types.
+        await _announce(store, updated["workspace_id"], "renamed", draft_id)
     return updated
 
 
@@ -388,6 +426,7 @@ async def ingest_draft(
     )
 
     await store.draft_repo.mark_ingested(draft_id, file_id)
+    await _announce(store, workspace_id, "ingested", draft_id)
     logger.info(
         {"event": "draft.ingested", "draft_id": draft_id,
          "file_id": file_id, "workspace_id": workspace_id, "user_id": user_id}
@@ -407,12 +446,14 @@ async def delete_draft(
     and throwing away the draft it came from should not silently remove it.
     """
     user_id = user_data["user_id"]
-    await _authorized_draft(draft_id, user_id, store, Capability.DELETE_DOCUMENT)
+    draft = await _authorized_draft(draft_id, user_id, store, Capability.DELETE_DOCUMENT)
+    workspace_id = draft["workspace_id"]
     if not await store.draft_repo.delete(draft_id):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not delete the document",
         )
+    await _announce(store, workspace_id, "deleted", draft_id)
     return {"draft_id": draft_id, "deleted": True}
 
 

@@ -507,3 +507,71 @@ async def test_a_message_with_no_history_is_refused_clearly(store, tenant, clien
 
     assert response.status_code == 422
     assert "history_id" in response.json()["detail"]
+
+
+# --- polling status for a document somebody else uploaded --------------------
+
+async def test_staff_can_poll_status_for_a_document_the_owner_uploaded(
+    store, tenant, client
+):
+    """The bug, put back.
+
+    Both status endpoints checked `file_record["user_id"] != caller`, scoping by
+    UPLOADER rather than by workspace. That is the mistake this codebase already
+    recorded fixing for retrieval and for the file list: documents belong to the
+    workspace, not to whoever added them.
+
+    It leaked nothing. It was too strict, and it broke quietly. A staff member's
+    list polls for status, every file the owner uploaded is refused, and those
+    documents sit at "Processing" on their screen forever while the owner
+    watches the same files go ready.
+    """
+    ws = await tenant.workspace("Shared")
+    member = await tenant.member(scope="workspace", workspaces=[ws])
+    file_id = await store.file_repo.add_file(
+        user_id=tenant.owner, file_name="owner-uploaded.pdf", file_url="", workspace_id=ws,
+    )
+
+    single = await client.as_(member).get(f"/api/v1/files/{file_id}/status")
+    assert single.status_code == 200, single.text
+    assert single.json()["file_id"] == file_id
+
+    batch = await client.as_(member).get(f"/api/v1/files/status?ids={file_id}")
+    assert batch.status_code == 200, batch.text
+    assert [i["file_id"] for i in batch.json()["items"]] == [file_id], (
+        "the batch endpoint silently omitted a document the caller can see"
+    )
+
+
+async def test_status_still_refuses_a_document_from_another_workspace(
+    store, tenant, client
+):
+    """Scoping by workspace must not become scoping by nothing."""
+    mine = await tenant.workspace("Mine")
+    theirs = await tenant.workspace("Theirs")
+    member = await tenant.member(scope="workspace", workspaces=[mine])
+    file_id = await store.file_repo.add_file(
+        user_id=tenant.owner, file_name="elsewhere.pdf", file_url="", workspace_id=theirs,
+    )
+
+    single = await client.as_(member).get(f"/api/v1/files/{file_id}/status")
+    assert single.status_code == 404
+
+    batch = await client.as_(member).get(f"/api/v1/files/status?ids={file_id}")
+    assert batch.status_code == 200
+    assert batch.json()["items"] == [], "a file from another workspace was returned"
+
+
+async def test_status_of_a_workspaceless_file_stays_with_its_uploader(
+    store, tenant, client
+):
+    """Pre-workspace uploads behave the same here as everywhere else."""
+    other = await tenant.new_user("other")
+    file_id = await store.file_repo.add_file(
+        user_id=tenant.owner, file_name="private.pdf", file_url="", workspace_id=None,
+    )
+
+    assert (await client.as_(tenant.owner).get(
+        f"/api/v1/files/{file_id}/status")).status_code == 200
+    assert (await client.as_(other).get(
+        f"/api/v1/files/{file_id}/status")).status_code == 404

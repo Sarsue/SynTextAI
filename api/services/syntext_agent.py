@@ -164,7 +164,36 @@ class SyntextAgent:
             # word Carrier appears nowhere in it, so the header is the only
             # place that information can come from.
             where = f" — {file_name}" + (f", page {page_num}" if page_num is not None else "")
-            context_header = f"--- Context Segment {segment_id}{where} ---"
+
+            # A page the vision model read but could not have verified says so,
+            # here, where the model will see it.
+            #
+            # `_read_page_with_vision` keeps a figure-dominant page whose text
+            # layer is too incomplete to arbitrate, and flags it instead of
+            # dropping it: enforcing the strict rule there cost four benchmark
+            # questions on 2026-08-14. But "flagged" was doing no work at all.
+            # The flag reached this function, was read into `meta`, and was
+            # never used, so a page kept PRECISELY because nothing could check
+            # it produced a citation identical to a verified one.
+            #
+            # Told rather than hidden, because the model is the only thing that
+            # knows which figure it is about to quote. A torque value from an
+            # unverified diagram is a safety claim, and the reader deserves to
+            # know before they act on it, not after.
+            unverified = bool(meta.get("vision_unverified_page"))
+            if unverified:
+                numbers = meta.get("vision_unverified_numbers") or []
+                shown = ", ".join(str(n) for n in numbers[:6])
+                caution = (
+                    " [READ FROM A FIGURE. The text layer could not confirm it"
+                    + (f", including these values: {shown}" if shown else "")
+                    + ". If you use anything from this segment, say plainly in the "
+                      "answer that it was read from a figure and should be checked "
+                      "against the document.]"
+                )
+            else:
+                caution = ""
+            context_header = f"--- Context Segment {segment_id}{where}{caution} ---"
             context_parts.append(f"{context_header}\n{content}")
             
             # --- Part 2: Create source mapping entry --- 
@@ -183,6 +212,11 @@ class SyntextAgent:
                 if file_url_base:
                      source_target += f"#page={page_num}"
             
+            # And on the citation itself, because the reader may skip the
+            # sentence and click the link.
+            if unverified:
+                source_text += " · read from a figure, unverified"
+
             # "Segment 3" is internal plumbing. A customer reading a cited
             # answer needs the document and page, which is the thing they can
             # actually go and check.
@@ -250,7 +284,14 @@ class SyntextAgent:
                     "the same question — the same kind of table, code or specification "
                     "appearing in more than one manual — do not choose between them and "
                     "do not merge them. Give each answer with the document it comes "
-                    "from, then ask which one the reader means."
+                    "from, then ask which one the reader means.\n"
+                    "8. A segment header may say it was READ FROM A FIGURE and could not "
+                    "be confirmed by the text layer. If any part of your answer rests on "
+                    "such a segment, say so in the answer itself, in one short sentence, "
+                    "naming what should be checked. A torque value or a dosage read off a "
+                    "diagram is a safety claim, and a reader who is not told cannot tell "
+                    "it apart from a figure the system verified. Do not add this caution "
+                    "for segments whose headers do not carry it."
                 )
 
                 # Step 4: Adapt detail level based on comprehension level
