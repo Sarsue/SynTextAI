@@ -264,6 +264,14 @@ way in, not a way around.
   approved again.
 - **The document opens in the main area, not a chat bubble.** A chat answer is
   the right size for a question and the wrong size for a document.
+- **Writing is a third composer mode, beside Ask and Find.** It shipped with its
+  own textarea and its own submit button in the sidebar, which was a second
+  place to type the same shape of request. `Ask / Find / Write` is the
+  segmented control the app already had, the mode is hidden from staff because
+  the server refuses them anyway, and the offer to write from the conversation
+  now sits under the conversation it refers to. The sidebar keeps the LIST,
+  because a document you wrote last week is something you own and go back to,
+  and finding it by scrolling chat history would be worse.
 
 ### Verification
 

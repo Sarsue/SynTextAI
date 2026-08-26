@@ -9,10 +9,22 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
-export type ComposerMode = 'ask' | 'find';
+export type ComposerMode = 'ask' | 'find' | 'write';
 
 interface InputAreaProps {
     onSend: (message: string, files: File[]) => Promise<void>;
+    /** Ticked in write mode to hand the conversation to the document.
+     *  Lives here rather than in a sidebar because it refers to the
+     *  conversation on screen, and a control describing something a person is
+     *  looking at belongs next to it. */
+    useConversation?: boolean;
+    onUseConversationChange?: (value: boolean) => void;
+    /** Whether there is a conversation to offer at all. */
+    hasConversation?: boolean;
+    /** Seconds the current write has been running. Writing a document takes
+     *  meaningfully longer than answering, and a button that says how long it
+     *  has been going is the difference between waiting and wondering. */
+    elapsedSeconds?: number;
     isSending: boolean;
     onContentAdded: () => Promise<void>;
     mode: ComposerMode;
@@ -23,6 +35,10 @@ interface InputAreaProps {
 
 const InputArea: React.FC<InputAreaProps> = ({
     onSend,
+    useConversation = false,
+    onUseConversationChange,
+    hasConversation = false,
+    elapsedSeconds = 0,
     isSending,
     onContentAdded,
     mode,
@@ -68,14 +84,29 @@ const InputArea: React.FC<InputAreaProps> = ({
     };
 
     const isFinding = mode === 'find';
+    const isWriting = mode === 'write';
+    // Both need words and neither takes an attachment: there is nothing to
+    // search for, or to write from, in a file that is not in the workspace yet.
+    const textOnly = isFinding || isWriting;
 
     const handleSendClick = () => {
         // Finding needs words. There is nothing to search for in an attachment,
         // and silently uploading it instead would be a different action from
         // the one the button offered.
-        if (isFinding) {
+        if (textOnly) {
             if (!message.trim()) {
-                addToast('Type what you want to find.', 'info');
+                addToast(
+                    isWriting ? 'Describe the document you want.' : 'Type what you want to find.',
+                    'info',
+                );
+                return;
+            }
+            if (isWriting) {
+                // Cleared on submit, unlike a search: a document is a one-off
+                // request, and leaving the description behind would suggest
+                // pressing again does something different.
+                const text = message;
+                onSend(text, []).then(() => setMessage(''));
                 return;
             }
             onSend(message, []).then(() => {
@@ -148,16 +179,18 @@ const InputArea: React.FC<InputAreaProps> = ({
 
     return (
         <div className={`input-area ${darkMode ? 'dark-mode' : ''}`}>
-            {/* Two things the same box can do, named by what the person wants
-                rather than by how it works: an answer, or the page it is on.
-                A radiogroup rather than two buttons, so a screen reader says
-                which of the two is selected. */}
+            {/* Three things the same box can do, named by what the person
+                wants rather than by how it works: an answer, the page it is on,
+                or a document. Writing used to have its own textarea and its own
+                button in the sidebar, which was a second place to type for the
+                same kind of act. A radiogroup rather than buttons, so a screen
+                reader says which is selected. */}
             <div className="composer-modes" role="radiogroup" aria-label="What to do">
                 <button
                     type="button"
                     role="radio"
-                    aria-checked={!isFinding}
-                    className={cn('composer-mode', !isFinding && 'is-active')}
+                    aria-checked={mode === 'ask'}
+                    className={cn('composer-mode', mode === 'ask' && 'is-active')}
                     onClick={() => onModeChange('ask')}
                 >
                     Ask
@@ -171,20 +204,58 @@ const InputArea: React.FC<InputAreaProps> = ({
                 >
                     Find
                 </button>
+                {/* Writing a document into a workspace is adding to it, and the
+                    server holds it to the same capability as an upload. Staff
+                    would see the mode, type a request and get a 403. */}
+                {canUpload && (
+                    <button
+                        type="button"
+                        role="radio"
+                        aria-checked={isWriting}
+                        className={cn('composer-mode', isWriting && 'is-active')}
+                        onClick={() => onModeChange('write')}
+                    >
+                        Write
+                    </button>
+                )}
             </div>
             <Textarea
                 className="composer-input"
                 placeholder={
-                    isFinding
-                        ? 'Find a passage in your documents...'
-                        : 'Ask a question about your documents...'
+                    isWriting
+                        ? 'An onboarding checklist for a new hygienist, from our policies...'
+                        : isFinding
+                            ? 'Find a passage in your documents...'
+                            : 'Ask a question about your documents...'
                 }
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={isSending}
-                aria-label={isFinding ? 'Search input' : 'Message input'}
+                aria-label={
+                    isWriting ? 'Describe the document' : isFinding ? 'Search input' : 'Message input'
+                }
             />
+            {isWriting && (
+                <div className="composer-write-note">
+                    {hasConversation && (
+                        <label className="composer-use-conversation">
+                            <input
+                                type="checkbox"
+                                checked={useConversation}
+                                onChange={(e) => onUseConversationChange?.(e.target.checked)}
+                                disabled={isSending}
+                            />
+                            Use this conversation too
+                        </label>
+                    )}
+                    <span>
+                        Written from this workspace's documents
+                        {useConversation && hasConversation ? ' and the conversation above' : ' only'}.
+                        It answers no questions until you add it to the knowledge base.
+                    </span>
+                </div>
+            )}
             {attachedFiles.length > 0 && (
                 <div className="attached-files">
                     {attachedFiles.map((file, index) => (
@@ -236,16 +307,23 @@ const InputArea: React.FC<InputAreaProps> = ({
                     onClick={handleSendClick}
                     disabled={
                         isSending ||
-                        (isFinding
+                        (textOnly
                             ? !message.trim()
                             : !message.trim() && attachedFiles.length === 0)
                     }
-                    aria-label={isFinding ? 'Search documents' : 'Send message'}
+                    aria-label={
+                        isWriting ? 'Write the document'
+                            : isFinding ? 'Search documents' : 'Send message'
+                    }
                     className="send-button"
                 >
-                    {isFinding
-                        ? isSending ? 'Searching...' : 'Find'
-                        : isSending ? 'Sending...' : 'Send'}
+                    {isWriting
+                        // Writing takes tens of seconds, so the button says how
+                        // long it has been going rather than sitting on a word.
+                        ? isSending ? `Writing, ${elapsedSeconds}s` : 'Write it'
+                        : isFinding
+                            ? isSending ? 'Searching...' : 'Find'
+                            : isSending ? 'Sending...' : 'Send'}
                 </Button>
             </div>
         </div>
