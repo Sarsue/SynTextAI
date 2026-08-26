@@ -175,8 +175,8 @@ const Home: React.FC = () => {
                     Your documents.<br />Your team's answers.
                 </h1>
                 <p className="home-subtext">
-                    Upload your SOPs, policies and manuals. Staff get instant cited answers.<br />
-                    Need a document you never wrote? It writes that too, from the same material.
+                    Upload your SOPs and policies. Staff get cited answers in seconds.<br />
+                    Need a document you never wrote? It writes that too.
                 </p>
                 <div className="home-actions">
                     <Button asChild className="home-btn-primary home-btn-lg">
@@ -185,7 +185,7 @@ const Home: React.FC = () => {
                         </Link>
                     </Button>
                     <Button asChild variant="outline" className="home-btn-ghost home-btn-lg">
-                        <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click')}>
+                        <a href="mailto:osas@osas-inc.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click')}>
                             Want a demo? Contact us
                         </a>
                     </Button>
@@ -202,10 +202,11 @@ const Home: React.FC = () => {
                     no subscription is entitled to nothing. Promising otherwise
                     sold the one thing the product does not do, and the person
                     who believed it found out at the payment form. */}
-                <p className="home-price-line">
-                    <strong>$99 a month</strong> for the whole practice. 10 seats included.
-                    Cancel anytime.
-                </p>
+                <div className="home-price">
+                    <span className="home-price-num">$99</span>
+                    <span className="home-price-per">a month, the whole practice</span>
+                    <span className="home-price-meta">10 seats included · Cancel anytime</span>
+                </div>
             </section>
 
             {/* The product, in the first screen. A real answer, from real
@@ -220,8 +221,7 @@ const Home: React.FC = () => {
                     loading="eager"
                 />
                 <p className="home-shot-caption">
-                    A real answer from a real practice's documents. The fee, the exception,
-                    and the page it came from.
+                    A real answer, cited to the page it came from.
                 </p>
             </section>
 
@@ -312,13 +312,11 @@ const Home: React.FC = () => {
                         <span className="home-thing-n">01</span>
                         <h3>Answers, with the page attached</h3>
                         <p>
-                            Staff ask in plain English. The answer comes back with the figure,
-                            the exception and a link to the page it came from, so anybody can
-                            check it in one click.
+                            Staff ask in plain English. The answer comes back with the
+                            figure and the page it came from.
                         </p>
                         <p className="home-thing-note">
-                            If the answer is not in your documents, it says so instead of
-                            inventing one.
+                            Not in your documents? It says so instead of inventing one.
                         </p>
                     </div>
                     <div className="home-thing-shot">
@@ -335,13 +333,11 @@ const Home: React.FC = () => {
                         <span className="home-thing-n">02</span>
                         <h3>The documents you never got round to writing</h3>
                         <p>
-                            Describe the checklist or SOP you need. It writes one from the
-                            documents you already have, tells you which ones it used, and hands
-                            you a Word or PDF file.
+                            Describe what you need. It writes one from the documents you
+                            already have, and hands you a Word or PDF file.
                         </p>
                         <p className="home-thing-note">
-                            Nothing it writes answers a single question until you have read it
-                            and added it yourself.
+                            Nothing it writes answers a question until you add it yourself.
                         </p>
                     </div>
                     <div className="home-thing-shot">
@@ -358,13 +354,11 @@ const Home: React.FC = () => {
                         <span className="home-thing-n">03</span>
                         <h3>One box. Ask, find, or write.</h3>
                         <p>
-                            The same box does all three. No modules to learn, no menu to hunt
-                            through, nothing to set up. If your staff can send a text message,
-                            they can use it.
+                            The same box does all three. If your staff can send a text
+                            message, they can use it.
                         </p>
                         <p className="home-thing-note">
-                            Replaced a policy? Mark the old one and it stops turning up in
-                            answers, while staying on file.
+                            Replaced a policy? Mark the old one and it stops turning up.
                         </p>
                     </div>
                     <div className="home-thing-shot">
@@ -425,7 +419,7 @@ const Home: React.FC = () => {
                     Payments are securely handled by Stripe. Add a card and you're in, no setup call required.
                     Seats are added as you invite people and removed the moment you remove them.
                     Want to see it on your own documents first?{' '}
-                    <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click', { location: 'pricing' })}>
+                    <a href="mailto:osas@osas-inc.com?subject=Syntext%20AI%20demo%20request" onClick={() => posthog.capture('homepage_demo_click', { location: 'pricing' })}>
                         Reach out to us
                     </a>.
                 </p>
@@ -440,24 +434,17 @@ const Home: React.FC = () => {
             <section className="home-section home-section--narrow">
                 <div className="home-note">
                     <p>
-                        I built Syntext because the businesses that need this least are the
-                        ones being sold to. The tools that do this well start at a sales call
-                        and a five figure contract, and a twelve person dental practice is
-                        never getting either.
+                        The tools that do this well start at a sales call and a five figure
+                        contract. A twelve person practice is never getting either.
                     </p>
                     <p>
                         So it is $99, you sign up with a card, and it works on the files you
-                        already have. No migration, no knowledge architecture project, no
-                        onboarding quarter.
-                    </p>
-                    <p>
-                        If you want to see it on your own documents before you decide, email
-                        me and I will set you up in a workspace myself.
+                        already have. Email me and I will set it up on your own documents.
                     </p>
                     <p className="home-note-sign">
-                        Osas Igbinedion, who builds and answers the email<br />
-                        <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI">
-                            osasigbinedion@gmail.com
+                        Osas Igbinedion, who builds it and answers the email<br />
+                        <a href="mailto:osas@osas-inc.com?subject=Syntext%20AI">
+                            osas@osas-inc.com
                         </a>
                     </p>
                 </div>

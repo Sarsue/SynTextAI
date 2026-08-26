@@ -70,7 +70,15 @@ body {
 .dark-mode .home-link:hover { color: #e8e8e8; }
 
 .home-btn-primary {
-    display: inline-block;
+    /* inline-flex, not inline-block. These classes are applied on top of the
+       shadcn Button, which centres its label with flex inside a fixed height.
+       Overriding display to inline-block dropped that centring and left the
+       text sitting on the baseline, low in the pill, in every hero button on
+       the page. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
     background: #111;
     color: #fff;
     text-decoration: none;
@@ -87,7 +95,10 @@ body {
 .dark-mode .home-btn-primary:hover { background: #fff; }
 
 .home-btn-ghost {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
     color: #555;
     text-decoration: none;
     font-size: 0.9rem;
@@ -108,12 +119,15 @@ body {
 .dark-mode .home-btn-ghost:hover { border-color: #555; color: #e8e8e8; }
 
 .home-btn-outline {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
     text-align: center;
     text-decoration: none;
     font-size: 0.9rem;
     font-weight: 500;
-    padding: 10px 20px;
+    padding: 12px 20px;
     border-radius: 6px;
     border: 1px solid #ddd;
     color: #111;
@@ -127,7 +141,10 @@ body {
 
 .home-btn-lg {
     font-size: 0.95rem;
-    padding: 12px 24px;
+    /* One height for both, set here rather than left to whichever label is
+       longer, so the pair reads as a pair. */
+    min-height: 46px;
+    padding: 0 28px;
 }
 
 /* ─── Hero ─────────────────────────────────────────────────────────────── */
@@ -174,7 +191,8 @@ body {
 
 .home-actions {
     display: flex;
-    gap: 10px;
+    align-items: stretch;
+    gap: 12px;
     flex-wrap: wrap;
     justify-content: center;
 }
@@ -678,15 +696,34 @@ body {
 
 /* The price, stated. It was 10px grey under the buttons, which is how a
    page looks when it is apologising for its own number. */
-.home-price-line {
-    font-size: 0.95rem;
-    color: var(--text-secondary);
-    margin: 22px 0 0;
+.home-price {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin: 30px 0 0;
 }
 
-.home-price-line strong {
+/* Set at a size that means it. Guru and Glean cannot put a number on a page at
+   all, and this one spent its first year in 10px grey under the buttons, which
+   is how a page looks when it is apologising for its own price. */
+.home-price-num {
+    font-size: 2.6rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
     color: var(--text-color);
-    font-weight: 600;
+}
+
+.home-price-per {
+    font-size: 0.95rem;
+    color: var(--text-color);
+}
+
+.home-price-meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 4px;
 }
 
 /* A shot on its own, under the hero. */
