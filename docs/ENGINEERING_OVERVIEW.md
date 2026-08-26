@@ -6,15 +6,14 @@ Git holds what changed and why. The code holds the reasoning beside the thing
 being reasoned about. This file holds only the three lists above. If an entry
 could be a commit message or a code comment, make it one instead.
 
-**Under 300 lines. Check before committing.** It was cut from 960 to 260 on
-2026-08-26 and was back to 538 by that evening, because four features each
-arrived with a dated section retelling its own commit message. That is the
-changelog this file says it is not.
+**Under 250 lines. Check before committing.** It was 960, then 260, then 538 in
+a single day, because each feature arrived with a dated section retelling its own
+commit message. That is the changelog this file says it is not.
 
 A shipped thing is one line under **Shipped**. What it taught is one line under
-**Decisions not to re-litigate**, with the number that makes it worth obeying.
-Neither is a section with a date in the heading. If it needs more room than
-that, the room is the commit message.
+**Decisions**, with the number that makes it worth obeying. Neither is ever a
+section with a date in the heading. If it needs more room, the room is the commit
+message.
 
 ## What it is
 
@@ -35,7 +34,7 @@ until a customer asks by name.
 | Frontend | React + TypeScript, Firebase Auth, Stripe, HashRouter |
 | Storage | Google Cloud Storage |
 | LLM | DeepInfra, `openai-gpt-oss-20b`, temp 0.1, 120k window |
-| Embeddings | Voyage AI |
+| Embeddings | Qwen3-Embedding-0.6B on DeepInfra |
 | Email | SendGrid |
 | Infra | DigitalOcean droplet, nginx, Docker Compose |
 | Analytics | PostHog |
@@ -49,11 +48,12 @@ pool 100, fusion weights 0.7 vector / 0.3 keyword.
 docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
 ```
 
+**Node 20.19+ or 22.12+.** Vite 8 refuses to run below that. The image builds on
+node:20-alpine, currently 20.20.2, which satisfies it.
+
 **Always pass `--env-file .env.dev`.** Compose interpolates build args from
-`.env` by default, which is the production file, so without the flag the
-frontend is built with the **live** Stripe key and test checkout silently fails.
-`.env` is `sk_live`/`pk_live` and belongs to deploys. `.env.dev` is
-`sk_test`/`pk_test` and belongs to the local stack. Never hand-swap them.
+`.env`, the production file, so without the flag the frontend is built with the
+**live** Stripe key and test checkout fails silently.
 
 Migrations:
 
@@ -61,22 +61,11 @@ Migrations:
 docker compose -f docker-compose.local.yml --env-file .env.dev run --rm --no-deps -w /app/api --entrypoint sh syntextaiapp -c "alembic upgrade head"
 ```
 
-Rebuild with `--build` after any `requirements.txt` change. The `./api:/app/api`
-mount refreshes code but not installed packages. See `env.example` for every
-config value.
-
-**If a container reports "Permission denied" on every file under `/app/api`,
-run `colima stop && colima start`.** Local Docker here is Colima, not Docker
-Desktop, and its `mountType` is sshfs: the mount runs over an SSH connection
-into the VM, and after the VM has been up a long time that connection dies. The
-mountpoint survives, so `ls` works and every read fails, and containers already
-running keep serving code they loaded at startup. Seen 2026-08-26, where a
-worker had looked healthy for two weeks while running a fortnight-old schema
-against the live database.
-
-Nothing to do with macOS privacy settings. There is a leftover Docker Desktop
-`settings.json` on this machine that controls nothing; reading it cost three
-wrong diagnoses.
+**"Permission denied" on every file under `/app/api` means the mount died.**
+Docker here is Colima and its mountType is sshfs, which drops once the VM has
+been up a while. `colima stop && colima start`. Nothing to do with macOS privacy
+settings. Containers already running keep serving code they loaded at startup,
+so they look healthy while running a stale schema.
 
 ## Shipped
 
@@ -161,102 +150,64 @@ enough until a customer says otherwise.
 
 ## Decisions not to re-litigate
 
-Reasoning is in the commit or the code comment beside it.
+One line each. The reasoning is in the commit or the code comment beside it.
 
 **Architecture**
-- Redis is a notification bus, never the queue. Leases, retries and per-tenant
-  fairness were each paid for in a bug.
+- Redis is a notification bus, never the queue.
 - Publish after the commit, never inside it, or the worker wakes to nothing.
-- Retrieval lives in SQL (`async_file_repository.hybrid_search`), not Python.
-  RAGFactory and the interfaces were DI scaffolding for two concrete classes.
-- Ranks are fused, never scores. A cosine similarity and a `ts_rank_cd` share no
-  scale.
+- Retrieval lives in SQL (`hybrid_search`), not Python.
+- Ranks are fused, never scores: a cosine and a `ts_rank_cd` share no scale.
 - Ingestion makes no chat call. Embeddings and vision only.
+- One markdown parser, two renderers, for Word and PDF export.
 
-**Security**
+**Security and tenancy**
 - Two questions, two functions. *May you see it* is `accessible_workspace_ids`.
-  *May you do it* is `assert_*_capability`. Every access bug so far answered one
-  of them some other way.
-- Retrieval scopes by workspace, never by uploader.
-- A refusal is 404 when naming a resource by id, so a stranger cannot enumerate
-  what a company owns.
-- `drive.file` and the picker, never `drive.readonly`, which is a restricted
-  scope needing a paid third-party assessment.
+  *May you do it* is `assert_*_capability`.
+- Scope by workspace, never by uploader. Checking the uploader refused invited
+  staff every document their owner added, twice, in two different places.
+- A refusal is 404 when naming a resource by id.
+- `test_every_route_is_scoped.py` fails on a route that reaches no tenant.
+- `drive.file` and the picker, never `drive.readonly`.
 - Never store a standing credential to a customer's systems.
 - Do not widen CORS while credentials are allowed.
-- A document that extracts nothing fails loudly. It used to be marked processed
-  and answer nothing.
+- A document that extracts nothing fails loudly.
 
-**Documents, and documents we write** (2026-08-26)
-- **A supersede link points forward**, from the old file to the new. Retrieval
-  has already joined `files` for every candidate, so it is a column test in the
-  existing WHERE rather than a NOT EXISTS per candidate on the hot path.
-- **The exclusion is skipped when a search is scoped to one file.** Asking about
-  a document is an explicit request for it, replaced or not.
-- **Drafts live in their own table, not a flag on `files`.** Retrieval joins
-  `files` and cannot join that table, so a generated draft is unretrievable by
-  construction. A boolean is what a future query forgets. If a draft could be
-  retrieved, the model's output becomes its own source, citing itself with a
-  page reference nobody can tell from a real one.
-- **Approving writes an ordinary `files` row through the upload path.** An
-  approval is another way in, not a way around, so it meets the plan limit and
-  the duplicate-name rule like anything else.
-- **The provenance note goes inside the exported file**, not beside it. A .docx
-  gets emailed and printed, which is exactly when everyone forgets a machine
-  drafted it.
-- **Drafting does not go through `generate_explanation`.** That hardcodes 1500
-  completion tokens, right for an answer. Reasoning spends the same allowance, so
-  a two-page SOP reasoned through the budget and returned empty about one attempt
-  in four. `DRAFT_MAX_TOKENS` 4000, `DRAFT_REASONING_EFFORT` low.
-- **One markdown parser, two renderers.** Word and PDF share it. Two parsers for
-  one grammar drift, and `ordered` is per ITEM: numbered steps with bulleted
-  notes are one list, and splitting them numbered every step 1.
+**Documents we write**
+- Drafts live in their own table, not behind a flag on `files`. Retrieval joins
+  `files` and cannot join that table, so a draft is unretrievable by
+  construction. Otherwise the model's output becomes its own source, citing
+  itself with a page reference nobody can tell from a real one.
+- Approving writes an ordinary `files` row through the upload path, so it meets
+  the plan limit and the duplicate-name rule like anything else.
+- The provenance note goes inside the exported file. A .docx gets emailed and
+  printed, which is when everyone forgets a machine drafted it.
+- Drafting does not go through `generate_explanation`: its 1500-token budget is
+  right for an answer, and reasoning spends the same allowance, so a two-page SOP
+  returned empty about one attempt in four.
+- A supersede link points forward, so retrieval tests a column it already joined.
 
-**Reading what the server sends** (2026-08-26)
-- **The API serialises naive UTC with no timezone designator, and JavaScript
-  parses such a string as LOCAL.** Every timestamp was wrong by the viewer's
-  offset until `utils/serverTime.ts`. Parse server times through it, always.
-- **Claim the connection slot before awaiting a token.** `initializeWebSocket`
-  checked its guard before an await and assigned after, so two calls both opened
-  a socket and the first was orphaned mid-handshake, logging a failure on every
-  page load while the app was connected.
+**Reading what the server sends**
+- The API serialises naive UTC with no designator and JavaScript parses that as
+  LOCAL. Every timestamp was wrong by the viewer's offset. Use
+  `utils/serverTime.ts`, always.
+- Claim the websocket slot before awaiting the token, or two sockets open and the
+  first is orphaned mid-handshake.
 
-**Vectors and documents that cannot answer** (2026-08-26)
-- **`chunks.embedding_model` records which model wrote each vector.** The
-  voyage-3.5-lite to Qwen3-Embedding-0.6B move errored nowhere and cost 11 of 17
-  benchmark questions their source. Next change is a column comparison.
-- **A NULL `embedding_model` is "not measured", not "stale".** Counting NULL as
-  stale flagged 2,528 of 2,650 chunks locally: a warning on nearly every
-  document, which is no signal.
-- **Production was measured 2026-08-26 and is clean.** 881 chunks, 2 documents,
-  0 with null `content`, all ingested after the model move. Detection and a UI
-  badge for that fault were built and deleted the same day: a new dead chunk
-  cannot be created since `chunks.content` started being written 2026-08-06. The
-  lesson is that "how many are there in production" was a database query
-  available the whole time, asked after the code rather than before it.
+**Vectors**
+- `chunks.embedding_model` records which model wrote each vector. Moving off the
+  previous model errored nowhere and cost 11 of 17 benchmark questions their
+  source. Next change is a column comparison.
+- NULL `embedding_model` is "not measured", not "stale". Counting NULL as stale
+  flagged 2,528 of 2,650 chunks: a warning on nearly every document, so no signal.
 
-**Authorization** (2026-08-26)
-- **Never scope by uploader.** Both file-status endpoints checked
-  `file_record["user_id"]`, so a staff member's list silently omitted every
-  document the owner uploaded and those files sat at Processing forever.
-- **`test_every_route_is_scoped.py` fails on a route that reaches no tenant.**
-  A smoke alarm, not a sprinkler: it reads source, so it proves a handler
-  consults the boundary, not that it consults it correctly.
-
-**Measured and rejected.** Do not rebuild these without beating the number.
-- **Cross-encoder reranking.** Qwen3-Reranker-0.6B separates relevant from
-  irrelevant by four orders of magnitude in isolation and changed nothing end to
-  end: 7/20 answers and 9/20 citations with it on and off.
-- **Contextual retrieval.** One LLM call per chunk at ingest (~1,500 for a
-  500-page manual). Retrieved nothing extra, ranked slightly worse, and
-  destroyed the embedding-reuse saving.
-- **Four retrieval ideas, 2026-08-14.** All four rejected on one corpus,
-  repeatable to the question.
-- **An LLM coverage classifier.** Regressed the agent from 16.2 to 11.2 while
-  looking reasonable on four questions. Coverage is decided by whether a search
-  contributed new passages, not by judgement.
-- **The slowness was the provider, not the code.** Three code-level
-  explanations were wrong before moving to DeepInfra on 2026-08-13 fixed it.
+**Measured and rejected.** Do not rebuild without beating the number.
+- Cross-encoder reranking: 7/20 answers with it on and off.
+- Contextual retrieval: ~1,500 LLM calls per 500-page manual, retrieved nothing
+  extra, ranked slightly worse.
+- An LLM coverage classifier: regressed the agent 16.2 to 11.2.
+- Four retrieval ideas, 2026-08-14, all rejected on one corpus.
+- The slowness was the provider, not the code. Three code-level explanations were
+  wrong before moving to DeepInfra fixed it.
 
 ## Questions for Osas, not to guess at
 
