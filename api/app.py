@@ -68,17 +68,26 @@ async def add_coop_coep_headers(request: Request, call_next):
 #   docs.google.com       the picker renders in an iframe from here
 _CSP_POLICY = "; ".join([
     "default-src 'self'",
-    # app.posthog.com is here as well as in connect-src: posthog-js is bundled,
-    # but session recording lazily fetches recorder.js from api_host, so
-    # enabling recording in the PostHog project would otherwise start failing
-    # the moment this policy became enforcing rather than advisory.
+    # PostHog is listed here as well as in connect-src: posthog-js is bundled,
+    # but session recording lazily fetches recorder.js from the api host.
+    #
+    # THE REGIONAL HOSTS ARE NOT OPTIONAL. analytics.ts sets
+    # api_host: app.posthog.com, but posthog-js resolves that to a regional
+    # host and fetches its config from us-assets.i.posthog.com and its flags
+    # and events from us.i.posthog.com. Only app.posthog.com was allowed, so
+    # from the day this policy stopped being Report-Only every event was
+    # blocked by the browser: homepage_get_started_click,
+    # homepage_pricing_click, all of it, silently, with the product looking
+    # perfectly healthy and the dashboard simply empty.
     "script-src 'self' https://js.stripe.com https://accounts.google.com "
-    "https://apis.google.com https://app.posthog.com",
+    "https://apis.google.com https://app.posthog.com "
+    "https://us-assets.i.posthog.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://storage.googleapis.com https://*.googleusercontent.com "
     "https://ssl.gstatic.com https://www.gstatic.com",
-    "connect-src 'self' https://app.posthog.com https://identitytoolkit.googleapis.com "
+    "connect-src 'self' https://app.posthog.com https://us.i.posthog.com "
+    "https://us-assets.i.posthog.com https://identitytoolkit.googleapis.com "
     "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com "
     "https://accounts.google.com https://www.googleapis.com",
     # Cited documents open in an iframe pointed at their GCS URL, so leaving

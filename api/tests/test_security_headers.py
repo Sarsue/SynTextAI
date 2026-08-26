@@ -106,3 +106,31 @@ async def test_the_other_headers_are_still_there(client):
     assert h.get("x-frame-options") == "DENY"
     assert h.get("x-content-type-options") == "nosniff"
     assert h.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
+def test_the_csp_allows_the_posthog_hosts_the_sdk_actually_uses():
+    """analytics.ts sets api_host to app.posthog.com, and posthog-js does not
+    use it directly.
+
+    It resolves to a regional host: config from us-assets.i.posthog.com, flags
+    and events from us.i.posthog.com. Only app.posthog.com was allowed, so from
+    the day this policy stopped being Report-Only the browser blocked every
+    event. Nothing errored server side, the product looked healthy, and the
+    dashboard was simply empty. Found 2026-08-26 by reading the console of a
+    locally built image, not by anything failing.
+    """
+    from api.app import _CSP_POLICY
+
+    directives = {
+        d.strip().split(" ")[0]: d.strip()
+        for d in _CSP_POLICY.split(";")
+    }
+    assert "https://us.i.posthog.com" in directives["connect-src"], (
+        "events and flags are sent here and would be blocked"
+    )
+    assert "https://us-assets.i.posthog.com" in directives["connect-src"], (
+        "the SDK fetches its config here"
+    )
+    assert "https://us-assets.i.posthog.com" in directives["script-src"], (
+        "session recording lazily loads recorder.js from here"
+    )
