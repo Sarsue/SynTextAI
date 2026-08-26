@@ -46,9 +46,7 @@ async def add_coop_coep_headers(request: Request, call_next):
 # Checked before switching it on: every external origin referenced anywhere in
 # frontend/src and index.html was matched against this policy. The only three
 # outside it are a bit.ly link href, schema.org inside a JSON-LD block, and
-# syntextai.com itself, none of which is a resource load. app.posthog.com was
-# added to script-src at the same time, for the recorder.js that session
-# recording fetches lazily.
+# syntextai.com itself, none of which is a resource load.
 #
 # What is NOT verified: the signed-in paths. Stripe checkout, the Drive picker
 # and the citation iframes could not be exercised from here without account
@@ -69,24 +67,29 @@ async def add_coop_coep_headers(request: Request, call_next):
 _CSP_POLICY = "; ".join([
     "default-src 'self'",
     # PostHog is listed here as well as in connect-src: posthog-js is bundled,
-    # but session recording lazily fetches recorder.js from the api host.
+    # but it lazily fetches config.js, surveys.js and the session recorder from
+    # the assets host.
     #
-    # THE REGIONAL HOSTS ARE NOT OPTIONAL. analytics.ts sets
-    # api_host: app.posthog.com, but posthog-js resolves that to a regional
-    # host and fetches its config from us-assets.i.posthog.com and its flags
-    # and events from us.i.posthog.com. Only app.posthog.com was allowed, so
-    # from the day this policy stopped being Report-Only every event was
-    # blocked by the browser: homepage_get_started_click,
+    # THE REGIONAL HOSTS ARE NOT OPTIONAL, and app.posthog.com is not one of
+    # them. It is the dashboard origin. analytics.ts used to name it as the
+    # api_host, and posthog-js quietly resolved that to us-assets.i.posthog.com
+    # for its config and us.i.posthog.com for events. Only app.posthog.com was
+    # allowed here, so from the day this policy stopped being Report-Only every
+    # event was blocked by the browser: homepage_get_started_click,
     # homepage_pricing_click, all of it, silently, with the product looking
     # perfectly healthy and the dashboard simply empty.
+    #
+    # analytics.ts now names us.i.posthog.com directly and app.posthog.com is
+    # only its ui_host, which builds links and loads nothing, so it is gone from
+    # both directives. Verified by loading the homepage and firing an event: the
+    # only origins contacted are the two below, both 200.
     "script-src 'self' https://js.stripe.com https://accounts.google.com "
-    "https://apis.google.com https://app.posthog.com "
-    "https://us-assets.i.posthog.com",
+    "https://apis.google.com https://us-assets.i.posthog.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://storage.googleapis.com https://*.googleusercontent.com "
     "https://ssl.gstatic.com https://www.gstatic.com",
-    "connect-src 'self' https://app.posthog.com https://us.i.posthog.com "
+    "connect-src 'self' https://us.i.posthog.com "
     "https://us-assets.i.posthog.com https://identitytoolkit.googleapis.com "
     "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com "
     "https://accounts.google.com https://www.googleapis.com",

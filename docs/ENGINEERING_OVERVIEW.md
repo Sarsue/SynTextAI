@@ -161,6 +161,14 @@ One line each. The reasoning is in the commit or the code comment beside it.
 - Ranks are fused, never scores: a cosine and a `ts_rank_cd` share no scale.
 - Ingestion makes no chat call. Embeddings and vision only.
 - One markdown parser, two renderers, for Word and PDF export.
+- PostHog is pointed at the regional host, `us.i.posthog.com`, never at
+  `app.posthog.com`. That one is the dashboard, and naming it let posthog-js
+  resolve somewhere the CSP did not allow: every event blocked for 11 days
+  with the product healthy and the dashboard empty. A test now reads the host
+  out of the built bundle and fails if the CSP disagrees.
+- Analytics events carry `environment`, decided by hostname. The local
+  container serves a production build, so `import.meta.env.DEV` is false there
+  and testing counted as customer behaviour.
 
 **Security and tenancy**
 - Two questions, two functions. *May you see it* is `accessible_workspace_ids`.

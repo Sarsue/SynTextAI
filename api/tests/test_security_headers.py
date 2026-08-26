@@ -18,6 +18,9 @@ Not the whole policy string, which will keep changing. The four origins whose
 absence breaks something a customer paid for, plus the reporting path that is
 now the only way we would find out.
 """
+import pathlib
+import re
+
 import pytest
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -108,23 +111,25 @@ async def test_the_other_headers_are_still_there(client):
     assert h.get("referrer-policy") == "strict-origin-when-cross-origin"
 
 
-def test_the_csp_allows_the_posthog_hosts_the_sdk_actually_uses():
-    """analytics.ts sets api_host to app.posthog.com, and posthog-js does not
-    use it directly.
+def _directives(policy: str) -> dict:
+    return {d.strip().split(" ")[0]: d.strip() for d in policy.split(";")}
 
-    It resolves to a regional host: config from us-assets.i.posthog.com, flags
-    and events from us.i.posthog.com. Only app.posthog.com was allowed, so from
-    the day this policy stopped being Report-Only the browser blocked every
-    event. Nothing errored server side, the product looked healthy, and the
-    dashboard was simply empty. Found 2026-08-26 by reading the console of a
-    locally built image, not by anything failing.
+
+def test_the_csp_allows_the_posthog_hosts_the_sdk_actually_uses():
+    """The browser never contacts app.posthog.com. It contacts the two regional
+    hosts, and only those have to be here.
+
+    analytics.ts used to set api_host to app.posthog.com, which posthog-js
+    accepts and then quietly resolves: config and recorder.js from
+    us-assets.i.posthog.com, events from us.i.posthog.com. Only app.posthog.com
+    was allowed, so from the day this policy stopped being Report-Only the
+    browser blocked every event. Nothing errored server side, the product looked
+    healthy, and the dashboard was simply empty. Found 2026-08-26 by reading the
+    console of a locally built image, not by anything failing.
     """
     from api.app import _CSP_POLICY
 
-    directives = {
-        d.strip().split(" ")[0]: d.strip()
-        for d in _CSP_POLICY.split(";")
-    }
+    directives = _directives(_CSP_POLICY)
     assert "https://us.i.posthog.com" in directives["connect-src"], (
         "events and flags are sent here and would be blocked"
     )
@@ -134,3 +139,44 @@ def test_the_csp_allows_the_posthog_hosts_the_sdk_actually_uses():
     assert "https://us-assets.i.posthog.com" in directives["script-src"], (
         "session recording lazily loads recorder.js from here"
     )
+
+
+def test_the_csp_allows_whatever_host_the_frontend_actually_posts_events_to():
+    """The pair that broke: analytics.ts names a host, the CSP allows a
+    different one, and the only symptom is an empty dashboard.
+
+    Read out of the built bundle rather than out of analytics.ts, because the
+    bundle is what a browser runs and is the thing shipped in this image. Tests
+    run in that image, so /app/frontend/build is always the frontend that will
+    be served. A region change (us -> eu) is exactly the edit this catches.
+    """
+    from api.app import _CSP_POLICY
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    candidates = [
+        *(root / "frontend" / "build" / "assets").glob("*.js"),
+        root / "frontend" / "src" / "services" / "analytics.ts",
+    ]
+    hosts = set()
+    for path in candidates:
+        if not path.exists():
+            continue
+        hosts.update(
+            re.findall(
+                r"""api_host\s*:\s*['"`](https://[^'"`]+)['"`]""",
+                path.read_text(errors="ignore"),
+            )
+        )
+
+    assert hosts, (
+        "no api_host found in the built frontend or in analytics.ts. Either the "
+        "frontend was not built into this image or the SDK is configured some "
+        "other way now, and this test is stale rather than passing."
+    )
+
+    connect_src = _directives(_CSP_POLICY)["connect-src"]
+    for host in sorted(hosts):
+        assert host in connect_src, (
+            f"the frontend posts events to {host} and the CSP does not allow it, "
+            "so the browser will drop every event silently"
+        )
