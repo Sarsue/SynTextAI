@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File as FastAPIFile, Request, Response, status, Query, Path
 from typing import List, Dict, Optional, Any, TypeVar
 from sqlalchemy.orm import Session
@@ -429,6 +429,12 @@ async def retrieve_files(
                 "created_at": f.get("created_at"),
                 "file_type": f.get("file_type"),
                 "status": f.get("processing_status", "uploaded"),
+                "effective_date": f.get("effective_date"),
+                # The list is the only place a customer can find out that a
+                # document has been replaced. Retrieval already skips it, so
+                # without this the row looks healthy and is silently never
+                # cited, which is the confusion this feature exists to remove.
+                "superseded_by_id": f.get("superseded_by_id"),
             }
             for f in db_files
         ]
@@ -650,6 +656,120 @@ async def delete_file(
 # Move file to different workspace
 class MoveFileRequest(BaseModel):
     workspace_id: int = Field(..., description="Target workspace ID")
+
+class CurrencyRequest(BaseModel):
+    """When a document became true, and what replaced it.
+
+    Both fields are optional and both accept null, which is why the route reads
+    `model_fields_set` rather than checking for None: clearing a supersede link
+    is how a customer says "this is current again", and that is a different
+    request from one that never mentioned the field.
+    """
+    effective_date: Optional[date] = Field(
+        None, description="The date this document takes effect. Null clears it."
+    )
+    superseded_by_id: Optional[int] = Field(
+        None, description="The document that replaced this one. Null clears it."
+    )
+
+
+@files_router.patch("/{file_id}/currency")
+async def set_file_currency(
+    file_id: int = Path(..., description="ID of the document to update"),
+    body: CurrencyRequest = None,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Mark a document's effective date, or the document that replaced it.
+
+    A replaced document stops answering questions. That is the point: a
+    workspace holding both the 2019 policy and the 2024 one cited whichever
+    matched better, and the customer had no way to say which was true.
+
+    Authorization is done on BOTH documents independently and never inferred
+    from one to the other. The replacement id arrives from the browser and is
+    not evidence of anything: without checking it, a member of one company
+    could point their own document at a file id belonging to another and learn
+    from the response whether that id exists.
+    """
+    user_id = user_data['user_id']
+    fields = body.model_fields_set if body else set()
+    if not fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing to update",
+        )
+
+    file = await store.file_repo.get_file_by_id(file_id)
+    # 404 rather than 403 when naming a resource by id, so a stranger cannot
+    # discover which file ids exist by reading the refusal.
+    if not file or file.get('workspace_id') is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    await assert_workspace_capability(
+        store, user_id, file['workspace_id'], Capability.DELETE_DOCUMENT
+    )
+
+    superseded_by_id = None
+    if 'superseded_by_id' in fields:
+        superseded_by_id = body.superseded_by_id
+        if superseded_by_id is not None:
+            if int(superseded_by_id) == int(file_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A document cannot replace itself",
+                )
+            replacement = await store.file_repo.get_file_by_id(superseded_by_id)
+            if not replacement:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+                )
+            # Same workspace, both ends. Documents are read per workspace, so a
+            # link across two of them would hide a document from people who can
+            # see it, on the say-so of people who cannot.
+            if replacement.get('workspace_id') != file['workspace_id']:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+                )
+            await assert_workspace_capability(
+                store, user_id, replacement['workspace_id'], Capability.READ
+            )
+            # A cycle would hide every document in it from retrieval with
+            # nothing in the product able to explain why.
+            if await store.file_repo.supersede_chain_reaches(superseded_by_id, file_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="That document is already replaced by this one",
+                )
+
+    ok = await store.file_repo.set_document_currency(
+        file_id,
+        effective_date=body.effective_date if 'effective_date' in fields else None,
+        set_effective_date='effective_date' in fields,
+        superseded_by_id=superseded_by_id,
+        set_superseded_by='superseded_by_id' in fields,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not update the document",
+        )
+
+    # Answers already cached were computed with the old document still in
+    # play, so they would keep citing it after the customer said not to.
+    if 'superseded_by_id' in fields:
+        await query_cache.bump_document_version(file['workspace_id'])
+
+    logger.info(
+        f"Currency set on file {file_id} by user {user_id}: "
+        f"fields={sorted(fields)}"
+    )
+    updated = await store.file_repo.get_file_by_id(file_id)
+    return {
+        "file_id": file_id,
+        "effective_date": updated.get('effective_date'),
+        "superseded_by_id": updated.get('superseded_by_id'),
+    }
+
 
 @files_router.patch("/{file_id}/workspace", status_code=status.HTTP_200_OK)
 async def move_file_to_workspace(

@@ -2,7 +2,7 @@
 ORM models for database tables.
 This file contains SQLAlchemy ORM models extracted from the original docsynth_store.py.
 """
-from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, ForeignKey, Text, JSON, Float, Boolean, CheckConstraint, UniqueConstraint, TIMESTAMP, text, Enum, Index
+from sqlalchemy import Column, Integer, SmallInteger, String, DateTime, Date, ForeignKey, Text, JSON, Float, Boolean, CheckConstraint, UniqueConstraint, TIMESTAMP, text, Enum, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -258,6 +258,28 @@ class File(Base):
         index=True
     )
     file_size_bytes = Column(Integer, nullable=True)  # Size of the original source file in bytes
+
+    # When the document became true, which is not when somebody uploaded it.
+    # created_at answers "when did this arrive"; a 2024 policy uploaded after a
+    # 2019 one is the common case, but so is backfilling an archive in the wrong
+    # order, and only the customer knows which. Optional: most documents have no
+    # meaningful effective date and forcing one would be a lie.
+    effective_date = Column(Date, nullable=True)
+    # The document that replaced this one. Set on the OLD file, pointing
+    # forward. Retrieval has already joined `files` for every candidate chunk,
+    # so forward-pointing makes "is this still current?" a column test folded
+    # into the existing WHERE; backward-pointing would be a NOT EXISTS subquery
+    # per candidate on the hot path for the same answer.
+    #
+    # SET NULL rather than CASCADE: deleting the replacement should bring the
+    # older document back into answers, not leave it hidden with nothing
+    # pointing at it.
+    superseded_by_id = Column(
+        Integer,
+        ForeignKey("files.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")

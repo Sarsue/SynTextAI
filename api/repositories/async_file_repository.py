@@ -79,6 +79,29 @@ def literal_tokens(query: str) -> List[str]:
     return seen[:8]
 
 
+def _serialize_file(file_orm) -> Dict[str, Any]:
+    """One file row as a dict, for every caller that returns one.
+
+    Extracted 2026-08-26. get_file_by_id and get_file_by_name held byte-identical
+    copies of this, so adding the currency fields to one would have left the
+    other answering an older shape of the same question.
+    """
+    return {
+        'id': file_orm.id,
+        'user_id': file_orm.user_id,
+        'file_name': file_orm.file_name,
+        'file_url': file_orm.file_url,
+        'file_type': file_orm.file_type,
+        # Access to a document is decided by its workspace, not by who uploaded
+        # it, so callers that authorize a read need this here.
+        'workspace_id': file_orm.workspace_id,
+        'processing_status': file_orm.processing_status,
+        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None,
+        'effective_date': file_orm.effective_date.isoformat() if file_orm.effective_date else None,
+        'superseded_by_id': file_orm.superseded_by_id,
+    }
+
+
 class AsyncFileRepository(AsyncBaseRepository):
     """Async repository for file operations."""
 
@@ -522,7 +545,9 @@ class AsyncFileRepository(AsyncBaseRepository):
                     FileORM.created_at,
                     FileORM.processing_status,
                     FileORM.file_type,
-                    FileORM.workspace_id
+                    FileORM.workspace_id,
+                    FileORM.effective_date,
+                    FileORM.superseded_by_id
                 ).where(*conditions).order_by(FileORM.created_at.desc()).offset(skip).limit(limit)
                 result = await session.execute(stmt)
                 files = result.fetchall()
@@ -537,7 +562,13 @@ class AsyncFileRepository(AsyncBaseRepository):
                         "processing_status": file.processing_status,
                         "file_type": file.file_type,
                         "workspace_id": file.workspace_id,
-                        "created_at": file.created_at.isoformat() if file.created_at else None
+                        "created_at": file.created_at.isoformat() if file.created_at else None,
+                        "effective_date": file.effective_date.isoformat() if file.effective_date else None,
+                        # Present so the list can mark a document as replaced.
+                        # Retrieval already skips these; without it here a
+                        # customer sees the document sitting in the list and
+                        # cannot tell why it is never cited.
+                        "superseded_by_id": file.superseded_by_id,
                     }
                     for file in files
                 ]
@@ -687,6 +718,17 @@ class AsyncFileRepository(AsyncBaseRepository):
 
                 if file_id is not None:
                     where_clauses.append("f.id = :file_id")
+                else:
+                    # A document that has been replaced does not answer
+                    # questions any more. One clause, applied to all three arms
+                    # below, because they share where_sql: excluding it in the
+                    # vector arm alone would let the keyword arm resurrect it.
+                    #
+                    # Only when the search is not already scoped to one file.
+                    # Asking about a specific document is an explicit request
+                    # for that document, superseded or not, and refusing to
+                    # read a file the customer named would be a bug.
+                    where_clauses.append("f.superseded_by_id IS NULL")
 
                 where_sql = " AND ".join(where_clauses)
                 sql = text(
@@ -872,6 +914,74 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Could not read pages for file {file_id}: {e}")
                 return []
 
+    async def set_document_currency(
+        self,
+        file_id: int,
+        *,
+        effective_date=None,
+        set_effective_date: bool = False,
+        superseded_by_id: Optional[int] = None,
+        set_superseded_by: bool = False,
+    ) -> bool:
+        """Record when a document became true, and what replaced it.
+
+        The two `set_*` flags exist because None is a meaningful value here:
+        clearing a supersede link is how a customer says "this document is
+        current again", and it has to be distinguishable from "the caller did
+        not mention that field".
+
+        Returns False rather than raising when the file is gone. The route has
+        already authorized both files by workspace; this does not re-check that,
+        and must not be called from anywhere that has not.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = select(FileORM).where(FileORM.id == int(file_id))
+                file_orm = (await session.execute(stmt)).scalar_one_or_none()
+                if not file_orm:
+                    return False
+                if set_effective_date:
+                    file_orm.effective_date = effective_date
+                if set_superseded_by:
+                    file_orm.superseded_by_id = superseded_by_id
+                await session.commit()
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Error setting currency on file {file_id}: {e}", exc_info=True)
+                return False
+
+    async def supersede_chain_reaches(self, start_id: int, target_id: int) -> bool:
+        """Does following "replaced by" from start_id ever arrive at target_id?
+
+        A cycle here is not a curiosity, it is an outage for the documents in
+        it: retrieval skips anything with a replacement, so A replaced-by B and
+        B replaced-by A means neither can ever be cited again, and nothing in
+        the product would say why. Callers refuse the link when this is True.
+
+        Bounded, because a corrupt chain must not spin forever. A workspace with
+        a legitimate revision history longer than this does not exist.
+        """
+        seen = set()
+        current = int(start_id)
+        async with self.get_async_session() as session:
+            for _ in range(64):
+                if current == int(target_id):
+                    return True
+                if current in seen:
+                    return True
+                seen.add(current)
+                nxt = (
+                    await session.execute(
+                        select(FileORM.superseded_by_id).where(FileORM.id == current)
+                    )
+                ).scalar_one_or_none()
+                if nxt is None:
+                    return False
+                current = int(nxt)
+        # Ran out of hops without terminating, which is itself a broken chain.
+        return True
+
     async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get a file record by ID.
 
@@ -887,19 +997,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                 result = await session.execute(stmt)
                 file_orm = result.scalar_one_or_none()
                 if file_orm:
-                    return {
-                        'id': file_orm.id,
-                        'user_id': file_orm.user_id,
-                        'file_name': file_orm.file_name,
-                        'file_url': file_orm.file_url,
-                        'file_type': file_orm.file_type,
-                        # Access to a document is decided by its workspace,
-                        # not by who uploaded it, so callers that authorize a
-                        # read need this here.
-                        'workspace_id': file_orm.workspace_id,
-                        'processing_status': file_orm.processing_status,
-                        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None
-                    }
+                    return _serialize_file(file_orm)
                 return None
             except Exception as e:
                 logger.error(f"Error getting file by ID {file_id}: {e}", exc_info=True)
@@ -1016,19 +1114,7 @@ class AsyncFileRepository(AsyncBaseRepository):
                 result = await session.execute(stmt)
                 file_orm = result.scalar_one_or_none()
                 if file_orm:
-                    return {
-                        'id': file_orm.id,
-                        'user_id': file_orm.user_id,
-                        'file_name': file_orm.file_name,
-                        'file_url': file_orm.file_url,
-                        'file_type': file_orm.file_type,
-                        # Access to a document is decided by its workspace,
-                        # not by who uploaded it, so callers that authorize a
-                        # read need this here.
-                        'workspace_id': file_orm.workspace_id,
-                        'processing_status': file_orm.processing_status,
-                        'created_at': file_orm.created_at.isoformat() if file_orm.created_at else None
-                    }
+                    return _serialize_file(file_orm)
                 return None
             except Exception as e:
                 logger.error(f"Error getting file by name {filename}: {e}", exc_info=True)

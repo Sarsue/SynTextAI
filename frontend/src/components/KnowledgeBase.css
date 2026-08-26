@@ -244,3 +244,34 @@
 .kb-import-button:focus-visible { outline: 2px solid var(--text-color, #111); outline-offset: 2px; }
 
 .kb-import-icon { width: 15px; height: 15px; }
+
+/* Document currency
+   ------------------------------------------------------------------
+   A replaced document is not an error and not a warning, so it does not
+   get red. It is simply out of play: dimmed, with the reason spelled out
+   beside it, because a row that looks healthy and is never cited is the
+   confusing state this whole feature exists to remove. */
+
+.file-item.replaced-file {
+    border-left: 3px solid var(--text-muted, #bbb);
+}
+
+.file-item.replaced-file .file-name,
+.file-item.replaced-file .file-status {
+    opacity: 0.55;
+}
+
+.file-replaced-badge {
+    margin-left: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 999px;
+    color: var(--text-muted, #666);
+    border: 1px solid var(--border-color, #e8e8e8);
+    background: transparent;
+    white-space: nowrap;
+}

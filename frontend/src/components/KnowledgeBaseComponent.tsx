@@ -14,6 +14,8 @@ import {
     Loader2,
     FolderInput,
     Trash2,
+    Archive,
+    RotateCcw,
     ChevronLeft,
     ChevronRight,
 } from 'lucide-react';
@@ -61,7 +63,7 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
         fileError: contextFileError,
         accessChangedAt,
     } = useUserContext();
-    interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; }
+    interface FileStatusEntry { isDeleting?: boolean; isMoving?: boolean; isMarking?: boolean; }
 
     const [fileStatus, setFileStatus] = useState<{[key: number]: FileStatusEntry}>({});
     const [pendingDelete, setPendingDelete] = useState<UploadedFile | null>(null);
@@ -176,6 +178,54 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
     };
 
 
+    /** Mark a document as replaced by another, or bring it back.
+     *
+     * Passing null clears the link, which is how somebody undoes this. The
+     * server refuses cycles and cross-workspace links; this only has to make
+     * the common case obvious.
+     */
+    const handleSupersede = async (fileId: number, replacementId: number | null) => {
+        if (!user) return;
+
+        setFileStatus(prev => ({
+            ...prev,
+            [fileId]: { ...prev[fileId], isMarking: true }
+        }));
+
+        try {
+            const idToken = await user.getIdToken();
+            const response = await fetch(`/api/v1/files/${fileId}/currency`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({ superseded_by_id: replacementId }),
+            });
+
+            if (response.ok) {
+                addToast(
+                    replacementId === null
+                        ? 'Document is current again and will be used in answers'
+                        : 'Document marked as replaced. It will no longer be used in answers',
+                    'success',
+                );
+                await loadUserFiles(filePagination.page, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
+            } else {
+                const data = await response.json();
+                addToast(data.detail || 'Could not update the document', 'error');
+            }
+        } catch (error) {
+            console.error('Error marking document as replaced:', error);
+            addToast('Could not update the document', 'error');
+        } finally {
+            setFileStatus(prev => ({
+                ...prev,
+                [fileId]: { ...prev[fileId], isMarking: false }
+            }));
+        }
+    };
+
 
     const handlePageChange = useCallback((newPage: number) => {
         loadUserFiles(newPage, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
@@ -270,7 +320,8 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
                             <li key={currentFile.id} className={`file-item ${
                                 currentFile.status === 'processed' ? 'processed-file' :
                                 currentFile.status === 'failed' ? 'failed-file' :
-                                currentFile.status === 'uploaded' ? 'uploaded-file' : 'processing-file'}`}>
+                                currentFile.status === 'uploaded' ? 'uploaded-file' : 'processing-file'}${
+                                currentFile.superseded_by_id ? ' replaced-file' : ''}`}>
                                 <div className="file-item-header">
                                     <div className="file-info" onClick={() => handleFileClick(currentFile)}>
                                         <span className="file-icon">
@@ -289,6 +340,15 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
                                                     return <>{icon} {label}</>;
                                                 })()}
                                             </span>
+                                            {/* Say why this document is never
+                                                cited. Without it the row looks
+                                                healthy and silently answers
+                                                nothing. */}
+                                            {currentFile.superseded_by_id && (
+                                                <span className="file-replaced-badge" title="Replaced by a newer document, so it is not used in answers">
+                                                    <Archive className="size-3" /> Replaced
+                                                </span>
+                                            )}
                                         </span>
 
                                         <div className="file-actions">
@@ -325,6 +385,63 @@ const KnowledgeBaseComponent: React.FC<KnowledgeBaseComponentProps> = ({ onFileC
                                                         ))}
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
+                                        )}
+                                        {/* Which document is current is a
+                                            document-management act, so it is
+                                            held to the same capability as
+                                            deleting one. Staff ask questions. */}
+                                        {canManageDocuments && (
+                                            currentFile.superseded_by_id ? (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleSupersede(currentFile.id, null);
+                                                    }}
+                                                    disabled={fileStatus[currentFile.id]?.isMarking || false}
+                                                    title="Use this document in answers again"
+                                                >
+                                                    {fileStatus[currentFile.id]?.isMarking
+                                                        ? <Loader2 className="size-3.5 animate-spin" />
+                                                        : <RotateCcw className="size-3.5" />}
+                                                </Button>
+                                            ) : files.length > 1 && (
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            disabled={fileStatus[currentFile.id]?.isMarking || false}
+                                                            title="Mark as replaced by a newer document"
+                                                        >
+                                                            {fileStatus[currentFile.id]?.isMarking
+                                                                ? <Loader2 className="size-3.5 animate-spin" />
+                                                                : <Archive className="size-3.5" />}
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                                        <DropdownMenuLabel>Replaced by</DropdownMenuLabel>
+                                                        {files
+                                                            .filter(f => f.id !== currentFile.id && !f.superseded_by_id)
+                                                            .map(f => (
+                                                                <DropdownMenuItem
+                                                                    key={f.id}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleSupersede(currentFile.id, f.id);
+                                                                    }}
+                                                                >
+                                                                    <FileText className="size-3.5" />
+                                                                    {f.file_name.length > 28
+                                                                        ? f.file_name.substring(0, 25) + '...'
+                                                                        : f.file_name}
+                                                                </DropdownMenuItem>
+                                                            ))}
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            )
                                         )}
                                         {/* Deleting is restricted to the file's
                                             uploader, so for staff this button
