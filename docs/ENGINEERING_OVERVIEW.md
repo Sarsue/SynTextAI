@@ -142,8 +142,6 @@ enough until a customer says otherwise.
   fallback. Unreachable by keyword, unrepairable by re-embedding. Only fix is
   re-upload. `reembed_chunks --check` counts them.
 - **Rate limits** (30/min chat, 10/min upload, per IP) are a first-pass guess.
-- **`api/middleware/` is empty.** The CORS, security-header and rate-limit
-  middleware live in `app.py`. Delete the package or move them in.
 
 **Parked, one customer away**
 
