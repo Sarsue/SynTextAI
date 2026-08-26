@@ -81,8 +81,9 @@ Live in production.
 - **Document currency**: mark a document as replaced by a newer one, and it
   stops answering questions. See below.
 - **Documents SyntextAI writes**: ask for an SOP or a summary, get it written
-  from the workspace's own documents, edit it, and approve it into the knowledge
-  base. Approval is the only way one ever answers a question. See below.
+  from the workspace's own documents, edit it, download it as Word, and approve
+  it into the knowledge base. Approval is the only way one ever answers a
+  question. See below.
 
 **Underneath**
 - Durable job queue in Postgres: leases, retries, per-tenant fairness, separate
@@ -273,10 +274,45 @@ The first approval attempt failed for exactly that reason, which incidentally
 proved the rollback: no `files` row was left behind, so no document appeared in
 the list that could never be opened.
 
+### Export to Word
+
+`services/docx_export.py` converts the draft's markdown to .docx: H1-H4, ordered
+and unordered lists including one level of nesting, pipe tables, and
+bold/italic/code inline. Anything it does not recognise becomes an ordinary
+paragraph rather than being dropped, because losing a line of a document
+somebody is about to hand to staff is worse than styling it plainly. A table
+whose rows disagree about their column count is a truncated table, and becomes
+text rather than an exception in the middle of a download.
+
+No markdown-to-docx library was added. `python-docx` is already here because
+`DocxProcessor` reads Word files on the way in, and pulling in a dependency to
+convert six constructs is a poor trade.
+
+**The provenance note is written into the file, above the content.** A .docx
+leaves the product: it gets emailed, printed and pinned to a wall, and that is
+exactly when everybody forgets a machine drafted it. Marking it only in the app
+marks it in the one place it is already obvious.
+
+The title reaches a `Content-Disposition` header and is customer text, so
+`safe_filename` strips it to characters that cannot break out of a header value.
+Tested with a title containing a quote and a CRLF.
+
+**Two faults the first real export exposed**, both fixed and both invisible to
+the tests that existed:
+
+- The model wrote `(Segment 6)` and `(Segment 9)` into a printed procedure. The
+  numbering is scaffolding for the model, and a staff member following an SOP
+  has never heard of a segment. The prompt now forbids it explicitly and shows
+  the model what not to write. Three real runs since: zero references.
+- The title was the raw prompt, so a document was called "A hand hygiene quick
+  reference for new staff. Use a table for when to wash..." and downloaded under
+  that filename. The draft now takes its name from its own opening `# heading`
+  when it wrote one, falling back to the prompt. The .docx skips that heading so
+  the name is not printed twice.
+
 ### Not done
 
-No export. A customer can edit a draft and approve it, and cannot yet download
-it as DOCX or PDF. `python-docx` is already a dependency.
+No PDF. Word only.
 
 ## Decisions not to re-litigate
 

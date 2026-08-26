@@ -18,7 +18,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from ..core.auth import authenticate_user, get_store
@@ -27,6 +27,7 @@ from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from ..core.utils import upload_bytes_to_gcs
 from ..repositories.repository_manager import RepositoryManager
+from ..services.docx_export import markdown_to_docx, safe_filename
 from ..services.llm_service import generate_explanation
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,11 @@ async def generate_draft(
     draft = await store.draft_repo.create(
         workspace_id=body.workspace_id,
         created_by=user_id,
-        title=(body.title or _title_from(body.prompt)),
+        # The document names itself better than its request does. "A hand
+        # hygiene quick reference for new staff. Use a table for when to..." is
+        # what somebody typed; "Hand Hygiene Quick Reference" is what they
+        # wanted, and it is also the filename of the .docx they download.
+        title=(body.title or _heading_of(content) or _title_from(body.prompt)),
         prompt=body.prompt,
         content=content.strip(),
         sources=sources,
@@ -209,6 +214,52 @@ async def update_draft(
             detail="Could not update the document",
         )
     return updated
+
+
+@drafts_router.get("/{draft_id}/export")
+async def export_draft(
+    draft_id: int = Path(...),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """The draft as a Word document.
+
+    Reading, so it is held to READ: somebody who may see a document may take a
+    copy of it, and refusing that while showing them the text on screen would be
+    theatre.
+
+    The file carries the provenance note at the top, before the content. A .docx
+    leaves the product and gets emailed, printed and pinned to a wall, which is
+    exactly when everyone forgets a machine drafted it.
+    """
+    draft = await _authorized_draft(draft_id, user_data["user_id"], store, Capability.READ)
+
+    try:
+        payload = await asyncio.to_thread(
+            markdown_to_docx,
+            draft["content"],
+            title=draft["title"],
+            sources=draft.get("sources"),
+        )
+    except Exception as e:
+        logger.error(f"Could not build .docx for draft {draft_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not build the Word document",
+        )
+
+    filename = safe_filename(draft["title"])
+    logger.info({"event": "draft.exported", "draft_id": draft_id, "bytes": len(payload)})
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            # filename* carries the real title for browsers that read RFC 5987,
+            # and the plain filename is already stripped to characters that
+            # cannot break out of the header.
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @drafts_router.post("/{draft_id}/ingest", status_code=status.HTTP_202_ACCEPTED)
@@ -394,6 +445,12 @@ def _draft_prompt(request_text: str, numbered_context: str, history_text: str) -
         "reading: TO BE COMPLETED: <what is missing>. A gap the reader can see "
         "is useful; a gap filled with something plausible is dangerous, because "
         "staff will follow it.\n\n"
+        "NEVER REFER TO THE SEGMENTS IN THE DOCUMENT:\n"
+        "The numbering is scaffolding for you, not content. Do not write "
+        "\"[Segment 4]\", \"(Segment 9)\", \"per the segments\" or anything like "
+        "them. This document is going to be printed and handed to staff who "
+        "have never heard of a segment, and a procedure that cites one reads as "
+        "broken.\n\n"
         "FORM:\n"
         "Write in Markdown. Open with a single # title, then short sections "
         "under ## headings. Use numbered lists for anything performed in order. "
@@ -405,6 +462,22 @@ def _draft_prompt(request_text: str, numbered_context: str, history_text: str) -
         f"{history_block}\n"
         f"SEGMENTS:\n{numbered_context}\n"
     )
+
+
+def _heading_of(content: str) -> str:
+    """The document's own H1, if it opened with one.
+
+    Only the first non-empty line is considered: a heading further down is a
+    section, not the document's name.
+    """
+    for line in (content or "").split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("# "):
+            return stripped[2:].strip()[:200]
+        return ""
+    return ""
 
 
 def _title_from(prompt: str) -> str:

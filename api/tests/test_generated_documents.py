@@ -353,3 +353,196 @@ async def test_a_draft_can_be_approved_again_if_the_document_was_deleted(
     again = await client.as_(tenant.owner).post(f"/api/v1/drafts/{draft['id']}/ingest")
     assert again.status_code == 202, again.text
     assert again.json()["file_id"] != file_id
+
+
+# --- export -------------------------------------------------------------------
+
+DOCX_MEDIA_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+
+def _docx_text(payload: bytes):
+    """Every paragraph and table cell in a .docx, so a test can read what a
+    person would see rather than trusting the byte count."""
+    from io import BytesIO
+    from docx import Document
+
+    doc = Document(BytesIO(payload))
+    lines = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            lines.extend(c.text for c in row.cells)
+    return doc, lines
+
+
+async def test_a_draft_downloads_as_a_word_document(store, tenant, draft, client):
+    res = await client.as_(tenant.owner).get(f"/api/v1/drafts/{draft['id']}/export")
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == DOCX_MEDIA_TYPE
+    assert "attachment" in res.headers["content-disposition"]
+    # A real Word file, opened rather than assumed.
+    _, lines = _docx_text(res.content)
+    assert any("Sterilisation SOP" in l for l in lines)
+    assert any("999 degrees" in l for l in lines)
+
+
+async def test_the_downloaded_file_says_a_machine_wrote_it(store, tenant, draft, client):
+    """The note travels with the file.
+
+    A .docx leaves the product: it gets emailed, printed and pinned to a wall,
+    and that is exactly when everybody forgets a machine drafted it. Marking it
+    only in the app would mark it in the one place it is already obvious.
+    """
+    res = await client.as_(tenant.owner).get(f"/api/v1/drafts/{draft['id']}/export")
+    _, lines = _docx_text(res.content)
+    assert any("Written by SyntextAI" in l for l in lines)
+    assert any("sop.pdf" in l for l in lines), "the source documents are not named"
+
+
+async def test_headings_lists_and_tables_survive_the_conversion(
+    store, tenant, workspace, client
+):
+    """Word structure, not one long paragraph. A document somebody has to
+    reformat before using is a document they will rewrite instead."""
+    from docx import Document as DocxDocument
+    from io import BytesIO
+
+    rich = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Rich", prompt="p",
+        content=(
+            "# Rich\n\n"
+            "## Steps\n\n"
+            "1. First step\n"
+            "2. Second step\n\n"
+            "- A bullet\n"
+            "- Another bullet\n\n"
+            "## Limits\n\n"
+            "| Setting | Value |\n"
+            "|---|---|\n"
+            "| Temperature | 134 |\n"
+            "| Time | 3 min |\n\n"
+            "Some **bold** text and some *italic* text.\n"
+        ),
+        sources=[],
+    )
+    res = await client.as_(tenant.owner).get(f"/api/v1/drafts/{rich['id']}/export")
+    assert res.status_code == 200, res.text
+
+    doc = DocxDocument(BytesIO(res.content))
+    styles = [p.style.name for p in doc.paragraphs]
+    assert any(s.startswith("Heading") for s in styles), "no headings survived"
+    assert any(s.startswith("List Number") for s in styles), "numbered list lost"
+    assert any(s.startswith("List Bullet") for s in styles), "bullet list lost"
+
+    assert len(doc.tables) == 1, f"expected one table, got {len(doc.tables)}"
+    cells = [c.text for r in doc.tables[0].rows for c in r.cells]
+    assert "Temperature" in cells and "134" in cells
+
+    # The markers themselves must not survive as literal text.
+    body = "\n".join(p.text for p in doc.paragraphs)
+    assert "**bold**" not in body and "bold" in body
+    assert "|---|" not in body
+
+
+async def test_a_half_written_table_becomes_text_rather_than_an_error(
+    store, tenant, workspace, client
+):
+    """Rows disagreeing about their column count is what a truncated table looks
+    like, and a download that raises is worse than one that is plain."""
+    broken = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Broken", prompt="p",
+        content="| A | B |\n|---|---|\n| only one\n",
+        sources=[],
+    )
+    res = await client.as_(tenant.owner).get(f"/api/v1/drafts/{broken['id']}/export")
+    assert res.status_code == 200, res.text
+    _, lines = _docx_text(res.content)
+    assert any("only one" in l for l in lines), "the row was dropped"
+
+
+async def test_staff_can_download_what_they_can_read(
+    store, tenant, workspace, draft, client
+):
+    """Somebody who may see the document may take a copy. Refusing that while
+    showing them the text on screen would be theatre."""
+    member = await tenant.member(scope="workspace", workspaces=[workspace["id"]])
+    res = await client.as_(member).get(f"/api/v1/drafts/{draft['id']}/export")
+    assert res.status_code == 200
+
+
+async def test_an_outsider_cannot_download_a_draft(store, tenant, draft, client):
+    outsider = await tenant.new_user("outsider")
+    res = await client.as_(outsider).get(f"/api/v1/drafts/{draft['id']}/export")
+    assert res.status_code == 403
+
+
+def test_a_title_cannot_break_out_of_the_content_disposition_header():
+    """The title is customer text and reaches a header. A quote or a newline
+    there would let it inject header fields."""
+    from api.services.docx_export import safe_filename
+
+    nasty = safe_filename('evil"; drop\r\nSet-Cookie: a=b')
+    assert '"' not in nasty and "\r" not in nasty and "\n" not in nasty
+    assert nasty.endswith(".docx")
+    assert safe_filename("") == "document.docx"
+    assert safe_filename("   ...   ") == "document.docx"
+
+
+async def test_the_title_comes_from_the_document_not_the_request(
+    store, tenant, paying, workspace, client, monkeypatch
+):
+    """"A hand hygiene quick reference for new staff. Use a table for when..."
+    is what somebody typed. "Hand Hygiene Quick Reference" is what they wanted,
+    and it is also the filename of the .docx they download."""
+    async def fake_embedding(text):
+        return QUERY_VEC
+    async def fake_generate(prompt, language=None, comprehension_level=None):
+        return "# Hand Hygiene Quick Reference\n\n## When to wash\n\nWhen visibly soiled."
+    monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
+    monkeypatch.setattr(drafts_route, "generate_explanation", fake_generate)
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/drafts/generate",
+        json={"workspace_id": workspace["id"],
+              "prompt": "A hand hygiene quick reference for new staff. Use a table "
+                        "for when to wash versus when to use alcohol rub."},
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["title"] == "Hand Hygiene Quick Reference"
+
+
+async def test_the_document_name_is_not_printed_twice(
+    store, tenant, workspace, client
+):
+    """Word's Title style already states it, so the opening # heading would be
+    the same words again directly underneath."""
+    from docx import Document as DocxDocument
+    from io import BytesIO
+
+    d = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Hand Hygiene", prompt="p",
+        content="# Hand Hygiene\n\n## When to wash\n\nWhen visibly soiled.",
+        sources=[],
+    )
+    res = await client.as_(tenant.owner).get(f"/api/v1/drafts/{d['id']}/export")
+    doc = DocxDocument(BytesIO(res.content))
+    exact = [p.text for p in doc.paragraphs if p.text.strip() == "Hand Hygiene"]
+    assert len(exact) == 1, f"the title appears {len(exact)} times"
+
+
+def test_the_prompt_forbids_citing_segment_numbers_in_the_output():
+    """The model wrote "(Segment 6)" into a procedure on the first real run.
+
+    Segment numbering is scaffolding for the model. A printed SOP that cites one
+    reads as broken to the person following it, who has never heard of a
+    segment.
+    """
+    built = drafts_route._draft_prompt("write an SOP", "[Segment 1]\nsome text", "")
+    assert "Segment 4" in built or "Segment 9" in built, (
+        "the instruction no longer shows the model what not to write"
+    )
+    assert "Do not write" in built

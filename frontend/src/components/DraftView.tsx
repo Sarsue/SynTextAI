@@ -17,12 +17,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Sparkles, Save, Library, Trash2, X, Loader2, FileText } from 'lucide-react';
+import { Sparkles, Save, Library, Trash2, X, Loader2, FileText, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmDialog from './ConfirmDialog';
 import './DraftView.css';
+
+
+/** The name the server chose, or a usable fallback.
+ *
+ * The header is already stripped to safe characters server-side; this only has
+ * to read it, and fall back when a proxy drops the header entirely. */
+function filenameFrom(disposition: string | null, title: string): string {
+    const match = disposition?.match(/filename="([^"]+)"/);
+    if (match) return match[1];
+    const cleaned = (title || 'document').replace(/[^\w\s.-]/g, '').trim() || 'document';
+    return `${cleaned}.docx`;
+}
 
 interface DraftSource {
     segment: number;
@@ -64,6 +76,7 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
     const [ingesting, setIngesting] = useState(false);
     const [confirmIngest, setConfirmIngest] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [exporting, setExporting] = useState(false);
 
     // What the server last agreed the document says. Comparing against this is
     // how the Save button knows whether there is anything to save, so an
@@ -125,6 +138,49 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
             addToast('Could not save', 'error');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleExport = async () => {
+        setExporting(true);
+        try {
+            // Save first. Downloading the server's copy while the person is
+            // looking at an edited one hands them a file that does not match
+            // what is on their screen.
+            if (dirty) {
+                const saveRes = await authFetch(`/api/v1/drafts/${draftId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ title, content }),
+                });
+                if (!saveRes.ok) {
+                    addToast('Could not save your edits, so nothing was downloaded', 'error');
+                    return;
+                }
+                setSaved({ title, content });
+            }
+
+            const res = await authFetch(`/api/v1/drafts/${draftId}/export`);
+            if (!res.ok) {
+                addToast('Could not build the Word document', 'error');
+                return;
+            }
+            // The endpoint needs the auth header, so this cannot be a plain
+            // link: fetch it, then hand the bytes to the browser.
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filenameFrom(res.headers.get('content-disposition'), title);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            // Revoked on the next tick rather than immediately: Safari has not
+            // started reading the blob by the time click() returns.
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch {
+            addToast('Could not build the Word document', 'error');
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -267,6 +323,10 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
                     <Button variant="ghost" size="sm" onClick={handleSave} disabled={!dirty || saving}>
                         {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
                         {dirty ? 'Save' : 'Saved'}
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={handleExport} disabled={exporting}>
+                        {exporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                        Word
                     </Button>
                     {!inKnowledgeBase && (
                         <Button size="sm" onClick={() => setConfirmIngest(true)} disabled={ingesting}>
