@@ -190,12 +190,39 @@ const Home: React.FC = () => {
                         </a>
                     </Button>
                 </div>
-                {/* It is, in fact, required. The trial was dropped rather than
+                {/* The price is stated, not whispered. Guru and Glean cannot
+                    put a number on a page, because enterprise sales will not
+                    let them: every visitor has to talk to somebody first. A
+                    number and a sign-up button is the one thing this product
+                    can do that they structurally cannot, and it spent its first
+                    year set in 10px grey under the buttons.
+
+                    It is, in fact, required. The trial was dropped rather than
                     built, so signing up takes a card and an organization with
                     no subscription is entitled to nothing. Promising otherwise
                     sold the one thing the product does not do, and the person
                     who believed it found out at the payment form. */}
-                <p className="home-footnote">$99 a month. Cancel anytime.</p>
+                <p className="home-price-line">
+                    <strong>$99 a month</strong> for the whole practice. 10 seats included.
+                    Cancel anytime.
+                </p>
+            </section>
+
+            {/* The product, in the first screen. A real answer, from real
+                documents, cited to the page it came from. Nobody buys software
+                they have not seen, and every competitor shows theirs. */}
+            <section className="home-shot home-shot--hero">
+                <img
+                    src="/product/answer.png"
+                    alt="A question about a cancellation fee, answered with the exact figures and a link to page 4 of the practice's own intake procedure."
+                    width={1200}
+                    height={1030}
+                    loading="eager"
+                />
+                <p className="home-shot-caption">
+                    A real answer from a real practice's documents. The fee, the exception,
+                    and the page it came from.
+                </p>
             </section>
 
             <div className="home-divider" />
@@ -273,23 +300,80 @@ const Home: React.FC = () => {
 
             <div className="home-divider" />
 
-            {/* Features */}
+            {/* Three things, each one shown rather than described. The grid
+                of six one-line cards that was here said "cited answers" and
+                "shared workspace" and left a stranger no wiser about what the
+                product looks like. */}
             <section className="home-section">
-                <h2 className="home-section-heading">Built for operations, not IT</h2>
-                <div className="home-features">
-                    {[
-                        { title: 'Cited answers', body: 'Every answer links to the exact section of your document. Staff can verify instantly.' },
-                        { title: 'It writes documents too', body: 'Describe the checklist or SOP you need. It writes it from your own documents, names the ones it used, and hands you a Word or PDF file.' },
-                        { title: 'Nothing goes in without you', body: 'A document it writes answers no questions until you have read it and added it yourself. Your knowledge base stays yours.' },
-                        { title: 'It knows which version is current', body: 'Mark the 2019 policy as replaced by the 2024 one. The old one stops turning up in answers, and stays on file.' },
-                        { title: 'Shared workspace', body: 'One place for your whole team. Everyone gets the same accurate answer from the same source.' },
-                        { title: 'Owner and staff roles', body: 'Owners manage documents and team members. Staff ask questions and read answers.' },
-                    ].map(f => (
-                        <div key={f.title} className="home-feature">
-                            <h3 className="home-feature-title">{f.title}</h3>
-                            <p className="home-feature-body">{f.body}</p>
-                        </div>
-                    ))}
+                <h2 className="home-section-heading">Three things it does</h2>
+
+                <div className="home-thing">
+                    <div className="home-thing-text">
+                        <span className="home-thing-n">01</span>
+                        <h3>Answers, with the page attached</h3>
+                        <p>
+                            Staff ask in plain English. The answer comes back with the figure,
+                            the exception and a link to the page it came from, so anybody can
+                            check it in one click.
+                        </p>
+                        <p className="home-thing-note">
+                            If the answer is not in your documents, it says so instead of
+                            inventing one.
+                        </p>
+                    </div>
+                    <div className="home-thing-shot">
+                        <img
+                            src="/product/answer.png"
+                            alt="A cited answer about a cancellation fee, sourced to page 4 of the practice's intake procedure."
+                            width={1200} height={1030} loading="lazy"
+                        />
+                    </div>
+                </div>
+
+                <div className="home-thing home-thing--reverse">
+                    <div className="home-thing-text">
+                        <span className="home-thing-n">02</span>
+                        <h3>The documents you never got round to writing</h3>
+                        <p>
+                            Describe the checklist or SOP you need. It writes one from the
+                            documents you already have, tells you which ones it used, and hands
+                            you a Word or PDF file.
+                        </p>
+                        <p className="home-thing-note">
+                            Nothing it writes answers a single question until you have read it
+                            and added it yourself.
+                        </p>
+                    </div>
+                    <div className="home-thing-shot">
+                        <img
+                            src="/product/document.png"
+                            alt="A front desk onboarding checklist written by SyntextAI, marked as written by AI, with Word and PDF buttons and the three source documents named."
+                            width={1200} height={1260} loading="lazy"
+                        />
+                    </div>
+                </div>
+
+                <div className="home-thing">
+                    <div className="home-thing-text">
+                        <span className="home-thing-n">03</span>
+                        <h3>One box. Ask, find, or write.</h3>
+                        <p>
+                            The same box does all three. No modules to learn, no menu to hunt
+                            through, nothing to set up. If your staff can send a text message,
+                            they can use it.
+                        </p>
+                        <p className="home-thing-note">
+                            Replaced a policy? Mark the old one and it stops turning up in
+                            answers, while staying on file.
+                        </p>
+                    </div>
+                    <div className="home-thing-shot">
+                        <img
+                            src="/product/write.png"
+                            alt="The composer with Ask, Find and Write, set to Write, with a request for a front desk onboarding checklist."
+                            width={1200} height={478} loading="lazy"
+                        />
+                    </div>
                 </div>
             </section>
 
@@ -345,6 +429,38 @@ const Home: React.FC = () => {
                         Reach out to us
                     </a>.
                 </p>
+            </section>
+
+            <div className="home-divider" />
+
+            {/* One signed section. Guru's homepage has a company behind it and
+                no person on it; this is the one thing they cannot copy, and it
+                costs a paragraph. Deliberately short: the product carries the
+                page, this just says who is behind it. */}
+            <section className="home-section home-section--narrow">
+                <div className="home-note">
+                    <p>
+                        I built Syntext because the businesses that need this least are the
+                        ones being sold to. The tools that do this well start at a sales call
+                        and a five figure contract, and a twelve person dental practice is
+                        never getting either.
+                    </p>
+                    <p>
+                        So it is $99, you sign up with a card, and it works on the files you
+                        already have. No migration, no knowledge architecture project, no
+                        onboarding quarter.
+                    </p>
+                    <p>
+                        If you want to see it on your own documents before you decide, email
+                        me and I will set you up in a workspace myself.
+                    </p>
+                    <p className="home-note-sign">
+                        Osas Igbinedion, who builds and answers the email<br />
+                        <a href="mailto:osasigbinedion@gmail.com?subject=Syntext%20AI">
+                            osasigbinedion@gmail.com
+                        </a>
+                    </p>
+                </div>
             </section>
 
             <div className="home-divider" />

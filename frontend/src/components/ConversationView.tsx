@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { formatServerTime } from '../utils/serverTime';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy } from 'lucide-react';
@@ -19,6 +20,7 @@ interface ConversationViewProps {
     /** Records this caller's rating of one answer, or clears it when null. */
     onFeedbackChange: (messageId: number, feedback: MessageFeedback | null) => void;
 }
+
 
 const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awaitingReply = false, onCopy, onFeedbackChange }) => {
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
@@ -219,7 +221,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
                             </div>
                         )}
                         <div className="message-metadata">
-                            <div className="message-timestamp">{message.timestamp}</div>
+                            <div className="message-timestamp" title={message.timestamp}>
+                                {formatServerTime(message.timestamp)}
+                            </div>
                             {isBot && (
                                 <>
                                     <Button
