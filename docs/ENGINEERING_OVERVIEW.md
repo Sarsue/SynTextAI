@@ -80,6 +80,9 @@ Live in production.
 - Import from Google Drive through the picker, `drive.file` only.
 - **Document currency**: mark a document as replaced by a newer one, and it
   stops answering questions. See below.
+- **Documents SyntextAI writes**: ask for an SOP or a summary, get it written
+  from the workspace's own documents, edit it, and approve it into the knowledge
+  base. Approval is the only way one ever answers a question. See below.
 
 **Underneath**
 - Durable job queue in Postgres: leases, retries, per-tenant fairness, separate
@@ -103,30 +106,25 @@ enough until a customer says otherwise.
    `.comment` are collected today and read by nobody. *"Cited the 2019 policy,
    we are on the 2024 one"* is a standing fact being handed over and thrown
    away. The other end of document currency, now shipped.
-2. **Generate work product.** SOPs, summaries, drafts, built from documents in
-   the workspace. This is what stops being search and starts being output, and
-   what justifies a tier above $99. Generate a **diff against the existing
-   document**, never fresh text in a chat bubble: a chat answer is the right
-   size for a question and the wrong size for a revision.
-3. **MCP server.** Expose `hybrid_search` over one workspace so a customer's own
+2. **MCP server.** Expose `hybrid_search` over one workspace so a customer's own
    Claude can query their knowledge base. No new ingestion, and `hybrid_search`
    plus the tenant scoping already exist. Distribution more than a feature.
-4. **Nothing here is an unkept promise.** Checked 2026-08-26. An earlier note
+3. **Nothing here is an unkept promise.** Checked 2026-08-26. An earlier note
    claimed "workflow automation is marketed and does not exist" and it was
    wrong: that phrase is on osas-inc.com under **AI Implementation**, which is
    consulting work Osas delivers himself, and the same sentence says "powered by
    SyntextAI where it applies, custom-built everywhere else". syntextai.com
    claims only cited answers from your documents, which is what ships. Do not
    re-raise this as a liability.
-5. **Vision verification flags have no UI.** The data reaches
+4. **Vision verification flags have no UI.** The data reaches
    `segments.meta_data` and comes back from `hybrid_search` on every result.
    Whether a citation to an unverified figure should say so, and how, is an
    unmade design decision, not a build.
-6. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
+5. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
    code around them drifting.
-7. **Activity history, admin dashboard, saved prompts.** Nothing exists.
+6. **Activity history, admin dashboard, saved prompts.** Nothing exists.
 
 **Not doing, decided 2026-08-26**
 - **Email-in.** Proposed and dropped. Upload plus Drive covers ingress.
@@ -212,6 +210,73 @@ now call `_serialize_file`.
 against the local database. Driven end to end in the browser: marking a document
 replaced removed it from search results for a query it was the only match for,
 and undoing it brought it back.
+
+## Documents SyntextAI writes, 2026-08-26
+
+Ask for a document, get one written from the workspace's own documents, edit it,
+and decide whether it joins the knowledge base. The deciding is the feature.
+
+### The wall, and why it is a table rather than a boolean
+
+A generated draft that could be retrieved makes the model its own source of
+truth. It writes a plausible SOP with one wrong figure, that is ingested, and
+afterwards it cites itself with a page reference indistinguishable from a real
+one. Nobody reading the answer can tell.
+
+So drafts live in `generated_documents`, which retrieval does not join and
+cannot. A boolean on `files` would have been smaller and is the kind of thing a
+future query forgets to check; this is unretrievable by construction. Proved by
+a test that puts a figure appearing in no document into a draft and searches for
+it.
+
+Approving does not move a row. It writes the bytes to storage and creates an
+ordinary `files` row queued for ingestion, so a draft is held to the plan limit,
+the duplicate-name rule and the same worker as an upload. An approval is another
+way in, not a way around.
+
+### The rest of the decisions
+
+- **The provenance note is inside the stored document**, not metadata beside it.
+  Once approved it gets retrieved and read by people who were not in the room,
+  and what they need to know is that a machine drafted it and a person approved
+  it.
+- **The screen says a machine wrote it, and keeps saying so after editing.** A
+  document that looks like the business wrote it is the dangerous one.
+- **Refuse rather than invent.** A request no document covers is refused with
+  422, and gaps inside a draft are written as `TO BE COMPLETED: ...`. A gap the
+  reader can see is useful; a gap filled with something plausible is dangerous,
+  because staff follow it.
+- **Held to `UPLOAD_DOCUMENT`**, and approval to the same. Owners manage
+  documents, staff ask questions.
+- **Chat history is opt-in** and read through the chat repository's own
+  workspace scoping, so a history id from another tenant returns nothing.
+- **"In the knowledge base" is both `status` and `ingested_file_id`.** Deleting
+  the approved document nulls the id through ON DELETE SET NULL while status
+  stays `ingested`; reading status alone would strand the draft, unable to be
+  approved again.
+- **The document opens in the main area, not a chat bubble.** A chat answer is
+  the right size for a question and the wrong size for a document.
+
+### Verification
+
+292 tests pass, 19 new. Driven end to end against the local stack: generated a
+real infection-control summary from `safe-care2.pdf` in 40 seconds, edited it,
+saved it, confirmed a marker string added by hand was not retrievable, then
+approved it and watched it become an ordinary document.
+
+`GCS_CREDENTIALS_PATH` was added while doing that. The service-account path was
+hardcoded in three places in `core/utils.py`, so nothing touching storage could
+run outside the container: every upload, import and approval failed with
+FileNotFoundError before reaching Google. The default is unchanged.
+
+The first approval attempt failed for exactly that reason, which incidentally
+proved the rollback: no `files` row was left behind, so no document appeared in
+the list that could never be opened.
+
+### Not done
+
+No export. A customer can edit a draft and approve it, and cannot yet download
+it as DOCX or PDF. `python-docx` is already a dependency.
 
 ## Decisions not to re-litigate
 

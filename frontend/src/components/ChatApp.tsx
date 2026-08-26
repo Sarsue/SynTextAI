@@ -12,6 +12,8 @@ import { User } from 'firebase/auth';
 import { useUserContext , ALL_WORKSPACES } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
+import DraftsPanel from './DraftsPanel';
+import DraftView from './DraftView';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -97,6 +99,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
+    // A document SyntextAI wrote, open in the main area instead of the chat.
+    // A document needs the width; a chat bubble is the wrong size for one, and
+    // reading a three-page SOP in the message list is exactly the complaint
+    // this feature exists to answer.
+    const [openDraftId, setOpenDraftId] = useState<number | null>(null);
+    const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
     const idTokenRef = useRef<string | null>(null); 
     const navigate = useNavigate();
     // Only offer the organization switcher to people who actually have a
@@ -986,6 +994,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         darkMode={darkMode}
                         onWorkspaceChange={setCurrentWorkspaceId}
                     />
+                    <DraftsPanel
+                        workspaceId={currentWorkspaceId}
+                        canManageDocuments={orgContext ? orgContext.can_manage_documents : true}
+                        onOpenDraft={(id) => { setOpenDraftId(id); setActiveTab('chat'); }}
+                        refreshKey={draftsRefreshKey}
+                    />
                     <div className="settings-button-container">
                         {/* Who am I, and where am I? Both matter once somebody
                             can belong to a company they do not own: an invited
@@ -1038,7 +1052,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 </aside>
 
                 <main className={`main-content-area chat-column ${activeTab === 'chat' ? 'active' : ''}`}>
-                    {composerMode === 'find' ? (
+                    {openDraftId !== null ? (
+                        <DraftView
+                            draftId={openDraftId}
+                            onClose={() => setOpenDraftId(null)}
+                            onIngested={() => {
+                                // The draft is a real document now, so both
+                                // lists are stale.
+                                setDraftsRefreshKey(k => k + 1);
+                                loadUserFiles(1, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
+                            }}
+                            onDeleted={() => setDraftsRefreshKey(k => k + 1)}
+                        />
+                    ) : composerMode === 'find' ? (
                         <SearchResults
                             query={searchQuery}
                             results={searchResults}

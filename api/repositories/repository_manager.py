@@ -11,6 +11,7 @@ from .async_user_repository import AsyncUserRepository
 from .async_chat_repository import AsyncChatRepository
 from .async_file_repository import AsyncFileRepository
 from .async_usage_repository import AsyncUsageRepository
+from .async_generated_document_repository import AsyncGeneratedDocumentRepository
 from .async_workspace_repository import AsyncWorkspaceRepository
 from .async_organization_repository import AsyncOrganizationRepository
 from .async_agent_run_repository import AsyncAgentRunRepository
@@ -45,4 +46,5 @@ class RepositoryManager:
         self.workspace_repo = AsyncWorkspaceRepository(database_url)
         self.org_repo = AsyncOrganizationRepository(database_url)
         self.usage_repo = AsyncUsageRepository(database_url)
+        self.draft_repo = AsyncGeneratedDocumentRepository(database_url)
         logger.info("All async repositories initialized successfully")
