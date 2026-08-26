@@ -145,6 +145,11 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
         setSelectedFile(null);
     };
 
+    // Written by syntext_agent when a segment came from a figure the text layer
+    // could not confirm. Matched rather than parsed: the citation line is
+    // markdown built server side, and this is the one token both ends agree on.
+    const UNVERIFIED_MARKER = 'read from a figure, unverified';
+
     const splitMessageAndSources = (content: string): { body: string; sources: string | null } => {
         const marker = '\n\n**Sources:**';
         const idx = content.indexOf(marker);
@@ -218,6 +223,18 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
                             <div className="citation-box">
                                 <div className="citation-label">Sources</div>
                                 {renderMarkdown(sources, handleFileLinkClick)}
+                                {/* A page the vision model read off a figure, which the
+                                    text layer could not confirm. The backend marks the
+                                    citation itself; this says once, in words, what the
+                                    marker means, because "unverified" beside a filename
+                                    is easy to read straight past. */}
+                                {sources.includes(UNVERIFIED_MARKER) && (
+                                    <p className="citation-caution">
+                                        One source was read from a figure and could not be
+                                        checked against the document's own text. Open it
+                                        before relying on any figure it gave.
+                                    </p>
+                                )}
                             </div>
                         )}
                         <div className="message-metadata">

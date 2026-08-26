@@ -140,3 +140,86 @@ async def test_storage_puts_the_flags_where_a_citation_can_reach_them(store, doc
         )).scalar()
 
     assert meta and meta.get("flags") == UNVERIFIED
+
+
+# --- the flag reaching the reader -------------------------------------------
+
+def _result(segment_id: int, *, unverified: bool, numbers=None):
+    meta = {}
+    if unverified:
+        meta = {
+            "vision_unverified_page": "figure page; text layer cannot verify",
+            "vision_unverified_numbers": numbers or ["134", "2.1"],
+        }
+    return {
+        "content": f"Body of segment {segment_id}.",
+        "file_name": "service-manual.pdf",
+        "file_url": "https://storage.example/service-manual.pdf",
+        "page_number": 22,
+        "meta_data": meta,
+    }
+
+
+def test_the_model_is_told_a_segment_came_from_a_figure():
+    """The flag was read into a variable and dropped.
+
+    A page kept PRECISELY because the text layer could not arbitrate produced a
+    citation identical to a verified one. The model is the only thing that knows
+    which figure it is about to quote, so it has to be told.
+    """
+    from api.services.syntext_agent import SyntextAgent
+
+    context, _ = SyntextAgent()._format_context_and_sources(
+        [_result(1, unverified=True, numbers=["134", "2.1"])]
+    )
+    assert "READ FROM A FIGURE" in context
+    assert "134" in context, "the values in question are not named"
+    assert "say plainly" in context
+
+
+def test_a_verified_segment_carries_no_caution():
+    """Cautioning everything is the same as cautioning nothing."""
+    from api.services.syntext_agent import SyntextAgent
+
+    context, targets = SyntextAgent()._format_context_and_sources(
+        [_result(1, unverified=False)]
+    )
+    assert "READ FROM A FIGURE" not in context
+    assert "unverified" not in targets[1][0]
+
+
+def test_the_citation_itself_says_so():
+    """The reader may skip the sentence and click the link."""
+    from api.services.syntext_agent import SyntextAgent
+
+    _, targets = SyntextAgent()._format_context_and_sources(
+        [_result(1, unverified=True)]
+    )
+    label, target = targets[1]
+    assert "read from a figure, unverified" in label
+    # The link still has to work: a caution is not a reason to break the citation.
+    assert target.endswith("#page=22")
+
+
+def test_only_the_flagged_segment_is_marked():
+    """One unverified page in a set of three must not taint the other two."""
+    from api.services.syntext_agent import SyntextAgent
+
+    _, targets = SyntextAgent()._format_context_and_sources([
+        _result(1, unverified=False),
+        _result(2, unverified=True),
+        _result(3, unverified=False),
+    ])
+    assert "unverified" not in targets[1][0]
+    assert "unverified" in targets[2][0]
+    assert "unverified" not in targets[3][0]
+
+
+def test_the_prompt_tells_the_model_what_to_do_with_it():
+    """The header is evidence; the instruction is what makes it an answer."""
+    import inspect
+    from api.services import syntext_agent
+
+    src = inspect.getsource(syntext_agent.SyntextAgent.query_pipeline)
+    assert "READ FROM A FIGURE" in src
+    assert "safety claim" in src

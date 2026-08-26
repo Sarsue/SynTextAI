@@ -80,6 +80,8 @@ Live in production.
 - Import from Google Drive through the picker, `drive.file` only.
 - **Document currency**: mark a document as replaced by a newer one, and it
   stops answering questions. See below.
+- **Vision cautions reach the reader**: a page read off a figure that the text
+  layer could not confirm now says so, in the answer and on the citation.
 - **Documents SyntextAI writes**: ask for an SOP or a summary, get it written
   from the workspace's own documents, edit it, download it as Word, and approve
   it into the knowledge base. Approval is the only way one ever answers a
@@ -117,15 +119,12 @@ enough until a customer says otherwise.
    SyntextAI where it applies, custom-built everywhere else". syntextai.com
    claims only cited answers from your documents, which is what ships. Do not
    re-raise this as a liability.
-4. **Vision verification flags have no UI.** The data reaches
-   `segments.meta_data` and comes back from `hybrid_search` on every result.
-   Whether a citation to an unverified figure should say so, and how, is an
-   unmade design decision, not a build.
-5. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
+
+4. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
    code around them drifting.
-6. **Activity history, admin dashboard, saved prompts.** Nothing exists.
+5. **Activity history, admin dashboard, saved prompts.** Nothing exists.
 
 **Not doing, decided 2026-08-26**
 - **Email-in.** Proposed and dropped. Upload plus Drive covers ingress.
@@ -413,6 +412,49 @@ opened a socket, and the first was orphaned mid-handshake with nothing holding a
 reference to close it. A `connectingRef` claimed synchronously fixes it.
 Measured after: one socket per page load, accepted and authenticated, where
 there had been two.
+
+## The vision caution, 2026-08-26
+
+`_read_page_with_vision` makes a costly, deliberate choice. On a page whose text
+layer is a credible record, a transcription introducing numbers absent from the
+page is rejected outright, because a confident wrong torque value is a safety
+claim rather than a typo. On a figure-dominant page the text layer is incomplete
+rather than merely disordered, so it cannot arbitrate: the read is KEPT and
+flagged. Enforcing the strict rule there cost four benchmark questions on
+2026-08-14.
+
+"Flagged" was doing no work. The flag reached `segments.meta_data`, came back
+from `hybrid_search` with every result, was read into a local named `meta` in
+`_format_context_and_sources`, and was never used again. Nothing in the frontend
+referenced `meta_data` at all. So a page kept PRECISELY because nothing could
+check it produced a citation identical to a verified one: same link, same page
+number, same confidence.
+
+Now told in both places, because they fail differently.
+
+**The model is told, in the segment header it already reads.** It is the only
+thing that knows which figure it is about to quote, and instruction 8 tells it
+to say so in one short sentence naming what should be checked. Only for headers
+carrying the flag: cautioning everything is the same as cautioning nothing, and
+there is a test for that.
+
+**The citation says so too**, because a reader may skip the sentence and click
+the link. The link still resolves to the page; a caution is not a reason to
+break a citation.
+
+**And the box says once, in words, what the marker means.** "Unverified" beside
+a filename is easy to read straight past.
+
+Five tests, including one asserting that one unverified page among three does
+not taint the other two.
+
+### The reason to do it at all
+
+This is the defence, not the disclaimer. Every competitor's pitch is that their
+answers can be trusted; Guru's homepage headline is literally about confidently
+wrong AI. A product that says which of its own answers it could not verify is
+making a stronger claim than one that says nothing, and it is the claim a
+compliance-minded buyer actually wants.
 
 ## Decisions not to re-litigate
 
