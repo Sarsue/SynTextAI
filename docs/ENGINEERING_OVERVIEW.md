@@ -136,8 +136,26 @@ enough until a customer says otherwise.
 
 **Known risks, carried deliberately**
 - **No database-level RLS.** Application layer only, so every new route needs
-  its explicit check. ~1 week to fix. Revisit when a security questionnaire asks
-  in writing.
+  its explicit check. Revisit when a security questionnaire asks in writing.
+
+  It is a week, and the week is code rather than schema. Enabling RLS and
+  writing a policy per table is an hour. The app must then stop connecting as
+  `syntext`, which is a SUPERUSER: Postgres bypasses every policy for
+  superusers, so without a new role the policies do nothing at all. Then every
+  session has to set the tenant and reliably clear it, because connections are
+  pooled and a leaked setting means one request inherits the previous request's
+  tenant, which is worse than having none. The worker's queue poll is
+  deliberately cross-tenant and needs an explicit bypass, five tables reach
+  their tenant only through a join chain, and a policy on `chunks` lands on the
+  vector search path.
+
+  `test_every_route_is_scoped.py` covers the realistic failure in the meantime:
+  it fails when a new route neither reaches its tenant nor says in EXEMPT why it
+  needs none. That is a smoke alarm, not a sprinkler. It reads source rather
+  than behaviour, so it proves a handler CONSULTS the boundary, not that it
+  consults it correctly, and it does nothing about a bad query inside an
+  authorized route. Verified to fail on a deliberately unscoped route before
+  being trusted.
 - **A workspace can silently hold vectors from a retired embedding model.**
   `api/scripts/reembed_chunks.py --check` detects it, wired into nothing.
 - **Documents ingested before 2026-08-07 have a null `chunks.content`** and no

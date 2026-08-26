@@ -57,6 +57,33 @@ files_router = APIRouter(prefix="/api/v1/files", tags=["files"])
 # Define a standardized API response model
 T = TypeVar('T')
 
+async def _may_see_file(file_record, user_id: int, store: RepositoryManager) -> bool:
+    """Whether this caller may see this document.
+
+    By WORKSPACE, never by uploader. The two status endpoints below checked
+    `file_record["user_id"] != caller`, which is the same mistake this codebase
+    already recorded fixing for retrieval and for the file list: documents belong
+    to the workspace, not to whoever happened to add them, so checking the
+    uploader refuses an invited staff member every document their owner
+    uploaded.
+
+    It did not leak anything. It was too strict, not too loose, and it broke
+    quietly: a staff member's list polls for status, the batch endpoint silently
+    omits every file the owner added, and those documents sit at "Processing" on
+    their screen forever while the owner watches them go ready.
+
+    Files with no workspace stay private to their uploader, which is how
+    pre-workspace uploads behave everywhere else.
+    """
+    if not file_record:
+        return False
+    workspace_id = file_record.get("workspace_id")
+    if workspace_id is None:
+        return file_record.get("user_id") == user_id
+    accessible = await store.workspace_repo.accessible_workspace_ids(user_id)
+    return workspace_id in (accessible or [])
+
+
 async def check_can_upload_to_workspace(workspace_id: int, user_id: int, store: RepositoryManager) -> None:
     """Raise 403 unless the caller may add documents to this workspace.
 
@@ -477,7 +504,7 @@ async def get_file_status(
     """Return current processing status and derived progress for a single file."""
     try:
         file_record = await store.file_repo.get_file_by_id(file_id)
-        if not file_record or file_record.get("user_id") != user_data["user_id"]:
+        if not await _may_see_file(file_record, user_data["user_id"], store):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         status_str = file_record.get("processing_status", "uploaded")
         return {
@@ -574,13 +601,27 @@ async def get_files_status(
     try:
         raw_ids = [s.strip() for s in ids.split(",") if s.strip()]
         results: List[Dict[str, Any]] = []
+        # Resolved once. This endpoint is polled continuously while anything is
+        # processing, so a per-file membership lookup would be one extra query
+        # per file per poll, for an answer that cannot change inside the loop.
+        accessible = set(
+            await store.workspace_repo.accessible_workspace_ids(user_data["user_id"]) or []
+        )
         for sid in raw_ids:
             try:
                 fid = int(sid)
             except ValueError:
                 continue
             file_record = await store.file_repo.get_file_by_id(file_id=fid)
-            if not file_record or file_record.get("user_id") != user_data["user_id"]:
+            if not file_record:
+                continue
+            workspace_id = file_record.get("workspace_id")
+            visible = (
+                file_record.get("user_id") == user_data["user_id"]
+                if workspace_id is None
+                else workspace_id in accessible
+            )
+            if not visible:
                 continue
             status_str = file_record.get("processing_status", "uploaded")
             results.append({
