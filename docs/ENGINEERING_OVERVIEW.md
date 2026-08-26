@@ -48,8 +48,10 @@ pool 100, fusion weights 0.7 vector / 0.3 keyword.
 docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
 ```
 
-**Node 20.19+ or 22.12+.** Vite 8 refuses to run below that. The image builds on
-node:20-alpine, currently 20.20.2, which satisfies it.
+**No Node needed on the host.** The frontend is built inside the image, on
+node:20-alpine. Vite 8 needs 20.19+ and that image is 20.20.2. Only reach for a
+host Node if you want to run `npm run dev` outside compose, and then it has to
+meet the same floor.
 
 **Always pass `--env-file .env.dev`.** Compose interpolates build args from
 `.env`, the production file, so without the flag the frontend is built with the
