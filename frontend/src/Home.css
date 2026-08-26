@@ -697,34 +697,23 @@ body {
 /* The price, stated. It was 10px grey under the buttons, which is how a
    page looks when it is apologising for its own number. */
 .home-price {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    margin: 30px 0 0;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin: 26px 0 0;
 }
 
-/* Set at a size that means it. Guru and Glean cannot put a number on a page at
-   all, and this one spent its first year in 10px grey under the buttons, which
-   is how a page looks when it is apologising for its own price. */
-.home-price-num {
-    font-size: 2.6rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    line-height: 1;
+.home-price strong {
     color: var(--text-color);
-}
-
-.home-price-per {
-    font-size: 0.95rem;
-    color: var(--text-color);
+    font-weight: 600;
 }
 
 .home-price-meta {
-    font-size: 0.8rem;
+    display: block;
+    font-size: 0.82rem;
     color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 6px;
 }
+
 
 /* A shot on its own, under the hero. */
 .home-shot {
