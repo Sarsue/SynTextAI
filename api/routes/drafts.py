@@ -27,7 +27,7 @@ from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from ..core.utils import upload_bytes_to_gcs
 from ..repositories.repository_manager import RepositoryManager
-from ..services.docx_export import markdown_to_docx, safe_filename
+from ..services.document_export import markdown_to_docx, markdown_to_pdf, safe_filename
 from ..services.llm_service import generate_explanation
 
 logger = logging.getLogger(__name__)
@@ -216,47 +216,72 @@ async def update_draft(
     return updated
 
 
+# What each format needs, so adding a third is a row rather than a branch.
+_EXPORT_FORMATS = {
+    "docx": (
+        markdown_to_docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Word document",
+    ),
+    "pdf": (markdown_to_pdf, "application/pdf", "PDF"),
+}
+
+
 @drafts_router.get("/{draft_id}/export")
 async def export_draft(
     draft_id: int = Path(...),
+    format: str = Query("docx", description="docx or pdf"),
     user_data: Dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
 ):
-    """The draft as a Word document.
+    """The draft as a file: Word to edit further, PDF to hand out.
 
     Reading, so it is held to READ: somebody who may see a document may take a
     copy of it, and refusing that while showing them the text on screen would be
     theatre.
 
-    The file carries the provenance note at the top, before the content. A .docx
-    leaves the product and gets emailed, printed and pinned to a wall, which is
+    Both formats carry the provenance note at the top, before the content. They
+    leave the product and get emailed, printed and pinned to a wall, which is
     exactly when everyone forgets a machine drafted it.
     """
+    chosen = (format or "docx").strip().lower()
+    if chosen not in _EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That format is not available. Choose docx or pdf.",
+        )
+    build, media_type, human_name = _EXPORT_FORMATS[chosen]
+
     draft = await _authorized_draft(draft_id, user_data["user_id"], store, Capability.READ)
 
     try:
+        # Both writers are synchronous and a long document is real work, so this
+        # goes to a thread rather than stalling the event loop for every other
+        # request on the process.
         payload = await asyncio.to_thread(
-            markdown_to_docx,
+            build,
             draft["content"],
             title=draft["title"],
             sources=draft.get("sources"),
         )
     except Exception as e:
-        logger.error(f"Could not build .docx for draft {draft_id}: {e}", exc_info=True)
+        logger.error(f"Could not build {chosen} for draft {draft_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not build the Word document",
+            detail=f"Could not build the {human_name}",
         )
 
-    filename = safe_filename(draft["title"])
-    logger.info({"event": "draft.exported", "draft_id": draft_id, "bytes": len(payload)})
+    filename = safe_filename(draft["title"], chosen)
+    logger.info({
+        "event": "draft.exported", "draft_id": draft_id,
+        "format": chosen, "bytes": len(payload),
+    })
     return Response(
         content=payload,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type=media_type,
         headers={
-            # filename* carries the real title for browsers that read RFC 5987,
-            # and the plain filename is already stripped to characters that
-            # cannot break out of the header.
+            # The filename is already stripped to characters that cannot break
+            # out of the header value.
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )

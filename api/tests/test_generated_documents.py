@@ -482,7 +482,7 @@ async def test_an_outsider_cannot_download_a_draft(store, tenant, draft, client)
 def test_a_title_cannot_break_out_of_the_content_disposition_header():
     """The title is customer text and reaches a header. A quote or a newline
     there would let it inject header fields."""
-    from api.services.docx_export import safe_filename
+    from api.services.document_export import safe_filename
 
     nasty = safe_filename('evil"; drop\r\nSet-Cookie: a=b')
     assert '"' not in nasty and "\r" not in nasty and "\n" not in nasty
@@ -546,3 +546,215 @@ def test_the_prompt_forbids_citing_segment_numbers_in_the_output():
         "the instruction no longer shows the model what not to write"
     )
     assert "Do not write" in built
+
+
+# --- PDF ----------------------------------------------------------------------
+
+def _pdf_text(payload: bytes):
+    """Every page's text, read back the way any PDF reader would."""
+    import fitz
+
+    doc = fitz.open(stream=payload, filetype="pdf")
+    return doc, "\n".join(page.get_text() for page in doc)
+
+
+async def test_a_draft_downloads_as_a_pdf(store, tenant, draft, client):
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{draft['id']}/export?format=pdf"
+    )
+    assert res.status_code == 200, res.text
+    assert res.headers["content-type"] == "application/pdf"
+    assert ".pdf" in res.headers["content-disposition"]
+    # A real PDF, opened rather than assumed.
+    assert res.content[:5] == b"%PDF-", "not a PDF at all"
+
+    doc, text = _pdf_text(res.content)
+    assert len(doc) >= 1
+    assert "Sterilisation SOP" in text
+    assert "999 degrees" in text
+
+
+async def test_the_pdf_says_a_machine_wrote_it(store, tenant, draft, client):
+    """Same reason as the Word file, more so: a PDF is the one people print."""
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{draft['id']}/export?format=pdf"
+    )
+    _, text = _pdf_text(res.content)
+    assert "Written by SyntextAI" in text
+    assert "sop.pdf" in text, "the source documents are not named"
+
+
+async def test_headings_lists_and_tables_reach_the_pdf(store, tenant, workspace, client):
+    rich = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Rich", prompt="p",
+        content=(
+            "# Rich\n\n## Steps\n\n1. First step\n2. Second step\n\n"
+            "- A bullet\n\n## Limits\n\n"
+            "| Setting | Value |\n|---|---|\n| Temperature | 134 |\n| Time | 3 min |\n\n"
+            "Some **bold** text.\n"
+        ),
+        sources=[],
+    )
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{rich['id']}/export?format=pdf"
+    )
+    assert res.status_code == 200, res.text
+    _, text = _pdf_text(res.content)
+
+    for expected in ("Steps", "First step", "A bullet", "Temperature", "134", "bold"):
+        assert expected in text, f"{expected!r} did not reach the PDF"
+    # The markers themselves must not survive as literal text.
+    assert "**bold**" not in text
+    assert "|---|" not in text
+
+
+async def test_a_long_document_paginates(store, tenant, workspace, client):
+    """Story lays out and breaks pages itself; this proves the loop that drives
+    it actually asks for more than one."""
+    long_doc = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Long", prompt="p",
+        content="\n\n".join(
+            f"## Section {n}\n\nParagraph {n}. " + ("Filler sentence. " * 40)
+            for n in range(1, 25)
+        ),
+        sources=[],
+    )
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{long_doc['id']}/export?format=pdf"
+    )
+    assert res.status_code == 200, res.text
+    doc, text = _pdf_text(res.content)
+    assert len(doc) > 1, "a very long document came out as one page"
+    assert "Section 24" in text, "the end of the document was lost"
+
+
+async def test_angle_brackets_in_the_text_do_not_break_the_pdf(
+    store, tenant, workspace, client
+):
+    """Text is escaped before markdown becomes HTML.
+
+    Escaping afterwards would turn "a < b" into markup MuPDF reads as an unknown
+    tag, and the rest of the paragraph disappears. The drafting prompt asks for
+    "TO BE COMPLETED: <what is missing>", so this is the normal case, not an
+    exotic one.
+    """
+    tricky = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Tricky", prompt="p",
+        content="TO BE COMPLETED: <the autoclave temperature>\n\nAlso 5 < 6 & 7 > 2.\n",
+        sources=[],
+    )
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{tricky['id']}/export?format=pdf"
+    )
+    assert res.status_code == 200, res.text
+    _, text = _pdf_text(res.content)
+    assert "the autoclave temperature" in text, "an angle-bracketed gap vanished"
+    assert "Also 5 < 6 & 7 > 2." in text
+
+
+async def test_an_unknown_format_is_refused(store, tenant, draft, client):
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{draft['id']}/export?format=rtf"
+    )
+    assert res.status_code == 400
+
+
+async def test_the_default_format_is_still_word(store, tenant, draft, client):
+    """The button that shipped first sends no format parameter."""
+    res = await client.as_(tenant.owner).get(f"/api/v1/drafts/{draft['id']}/export")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == DOCX_MEDIA_TYPE
+
+
+async def test_an_outsider_cannot_download_a_pdf(store, tenant, draft, client):
+    outsider = await tenant.new_user("outsider")
+    res = await client.as_(outsider).get(
+        f"/api/v1/drafts/{draft['id']}/export?format=pdf"
+    )
+    assert res.status_code == 403
+
+
+def test_both_formats_read_the_same_markdown():
+    """One parser, two renderers. A second parser inside the PDF writer would
+    drift: teach one about nested lists and the other keeps flattening them."""
+    from api.services import document_export
+
+    blocks = document_export.parse_markdown(
+        "# T\n\n## S\n\n1. one\n2. two\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"
+    )
+    kinds = [b.kind for b in blocks]
+    assert kinds == ["heading", "heading", "list", "table"], kinds
+    assert len(blocks[2].items) == 2 and all(o for _, o, _ in blocks[2].items)
+    assert blocks[3].rows == [["A", "B"], ["1", "2"]]
+
+
+async def test_a_numbered_procedure_with_sub_bullets_keeps_counting(
+    store, tenant, workspace, client
+):
+    """The bug this closes, seen in a real generated SOP.
+
+    Numbered steps with bulleted notes under them are how every procedure is
+    written. Holding one ordered flag per list forced the parser to end the list
+    and start another at each switch, so a five-step procedure printed as
+    1, 1, 1, 1, 1 and the person following it had no idea what order to work in.
+    """
+    from api.services import document_export
+
+    markdown = (
+        "1. **Gloves** - Wear gloves whenever there is contact with blood.\n"
+        "   - Do not reuse gloves.\n"
+        "   - Change gloves between patients.\n"
+        "2. **Protective clothing** - Wear a gown that covers skin.\n"
+        "   - Change it if visibly soiled.\n"
+        "3. **Eye protection** - Wear it during procedures that splash.\n"
+    )
+
+    blocks = document_export.parse_markdown(markdown)
+    lists = [b for b in blocks if b.kind == "list"]
+    assert len(lists) == 1, f"one procedure became {len(lists)} lists"
+    top = [t for d, o, t in lists[0].items if d == 0 and o]
+    assert len(top) == 3, f"expected 3 numbered steps, got {len(top)}"
+
+    # And the HTML the PDF is laid out from keeps them in one <ol>.
+    html = document_export.blocks_to_html(blocks)
+    assert html.count("<ol>") == 1, "the numbered steps were split across lists"
+    assert html.count("<ul>") == 2, "the notes did not nest under their steps"
+
+    d = await store.draft_repo.create(
+        workspace_id=workspace["id"], created_by=tenant.owner,
+        title="Procedure", prompt="p", content=markdown, sources=[],
+    )
+    res = await client.as_(tenant.owner).get(
+        f"/api/v1/drafts/{d['id']}/export?format=pdf"
+    )
+    assert res.status_code == 200, res.text
+    _, text = _pdf_text(res.content)
+    for n in ("1.", "2.", "3."):
+        assert n in text, f"step {n} is not numbered in the PDF"
+
+
+async def test_a_loose_list_does_not_restart_at_one(store, tenant, workspace, client):
+    """Markdown allows blank lines between items. Ending the list there would
+    restart the numbering at the next one."""
+    from api.services import document_export
+
+    blocks = document_export.parse_markdown(
+        "1. First step\n\n2. Second step\n\n3. Third step\n"
+    )
+    lists = [b for b in blocks if b.kind == "list"]
+    assert len(lists) == 1, f"blank lines split one list into {len(lists)}"
+    assert len(lists[0].items) == 3
+
+
+def test_a_list_still_ends_when_the_document_moves_on():
+    """The blank-line rule must not swallow everything after a list."""
+    from api.services import document_export
+
+    blocks = document_export.parse_markdown(
+        "1. First step\n2. Second step\n\nA following paragraph.\n\n- A later bullet\n"
+    )
+    kinds = [b.kind for b in blocks]
+    assert kinds == ["list", "paragraph", "list"], kinds

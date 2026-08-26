@@ -29,11 +29,11 @@ import './DraftView.css';
  *
  * The header is already stripped to safe characters server-side; this only has
  * to read it, and fall back when a proxy drops the header entirely. */
-function filenameFrom(disposition: string | null, title: string): string {
+function filenameFrom(disposition: string | null, title: string, extension: string): string {
     const match = disposition?.match(/filename="([^"]+)"/);
     if (match) return match[1];
     const cleaned = (title || 'document').replace(/[^\w\s.-]/g, '').trim() || 'document';
-    return `${cleaned}.docx`;
+    return `${cleaned}.${extension}`;
 }
 
 interface DraftSource {
@@ -76,7 +76,7 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
     const [ingesting, setIngesting] = useState(false);
     const [confirmIngest, setConfirmIngest] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
-    const [exporting, setExporting] = useState(false);
+    const [exporting, setExporting] = useState<'docx' | 'pdf' | null>(null);
 
     // What the server last agreed the document says. Comparing against this is
     // how the Save button knows whether there is anything to save, so an
@@ -141,8 +141,8 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
         }
     };
 
-    const handleExport = async () => {
-        setExporting(true);
+    const handleExport = async (format: 'docx' | 'pdf') => {
+        setExporting(format);
         try {
             // Save first. Downloading the server's copy while the person is
             // looking at an edited one hands them a file that does not match
@@ -159,9 +159,9 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
                 setSaved({ title, content });
             }
 
-            const res = await authFetch(`/api/v1/drafts/${draftId}/export`);
+            const res = await authFetch(`/api/v1/drafts/${draftId}/export?format=${format}`);
             if (!res.ok) {
-                addToast('Could not build the Word document', 'error');
+                addToast(`Could not build the ${format === 'pdf' ? 'PDF' : 'Word document'}`, 'error');
                 return;
             }
             // The endpoint needs the auth header, so this cannot be a plain
@@ -170,7 +170,7 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
-            link.download = filenameFrom(res.headers.get('content-disposition'), title);
+            link.download = filenameFrom(res.headers.get('content-disposition'), title, format);
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -178,9 +178,9 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
             // started reading the blob by the time click() returns.
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         } catch {
-            addToast('Could not build the Word document', 'error');
+            addToast(`Could not build the ${format === 'pdf' ? 'PDF' : 'Word document'}`, 'error');
         } finally {
-            setExporting(false);
+            setExporting(null);
         }
     };
 
@@ -324,9 +324,29 @@ const DraftView: React.FC<DraftViewProps> = ({ draftId, onClose, onIngested, onD
                         {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
                         {dirty ? 'Save' : 'Saved'}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={handleExport} disabled={exporting}>
-                        {exporting ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleExport('docx')}
+                        disabled={exporting !== null}
+                        title="Download as a Word document"
+                    >
+                        {exporting === 'docx'
+                            ? <Loader2 className="size-3.5 animate-spin" />
+                            : <Download className="size-3.5" />}
                         Word
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleExport('pdf')}
+                        disabled={exporting !== null}
+                        title="Download as a PDF"
+                    >
+                        {exporting === 'pdf'
+                            ? <Loader2 className="size-3.5 animate-spin" />
+                            : <Download className="size-3.5" />}
+                        PDF
                     </Button>
                     {!inKnowledgeBase && (
                         <Button size="sm" onClick={() => setConfirmIngest(true)} disabled={ingesting}>

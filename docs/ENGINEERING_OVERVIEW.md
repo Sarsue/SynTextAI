@@ -274,9 +274,21 @@ The first approval attempt failed for exactly that reason, which incidentally
 proved the rollback: no `files` row was left behind, so no document appeared in
 the list that could never be opened.
 
-### Export to Word
+### Export to Word and PDF
 
-`services/docx_export.py` converts the draft's markdown to .docx: H1-H4, ordered
+`services/document_export.py` reads the markdown ONCE into a list of blocks and
+each format renders those blocks its own way. The alternative was a second
+markdown parser inside the PDF writer, and two parsers for one grammar drift:
+teach one about nested lists and the other silently keeps flattening them, and
+nobody finds out until a customer's SOP prints wrong.
+
+Word is written with `python-docx`. PDF is laid out by MuPDF's `Story`, which
+takes a small HTML subset and paginates it, on US Letter with one inch margins.
+Neither needed a new dependency: `python-docx` is here because `DocxProcessor`
+reads Word files on the way in, and PyMuPDF because `PDFProcessor` reads PDFs.
+No markdown-to-docx or HTML-to-PDF library was added to convert six constructs.
+
+Both formats handle: H1-H4, ordered
 and unordered lists including one level of nesting, pipe tables, and
 bold/italic/code inline. Anything it does not recognise becomes an ordinary
 paragraph rather than being dropped, because losing a line of a document
@@ -284,21 +296,23 @@ somebody is about to hand to staff is worse than styling it plainly. A table
 whose rows disagree about their column count is a truncated table, and becomes
 text rather than an exception in the middle of a download.
 
-No markdown-to-docx library was added. `python-docx` is already here because
-`DocxProcessor` reads Word files on the way in, and pulling in a dependency to
-convert six constructs is a poor trade.
-
-**The provenance note is written into the file, above the content.** A .docx
-leaves the product: it gets emailed, printed and pinned to a wall, and that is
+**The provenance note is written into both files, above the content.** They
+leave the product: they get emailed, printed and pinned to a wall, and that is
 exactly when everybody forgets a machine drafted it. Marking it only in the app
 marks it in the one place it is already obvious.
+
+**Text is escaped before markdown becomes HTML, not after.** The drafting prompt
+asks for gaps written as `TO BE COMPLETED: <what is missing>`, so a document
+full of angle brackets is the normal case. Escaping afterwards would hand MuPDF
+an unknown tag and the rest of the paragraph would vanish.
 
 The title reaches a `Content-Disposition` header and is customer text, so
 `safe_filename` strips it to characters that cannot break out of a header value.
 Tested with a title containing a quote and a CRLF.
 
-**Two faults the first real export exposed**, both fixed and both invisible to
-the tests that existed:
+**Three faults the first real exports exposed**, all fixed, and all invisible to
+the tests that existed, because those tests fed the converter markdown somebody
+had already written rather than markdown the model produced:
 
 - The model wrote `(Segment 6)` and `(Segment 9)` into a printed procedure. The
   numbering is scaffolding for the model, and a staff member following an SOP
@@ -307,12 +321,20 @@ the tests that existed:
 - The title was the raw prompt, so a document was called "A hand hygiene quick
   reference for new staff. Use a table for when to wash..." and downloaded under
   that filename. The draft now takes its name from its own opening `# heading`
-  when it wrote one, falling back to the prompt. The .docx skips that heading so
+  when it wrote one, falling back to the prompt. The file skips that heading so
   the name is not printed twice.
+- **A five-step procedure printed as 1, 1, 1, 1, 1.** Numbered steps with
+  bulleted notes under them are how every SOP is written, and the block held one
+  `ordered` flag for the whole list, so the parser ended the list and started
+  another at every switch and the numbering restarted. `ordered` is now a
+  property of each ITEM. A blank line no longer ends a list either, unless what
+  follows is not a list item, because markdown allows loose lists and ending one
+  there restarts the count too. Caught by looking at the rendered page, not by
+  reading the extracted text, which showed the right words in the right order.
 
 ### Not done
 
-No PDF. Word only.
+Nothing on this feature. Both formats ship.
 
 ## Decisions not to re-litigate
 
