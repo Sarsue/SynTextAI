@@ -111,9 +111,13 @@ enough until a customer says otherwise.
 3. **MCP server.** Expose `hybrid_search` over one workspace so a customer's own
    Claude can query their knowledge base. No new ingestion, and `hybrid_search`
    plus the tenant scoping already exist. Distribution more than a feature.
-4. **"Workflow automation" is marketed and does not exist.** Build something
-   that answers to the phrase, or cut the phrase from the site. The only
-   outstanding item that is a live promise rather than a gap.
+4. **Nothing here is an unkept promise.** Checked 2026-08-26. An earlier note
+   claimed "workflow automation is marketed and does not exist" and it was
+   wrong: that phrase is on osas-inc.com under **AI Implementation**, which is
+   consulting work Osas delivers himself, and the same sentence says "powered by
+   SyntextAI where it applies, custom-built everywhere else". syntextai.com
+   claims only cited answers from your documents, which is what ships. Do not
+   re-raise this as a liability.
 5. **Vision verification flags have no UI.** The data reaches
    `segments.meta_data` and comes back from `hybrid_search` on every result.
    Whether a citation to an unverified figure should say so, and how, is an
