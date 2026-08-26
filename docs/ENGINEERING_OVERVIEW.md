@@ -156,11 +156,28 @@ enough until a customer says otherwise.
   consults it correctly, and it does nothing about a bad query inside an
   authorized route. Verified to fail on a deliberately unscoped route before
   being trusted.
-- **A workspace can silently hold vectors from a retired embedding model.**
-  `api/scripts/reembed_chunks.py --check` detects it, wired into nothing.
-- **Documents ingested before 2026-08-07 have a null `chunks.content`** and no
-  fallback. Unreachable by keyword, unrepairable by re-embedding. Only fix is
-  re-upload. `reembed_chunks --check` counts them.
+- **Vectors from a retired model, and documents whose text was never stored,
+  are now visible in the product.** Both used to need somebody to remember to
+  run `reembed_chunks.py --check`, which had never been run in production.
+
+  `chunks.embedding_model` records which model wrote each vector, so staleness
+  is a column comparison rather than an inference call per workspace. The file
+  list reports `health` per document: `dead` (text never stored, invisible to
+  keyword search, only a re-upload fixes it) or `stale` (retired model,
+  repairable from our side). The knowledge base shows a badge for each, with
+  different words, because only one of them is the customer's to act on.
+
+  **A NULL `embedding_model` is "not measured", not "stale", and is not
+  reported.** The column is new, so almost every existing row is NULL: counting
+  those as stale flagged 2,528 of 2,650 chunks locally, a warning on nearly
+  every document somebody owns, which is no signal at all. Some of those vectors
+  are current. Deciding which still needs the cosine sample, and
+  `reembed_chunks.py` now stamps the model when it repairs, so unknowns resolve
+  as they are touched rather than by guessing about them now.
+
+  Still outstanding: nobody has run the check against production, and the 122
+  dead chunks on the local database have production equivalents nobody has
+  counted.
 - **Rate limits** (30/min chat, 10/min upload, per IP) are a first-pass guess.
 
 **Parked, one customer away**

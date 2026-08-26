@@ -54,6 +54,8 @@ holding vectors from the current model.
 from __future__ import annotations
 
 import argparse
+
+from api.services.llm_service import MODEL_EMBEDDING_ID
 import asyncio
 import hashlib
 import logging
@@ -202,13 +204,22 @@ async def _repair(repo, workspace_id: Optional[int], dry_run: bool,
                         """
                         UPDATE chunks
                         SET embedding = CAST(:emb AS vector),
-                            content_hash = :hash
+                            content_hash = :hash,
+                            -- Stamped on repair, so a row this script has
+                            -- touched stops being an unknown. The column is
+                            -- new and almost every existing row is NULL, which
+                            -- the product treats as "not measured" rather than
+                            -- "stale": counting unknowns as stale would put a
+                            -- warning on nearly every document somebody owns.
+                            -- They resolve as they are repaired.
+                            embedding_model = :model
                         WHERE id = :cid
                         """
                     ),
                     {
                         "emb": _vector_literal(emb),
                         "hash": hashlib.sha256(embedded.encode("utf-8")).hexdigest(),
+                        "model": MODEL_EMBEDDING_ID,
                         "cid": cid,
                     },
                 )

@@ -358,6 +358,12 @@ class Chunk(Base):
     # under that name, and declaring one here too makes autogenerate propose
     # dropping the live index and adding an identical one called ix_*.
     content_hash = Column(String(64), nullable=True)
+    # Which model produced `embedding`. NULL means the vector predates this
+    # column, which means Voyage, which means stale: a vector only means
+    # anything beside other vectors from the same model, and mixing them errors
+    # nowhere. Written down so staleness is a column comparison rather than an
+    # inference call per workspace that somebody has to remember to make.
+    embedding_model = Column(String, nullable=True, index=True)
 
     # Relationship to file
     file = relationship("File", back_populates="chunks")
