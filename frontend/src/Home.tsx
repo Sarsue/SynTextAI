@@ -12,6 +12,10 @@ interface Vertical {
     label: string;
     headline: string;
     documents: string[];
+    /** Documents this industry never gets round to writing. Concrete beats
+     *  "it writes documents": a practice manager recognises her own missing
+     *  intake checklist and does not recognise a capability. */
+    writes: string[];
     examples: { q: string; a: string }[];
 }
 
@@ -21,6 +25,7 @@ const verticals: Vertical[] = [
         label: 'Healthcare',
         headline: 'Your staff gets answers. You focus on patients.',
         documents: ['Patient intake procedures', 'Billing & coding guides', 'HIPAA compliance policies', 'Treatment protocols', 'Insurance pre-auth checklists'],
+        writes: ['A new-patient intake checklist', 'A one page infection control summary', 'A front-desk script for insurance questions'],
         examples: [
             { q: 'What is the pre-auth process for MRI scans?', a: 'Sourced from your Insurance Pre-Auth Policy, p.4' },
             { q: 'How do we handle a missed appointment fee?', a: 'Sourced from your Billing Procedures Manual, p.11' },
@@ -31,6 +36,7 @@ const verticals: Vertical[] = [
         label: 'Accounting',
         headline: 'Junior staff stop asking. Senior staff stop repeating.',
         documents: ['Client onboarding checklists', 'Filing deadline calendars', 'Compliance procedures', 'Engagement letter templates', 'Software SOPs'],
+        writes: ['A year-end close checklist', 'A new-client onboarding brief', 'A one page guide to your filing deadlines'],
         examples: [
             { q: 'What documents do we need for a new corporate client?', a: 'Sourced from your Client Onboarding SOP, p.2' },
             { q: 'When is the T2 filing deadline for a December year-end?', a: 'Sourced from your Filing Deadlines Guide, p.7' },
@@ -41,6 +47,7 @@ const verticals: Vertical[] = [
         label: 'Legal',
         headline: 'Find the precedent. Don\'t lose the billable hour.',
         documents: ['Matter intake procedures', 'Client communication standards', 'Filing deadlines & court rules', 'Billing & disbursement policies', 'Conflict check procedures'],
+        writes: ['A matter intake checklist', 'A client onboarding letter', 'A one page summary of your billing policy'],
         examples: [
             { q: 'What is our conflict check process for new clients?', a: 'Sourced from your Intake Procedures Manual, p.3' },
             { q: 'What are the disbursement approval thresholds?', a: 'Sourced from your Billing Policy, p.9' },
@@ -51,6 +58,7 @@ const verticals: Vertical[] = [
         label: 'Property Management',
         headline: 'Your team handles it right the first time.',
         documents: ['Lease agreement templates', 'Maintenance request procedures', 'Tenant communication policies', 'Move-in / move-out checklists', 'Vendor contact directories'],
+        writes: ['A move-out inspection checklist', 'A tenant welcome pack', 'A one page emergency contact sheet'],
         examples: [
             { q: 'What is the notice period required before a property inspection?', a: 'Sourced from your Tenant Policy Manual, p.6' },
             { q: 'Who do we call for emergency HVAC repairs?', a: 'Sourced from your Vendor Directory, p.1' },
@@ -61,6 +69,7 @@ const verticals: Vertical[] = [
         label: 'Trades & HVAC',
         headline: 'Techs get answers in the field. You stop getting calls.',
         documents: ['Installation specifications', 'Warranty & service policies', 'Safety procedures', 'Equipment manuals', 'Quote & pricing guides'],
+        writes: ['A pre-job safety checklist', 'A van stock list for a service call', 'A one page warranty summary for customers'],
         examples: [
             { q: 'What is the warranty period on Carrier heat pump installations?', a: 'Sourced from your Warranty Policy, p.2' },
             { q: 'What PPE is required for refrigerant handling?', a: 'Sourced from your Safety Procedures Manual, p.5' },
@@ -71,6 +80,7 @@ const verticals: Vertical[] = [
         label: 'Insurance',
         headline: 'Your agents look it up in seconds, not minutes.',
         documents: ['Product & coverage guides', 'Underwriting guidelines', 'Claims procedures', 'Compliance & licensing docs', 'Client communication scripts'],
+        writes: ['A claims intake checklist', 'A one page coverage comparison', 'A renewal call script'],
         examples: [
             { q: 'What does our commercial general liability policy exclude?', a: 'Sourced from your Product Guide, p.14' },
             { q: 'What is the claims reporting window for property damage?', a: 'Sourced from your Claims Procedures, p.3' },
@@ -81,6 +91,7 @@ const verticals: Vertical[] = [
         label: 'Manufacturing',
         headline: 'Technicians get the fix. Machines stay running.',
         documents: ['Equipment manuals', 'Maintenance SOPs', 'Torque & spec sheets', 'Safety procedures', 'Troubleshooting guides'],
+        writes: ['A shift handover checklist', 'A one page lockout/tagout summary', 'A preventive maintenance schedule'],
         examples: [
             { q: 'What is the torque spec for the drive shaft bolts on the CNC lathe?', a: 'Sourced from your Equipment Manual, p.22' },
             { q: 'What is the lockout/tagout procedure before servicing the conveyor motor?', a: 'Sourced from your Safety Procedures Manual, p.8' },
@@ -95,7 +106,19 @@ const faqs = [
     },
     {
         q: 'What file types do you support?',
-        a: 'PDF, Word (.docx), text and Markdown. Drag them in, or import them straight from Google Drive without downloading anything first.',
+        a: 'PDF, Word (.docx), text and Markdown. Drag them in, or import them straight from Google Drive without downloading anything first. Anything Syntext writes comes back out as Word or PDF.',
+    },
+    {
+        q: 'Can it write documents, or only answer questions?',
+        a: 'Both. Describe the checklist, SOP or summary you need and it writes one from the documents already in your workspace, and tells you which ones it used. You edit it, download it as Word or PDF, and choose whether to add it to your knowledge base.',
+    },
+    {
+        q: 'Does what it writes become an answer straight away?',
+        a: 'No, and that is deliberate. A document it wrote answers nothing until you have read it and added it yourself. Otherwise its own writing would become its own source, and nobody reading an answer could tell the difference.',
+    },
+    {
+        q: 'What happens when a policy is replaced?',
+        a: 'Mark the old one as replaced by the new one. It stops appearing in answers immediately and stays on file, so nobody gets last year\'s rule quoted back at them. One click puts it back.',
     },
     {
         q: 'How accurate are the answers?',
@@ -127,7 +150,7 @@ const Home: React.FC = () => {
         <div className={`home ${darkMode ? 'dark-mode' : ''}`}>
             <Helmet>
                 <title>Syntext AI: Instant answers from your company documents</title>
-                <meta name="description" content="Upload your SOPs, policies, and manuals. Your staff gets instant cited answers." />
+                <meta name="description" content="Upload your SOPs, policies and manuals. Your staff gets instant cited answers, and Syntext writes the documents you are missing from the same material." />
             </Helmet>
 
             {/* Header */}
@@ -152,8 +175,8 @@ const Home: React.FC = () => {
                     Your documents.<br />Your team's answers.
                 </h1>
                 <p className="home-subtext">
-                    Upload your SOPs, policies, and manuals. Staff get instant cited answers.<br />
-                    You stop being interrupted.
+                    Upload your SOPs, policies and manuals. Staff get instant cited answers.<br />
+                    Need a document you never wrote? It writes that too, from the same material.
                 </p>
                 <div className="home-actions">
                     <Button asChild className="home-btn-primary home-btn-lg">
@@ -185,6 +208,7 @@ const Home: React.FC = () => {
                         { n: '01', title: 'Bring your documents', body: 'Import straight from Google Drive, or drag in PDFs and Word files. Your SOPs, policy manuals and handbooks.' },
                         { n: '02', title: 'Invite your staff', body: 'Add team members by email. They get access immediately, no training required.' },
                         { n: '03', title: 'Staff get cited answers', body: 'Your team asks questions in plain English and gets answers with direct links to the source.' },
+                        { n: '04', title: 'Ask for the ones you are missing', body: 'Describe a checklist or an SOP and Syntext writes it from your own documents. Edit it, download it as Word or PDF, and add it back when you are happy with it.' },
                     ].map(s => (
                         <div key={s.n} className="home-step">
                             <span className="home-step-n">{s.n}</span>
@@ -228,6 +252,10 @@ const Home: React.FC = () => {
                         <ul className="home-vpanel-docs">
                             {vertical.documents.map(d => <li key={d}>{d}</li>)}
                         </ul>
+                        <p className="home-vpanel-label">Documents you'd ask it to write</p>
+                        <ul className="home-vpanel-docs home-vpanel-writes">
+                            {vertical.writes.map(d => <li key={d}>{d}</li>)}
+                        </ul>
                     </div>
                     <div className="home-vpanel-right">
                         <p className="home-vpanel-label">Example questions your team asks</p>
@@ -251,9 +279,11 @@ const Home: React.FC = () => {
                 <div className="home-features">
                     {[
                         { title: 'Cited answers', body: 'Every answer links to the exact section of your document. Staff can verify instantly.' },
+                        { title: 'It writes documents too', body: 'Describe the checklist or SOP you need. It writes it from your own documents, names the ones it used, and hands you a Word or PDF file.' },
+                        { title: 'Nothing goes in without you', body: 'A document it writes answers no questions until you have read it and added it yourself. Your knowledge base stays yours.' },
+                        { title: 'It knows which version is current', body: 'Mark the 2019 policy as replaced by the 2024 one. The old one stops turning up in answers, and stays on file.' },
                         { title: 'Shared workspace', body: 'One place for your whole team. Everyone gets the same accurate answer from the same source.' },
                         { title: 'Owner and staff roles', body: 'Owners manage documents and team members. Staff ask questions and read answers.' },
-                        { title: 'No onboarding needed', body: 'If your staff can send a text, they can use Syntext. Invite by email and they are ready.' },
                     ].map(f => (
                         <div key={f.title} className="home-feature">
                             <h3 className="home-feature-title">{f.title}</h3>
@@ -277,7 +307,8 @@ const Home: React.FC = () => {
                             <li>10 seats included, then $9 each</li>
                             <li>Unlimited documents</li>
                             <li>Cited answers</li>
-                            <li>PDF and Word, or import from Google Drive</li>
+                            <li>Written documents, exported to Word or PDF</li>
+                            <li>PDF and Word in, or import from Google Drive</li>
                             <li>Email support</li>
                         </ul>
                         <Button asChild variant="outline" className="home-btn-outline">
@@ -294,7 +325,8 @@ const Home: React.FC = () => {
                             <li>30 seats included, then $7 each</li>
                             <li>Unlimited documents</li>
                             <li>Cited answers</li>
-                            <li>PDF and Word, or import from Google Drive</li>
+                            <li>Written documents, exported to Word or PDF</li>
+                            <li>PDF and Word in, or import from Google Drive</li>
                             <li>Priority support</li>
                             <li>Onboarding call included</li>
                         </ul>

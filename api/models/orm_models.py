@@ -259,6 +259,22 @@ class File(Base):
     )
     file_size_bytes = Column(Integer, nullable=True)  # Size of the original source file in bytes
 
+    # The document that replaced this one. Set on the OLD file, pointing
+    # forward. Retrieval has already joined `files` for every candidate chunk,
+    # so forward-pointing makes "is this still current?" a column test folded
+    # into the existing WHERE; backward-pointing would be a NOT EXISTS subquery
+    # per candidate on the hot path for the same answer.
+    #
+    # SET NULL rather than CASCADE: deleting the replacement should bring the
+    # older document back into answers, not leave it hidden with nothing
+    # pointing at it.
+    superseded_by_id = Column(
+        Integer,
+        ForeignKey("files.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     chunks = relationship("Chunk", back_populates="file", cascade="all, delete-orphan")
     segments = relationship("Segment", back_populates="file", cascade="all, delete-orphan")
@@ -392,6 +408,50 @@ class Message(Base):
     chat_history = relationship("ChatHistory", back_populates="messages")
     feedback = relationship(
         "MessageFeedback", back_populates="message", cascade="all, delete-orphan"
+    )
+
+
+class GeneratedDocument(Base):
+    """A draft SyntextAI wrote, which cannot answer questions until approved.
+
+    Deliberately NOT a `files` row with a flag. If a generated draft could be
+    retrieved, the model's own output becomes its own source of truth: it writes
+    a plausible SOP with one wrong figure, that gets ingested, and afterwards it
+    cites itself with a page reference indistinguishable from a real one. A
+    boolean is something a future query forgets to check. Retrieval joins
+    `files`; it does not join this table and cannot, so a draft is unretrievable
+    by construction.
+
+    Approving one does not move a row. It writes the bytes to storage and
+    creates an ordinary `files` row queued for ingestion, the same path an
+    upload takes.
+    """
+    __tablename__ = "generated_documents"
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # A draft belongs to the workspace, not to whoever asked for it. Cascading
+    # here would mean offboarding somebody destroyed the company's drafts.
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String, nullable=False)
+    # Kept so a draft can be regenerated, and so the customer can see what
+    # produced it.
+    prompt = Column(Text, nullable=False)
+    content = Column(Text, nullable=False)
+    # The pages this drew on: file name, page number, file id.
+    sources = Column(JSONB, nullable=True)
+    # 'draft' or 'ingested'. Drives what the UI offers. Retrieval never reads
+    # it, because retrieval cannot see this table.
+    status = Column(String, nullable=False, default="draft")
+    ingested_file_id = Column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
 

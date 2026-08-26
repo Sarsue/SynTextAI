@@ -195,6 +195,13 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [fileError, setFileError] = useState<string | null>(null);
 
     const socketRef = useRef<WebSocket | null>(null);
+    // Claimed synchronously, before the token await below. socketRef alone
+    // could not guard against a second call, because it is assigned only after
+    // getIdToken() resolves: two calls both saw null, both opened a socket, and
+    // the first was orphaned mid-handshake with nothing holding a reference to
+    // close it. That orphan is what logged "WebSocket connection failed" on
+    // every local session while the app was, in fact, connected.
+    const connectingRef = useRef(false);
     const reconnectionAttempts = useRef(0);
     const reconnectTimeoutId = useRef<NodeJS.Timeout | null>(null);
     const filesRef = useRef<UploadedFile[]>([]);
@@ -336,10 +343,18 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, []);
 
     const initializeWebSocket = useCallback(async () => {
+        if (!user || socketRef.current || connectingRef.current) return;
+        connectingRef.current = true;
         setWebSocketStatus('connecting');
-        if (!user || socketRef.current) return;
 
-        const token = await user.getIdToken();
+        let token: string;
+        try {
+            token = await user.getIdToken();
+        } catch (e) {
+            connectingRef.current = false;
+            setWebSocketStatus('disconnected');
+            return;
+        }
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsUrl = `${protocol}://${window.location.host}/ws/${user.uid}`;
         
@@ -348,6 +363,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setSocket(ws);
 
         ws.onopen = () => {
+            connectingRef.current = false;
             setWebSocketStatus('connected');
             console.log('WebSocket connection established.');
             addToast('Real-time connection established.', 'success');
@@ -460,8 +476,12 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
 
         ws.onclose = () => {
+            // Released here as well as in onopen, because a socket that closes
+            // during its handshake never opens, and leaving the claim set would
+            // block every reconnection attempt after it.
+            connectingRef.current = false;
             if (!socketRef.current) return;
-            
+
             socketRef.current = null;
             setSocket(null);
 

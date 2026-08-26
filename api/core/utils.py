@@ -1,4 +1,5 @@
 from firebase_admin import auth
+import os
 import asyncio
 import re
 from google.cloud import storage
@@ -24,7 +25,13 @@ bucket_name = 'docsynth-fbb02.appspot.com'
 # deliberately NOT fetchable. Access goes through a short-lived signed URL minted
 # per request, after the caller's workspace access has been checked.
 GCS_PUBLIC_HOST = 'https://storage.googleapis.com'
-CREDENTIALS_PATH = '/app/api/config/credentials.json'
+# The service-account file, at the path it has inside the container. Overridable
+# because it was hardcoded in three places, which meant nothing touching storage
+# could run outside Docker: every upload, import and approval failed with
+# FileNotFoundError before reaching Google. `firebase_setup.py` already solves
+# the same problem the same way. The default is unchanged, so the container
+# behaves exactly as before.
+CREDENTIALS_PATH = os.getenv('GCS_CREDENTIALS_PATH', '/app/api/config/credentials.json')
 
 # Long enough to read a document, short enough that a leaked link is a
 # non-event. Refreshed every time the viewer opens a file.
@@ -179,9 +186,8 @@ async def upload_to_gcs(file: UploadFile, workspace_id: int, file_id: int, filen
         logger.debug(f"Uploading file {filename} to GCS for workspace {workspace_id}...")
 
         # Initialize GCS client with explicit credentials file path
-        credentials_path = '/app/api/config/credentials.json'
-        logger.info(f"Using GCS credentials from {credentials_path}")
-        client = storage.Client.from_service_account_json(credentials_path)
+        logger.info(f"Using GCS credentials from {CREDENTIALS_PATH}")
+        client = storage.Client.from_service_account_json(CREDENTIALS_PATH)
         bucket = client.bucket(bucket_name)
         object_path = workspace_object_path(workspace_id, file_id, filename)
         blob = bucket.blob(object_path)
@@ -256,7 +262,7 @@ async def upload_bytes_to_gcs(data: bytes, workspace_id: int, file_id: int, file
     an uploaded one everywhere downstream.
     """
     try:
-        client = storage.Client.from_service_account_json('/app/api/config/credentials.json')
+        client = storage.Client.from_service_account_json(CREDENTIALS_PATH)
         bucket = client.bucket(bucket_name)
         object_path = workspace_object_path(workspace_id, file_id, filename)
         blob = bucket.blob(object_path)

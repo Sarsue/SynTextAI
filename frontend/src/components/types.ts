@@ -27,7 +27,10 @@ export interface UploadedFile {
     created_at?: string;
     file_type: 'pdf' | 'image' | 'audio' | 'video' | 'text';
     status: ProcessingStatus; // Current processing state
-
+    // The document that replaced this one. Set means this document has stopped
+    // answering questions, so the list has to say so: otherwise it sits there
+    // looking healthy and is never cited, with nothing explaining why.
+    superseded_by_id?: number | null;
 }
 
 export interface KeyConcept {

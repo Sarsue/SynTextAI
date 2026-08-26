@@ -12,6 +12,8 @@ import { User } from 'firebase/auth';
 import { useUserContext , ALL_WORKSPACES } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
 import KnowledgeBaseComponent from './KnowledgeBaseComponent';
+import DraftsPanel from './DraftsPanel';
+import DraftView from './DraftView';
 import FileViewerComponent from './FileViewerComponent';
 import { Persona, UploadedFile } from './types';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -97,6 +99,22 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     const [currentWorkspaceId, setCurrentWorkspaceId] = useState<number | null>(null);
+    // A document SyntextAI wrote, open in the main area instead of the chat.
+    // A document needs the width; a chat bubble is the wrong size for one, and
+    // reading a three-page SOP in the message list is exactly the complaint
+    // this feature exists to answer.
+    const [openDraftId, setOpenDraftId] = useState<number | null>(null);
+    const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
+    const [useConversationForDraft, setUseConversationForDraft] = useState(false);
+    const [writeElapsed, setWriteElapsed] = useState(0);
+
+    // Leaving a conversation clears the offer to write from it, or the next
+    // document would carry a history_id belonging to a chat nobody is looking
+    // at any more.
+    useEffect(() => {
+        if (currentHistory === null) setUseConversationForDraft(false);
+    }, [currentHistory]);
+
     const idTokenRef = useRef<string | null>(null); 
     const navigate = useNavigate();
     // Only offer the organization switcher to people who actually have a
@@ -147,6 +165,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
 
     // Placeholder chat handlers - implement actual logic as needed
     const handleSendMessage = async (messageContent: string, historyId: number | null, attachments?: File[]) => {
+        // Asking a question means the answer is what they want to look at, and
+        // the answer renders where the document is. Leaving the document open
+        // sent the reply somewhere they could not see.
+        setOpenDraftId(null);
         console.log('handleSendMessage called with:', { messageContent, historyId, attachments });
         trackAction('send_message', 'chat', historyId?.toString());
         setIsSending(true);
@@ -474,6 +496,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
      * at, the same as everything else on this screen.
      */
     const handleSearch = async (query: string) => {
+        // Same reason as sending a message: results render in the main area.
+        setOpenDraftId(null);
         const trimmed = query.trim();
         if (!trimmed) return;
 
@@ -518,9 +542,71 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }
     };
 
+    /** Write a document from this workspace, and open it.
+     *
+     * Lives beside handleSearch because it is the same shape of act: a request
+     * typed into the composer whose result fills the main area. The document is
+     * NOT added to the knowledge base here and cannot answer anything until
+     * somebody opens it, reads it and approves it.
+     */
+    const handleWriteDocument = async (prompt: string) => {
+        if (!user) return;
+        if (currentWorkspaceId === null) {
+            addToast('Choose a workspace first.', 'info');
+            return;
+        }
+        setIsSending(true);
+        setWriteElapsed(0);
+        const started = Date.now();
+        const tick = setInterval(
+            () => setWriteElapsed(Math.round((Date.now() - started) / 1000)),
+            1000,
+        );
+        try {
+            const idToken = await user.getIdToken();
+            const response = await fetch('/api/v1/drafts/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${idToken}`,
+                },
+                body: JSON.stringify({
+                    workspace_id: currentWorkspaceId,
+                    prompt,
+                    // Only when asked for. Folding the conversation in by
+                    // default would let an unrelated chat quietly steer a
+                    // document somebody is about to hand to staff.
+                    ...(useConversationForDraft && currentHistory !== null
+                        ? { history_id: currentHistory }
+                        : {}),
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                addToast(
+                    typeof data.detail === 'string' ? data.detail : 'Could not write that',
+                    'error',
+                );
+                return;
+            }
+            setDraftsRefreshKey(k => k + 1);
+            setOpenDraftId(data.id);
+        } catch (error) {
+            console.error('Error writing document:', error);
+            addToast('Could not write that', 'error');
+        } finally {
+            clearInterval(tick);
+            setIsSending(false);
+        }
+    };
+
     const handleSend = async (message: string, files: File[]) => {
         if (composerMode === 'find') {
             await handleSearch(message);
+            return;
+        }
+        if (composerMode === 'write') {
+            await handleWriteDocument(message);
             return;
         }
         try {
@@ -986,6 +1072,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         darkMode={darkMode}
                         onWorkspaceChange={setCurrentWorkspaceId}
                     />
+                    <DraftsPanel
+                        workspaceId={currentWorkspaceId}
+                        onOpenDraft={(id) => { setOpenDraftId(id); setActiveTab('chat'); }}
+                        onWrite={() => { setComposerMode('write'); setActiveTab('chat'); }}
+                        refreshKey={draftsRefreshKey}
+                    />
                     <div className="settings-button-container">
                         {/* Who am I, and where am I? Both matter once somebody
                             can belong to a company they do not own: an invited
@@ -1038,7 +1130,19 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                 </aside>
 
                 <main className={`main-content-area chat-column ${activeTab === 'chat' ? 'active' : ''}`}>
-                    {composerMode === 'find' ? (
+                    {openDraftId !== null ? (
+                        <DraftView
+                            draftId={openDraftId}
+                            onClose={() => setOpenDraftId(null)}
+                            onIngested={() => {
+                                // The draft is a real document now, so both
+                                // lists are stale.
+                                setDraftsRefreshKey(k => k + 1);
+                                loadUserFiles(1, filePagination.pageSize, currentWorkspaceId ?? ALL_WORKSPACES);
+                            }}
+                            onDeleted={() => setDraftsRefreshKey(k => k + 1)}
+                        />
+                    ) : composerMode === 'find' ? (
                         <SearchResults
                             query={searchQuery}
                             results={searchResults}
@@ -1060,6 +1164,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         isSending={isSending || isSearching}
                         mode={composerMode}
                         onModeChange={setComposerMode}
+                        useConversation={useConversationForDraft}
+                        onUseConversationChange={setUseConversationForDraft}
+                        hasConversation={currentHistory !== null}
+                        elapsedSeconds={writeElapsed}
                         workspaceId={typeof currentWorkspaceId === 'number' ? currentWorkspaceId : null}
                         onContentAdded={async () => {
                             // Scoped to the workspace the file was uploaded into.

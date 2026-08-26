@@ -1,0 +1,126 @@
+/* Ask SyntextAI to write a document. Tokens only, from index.css. */
+
+.drafts-panel {
+    border-top: 1px solid var(--border-color, #e8e8e8);
+    margin-top: 10px;
+    padding-top: 10px;
+}
+
+.drafts-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-color, #111);
+}
+
+.drafts-count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted, #666);
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: 999px;
+    padding: 1px 7px;
+}
+
+.drafts-panel-body { padding: 8px 0 4px; }
+
+
+
+
+
+
+
+
+
+.drafts-list { list-style: none; margin: 12px 0 0; padding: 0; }
+
+.drafts-list li + li { margin-top: 2px; }
+
+.drafts-list button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-color, #111);
+    text-align: left;
+}
+
+.drafts-list button:hover { border-color: var(--border-color, #e8e8e8); }
+
+.drafts-list-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.drafts-badge {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    color: var(--text-muted, #666);
+    border: 1px solid var(--border-color, #e8e8e8);
+}
+
+.drafts-badge.in-kb { padding: 2px 5px; }
+
+.drafts-more {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    padding: 5px 8px;
+    background: transparent;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-muted, #666);
+}
+
+.drafts-more:hover { color: var(--text-color, #111); }
+
+.drafts-write-cta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 8px;
+    margin-bottom: 10px;
+    background: transparent;
+    border: 1px dashed var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-muted, #666);
+}
+
+.drafts-write-cta:hover {
+    color: var(--text-color, #111);
+    border-color: var(--text-muted, #bbb);
+}
+
+.drafts-empty {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-muted, #666);
+}
