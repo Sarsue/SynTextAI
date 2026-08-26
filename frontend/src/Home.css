@@ -636,3 +636,26 @@ body {
     flex-direction: column;
     min-height: 100vh;
 }
+
+/* The documents this industry never gets round to writing.
+   ------------------------------------------------------------------
+   A different marker from the list above it, because the two lists mean
+   opposite things: one is what you already have, one is what you do not.
+   Read as one list of ten, they would say nothing.
+
+   ::before rather than ::marker, because .home-vpanel-docs sets
+   list-style: none and a ::marker rule on it does nothing at all. */
+.home-vpanel-writes {
+    margin-bottom: 4px;
+}
+
+/* The second label follows a list rather than a headline, so it needs the
+   space the first one gets from what is above it. */
+.home-vpanel-docs + .home-vpanel-label {
+    margin-top: 22px;
+}
+
+.home-vpanel-writes li::before {
+    content: '+';
+    font-weight: 600;
+}
