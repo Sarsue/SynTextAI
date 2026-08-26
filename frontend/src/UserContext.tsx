@@ -113,6 +113,9 @@ interface UserContextType {
     incomingChatMessage: IncomingChatMessage | null;
     // Timestamp of the last access change pushed from the server.
     accessChangedAt: number;
+    /** Bumped when a document in the current workspace is written, renamed,
+     *  approved or deleted, by anyone. */
+    draftsChangedAt: number;
     clearIncomingChatMessage: () => void;
     // The tenant the user chose at sign-in. Everything is scoped to it, so
     // entitlement and role can never be blended across two organizations the
@@ -178,6 +181,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Bumped whenever access changes, so views holding workspace-scoped lists
     // can refetch without each of them subscribing to the socket.
     const [accessChangedAt, setAccessChangedAt] = useState<number>(0);
+    const [draftsChangedAt, setDraftsChangedAt] = useState<number>(0);
     const clearIncomingChatMessage = useCallback(() => setIncomingChatMessage(null), []);
     const [activeOrganizationId, setActiveOrganizationId] = useState<number | null>(() => {
         const stored = localStorage.getItem('active_organization_id');
@@ -455,6 +459,16 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         break;
                     }
                     case 'file_status_error': {
+                        break;
+                    }
+
+                    // Somebody in this workspace wrote, renamed, approved or
+                    // deleted a document. The list used to be fetched once per
+                    // mount, so a colleague's document was invisible until a
+                    // reload; reloading on open and on tab focus still left two
+                    // people working side by side out of step.
+                    case 'draft_changed': {
+                        setDraftsChangedAt(Date.now());
                         break;
                     }
 
@@ -752,6 +766,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         incomingChatMessage,
         clearIncomingChatMessage,
         accessChangedAt,
+        draftsChangedAt,
         activeOrganizationId,
         orgContext,
         setActiveOrganization,

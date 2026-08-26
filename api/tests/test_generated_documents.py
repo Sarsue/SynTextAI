@@ -914,3 +914,80 @@ async def test_the_budget_actually_reaches_the_model(
     assert res.status_code == 201, res.text
     assert seen["max_tokens"] == drafts_route.DRAFT_MAX_TOKENS
     assert seen["reasoning_effort"] == drafts_route.DRAFT_REASONING_EFFORT
+
+
+# --- the list going live ------------------------------------------------------
+
+async def test_everyone_in_the_workspace_is_told_when_a_document_changes(
+    store, tenant, paying, workspace, client, monkeypatch
+):
+    """The colleague who did NOT act is the point.
+
+    The list was fetched once per mount, so a document written on one screen
+    stayed invisible on another until a reload. Reloading on open and on tab
+    focus covered the common case and still left two people working side by side
+    out of step.
+    """
+    member = await tenant.member(scope="workspace", workspaces=[workspace["id"]])
+    sent = []
+
+    async def capture(user_id, event_type, data):
+        sent.append((str(user_id), event_type, data))
+
+    monkeypatch.setattr(drafts_route.websocket_manager, "send_message", capture)
+
+    async def fake_embedding(text):
+        return QUERY_VEC
+
+    async def fake_generate(prompt, max_tokens=None, reasoning_effort=None):
+        return "# SOP\n\nSomething."
+
+    monkeypatch.setattr(drafts_route, "get_text_embedding", fake_embedding, raising=False)
+    monkeypatch.setattr(drafts_route, "gradient_chat", fake_generate)
+
+    res = await client.as_(tenant.owner).post(
+        "/api/v1/drafts/generate",
+        json={"workspace_id": workspace["id"], "prompt": "write an SOP"},
+    )
+    assert res.status_code == 201, res.text
+
+    told = {u for u, e, _ in sent if e == "draft_changed"}
+    assert str(tenant.owner) in told
+    assert str(member) in told, "the colleague who did not act was not told"
+    payload = next(d for _, e, d in sent if e == "draft_changed")
+    assert payload["workspace_id"] == workspace["id"]
+    assert payload["action"] == "created"
+
+
+async def test_deleting_announces_before_the_row_is_gone(
+    store, tenant, workspace, draft, client, monkeypatch
+):
+    """The workspace has to be read off the draft while it still exists."""
+    sent = []
+
+    async def capture(user_id, event_type, data):
+        sent.append(data)
+
+    monkeypatch.setattr(drafts_route.websocket_manager, "send_message", capture)
+
+    res = await client.as_(tenant.owner).delete(f"/api/v1/drafts/{draft['id']}")
+    assert res.status_code == 200, res.text
+    assert sent and sent[0]["action"] == "deleted"
+    assert sent[0]["workspace_id"] == workspace["id"]
+
+
+async def test_a_failed_announcement_does_not_fail_the_request(
+    store, tenant, workspace, draft, client, monkeypatch
+):
+    """The document is written either way, and the list still reloads when the
+    panel is next opened."""
+    async def boom(user_id, event_type, data):
+        raise RuntimeError("socket gone")
+
+    monkeypatch.setattr(drafts_route.websocket_manager, "send_message", boom)
+
+    res = await client.as_(tenant.owner).patch(
+        f"/api/v1/drafts/{draft['id']}", json={"title": "Renamed"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["title"] == "Renamed"

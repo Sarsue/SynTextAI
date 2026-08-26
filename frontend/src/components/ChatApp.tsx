@@ -67,7 +67,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         clearIncomingChatMessage,
         activeOrganizationId,
         orgContext,
-        accessChangedAt
+        accessChangedAt,
+        draftsChangedAt
     } = useUserContext();
     const { addToast } = useToast();
     const { webSocketStatus } = useUserContext();
@@ -1080,7 +1081,9 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                         workspaceId={currentWorkspaceId}
                         onOpenDraft={(id) => { setOpenDraftId(id); setActiveTab('chat'); }}
                         onWrite={() => { setComposerMode('write'); setActiveTab('chat'); }}
-                        refreshKey={draftsRefreshKey}
+                        // Local actions bump draftsRefreshKey; the socket bumps
+                        // draftsChangedAt when a colleague acts. Either reloads the list.
+                        refreshKey={draftsRefreshKey + draftsChangedAt}
                     />
                     <div className="settings-button-container">
                         {/* Who am I, and where am I? Both matter once somebody
