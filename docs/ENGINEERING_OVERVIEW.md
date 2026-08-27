@@ -3,17 +3,14 @@
 What is shipped, what is outstanding, and what not to build twice.
 
 Git holds what changed and why. The code holds the reasoning beside the thing
-being reasoned about. This file holds only the three lists above. If an entry
-could be a commit message or a code comment, make it one instead.
+being reasoned about. If an entry could be a commit message or a code comment,
+make it one instead.
 
 **Under 250 lines. Check before committing.** It was 960, then 260, then 538 in
-a single day, because each feature arrived with a dated section retelling its own
-commit message. That is the changelog this file says it is not.
-
-A shipped thing is one line under **Shipped**. What it taught is one line under
-**Decisions**, with the number that makes it worth obeying. Neither is ever a
-section with a date in the heading. If it needs more room, the room is the commit
-message.
+a single day, because each feature arrived with a dated section retelling its
+own commit message. A shipped thing is one line under **Shipped**; what it
+taught is one line under **Decisions**, with the number that makes it worth
+obeying. Never a section with a date in the heading.
 
 ## What it is
 
@@ -52,16 +49,18 @@ docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
 is built inside the image on node:20-alpine. Vite 8 needs 20.19+ and that image
 is 20.20.2, while the host has 18.15.0.
 
+**A driven browser is a hidden page**, so animations finish without firing
+`animationend`. A Radix dialog waiting to unmount looks stuck and is not.
+
 **To drive the UI, use the dev server on :5173, not :3000.**
 
 ```bash
 docker compose -f docker-compose.local.yml --env-file .env.dev --profile dev up -d frontend-dev
 ```
 
-Port 3000 is a production build, which is what deploys and which therefore has
-no dev sign-in harness, so it cannot be signed into without a real Google
-account. 5173 has the harness and hot reload. Sign in with
-`window.__syntextDevSignIn(customToken)`; mint the custom token with the
+Port 3000 is a production build, so it has no dev sign-in harness and cannot be
+signed into without a real Google account. 5173 has the harness and hot reload.
+Sign in with `window.__syntextDevSignIn(customToken)`; mint it with the
 service-account key inside the app container and destroy it afterwards.
 
 **Always pass `--env-file .env.dev`.** Compose interpolates build args from
@@ -217,6 +216,9 @@ One line each. The reasoning is in the commit or the code comment beside it.
   right for an answer, and reasoning spends the same allowance, so a two-page SOP
   returned empty about one attempt in four.
 - A supersede link points forward, so retrieval tests a column it already joined.
+
+- `ui/` is shadcn written for React 19, running on React 18.3.1, so only the
+  Overlays need `forwardRef`. Nothing else here is handed a ref.
 
 **Reading what the server sends**
 - The API serialises naive UTC with no designator and JavaScript parses that as

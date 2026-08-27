@@ -26,12 +26,47 @@ function AlertDialogPortal({
   )
 }
 
-function AlertDialogOverlay({
-  className,
-  ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
+// forwardRef, unlike the other primitives in this directory.
+//
+// These come from shadcn/ui, which targets React 19, where a ref is an ordinary
+// prop and forwardRef is deprecated. This app is on React 18.3.1, where a plain
+// function component silently drops any ref given to it. Of the 13 files here,
+// only button.tsx had already been adapted.
+//
+// It bites the Overlay specifically: Radix wraps each child of a Portal in
+// <Presence>, and Presence takes a ref on its child so it can tell when the
+// exit animation has finished. Dropped, React warns "Function components cannot
+// be given refs" on every dialog the app opens.
+//
+// Only the Overlays are wrapped, because only they are handed a ref. Established
+// by recording every such warning while driving the app rather than by reading
+// the files: exactly one fires per open, naming DialogOverlay.
+//
+// IF A CLOSED DIALOG SEEMS TO STAY IN THE DOM, IT IS THE BROWSER, NOT THIS
+//
+// Presence unmounts its child on animationend. In an automated browser the page
+// is hidden (document.visibilityState === "hidden" even with the tab fronted),
+// and a hidden page produces no frames, so animations run to completion but
+// their events are never dispatched. Presence waits forever and the closed node
+// stays mounted.
+//
+// Proved with a plain 100ms keyframe on a bare div, nothing to do with Radix:
+// playState "running", final opacity 0, so it finished, and zero animationstart
+// or animationend. The leftover dialog nodes report getAnimations() === [] for
+// the same reason: finished, never announced.
+//
+// Half a day went into this looking like a product bug. It is not one. Do not
+// diagnose exit or unmount behaviour from a driven browser.
+//
+// The real fix for the whole class is React 19, at which point this wrapper
+// should come back out.
+const AlertDialogOverlay = React.forwardRef<
+  React.ElementRef<typeof AlertDialogPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
+>(({ className, ...props }, ref) => {
   return (
     <AlertDialogPrimitive.Overlay
+      ref={ref}
       data-slot="alert-dialog-overlay"
       className={cn(
         "fixed inset-0 z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
@@ -40,7 +75,8 @@ function AlertDialogOverlay({
       {...props}
     />
   )
-}
+})
+AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
 
 function AlertDialogContent({
   className,
