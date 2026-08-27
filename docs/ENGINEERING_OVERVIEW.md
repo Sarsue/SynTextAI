@@ -141,10 +141,8 @@ enough until a customer says otherwise.
 
 **Not doing, decided 2026-08-26**
 - **Email-in.** Proposed and dropped. Upload plus Drive covers ingress.
-- **OneDrive / SharePoint picker.** The backend exists and is tested
-  (`SharePointConnector`, registered in `_CONNECTORS`, `/files` accepts
-  `provider: "sharepoint"`), so this is a frontend picker plus an Azure app
-  registration whenever a customer asks. Not worth the effort before then.
+- **OneDrive / SharePoint picker.** Backend exists and is tested, so this is a
+  frontend picker plus an Azure app registration whenever a customer asks.
 - **Box, Dropbox.** Same reasoning.
 
 **Known risks, carried deliberately**
@@ -198,6 +196,8 @@ One line each. The reasoning is in the commit or the code comment beside it.
   staff every document their owner added, twice, in two different places.
 - A refusal is 404 when naming a resource by id.
 - `test_every_route_is_scoped.py` fails on a route that reaches no tenant.
+- The suite runs on its own database, `syntextai_test`, made by conftest. The
+  worker polls the same queue tests enqueue into and was claiming their jobs.
 - `drive.file` and the picker, never `drive.readonly`.
 - Never store a standing credential to a customer's systems.
 - Do not widen CORS while credentials are allowed.

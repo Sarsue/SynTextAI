@@ -10,13 +10,84 @@ as written. Point them at the local stack:
 Every test creates its own organization and users and removes them afterwards,
 so a run leaves no trace in whatever database it was pointed at.
 """
+import os
+import subprocess
 import uuid
+from pathlib import Path
+
+# THE SUITE GETS ITS OWN DATABASE, AND THIS IS NOT TIDINESS
+#
+# The worker container polls the same job queue the tests enqueue into, and
+# claims their jobs. Its log during a run: run_type "ingest_file" against test
+# user ids, "Starting processing for file: good-one.pdf", which is a fixture
+# filename, and "File with ID 8215 not found" where the tenant fixture had torn
+# the row down mid-flight. 1364 lines in forty minutes.
+#
+# Mostly it failed harmlessly. Once in about six runs it did not:
+# "Failed to create file record for file_id: 8212" is the worker creating a
+# files row, and a row it created carried a name a test was about to reuse, so
+# test_a_draft_can_be_approved_again_if_the_document_was_deleted got a 409 where
+# it expected a 202. That test is correct. It was losing a race with another
+# process.
+#
+# Pointing the suite at its own database removes the race instead of timing
+# around it. The worker reads DATABASE_NAME too, and it is not this one.
+#
+# Set TEST_DATABASE_NAME to override. Never point it at a database anything else
+# is using: the tenant fixture deletes what it made, and a worker mid-flight in
+# the same database is exactly what this exists to prevent.
+os.environ["DATABASE_NAME"] = os.getenv("TEST_DATABASE_NAME", "syntextai_test")
 
 import pytest
 import pytest_asyncio
 
 from api.models.async_db import get_database_url
 from api.repositories.repository_manager import RepositoryManager
+
+
+def _ensure_test_database() -> None:
+    """Create the test database if it is missing, then bring it to head.
+
+    Runs once per session. `alembic upgrade head` is a no-op when it is already
+    there, which is the common case, so the cost is one connection.
+    """
+    import asyncio
+
+    import asyncpg
+
+    name = os.environ["DATABASE_NAME"]
+    admin = {
+        "user": os.getenv("DATABASE_USER", "postgres"),
+        "password": os.getenv("DATABASE_PASSWORD", "password"),
+        "host": os.getenv("DATABASE_HOST", "localhost"),
+        "port": int(os.getenv("DATABASE_PORT", "5432")),
+    }
+
+    async def create_if_missing() -> None:
+        conn = await asyncpg.connect(database="postgres", **admin)
+        try:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", name
+            )
+            if not exists:
+                # Identifier, so it cannot be a bound parameter. name comes from
+                # our own environment, not from anything a request supplies.
+                await conn.execute(f'CREATE DATABASE "{name}"')
+        finally:
+            await conn.close()
+
+    asyncio.run(create_if_missing())
+
+    api_dir = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        ["alembic", "upgrade", "head"],
+        cwd=api_dir,
+        check=True,
+        capture_output=True,
+    )
+
+
+_ensure_test_database()
 
 
 @pytest.fixture
