@@ -47,19 +47,21 @@ function DialogClose({
 // by recording every such warning while driving the app rather than by reading
 // the files: exactly one fires per open, naming DialogOverlay.
 //
-// KNOWN, AND NOT CAUSED BY THIS
+// IF A CLOSED DIALOG SEEMS TO STAY IN THE DOM, IT IS THE BROWSER, NOT THIS
 //
-// Presence never completes its exit in this app. No animationstart or
-// animationend event fires for either dialog, on open or on close, even though
-// the enter/exit keyframes are defined, animation-duration computes to 0.1s and
-// prefers-reduced-motion is not set. So Presence waits on an event that never
-// arrives and leaves the closed node mounted.
+// Presence unmounts its child on animationend. In an automated browser the page
+// is hidden (document.visibilityState === "hidden" even with the tab fronted),
+// and a hidden page produces no frames, so animations run to completion but
+// their events are never dispatched. Presence waits forever and the closed node
+// stays mounted.
 //
-// That already happens to the content node, which is Radix's own forwardRef
-// component, so it predates this and is a separate bug. The visible effect of
-// wiring the Overlay's ref is that its node now lingers the same way: invisible,
-// not blocking clicks, and not accumulating across repeated open and close.
-// Fixing the exit properly is its own task.
+// Proved with a plain 100ms keyframe on a bare div, nothing to do with Radix:
+// playState "running", final opacity 0, so it finished, and zero animationstart
+// or animationend. The leftover dialog nodes report getAnimations() === [] for
+// the same reason: finished, never announced.
+//
+// Half a day went into this looking like a product bug. It is not one. Do not
+// diagnose exit or unmount behaviour from a driven browser.
 //
 // The real fix for the whole class is React 19, at which point this wrapper
 // should come back out.

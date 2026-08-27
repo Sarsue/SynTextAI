@@ -49,16 +49,18 @@ docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
 is built inside the image on node:20-alpine. Vite 8 needs 20.19+ and that image
 is 20.20.2, while the host has 18.15.0.
 
+**A driven browser is a hidden page**, so animations finish without firing
+`animationend`. A Radix dialog waiting to unmount looks stuck and is not.
+
 **To drive the UI, use the dev server on :5173, not :3000.**
 
 ```bash
 docker compose -f docker-compose.local.yml --env-file .env.dev --profile dev up -d frontend-dev
 ```
 
-Port 3000 is a production build, which is what deploys and which therefore has
-no dev sign-in harness, so it cannot be signed into without a real Google
-account. 5173 has the harness and hot reload. Sign in with
-`window.__syntextDevSignIn(customToken)`; mint the custom token with the
+Port 3000 is a production build, so it has no dev sign-in harness and cannot be
+signed into without a real Google account. 5173 has the harness and hot reload.
+Sign in with `window.__syntextDevSignIn(customToken)`; mint it with the
 service-account key inside the app container and destroy it afterwards.
 
 **Always pass `--env-file .env.dev`.** Compose interpolates build args from
@@ -216,7 +218,7 @@ One line each. The reasoning is in the commit or the code comment beside it.
 - A supersede link points forward, so retrieval tests a column it already joined.
 
 - `ui/` is shadcn written for React 19, running on React 18.3.1, so only the
-  Overlays need `forwardRef`. Presence never completes its exit either way.
+  Overlays need `forwardRef`. Nothing else here is handed a ref.
 
 **Reading what the server sends**
 - The API serialises naive UTC with no designator and JavaScript parses that as
