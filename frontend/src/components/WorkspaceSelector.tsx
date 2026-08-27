@@ -95,6 +95,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     // panel has read reach from the organization endpoint since that endpoint
     // existed. Removed rather than kept warm for a caller that never came.
     const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+    const [cancellingInviteId, setCancellingInviteId] = useState<number | null>(null);
     // Reach belongs to the organization, not to one workspace, so it is read
     // from the organization endpoint rather than the workspace's member list.
     const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
@@ -448,6 +449,36 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             addToast('Could not remove member', 'error');
         }
         setMemberToRemove(null);
+    };
+
+    /** Take back an invite that has not been accepted yet.
+
+     * No confirmation step, unlike removing a member. Nobody loses access here
+     * because nobody has any yet, and the whole action is undone by inviting
+     * the same address again. */
+    const cancelInvite = async (inviteId: number, email: string) => {
+        const orgId = activeOrganizationId ?? orgContext?.organization_id ?? null;
+        if (!user || !orgId) return;
+        setCancellingInviteId(inviteId);
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(
+                `/api/v1/organizations/${orgId}/invites/${inviteId}`,
+                { method: 'DELETE', headers: { Authorization: `Bearer ${idToken}` } },
+            );
+            if (res.ok) {
+                // Says what happened to the link, because that is the thing the
+                // owner is actually worried about still being out there.
+                addToast(`Invite to ${email} cancelled. Their link no longer works.`, 'success');
+                await fetchOrgMembers();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                addToast(data.detail || 'Could not cancel the invite', 'error');
+            }
+        } catch {
+            addToast('Could not cancel the invite', 'error');
+        }
+        setCancellingInviteId(null);
     };
 
     const fetchOrgMembers = async () => {
@@ -1109,9 +1140,22 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                         <div style={{ marginTop: 20 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: '#888', marginBottom: 8 }}>Pending Invites</div>
                             {pendingInvites.map(inv => (
-                                <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(128,128,128,0.15)' }}>
+                                <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(128,128,128,0.15)' }}>
                                     <span style={{ fontSize: 14 }}>{inv.email}</span>
-                                    <span style={{ fontSize: 12, color: '#888' }}>Pending</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <span style={{ fontSize: 12, color: '#888' }}>
+                                            {cancellingInviteId === inv.id ? 'Cancelling...' : 'Pending'}
+                                        </span>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            disabled={cancellingInviteId === inv.id}
+                                            onClick={() => cancelInvite(inv.id, inv.email)}
+                                            title="Cancel this invite"
+                                        >
+                                            <X className="size-3.5" />
+                                        </Button>
+                                    </div>
                                 </div>
                             ))}
                         </div>

@@ -2,7 +2,7 @@
 import os
 import logging
 from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
+from sendgrid.helpers.mail import ClickTracking, Mail, TrackingSettings
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +63,16 @@ def send_workspace_invite(to_email: str, workspace_name: str, token: str, invite
         from_email=cfg["from_email"],
         to_emails=to_email,
         subject=f"{inviter_name} invited you to join their knowledge base on Syntext",
-        # The link, plainly, and nothing to press.
+        # The link, plainly, and nothing to press. No em dashes, per the house
+        # style for anything a customer reads.
         #
-        # A styled anchor here was reported as "this site doesn't support a
-        # secure connection" while the same URL pasted into a browser worked
-        # fine. Mail clients and scanners rewrite button targets through their
-        # own redirectors, and whatever that hop resolved to did not match what
-        # the browser expected. Not worth diagnosing per client: the link is the
-        # thing being delivered, and a link needs no chrome to work.
-        #
-        # No em dashes, per the house style for anything a customer reads.
+        # This anchor used to be a styled button, and the styling was blamed on
+        # 2026-08-03 for a report of "this site doesn't support a secure
+        # connection". That was the wrong diagnosis and the report stayed true
+        # for another three weeks. See the tracking_settings block below for
+        # what was actually happening: SendGrid rewrites every href here no
+        # matter how it is dressed, so no amount of markup was ever going to
+        # change the outcome.
         html_content=f"""
         <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
             <h2 style="color: #0062b1;">You've been invited</h2>
@@ -91,6 +91,37 @@ def send_workspace_invite(to_email: str, workspace_name: str, token: str, invite
             f"Open this link to accept:\n{invite_url}\n\n"
             "This invite expires in 7 days. If you weren't expecting this, you can ignore it.\n"
         ),
+    )
+
+    # Click tracking OFF, and this is load-bearing rather than a preference.
+    #
+    # SendGrid rewrites every link in the message to
+    # http://url639.syntextai.com/ls/click?upn=..., its branded link domain,
+    # which is a CNAME to sendgrid.net. That hop resolves correctly over HTTP
+    # and preserves the #/invite/<token> fragment, so the destination was never
+    # the problem.
+    #
+    # The problem is that api/app.py sends
+    # Strict-Transport-Security: max-age=31536000; includeSubDomains, and
+    # includeSubDomains covers url639.syntextai.com. The browser upgrades
+    # SendGrid's http:// link to https://, SendGrid holds no certificate
+    # covering that name, and HSTS removes the "proceed anyway" escape. Chrome
+    # shows NET::ERR_CERT_COMMON_NAME_INVALID and the invite is unreachable.
+    #
+    # Broken since HSTS shipped in 1e9d746 on 2026-07-29. It looked
+    # intermittent because HSTS is trust-on-first-use and we do not set
+    # preload: it only bites once that browser has seen syntextai.com, which an
+    # invitee who looked the product up first has and a total stranger has not.
+    #
+    # enable_text as well as enable: they are separate settings at SendGrid and
+    # the plain-text part carries the same link.
+    #
+    # Turning this off here rather than in the SendGrid dashboard keeps it in
+    # the repo, where test_email_service.py holds it. A dashboard toggle is one
+    # click from silently undoing this, and nothing would fail until an invite
+    # went unanswered.
+    message.tracking_settings = TrackingSettings(
+        click_tracking=ClickTracking(enable=False, enable_text=False)
     )
 
     sg = SendGridAPIClient(cfg["api_key"])

@@ -179,7 +179,11 @@ class WorkspaceInvite(Base):
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True)
     email = Column(String, nullable=False)
     token = Column(String, nullable=False)
-    status = Column(String, nullable=False, default="pending")  # "pending" | "accepted" | "expired"
+    # "expired" is set by time or by re-inviting the same address. "revoked" is
+    # somebody withdrawing the offer on purpose. Both are dead to
+    # get_invite_by_token, which admits nothing but "pending"; they read
+    # differently to a person looking at why an invite went nowhere.
+    status = Column(String, nullable=False, default="pending")  # "pending" | "accepted" | "expired" | "revoked"
     # What they will be once they accept, decided by whoever invited them.
     # Every invite used to produce an organization-wide staff member, so the
     # owner had to correct the role and reach afterwards, on another screen,

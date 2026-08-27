@@ -24,6 +24,11 @@ export default defineConfig({
     // file for the port concluded the dev server wanted a busy port and
     // refused. Overridable with VITE_DEV_PORT either way.
     port: Number(process.env.VITE_DEV_PORT ?? 5173),
+    // Inotify events do not cross the Colima sshfs mount, so a dev server
+    // running inside a container sees an edit on the host as nothing at all and
+    // silently serves stale code. Polling costs CPU and is only wanted there,
+    // hence the env var rather than always-on.
+    watch: process.env.VITE_POLL ? { usePolling: true, interval: 300 } : undefined,
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET ?? 'http://localhost:5000',

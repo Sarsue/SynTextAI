@@ -48,10 +48,21 @@ pool 100, fusion weights 0.7 vector / 0.3 keyword.
 docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
 ```
 
-**No Node needed on the host.** The frontend is built inside the image, on
-node:20-alpine. Vite 8 needs 20.19+ and that image is 20.20.2. Only reach for a
-host Node if you want to run `npm run dev` outside compose, and then it has to
-meet the same floor.
+**No Node needed on the host**, for building or for driving the UI. The frontend
+is built inside the image on node:20-alpine. Vite 8 needs 20.19+ and that image
+is 20.20.2, while the host has 18.15.0.
+
+**To drive the UI, use the dev server on :5173, not :3000.**
+
+```bash
+docker compose -f docker-compose.local.yml --env-file .env.dev --profile dev up -d frontend-dev
+```
+
+Port 3000 is a production build, which is what deploys and which therefore has
+no dev sign-in harness, so it cannot be signed into without a real Google
+account. 5173 has the harness and hot reload. Sign in with
+`window.__syntextDevSignIn(customToken)`; mint the custom token with the
+service-account key inside the app container and destroy it afterwards.
 
 **Always pass `--env-file .env.dev`.** Compose interpolates build args from
 `.env`, the production file, so without the flag the frontend is built with the
@@ -69,6 +80,11 @@ been up a while. `colima stop && colima start`. Nothing to do with macOS privacy
 settings. Containers already running keep serving code they loaded at startup,
 so they look healthy while running a stale schema.
 
+**A new route answering 405 means the same thing.** `./api` is mounted, so the
+files are current, but uvicorn registered its routes at startup.
+`docker compose ... restart syntextaiapp`. Tests will not catch this: they
+import the app fresh.
+
 ## Shipped
 
 Live in production.
@@ -78,6 +94,7 @@ Live in production.
 - **Find**: search returning matched pages in ~0.6s, no generation.
 - Vision extraction: PDF pages the text layer loses are read by a vision model.
 - Organizations, workspaces, invites, roles, per-workspace document access.
+  A pending invite can be cancelled, which kills the link already in the inbox.
 - Stripe: trial, subscribe, plan changes, 3D Secure, card update.
 - Answer feedback: thumbs, four reasons, a comment, joined to the run.
 - **Usage** in Settings: questions, who asks, documents including failed ones,
@@ -161,8 +178,21 @@ One line each. The reasoning is in the commit or the code comment beside it.
 - Ranks are fused, never scores: a cosine and a `ts_rank_cd` share no scale.
 - Ingestion makes no chat call. Embeddings and vision only.
 - One markdown parser, two renderers, for Word and PDF export.
+- PostHog is pointed at the regional host, `us.i.posthog.com`, never at
+  `app.posthog.com`. That one is the dashboard, and naming it let posthog-js
+  resolve somewhere the CSP did not allow: every event blocked for 11 days
+  with the product healthy and the dashboard empty. A test now reads the host
+  out of the built bundle and fails if the CSP disagrees.
+- Analytics events carry `environment`, decided by hostname. The local
+  container serves a production build, so `import.meta.env.DEV` is false there
+  and testing counted as customer behaviour.
 
 **Security and tenancy**
+- Invite mail goes out with SendGrid click tracking off. On, SendGrid
+  rewrites the link to `url639.syntextai.com`, our own `includeSubDomains`
+  HSTS forces that to https, and SendGrid has no certificate for it: no
+  invite could be accepted for four weeks. Set in code, not the dashboard,
+  and held by `test_email_service.py`.
 - Two questions, two functions. *May you see it* is `accessible_workspace_ids`.
   *May you do it* is `assert_*_capability`.
 - Scope by workspace, never by uploader. Checking the uploader refused invited
