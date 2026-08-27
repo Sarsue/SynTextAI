@@ -66,10 +66,35 @@ const AcceptInvite: React.FC = () => {
         setPageStatus('accepting');
         try {
             const idToken = await user.getIdToken();
-            const res = await fetch(`/api/v1/workspaces/invites/${token}/accept`, {
+            const accept = () => fetch(`/api/v1/workspaces/invites/${token}/accept`, {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${idToken}` },
             });
+
+            let res = await accept();
+            let registeredOnRetry = false;
+
+            // "User not found" means Firebase knows them and we do not, which
+            // happens when the registration call at sign-in did not land. That
+            // call is not retried anywhere and its failure is not fatal by
+            // design, so without this the person is left holding a valid invite
+            // that can never be accepted, on a card whose only button is Go
+            // home. Register and try once more: the second attempt is the whole
+            // recovery, and one retry is enough because a permanent failure
+            // gives the same answer twice.
+            if (res.status === 404) {
+                await fetch('/api/v1/users?intent=signin', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${idToken}`,
+                    },
+                    body: JSON.stringify({ firebase_uid: user.uid, email: user.email }),
+                }).catch(() => undefined);
+                registeredOnRetry = true;
+                res = await accept();
+            }
+
             if (res.ok) {
                 // Enter the organization we just joined, rather than bouncing
                 // through the chooser to rediscover it.
@@ -79,6 +104,17 @@ const AcceptInvite: React.FC = () => {
                 }
                 setPageStatus('done');
                 setTimeout(() => navigate('/chat'), 1800);
+            } else if (registeredOnRetry) {
+                // Registering accepts every invite waiting for the address, so
+                // by the time the retry ran the invite was already used, by us,
+                // a moment earlier. The second accept then reports it as invalid
+                // or already used and that reads as failure, but the person is
+                // a member: verified in the database after this exact sequence,
+                // invite 'accepted' and the row present in organization_members.
+                // Showing them "Invite unavailable" at that point is the app
+                // calling its own success a failure.
+                setPageStatus('done');
+                navigate('/select-organization', { replace: true });
             } else {
                 const data = await res.json().catch(() => ({}));
                 setErrorMsg(data.detail || 'Could not accept the invite.');
@@ -99,12 +135,27 @@ const AcceptInvite: React.FC = () => {
     }
 
     if (pageStatus === 'invalid' || pageStatus === 'error') {
+        // An invite that reads "already accepted" to somebody not signed in
+        // means they joined and are simply not signed in on this device. "Go
+        // home" is the one thing that cannot help them, so offer the sign-in
+        // that can. Anything genuinely dead still gets Go home.
+        const alreadyAccepted = /accepted/i.test(errorMsg);
         return (
             <div className="auth-page">
                 <div className="invite-card">
-                    <h2 className="invite-title">Invite unavailable</h2>
-                    <p className="invite-sub">{errorMsg}</p>
-                    <Button variant="outline" className="w-full" onClick={() => navigate('/')}>Go home</Button>
+                    <h2 className="invite-title">
+                        {alreadyAccepted ? 'You have already joined' : 'Invite unavailable'}
+                    </h2>
+                    <p className="invite-sub">
+                        {alreadyAccepted
+                            ? 'This invite has been used. Sign in to reach your team.'
+                            : errorMsg}
+                    </p>
+                    {alreadyAccepted ? (
+                        <Button variant="outline" className="w-full" onClick={() => navigate('/login')}>Sign in</Button>
+                    ) : (
+                        <Button variant="outline" className="w-full" onClick={() => navigate('/')}>Go home</Button>
+                    )}
                 </div>
             </div>
         );

@@ -143,17 +143,14 @@ enough until a customer says otherwise.
 - **Email-in.** Proposed and dropped. Upload plus Drive covers ingress.
 - **OneDrive / SharePoint picker.** Backend exists and is tested, so this is a
   frontend picker plus an Azure app registration whenever a customer asks.
-- **Box, Dropbox.** Same reasoning.
 
 **Known risks, carried deliberately**
 - **No database-level RLS.** Application layer only, so every new route needs
   its explicit check. Revisit when a security questionnaire asks in writing.
-  A week, and mostly code: the app connects as `syntext`, a SUPERUSER, and
-  Postgres bypasses every policy for superusers, so a new role comes first or
-  the policies do nothing at all. Then every session must set and reliably clear
-  the tenant, because a leaked setting on a pooled connection means one request
-  inherits another's. `test_every_route_is_scoped.py` covers the realistic
-  failure meanwhile.
+  A week, and mostly code: the app connects as a SUPERUSER, which bypasses every
+  policy, so a new role comes first. Then every session must set and reliably
+  clear the tenant, or a pooled connection leaks one request's into another's.
+  `test_every_route_is_scoped.py` covers the realistic failure meanwhile.
 - **Rate limits** (30/min chat, 10/min upload, per IP) are a first-pass guess.
 
 **Parked, one customer away**
@@ -219,6 +216,9 @@ One line each. The reasoning is in the commit or the code comment beside it.
 
 - `ui/` is shadcn written for React 19, running on React 18.3.1, so only the
   Overlays need `forwardRef`. Nothing else here is handed a ref.
+
+- Firebase decides who is signed in; whether our API answers is a separate
+  question. Confusing the two stranded an invited colleague, silently.
 
 **Reading what the server sends**
 - The API serialises naive UTC with no designator and JavaScript parses that as

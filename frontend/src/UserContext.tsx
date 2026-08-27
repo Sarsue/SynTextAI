@@ -557,60 +557,75 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const fetchSubscriptionStatus = useCallback(async () => {
         if (!currentUser()) return;
-        // Scoped to the organization being viewed. Without it the answer came
-        // back for the person, so somebody inside their own unpaid company saw
-        // the subscription of a different company they happen to belong to.
-        const orgId = localStorage.getItem('active_organization_id');
-        const url = orgId
-            ? `/api/v1/subscriptions/status?organization_id=${encodeURIComponent(orgId)}`
-            : '/api/v1/subscriptions/status';
-        const response = await _callApiWithTokenInternal(url, 'GET');
-        if (response?.ok) {
-            const data = await response.json();
-            setSubscriptionStatus(data.subscription_status ?? 'none');
-            // Fall back to the personal status if an older backend omits the
-            // field, so this cannot regress into locking everyone out.
-            setIsEntitled(
-                data.entitled ?? ['active', 'trialing'].includes(data.subscription_status)
-            );
-            // Default to owner when an older backend omits these, so nobody is
-            // locked out of their own billing by a missing field.
-            setIsOrgOwner(data.is_org_owner ?? true);
-            setIsMemberOnly(data.is_member_only ?? false);
-            setSubscriptionData(data);
+        // The else branch below already knows that leaving subscriptionStatus
+        // null strands the person on the auth page, because Auth.tsx will not
+        // redirect until it is anything else. A rejected request skipped that
+        // branch entirely and left it null, which is the same bug by a different
+        // route, so the throw is caught at the bottom and answered the same way.
+        try {
+            // Scoped to the organization being viewed. Without it the answer came
+            // back for the person, so somebody inside their own unpaid company saw
+            // the subscription of a different company they happen to belong to.
+            const orgId = localStorage.getItem('active_organization_id');
+            const url = orgId
+                ? `/api/v1/subscriptions/status?organization_id=${encodeURIComponent(orgId)}`
+                : '/api/v1/subscriptions/status';
+            const response = await _callApiWithTokenInternal(url, 'GET');
+            if (response?.ok) {
+                const data = await response.json();
+                setSubscriptionStatus(data.subscription_status ?? 'none');
+                // Fall back to the personal status if an older backend omits the
+                // field, so this cannot regress into locking everyone out.
+                setIsEntitled(
+                    data.entitled ?? ['active', 'trialing'].includes(data.subscription_status)
+                );
+                // Default to owner when an older backend omits these, so nobody is
+                // locked out of their own billing by a missing field.
+                setIsOrgOwner(data.is_org_owner ?? true);
+                setIsMemberOnly(data.is_member_only ?? false);
+                setSubscriptionData(data);
 
-            // Entitlement is a property of the organization, so a subscription
-            // change makes the cached organization context stale. Nothing
-            // refreshed it, which meant that after starting a trial the app
-            // still believed the organization was unentitled: chat stayed
-            // locked and the settings close button stayed hidden until some
-            // unrelated action happened to re-resolve it, such as renaming the
-            // organization. Refresh it here so every caller is covered rather
-            // than each one remembering.
-            //
-            // Refresh the organization this status was actually fetched for,
-            // read at the top of this call. Using the activeOrganizationId
-            // captured when this callback was built put the app back into the
-            // *previous* organization: switching sets the state and this
-            // closure still holds the old value, so signing up bounced the
-            // person straight out of the company they had just created. With
-            // one organization the wrong id was the right id and it never
-            // showed.
-            if (orgId) {
-                await setActiveOrganization(Number(orgId));
+                // Entitlement is a property of the organization, so a subscription
+                // change makes the cached organization context stale. Nothing
+                // refreshed it, which meant that after starting a trial the app
+                // still believed the organization was unentitled: chat stayed
+                // locked and the settings close button stayed hidden until some
+                // unrelated action happened to re-resolve it, such as renaming the
+                // organization. Refresh it here so every caller is covered rather
+                // than each one remembering.
+                //
+                // Refresh the organization this status was actually fetched for,
+                // read at the top of this call. Using the activeOrganizationId
+                // captured when this callback was built put the app back into the
+                // *previous* organization: switching sets the state and this
+                // closure still holds the old value, so signing up bounced the
+                // person straight out of the company they had just created. With
+                // one organization the wrong id was the right id and it never
+                // showed.
+                if (orgId) {
+                    await setActiveOrganization(Number(orgId));
+                }
+            } else {
+                // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
+                // fires instead of leaving the user stuck on the auth page indefinitely.
+                console.error('Failed to fetch subscription status');
+                setSubscriptionStatus('none');
+                setIsEntitled(false);
+                setIsOrgOwner(true);
+                setIsMemberOnly(false);
             }
-        } else {
-            // Set to 'none' so the Auth.tsx redirect condition (subscriptionStatus !== null)
-            // fires instead of leaving the user stuck on the auth page indefinitely.
-            console.error('Failed to fetch subscription status');
+            // activeOrganizationId is deliberately absent: this reads the id from
+            // storage, so depending on the state only churned this callback's
+            // identity every time the organization changed.
+        } catch (e) {
+            // Same answer as a non-ok response, for the same reason: anything
+            // other than null lets Auth.tsx move the person off the auth page.
+            console.error('Failed to fetch subscription status', e);
             setSubscriptionStatus('none');
             setIsEntitled(false);
             setIsOrgOwner(true);
             setIsMemberOnly(false);
         }
-        // activeOrganizationId is deliberately absent: this reads the id from
-        // storage, so depending on the state only churned this callback's
-        // identity every time the organization changed.
     }, [user, _callApiWithTokenInternal, setActiveOrganization]);
 
     const registerUserInBackend = useCallback(async (
@@ -695,26 +710,84 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // below run in this same tick and read it.
             userRef.current = fbUser;
             setAuthLoading(true);
-            if (fbUser) {
-                // The button that started this is long gone by the time
-                // Firebase reports back, so the intent is parked before the
-                // popup opens and read here. Defaults to signin, which never
-                // creates anything.
-                const intent = (sessionStorage.getItem('auth_intent') === 'signup')
-                    ? 'signup' : 'signin';
-                sessionStorage.removeItem('auth_intent');
-                await registerUserInBackend(fbUser, intent);
-                setUser(fbUser);
-                await fetchSubscriptionStatus();
-                // Runs before any workspace has been chosen, which is the one
-                // place the wide scope is genuinely right.
-                await loadUserFiles(1, 10, ALL_WORKSPACES);
-            } else {
-                setUser(null);
-                setFiles([]);
-                disconnectWebSocket();
+            try {
+                if (fbUser) {
+                    // Identity first, before anything that can fail.
+                    //
+                    // setUser used to sit after registerUserInBackend. That call
+                    // is one fetch, and when it rejected — a dropped connection
+                    // is enough — setUser never ran, and neither did
+                    // setAuthLoading(false), because nothing here caught
+                    // anything. Firebase considered the person signed in and
+                    // this app considered nobody signed in, permanently, with no
+                    // error anywhere.
+                    //
+                    // What that looked like: every redirect in Auth.tsx is gated
+                    // on !authLoading AND user, so nothing routed. AcceptInvite
+                    // recovers from an already-accepted invite with
+                    // `410 && user`, so with user null it fell through to
+                    // "Invite unavailable" and an invited colleague sat on that
+                    // card with no way forward, while "Continue with Google"
+                    // appeared to do nothing.
+                    //
+                    // Firebase decides who is signed in. Whether our own API is
+                    // reachable is a different question and must not be allowed
+                    // to answer the first one.
+                    //
+                    // Reproduced 2026-08-27 by rejecting a single /api/v1/users
+                    // call and watching the invite screen freeze.
+                    setUser(fbUser);
+
+                    // The button that started this is long gone by the time
+                    // Firebase reports back, so the intent is parked before the
+                    // popup opens and read here. Defaults to signin, which never
+                    // creates anything.
+                    const intent = (sessionStorage.getItem('auth_intent') === 'signup')
+                        ? 'signup' : 'signin';
+                    sessionStorage.removeItem('auth_intent');
+
+                    // Each step guarded separately, because they are independent
+                    // and one failing must not skip the rest.
+                    //
+                    // A single try around all three was the first attempt at
+                    // this fix and it was not enough: registerUserInBackend
+                    // threw, the other two never ran, subscriptionStatus stayed
+                    // null, and Auth.tsx will not redirect until it is anything
+                    // else. The stuck invite card became a stuck login page,
+                    // which is the same person equally unable to proceed.
+                    try {
+                        await registerUserInBackend(fbUser, intent);
+                    } catch (e) {
+                        console.error('Registering the account failed:', e);
+                    }
+                    try {
+                        await fetchSubscriptionStatus();
+                    } catch (e) {
+                        // It answers 'none' for itself on failure. This is only
+                        // in case it cannot even get that far.
+                        console.error('Fetching subscription status failed:', e);
+                        setSubscriptionStatus('none');
+                    }
+                    try {
+                        // Runs before any workspace has been chosen, which is the
+                        // one place the wide scope is genuinely right.
+                        await loadUserFiles(1, 10, ALL_WORKSPACES);
+                    } catch (e) {
+                        console.error('Loading files failed:', e);
+                    }
+                } else {
+                    setUser(null);
+                    setFiles([]);
+                    disconnectWebSocket();
+                }
+            } catch (e) {
+                // Each step below already reports its own failure to the person.
+                // This exists so that one of them failing cannot freeze the
+                // session, which is a worse outcome than any of them individually.
+                console.error('Auth state handling failed:', e);
+            } finally {
+                setAuthLoading(false);
             }
-            setAuthLoading(false);
         });
         return () => unsubscribe();
         // Empty on purpose. See the note above the ref.

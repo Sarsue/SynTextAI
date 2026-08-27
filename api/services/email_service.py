@@ -120,6 +120,38 @@ def send_workspace_invite(to_email: str, workspace_name: str, token: str, invite
     # the repo, where test_email_service.py holds it. A dashboard toggle is one
     # click from silently undoing this, and nothing would fail until an invite
     # went unanswered.
+    #
+    # THE BRANDED LINK DOMAIN IS GONE, 2026-08-27
+    #
+    # url639.syntextai.com no longer exists. This is SendGrid account state that
+    # no code reveals, so it is written here rather than nowhere.
+    #
+    # What was deleted: link branding id 5567866, syntextai.com / subdomain
+    # url639, whose two CNAMEs (url639.syntextai.com and 28105742.syntextai.com,
+    # both to sendgrid.net) have since been removed from DNS.
+    #
+    # Why it could not simply be fixed: HTTPS on a branded link domain is a paid
+    # SendGrid feature and this account is on the free plan. The record carried
+    # no SSL field at all, and the host answered with SendGrid's own
+    # CN=*.sendgrid.net, which covers sendgrid.net and one label under it and was
+    # never going to cover a customer subdomain.
+    #
+    # What tracking uses now: https://u28105742.ct.sendgrid.net/..., under a
+    # valid *.ct.sendgrid.net certificate, and crucially NOT a subdomain of
+    # syntextai.com, so includeSubDomains does not reach it. The failure above
+    # cannot recur on that host. Verified by sending one invite before and one
+    # after and reading both pixels out of the delivered mail.
+    #
+    # Deliverability was not touched. DKIM and SPF are separate records,
+    # em1454.syntextai.com and s1/s2._domainkey.syntextai.com pointing at
+    # u28105742.wl243.sendgrid.net, and the message sent after the deletion was
+    # delivered to Gmail.
+    #
+    # Click tracking stays off here anyway. It would work now, but a
+    # transactional invite gains nothing from it, and leaving the override in
+    # place means a change to the account setting cannot quietly break invites a
+    # second time. Recreating link branding would issue a NEW subdomain and need
+    # fresh DNS, so this is not a one-click undo.
     message.tracking_settings = TrackingSettings(
         click_tracking=ClickTracking(enable=False, enable_text=False)
     )
