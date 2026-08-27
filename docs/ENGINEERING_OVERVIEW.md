@@ -3,17 +3,14 @@
 What is shipped, what is outstanding, and what not to build twice.
 
 Git holds what changed and why. The code holds the reasoning beside the thing
-being reasoned about. This file holds only the three lists above. If an entry
-could be a commit message or a code comment, make it one instead.
+being reasoned about. If an entry could be a commit message or a code comment,
+make it one instead.
 
 **Under 250 lines. Check before committing.** It was 960, then 260, then 538 in
-a single day, because each feature arrived with a dated section retelling its own
-commit message. That is the changelog this file says it is not.
-
-A shipped thing is one line under **Shipped**. What it taught is one line under
-**Decisions**, with the number that makes it worth obeying. Neither is ever a
-section with a date in the heading. If it needs more room, the room is the commit
-message.
+a single day, because each feature arrived with a dated section retelling its
+own commit message. A shipped thing is one line under **Shipped**; what it
+taught is one line under **Decisions**, with the number that makes it worth
+obeying. Never a section with a date in the heading.
 
 ## What it is
 
