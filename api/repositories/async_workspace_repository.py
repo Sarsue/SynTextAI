@@ -1066,6 +1066,56 @@ class AsyncWorkspaceRepository(AsyncBaseRepository):
                 )
                 return []
 
+    async def revoke_invite(
+        self, invite_id: int, organization_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Withdraw a pending invite. Returns what was withdrawn, or None.
+
+        None covers three different situations on purpose: no such invite, an
+        invite belonging to another tenant, and an invite that is not pending
+        any more. The caller answers 404 to all three, so a stranger cannot
+        learn which invite ids exist by reading the difference.
+
+        Reach matches `list_pending_organization_invites` exactly. An invite
+        naming a workspace can carry a null organization_id and belong to this
+        company by way of that workspace, so scoping on the column alone would
+        list an invite the owner could then not cancel.
+
+        The row is marked 'revoked' rather than deleted. `get_invite_by_token`
+        admits nothing but 'pending', so the token dies either way, and keeping
+        the row means the owner can still see that the invite happened.
+        """
+        async with self.get_async_session() as session:
+            try:
+                stmt = (
+                    select(WorkspaceInvite)
+                    .outerjoin(WorkspaceORM, WorkspaceORM.id == WorkspaceInvite.workspace_id)
+                    .where(
+                        WorkspaceInvite.id == invite_id,
+                        or_(
+                            WorkspaceInvite.organization_id == organization_id,
+                            WorkspaceORM.organization_id == organization_id,
+                        ),
+                        WorkspaceInvite.status == "pending",
+                    )
+                )
+                invite = (await session.execute(stmt)).scalars().first()
+                if invite is None:
+                    return None
+
+                invite.status = "revoked"
+                revoked = {"id": invite.id, "email": invite.email}
+                await session.commit()
+                return revoked
+            except Exception as e:
+                logger.error(
+                    f"Error revoking invite {invite_id} for organization "
+                    f"{organization_id}: {e}",
+                    exc_info=True,
+                )
+                await session.rollback()
+                return None
+
     async def list_pending_invites(self, workspace_id: int) -> List[Dict[str, Any]]:
         """Return pending invites for a workspace."""
         async with self.get_async_session() as session:

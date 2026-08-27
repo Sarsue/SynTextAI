@@ -402,6 +402,44 @@ async def invite_to_organization(
     }
 
 
+@organizations_router.delete("/{organization_id}/invites/{invite_id}")
+async def revoke_organization_invite(
+    organization_id: int = Path(...),
+    invite_id: int = Path(...),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """Withdraw an invite that has not been accepted yet.
+
+    The offer was sent by mistake, or to somebody who has since left, or with
+    the wrong access. Until now the only way out was to wait seven days for it
+    to expire, so an owner who mistyped an address had a live token sitting in
+    a stranger's inbox and no way to stop it.
+
+    Whoever may invite may withdraw, which is owners and admins.
+
+    An invite id this caller may not cancel is 404, not 403: ids are sequential
+    integers, so a 403 would let anyone map which invites exist by walking them.
+    Naming an organization the caller does not belong to is still 403, from
+    assert_organization_capability, which every route here shares. Verified over
+    HTTP: another tenant's owner gets 404 through their own organization and 403
+    through this one, and the invite stays pending either way.
+    """
+    user_id = user_data["user_id"]
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.INVITE_MEMBER
+    )
+
+    revoked = await store.workspace_repo.revoke_invite(invite_id, organization_id)
+    if not revoked:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That invite is not pending, or does not exist.",
+        )
+
+    return {"message": f"Invite to {revoked['email']} cancelled", "id": revoked["id"]}
+
+
 class MemberAccessRequest(BaseModel):
     """What somebody may see, and what they may do.
 

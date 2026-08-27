@@ -78,6 +78,7 @@ Live in production.
 - **Find**: search returning matched pages in ~0.6s, no generation.
 - Vision extraction: PDF pages the text layer loses are read by a vision model.
 - Organizations, workspaces, invites, roles, per-workspace document access.
+  A pending invite can be cancelled, which kills the link already in the inbox.
 - Stripe: trial, subscribe, plan changes, 3D Secure, card update.
 - Answer feedback: thumbs, four reasons, a comment, joined to the run.
 - **Usage** in Settings: questions, who asks, documents including failed ones,
