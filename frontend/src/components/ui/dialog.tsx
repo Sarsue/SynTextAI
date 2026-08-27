@@ -31,12 +31,45 @@ function DialogClose({
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
 }
 
-function DialogOverlay({
-  className,
-  ...props
-}: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+// forwardRef, unlike the other primitives in this directory.
+//
+// These come from shadcn/ui, which targets React 19, where a ref is an ordinary
+// prop and forwardRef is deprecated. This app is on React 18.3.1, where a plain
+// function component silently drops any ref given to it. Of the 13 files here,
+// only button.tsx had already been adapted.
+//
+// It bites the Overlay specifically: Radix wraps each child of a Portal in
+// <Presence>, and Presence takes a ref on its child so it can tell when the
+// exit animation has finished. Dropped, React warns "Function components cannot
+// be given refs" on every dialog the app opens.
+//
+// Only the Overlays are wrapped, because only they are handed a ref. Established
+// by recording every such warning while driving the app rather than by reading
+// the files: exactly one fires per open, naming DialogOverlay.
+//
+// KNOWN, AND NOT CAUSED BY THIS
+//
+// Presence never completes its exit in this app. No animationstart or
+// animationend event fires for either dialog, on open or on close, even though
+// the enter/exit keyframes are defined, animation-duration computes to 0.1s and
+// prefers-reduced-motion is not set. So Presence waits on an event that never
+// arrives and leaves the closed node mounted.
+//
+// That already happens to the content node, which is Radix's own forwardRef
+// component, so it predates this and is a separate bug. The visible effect of
+// wiring the Overlay's ref is that its node now lingers the same way: invisible,
+// not blocking clicks, and not accumulating across repeated open and close.
+// Fixing the exit properly is its own task.
+//
+// The real fix for the whole class is React 19, at which point this wrapper
+// should come back out.
+const DialogOverlay = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
+>(({ className, ...props }, ref) => {
   return (
     <DialogPrimitive.Overlay
+      ref={ref}
       data-slot="dialog-overlay"
       className={cn(
         "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
@@ -45,7 +78,8 @@ function DialogOverlay({
       {...props}
     />
   )
-}
+})
+DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 function DialogContent({
   className,

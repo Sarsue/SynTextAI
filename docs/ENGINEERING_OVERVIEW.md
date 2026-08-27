@@ -218,6 +218,9 @@ One line each. The reasoning is in the commit or the code comment beside it.
   returned empty about one attempt in four.
 - A supersede link points forward, so retrieval tests a column it already joined.
 
+- `ui/` is shadcn written for React 19, running on React 18.3.1, so only the
+  Overlays need `forwardRef`. Presence never completes its exit either way.
+
 **Reading what the server sends**
 - The API serialises naive UTC with no designator and JavaScript parses that as
   LOCAL. Every timestamp was wrong by the viewer's offset. Use
