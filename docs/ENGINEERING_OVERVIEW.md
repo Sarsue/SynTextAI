@@ -48,10 +48,21 @@ pool 100, fusion weights 0.7 vector / 0.3 keyword.
 docker compose -f docker-compose.local.yml --env-file .env.dev up --build -d
 ```
 
-**No Node needed on the host.** The frontend is built inside the image, on
-node:20-alpine. Vite 8 needs 20.19+ and that image is 20.20.2. Only reach for a
-host Node if you want to run `npm run dev` outside compose, and then it has to
-meet the same floor.
+**No Node needed on the host**, for building or for driving the UI. The frontend
+is built inside the image on node:20-alpine. Vite 8 needs 20.19+ and that image
+is 20.20.2, while the host has 18.15.0.
+
+**To drive the UI, use the dev server on :5173, not :3000.**
+
+```bash
+docker compose -f docker-compose.local.yml --env-file .env.dev --profile dev up -d frontend-dev
+```
+
+Port 3000 is a production build, which is what deploys and which therefore has
+no dev sign-in harness, so it cannot be signed into without a real Google
+account. 5173 has the harness and hot reload. Sign in with
+`window.__syntextDevSignIn(customToken)`; mint the custom token with the
+service-account key inside the app container and destroy it afterwards.
 
 **Always pass `--env-file .env.dev`.** Compose interpolates build args from
 `.env`, the production file, so without the flag the frontend is built with the
@@ -68,6 +79,11 @@ Docker here is Colima and its mountType is sshfs, which drops once the VM has
 been up a while. `colima stop && colima start`. Nothing to do with macOS privacy
 settings. Containers already running keep serving code they loaded at startup,
 so they look healthy while running a stale schema.
+
+**A new route answering 405 means the same thing.** `./api` is mounted, so the
+files are current, but uvicorn registered its routes at startup.
+`docker compose ... restart syntextaiapp`. Tests will not catch this: they
+import the app fresh.
 
 ## Shipped
 
