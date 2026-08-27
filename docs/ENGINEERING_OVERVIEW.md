@@ -171,6 +171,11 @@ One line each. The reasoning is in the commit or the code comment beside it.
   and testing counted as customer behaviour.
 
 **Security and tenancy**
+- Invite mail goes out with SendGrid click tracking off. On, SendGrid
+  rewrites the link to `url639.syntextai.com`, our own `includeSubDomains`
+  HSTS forces that to https, and SendGrid has no certificate for it: no
+  invite could be accepted for four weeks. Set in code, not the dashboard,
+  and held by `test_email_service.py`.
 - Two questions, two functions. *May you see it* is `accessible_workspace_ids`.
   *May you do it* is `assert_*_capability`.
 - Scope by workspace, never by uploader. Checking the uploader refused invited
