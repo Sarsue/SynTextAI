@@ -91,7 +91,24 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   }, [user, subscriptionStatus, authLoading, navigate]);
 
   const signInWithGoogle = useCallback(async () => {
-    if (user || isSigningIn) return;
+    if (isSigningIn) return;
+    if (user) {
+      // Already signed in, so there is nothing to sign into.
+      //
+      // This used to be a bare `return`, and it is why a stranded person
+      // clicking "Continue with Google" saw nothing happen at all: no popup, no
+      // error, no toast, no log. Send them on instead. The effect above does
+      // the same thing when it can, and this covers the case where it cannot,
+      // which is the case somebody is actually sitting in when they press this.
+      const pending = sessionStorage.getItem('pending_invite_token');
+      if (pending) {
+        sessionStorage.removeItem('pending_invite_token');
+        navigate(`/invite/${pending}`, { replace: true });
+      } else {
+        navigate('/select-organization', { replace: true });
+      }
+      return;
+    }
 
     setIsSigningIn(true);
     const provider = new GoogleAuthProvider();
@@ -117,7 +134,15 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
         
         // Navigation handled by useEffect above
         // New users will see /welcome, returning users go to /chat or /settings
-        if (isNewUser) {
+        //
+        // Except somebody arriving on an invite, who is joining a company
+        // rather than starting one. /welcome asks for a company name and a
+        // plan, which is both the wrong question for them and a dead end: it
+        // never reads pending_invite_token, so the invite is left unaccepted
+        // while they are asked to pay for a team that already pays. It also
+        // raced the effect above, which could consume the token first and then
+        // be overridden here, losing it entirely.
+        if (isNewUser && !sessionStorage.getItem('pending_invite_token')) {
           navigate('/welcome', { replace: true });
         }
       }
