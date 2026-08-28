@@ -205,6 +205,25 @@ async def list_organization_members(
     }
 
 
+@organizations_router.get("/{organization_id}/events")
+async def list_organization_events(
+    organization_id: int,
+    limit: int = 50,
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """What has happened to this team: invites, joins, removals, access changes.
+
+    Behind the same capability as managing people. It names who invited and who
+    removed whom, which is not something every member is owed.
+    """
+    user_id = user_data["user_id"]
+    await assert_organization_capability(
+        store, user_id, organization_id, Capability.INVITE_MEMBER
+    )
+    return {"items": await store.org_repo.list_events(organization_id, limit=min(limit, 200))}
+
+
 @organizations_router.get("/{organization_id}/usage")
 async def organization_usage(
     organization_id: int = Path(...),
@@ -383,6 +402,13 @@ async def invite_to_organization(
             token=token,
             inviter_name=inviter_name,
         )
+        await store.org_repo.record_event(
+            organization_id=organization_id,
+            event_type="invite_sent",
+            actor_user_id=user_id,
+            subject_email=body.email,
+            detail={"role": body.role, "scope": body.scope, "email_delivered": True},
+        )
         return {
             "message": f"Invite sent to {body.email}",
             "email_sent": True,
@@ -393,6 +419,18 @@ async def invite_to_organization(
         logger.warning(f"Invite created for {body.email} but email is not configured: {e}")
     except Exception as e:
         logger.error(f"Invite created for {body.email} but sending failed: {e}", exc_info=True)
+
+    # Recorded as sent either way, with whether the email actually left. An
+    # invite the owner has to relay by hand is still an invite, and a history
+    # that only lists the ones SendGrid accepted would be wrong on exactly the
+    # occasions somebody goes looking.
+    await store.org_repo.record_event(
+        organization_id=organization_id,
+        event_type="invite_sent",
+        actor_user_id=user_id,
+        subject_email=body.email,
+        detail={"role": body.role, "scope": body.scope, "email_delivered": False},
+    )
 
     return {
         "message": f"Invite created for {body.email}, but the email could not be sent. Share this link with them.",
@@ -436,6 +474,13 @@ async def revoke_organization_invite(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="That invite is not pending, or does not exist.",
         )
+
+    await store.org_repo.record_event(
+        organization_id=organization_id,
+        event_type="invite_revoked",
+        actor_user_id=user_id,
+        subject_email=revoked["email"],
+    )
 
     return {"message": f"Invite to {revoked['email']} cancelled", "id": revoked["id"]}
 
@@ -525,6 +570,19 @@ async def set_member_access(
                 detail="Could not change access for this member.",
             )
 
+    await store.org_repo.record_event(
+        organization_id=organization_id,
+        event_type="member_access_changed",
+        actor_user_id=user_id,
+        subject_user_id=member_user_id,
+        subject_email=await store.user_repo.get_email_from_user_id(member_user_id),
+        detail={
+            "role": body.role,
+            "scope": body.scope,
+            "workspace_ids": body.workspace_ids,
+        },
+    )
+
     # Tell them, rather than waiting for a refresh they have no reason to make.
     #
     # Their browser holds the workspace list, the document list and the
@@ -589,7 +647,15 @@ async def remove_organization_member(
         "the organization",
     )
 
-    removed = await store.org_repo.remove_member(organization_id, member_user_id)
+    # The address is read before the removal, because afterwards the membership
+    # row it would be joined through is gone.
+    subject_email = await store.user_repo.get_email_from_user_id(member_user_id)
+    removed = await store.org_repo.remove_member(
+        organization_id,
+        member_user_id,
+        actor_user_id=user_id,
+        subject_email=subject_email,
+    )
     if not removed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
