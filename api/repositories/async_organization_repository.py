@@ -250,6 +250,58 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )
                 return False
 
+    async def deletion_impact(self, user_id: int) -> Dict[str, Any]:
+        """What deleting this account destroys, for saying so before it happens.
+
+        The owner holds the card and the Stripe customer, so their leaving ends
+        the subscription whatever else is true. An organization with no payer
+        cannot be used at all, which is why ownership is not handed on: it would
+        give somebody a company nobody can pay for. The honest thing is to say
+        plainly what goes and let them decide.
+
+        Read-only. Nothing here changes anything.
+        """
+        from ..models.orm_models import File as FileORM
+
+        organizations: List[Dict[str, Any]] = []
+        async with self.get_async_session() as session:
+            for membership in await self.get_memberships(user_id):
+                if membership["role"] != "owner":
+                    continue
+                org_id = membership["organization_id"]
+
+                others = [
+                    m for m in await self.list_members(org_id)
+                    if m["user_id"] != user_id
+                ]
+                workspace_ids = (await session.execute(
+                    select(WorkspaceORM.id).where(WorkspaceORM.organization_id == org_id)
+                )).scalars().all()
+                documents = 0
+                if workspace_ids:
+                    documents = (await session.execute(
+                        select(func.count(FileORM.id)).where(
+                            FileORM.workspace_id.in_(workspace_ids)
+                        )
+                    )).scalar() or 0
+
+                organizations.append({
+                    "organization_id": org_id,
+                    "name": membership["name"],
+                    # Counted rather than listed. Somebody deciding whether to
+                    # delete needs the size of what they are about to destroy,
+                    # not their colleagues' addresses.
+                    "other_members": len(others),
+                    "documents": documents,
+                    "workspaces": len(workspace_ids),
+                })
+
+        return {
+            "organizations": organizations,
+            "loses_access": sum(o["other_members"] for o in organizations),
+            "documents_deleted": sum(o["documents"] for o in organizations),
+        }
+
     async def record_event(
         self,
         organization_id: int,

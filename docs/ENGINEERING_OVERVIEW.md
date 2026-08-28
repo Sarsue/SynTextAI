@@ -208,6 +208,9 @@ One line each. The reasoning is in the commit or the code comment beside it.
   itself with a page reference nobody can tell from a real one.
 - Approving writes an ordinary `files` row through the upload path, so it meets
   the plan limit and the duplicate-name rule like anything else.
+- Deleting an account deletes every company you own, members and documents
+  included: you hold the card, so your leaving ends the subscription anyway.
+  Handing ownership on gives somebody a company nobody can pay for.
 - The provenance note goes inside the exported file. A .docx gets emailed and
   printed, which is when everyone forgets a machine drafted it.
 - Drafting does not go through `generate_explanation`: its 1500-token budget is
@@ -237,11 +240,8 @@ One line each. The reasoning is in the commit or the code comment beside it.
 
 **Measured and rejected.** Do not rebuild without beating the number.
 - Cross-encoder reranking: 7/20 answers with it on and off.
-- Contextual retrieval: ~1,500 LLM calls per 500-page manual, retrieved nothing
-  extra, ranked slightly worse.
-- An LLM coverage classifier: regressed the agent 16.2 to 11.2.
-- The slowness was the provider, not the code. Three code-level explanations were
-  wrong before moving to DeepInfra fixed it.
+- Contextual retrieval: ~1,500 LLM calls per 500-page manual, nothing extra.
+- The slowness was the provider. Three code-level explanations were wrong first.
 
 ## Questions for Osas, not to guess at
 
