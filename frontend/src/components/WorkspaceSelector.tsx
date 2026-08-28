@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Folder, Users, Plus, ChevronDown, Pencil, Trash2, Check, AlertTriangle, X } from 'lucide-react';
 import { useUserContext } from '../UserContext';
 import { useToast } from '../contexts/ToastContext';
+import { parseServerTime } from '../utils/serverTime';
 import './WorkspaceSelector.css';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -70,6 +71,48 @@ interface WorkspaceSelectorProps {
     onWorkspaceChange?: (workspaceId: number) => void;
 }
 
+
+/** One line of team history, in words rather than an event name.
+ *
+ * "member_removed" is what the row says; nobody reading the panel is asking in
+ * those terms. The subject is always an address because an invite names one
+ * before there is any account behind it.
+ */
+function describeTeamEvent(ev: any): string {
+    const who = ev.subject_email || 'someone';
+    const by = ev.actor_email ? ` by ${ev.actor_email}` : '';
+    const role = ev.detail?.role ? ` as ${ev.detail.role}` : '';
+    switch (ev.event_type) {
+        case 'invite_sent':
+            // Worth saying out loud: an invite whose email did not leave still
+            // happened, and the owner has to relay the link by hand.
+            return ev.detail?.email_delivered === false
+                ? `Invited ${who}${role}${by}, email not delivered`
+                : `Invited ${who}${role}${by}`;
+        case 'invite_revoked':
+            return `Cancelled the invite to ${who}${by}`;
+        case 'invite_accepted':
+            return `${who} joined`;
+        case 'member_removed':
+            return `Removed ${who}${role}${by}`;
+        case 'member_access_changed':
+            return `Changed access for ${who}${role}${by}`;
+        default:
+            return `${ev.event_type} ${who}${by}`;
+    }
+}
+
+/** Through parseServerTime, always: the API sends naive UTC with no designator
+ *  and JavaScript reads that as local, which put every timestamp out by the
+ *  viewer's offset. */
+function formatEventTime(value?: string | null): string {
+    const d = parseServerTime(value);
+    if (!d) return '';
+    return d.toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+}
+
 const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false, onWorkspaceChange }) => {
     const { user, setCurrentWorkspaceRole, activeOrganizationId, orgContext, accessChangedAt } = useUserContext();
     const { addToast } = useToast();
@@ -102,6 +145,11 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const [savingAccessFor, setSavingAccessFor] = useState<number | null>(null);
     const [memberToRemove, setMemberToRemove] = useState<OrgMember | null>(null);
     const [membersError, setMembersError] = useState<string | null>(null);
+    // What has happened to this team, as opposed to what it looks like now.
+    // Removals used to leave no trace anywhere, so somebody missing from the
+    // list above had no explanation on any screen or in the database.
+    const [teamEvents, setTeamEvents] = useState<any[]>([]);
+    const [showTeamHistory, setShowTeamHistory] = useState(false);
     const [inviteEmail, setInviteEmail] = useState('');
     // What the invited person will be when they arrive. Decided here rather
     // than corrected in the list afterwards, which let somebody in with more
@@ -441,6 +489,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 // which is the question they had when they opened the dialog.
                 addToast(`${email} removed. They no longer have access.`, 'success');
                 await fetchOrgMembers();
+                await fetchTeamEvents();
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Could not remove member', 'error');
@@ -471,6 +520,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 // owner is actually worried about still being out there.
                 addToast(`Invite to ${email} cancelled. Their link no longer works.`, 'success');
                 await fetchOrgMembers();
+                await fetchTeamEvents();
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Could not cancel the invite', 'error');
@@ -479,6 +529,22 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             addToast('Could not cancel the invite', 'error');
         }
         setCancellingInviteId(null);
+    };
+
+    const fetchTeamEvents = async () => {
+        const orgId = localStorage.getItem('active_organization_id');
+        if (!orgId || !user) return;
+        // Not fatal to the panel, same as the pending-invite list. Failing to
+        // show the history must not stop an owner managing the people here.
+        try {
+            const idToken = await user.getIdToken();
+            const res = await fetch(`/api/v1/organizations/${orgId}/events`, {
+                headers: { Authorization: `Bearer ${idToken}` },
+            });
+            if (res.ok) setTeamEvents((await res.json()).items || []);
+        } catch (err) {
+            console.error('Error fetching team history:', err);
+        }
     };
 
     const fetchOrgMembers = async () => {
@@ -560,6 +626,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
             if (res.ok) {
                 addToast('Access updated', 'success');
                 await fetchOrgMembers();
+                await fetchTeamEvents();
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Could not change access', 'error');
@@ -574,6 +641,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
     const handleOpenMembers = async () => {
         if (currentWorkspace) {
             fetchOrgMembers();
+            fetchTeamEvents();
             setShowMembersModal(true);
             setShowDropdown(false);
             // What the next seat costs, so the price of adding somebody is on
@@ -632,6 +700,7 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                 setInviteScope('organization');
                 setInviteWorkspaceIds([]);
                 await fetchOrgMembers();
+                await fetchTeamEvents();
             } else {
                 const data = await res.json().catch(() => ({}));
                 addToast(data.detail || 'Failed to send invite', 'error');
@@ -1158,6 +1227,36 @@ const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({ darkMode = false,
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    )}
+
+                    {/* History.
+                        Collapsed, because the common visit to this panel is to
+                        invite somebody and the list above is the answer to that.
+                        It is here rather than in Settings because the question
+                        it answers, "why is this person not in the list", is
+                        asked while looking at the list. */}
+                    {teamEvents.length > 0 && (
+                        <div style={{ marginTop: 20 }}>
+                            <button
+                                type="button"
+                                onClick={() => setShowTeamHistory(v => !v)}
+                                style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: '#888', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+                            >
+                                History {showTeamHistory ? '▾' : '▸'}
+                            </button>
+                            {showTeamHistory && (
+                                <div style={{ marginTop: 8, maxHeight: 220, overflowY: 'auto' }}>
+                                    {teamEvents.map(ev => (
+                                        <div key={ev.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '6px 0', borderBottom: '1px solid rgba(128,128,128,0.12)' }}>
+                                            <span style={{ fontSize: 13 }}>{describeTeamEvent(ev)}</span>
+                                            <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
+                                                {formatEventTime(ev.created_at)}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 

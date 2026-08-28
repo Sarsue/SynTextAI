@@ -9,10 +9,12 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from sqlalchemy import select, func
+from sqlalchemy.orm import aliased
 
 from .async_base_repository import AsyncBaseRepository
 from ..models.orm_models import (
     Organization,
+    OrganizationEvent,
     OrganizationMember,
     Subscription,
     Workspace as WorkspaceORM,
@@ -147,8 +149,19 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 )
                 return False
 
-    async def remove_member(self, organization_id: int, user_id: int) -> bool:
+    async def remove_member(
+        self,
+        organization_id: int,
+        user_id: int,
+        actor_user_id: Optional[int] = None,
+        subject_email: Optional[str] = None,
+    ) -> bool:
         """Remove somebody from an organization entirely. Refuses the last owner.
+
+        actor_user_id and subject_email are for the record this writes, not for
+        authorization, which is the route's job. Both default to None so a
+        caller that does not know them still removes the member rather than
+        failing, and the event simply says less.
 
         Also clears their workspace assignments inside this organization.
         Deleting only the organization_members row left the workspace_members
@@ -197,7 +210,33 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                 for assignment in assignments:
                     await session.delete(assignment)
 
+                # What they were, captured before the row goes. After the
+                # delete there is nothing left to read it from, and "removed a
+                # member" without saying which role tells the reader almost
+                # nothing a year later.
+                removed_role = member.role
+                removed_scope = member.scope
+
                 await session.delete(member)
+
+                # Same transaction as the delete, deliberately. An event that can
+                # commit without the change, or a change without the event, is
+                # worse than no event at all: invites marked accepted while
+                # creating no membership is exactly that, and it stranded two of
+                # the first four people invited here.
+                session.add(OrganizationEvent(
+                    organization_id=organization_id,
+                    actor_user_id=actor_user_id,
+                    subject_user_id=user_id,
+                    subject_email=subject_email,
+                    event_type="member_removed",
+                    detail={
+                        "role": removed_role,
+                        "scope": removed_scope,
+                        "workspace_assignments_cleared": len(assignments),
+                    },
+                ))
+
                 await session.commit()
                 logger.info(
                     f"Removed user {user_id} from org {organization_id} "
@@ -210,6 +249,82 @@ class AsyncOrganizationRepository(AsyncBaseRepository):
                     f"Error removing user {user_id} from org {organization_id}: {e}", exc_info=True
                 )
                 return False
+
+    async def record_event(
+        self,
+        organization_id: int,
+        event_type: str,
+        actor_user_id: Optional[int] = None,
+        subject_user_id: Optional[int] = None,
+        subject_email: Optional[str] = None,
+        detail: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record something that happened to this team.
+
+        For callers whose change is already committed and cannot share a
+        transaction, such as a route that just sent an email. Where the change
+        and the record CAN share one, they must: see remove_member.
+
+        Never raises. Losing the audit line is bad; failing the invite or the
+        removal because the audit line failed is worse, and the caller has
+        already done the thing by the time most of these are written.
+        """
+        try:
+            async with self.get_async_session() as session:
+                session.add(OrganizationEvent(
+                    organization_id=organization_id,
+                    actor_user_id=actor_user_id,
+                    subject_user_id=subject_user_id,
+                    subject_email=subject_email,
+                    event_type=event_type,
+                    detail=detail or {},
+                ))
+                await session.commit()
+        except Exception as e:
+            logger.error(
+                f"Could not record {event_type} for org {organization_id}: {e}",
+                exc_info=True,
+            )
+
+    async def list_events(
+        self, organization_id: int, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """This team's history, newest first.
+
+        The actor's address is joined in rather than stored, so a rename shows
+        the current one. The subject's address IS stored, because an invite
+        names an address that may never become an account.
+        """
+        from ..models.orm_models import User
+
+        async with self.get_async_session() as session:
+            actor = aliased(User)
+            rows = (await session.execute(
+                select(
+                    OrganizationEvent.id,
+                    OrganizationEvent.event_type,
+                    OrganizationEvent.subject_email,
+                    OrganizationEvent.detail,
+                    OrganizationEvent.created_at,
+                    actor.email.label("actor_email"),
+                )
+                .outerjoin(actor, actor.id == OrganizationEvent.actor_user_id)
+                .where(OrganizationEvent.organization_id == organization_id)
+                .order_by(OrganizationEvent.created_at.desc(), OrganizationEvent.id.desc())
+                .limit(limit)
+            )).all()
+
+        return [
+            {
+                "id": r.id,
+                "event_type": r.event_type,
+                "subject_email": r.subject_email,
+                "actor_email": r.actor_email,
+                "detail": r.detail or {},
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
 
     async def list_members(self, organization_id: int) -> List[Dict[str, Any]]:
         """Members of an organization with their roles, strongest role first."""

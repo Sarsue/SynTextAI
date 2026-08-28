@@ -42,6 +42,36 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
   const { user, subscriptionStatus, authLoading } = useUserContext();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const { addToast } = useToast();
+
+  // Who invited them, if they got here from an invite.
+  //
+  // AcceptInvite parks the token and sends them here to sign in, and this page
+  // then offered somebody mid-invite three competing readings: a heading saying
+  // "a company you belong to", which they do not yet; "Want your own company
+  // account? Sign up", which is the one action that actively harms them; and
+  // "Joining a team? Use the invite link", which they had just used.
+  //
+  // Signing up instead of signing in starts a company they own and pay for and
+  // leaves the invite unaccepted. That is not hypothetical: one invited person
+  // in production ended up owning an empty organization of their own while the
+  // team that invited them still showed them as never having joined.
+  const [invitedTo, setInvitedTo] = useState<string | null>(null);
+  const [hasPendingInvite, setHasPendingInvite] = useState(false);
+
+  useEffect(() => {
+    const token = sessionStorage.getItem('pending_invite_token');
+    if (!token) return;
+    setHasPendingInvite(true);
+    // Name the company if we can. The heading is still correct without it, so
+    // a failed lookup changes nothing the person needs.
+    fetch(`/api/v1/workspaces/invites/${token}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(info => {
+        const name = info?.organization_name || info?.workspace_name;
+        if (name) setInvitedTo(name);
+      })
+      .catch(() => undefined);
+  }, []);
   // Sign up and sign in are the same Google call underneath, but they are not
   // the same act. Signing up starts an organization you own; signing in enters
   // ones you already belong to. The backend used to decide by looking for a
@@ -235,9 +265,13 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
               already belong to. Somebody invited into a company can do both,
               and the wording has to make that make sense. */}
           <p className="auth-sub">
-            {mode === 'signup'
-              ? 'Start a company account. You will pick a plan and add a card.'
-              : 'Sign in to a company you belong to.'}
+            {hasPendingInvite
+              ? (invitedTo
+                  ? `Sign in to join ${invitedTo}. Nothing to pay: their plan covers you.`
+                  : 'Sign in to join your team. Nothing to pay: their plan covers you.')
+              : mode === 'signup'
+                ? 'Start a company account. You will pick a plan and add a card.'
+                : 'Sign in to a company you belong to.'}
           </p>
           <Button
             variant="outline"
@@ -257,7 +291,7 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
               </>
             )}
           </Button>
-          <p className="auth-hint">
+          <p className="auth-hint" hidden={hasPendingInvite}>
             {mode === 'signup' ? (
               <>
                 Already have an account?{' '}
@@ -274,7 +308,7 @@ const Auth = forwardRef<AuthRef, AuthProps>((props, ref) => {
               </>
             )}
           </p>
-          <p className="auth-hint auth-hint-quiet">
+          <p className="auth-hint auth-hint-quiet" hidden={hasPendingInvite}>
             Joining a team? Use the invite link your colleague sent you.
           </p>
         </div>

@@ -95,6 +95,22 @@ class AsyncUserRepository(AsyncBaseRepository):
                 logger.error(f"Error getting user ID for email {email}: {e}", exc_info=True)
                 return None
 
+    async def get_email_from_user_id(self, user_id: int) -> Optional[str]:
+        """The address for an id, for records that must outlive the row.
+
+        A removal has to name who was removed, and once the membership row is
+        gone there is nothing left to join through, so the address is read
+        before the delete rather than reconstructed after it.
+        """
+        async with self.get_async_session() as session:
+            try:
+                result = await session.execute(select(UserORM).where(UserORM.id == user_id))
+                user_orm = result.scalar_one_or_none()
+                return user_orm.email if user_orm else None
+            except Exception as e:
+                logger.error(f"Error getting email for user {user_id}: {e}", exc_info=True)
+                return None
+
     async def delete_user_account(self, user_id: int) -> bool:
         """Delete a user account and all associated data.
 

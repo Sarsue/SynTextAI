@@ -586,3 +586,41 @@ class AgentRun(Base):
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
+
+
+class OrganizationEvent(Base):
+    """What happened to a team, as opposed to what it looks like now.
+
+    organization_members and workspace_invites hold current state only. A
+    removal left no trace at all, and an invite's history was its status column
+    being overwritten in place, so "who removed this person, and when" had no
+    answer anywhere.
+
+    Written in the same transaction as the act it records. An event that can be
+    committed without the change, or the change without the event, is worse than
+    no event: invites marked accepted while creating no membership is exactly
+    that failure and it stranded two of the first four people invited.
+    """
+
+    __tablename__ = "organization_events"
+    __table_args__ = (
+        # The only query this serves: one organization, newest first.
+        Index("ix_organization_events_org_created", "organization_id", text("created_at DESC")),
+    )
+
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    # SET NULL, not CASCADE. The event stays true after the person who did it is
+    # gone, and deleting an account must not quietly delete the record of what
+    # that account did.
+    actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    subject_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Always recorded, even when subject_user_id is set: an invite names an
+    # address before any account exists, and the address is what a reader
+    # recognises a year later.
+    subject_email = Column(String, nullable=True)
+    event_type = Column(String, nullable=False)
+    detail = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())

@@ -13,6 +13,23 @@ from api.core.limits import resolve_entitlement
 from api.core.seats import sync_seats_to_stripe
 
 
+async def _record_joins(store, joined, user_id: int, email: str) -> None:
+    """Note the join on each organization the invite put them in.
+
+    The actor and the subject are the same person here, which is the honest
+    shape: nobody added them, they arrived. Whoever sent the invite is already
+    on the record as a separate invite_sent event.
+    """
+    for org_id in joined or []:
+        await store.org_repo.record_event(
+            organization_id=org_id,
+            event_type="invite_accepted",
+            actor_user_id=user_id,
+            subject_user_id=user_id,
+            subject_email=email,
+        )
+
+
 async def _bill_for_joins(store: RepositoryManager, joined: list) -> None:
     """Charge for seats taken by invites this sign-in accepted.
 
@@ -187,6 +204,7 @@ async def create_user(
         if joined:
             logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
             await _bill_for_joins(store, joined)
+            await _record_joins(store, joined, existing_user_id, email)
 
         organization_id = None
         if wants_own_organization:
@@ -231,6 +249,7 @@ async def create_user(
         if joined:
             logger.info(f"POST /users: {email} joined organization(s) {joined} by invitation")
             await _bill_for_joins(store, joined)
+            await _record_joins(store, joined, new_user_id, email)
 
         # An organization is started only by somebody who came to start one.
         # It used to be created for anyone without a pending invite, which made

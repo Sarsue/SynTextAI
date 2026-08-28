@@ -520,6 +520,15 @@ async def accept_invite(
     if organization_id is None and workspace_id is not None:
         organization_id = await store.org_repo.get_organization_for_workspace(workspace_id)
 
+    if organization_id:
+        await store.org_repo.record_event(
+            organization_id=organization_id,
+            event_type="invite_accepted",
+            actor_user_id=user_id,
+            subject_user_id=user_id,
+            subject_email=account_email,
+        )
+
     # Headcount just changed, so the Stripe quantity has to follow it. Seats
     # beyond the plan's included allowance are charged, which is the whole
     # point of seat pricing. This never raises: the person has already joined,

@@ -99,10 +99,12 @@ Live in production.
 - **Usage** in Settings: questions, who asks, documents including failed ones,
   what the team thought, which documents nothing has ever used, ingestion time.
 - Import from Google Drive through the picker, `drive.file` only.
-- **Document currency**: mark a document as replaced by a newer one, and it
-  stops answering questions. See below.
-- **Vision cautions reach the reader**: a page read off a figure that the text
-  layer could not confirm now says so, in the answer and on the citation.
+- **Document currency**: mark a document replaced by a newer one and it stops
+  answering questions.
+- **Vision cautions reach the reader**: a page read off a figure the text layer
+  could not confirm says so, in the answer and on the citation.
+- **Team history**: invites, joins, removals and access changes, in the Team
+  panel. A removal used to leave no trace anywhere.
 - **Documents SyntextAI writes**: ask for an SOP or a summary, get it written
   from the workspace's own documents, edit it, download it as Word, and approve
   it into the knowledge base. Approval is the only way one ever answers a
@@ -137,7 +139,7 @@ enough until a customer says otherwise.
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
    code around them drifting.
-4. **Activity history, admin dashboard, saved prompts.** Nothing exists.
+4. **Admin dashboard, saved prompts.** Nothing exists. Team history shipped.
 
 **Not doing, decided 2026-08-26**
 - **Email-in.** Proposed and dropped. Upload plus Drive covers ingress.
@@ -159,7 +161,6 @@ enough until a customer says otherwise.
 |---|---|
 | Slack, Teams | Need an admin, and SMBs mostly are not there |
 | Computer-use on payer portals | Hardest on the list, credentials are heavy |
-| Self-hosting models | A sales decision, not a cost one, at this size |
 
 ## Decisions not to re-litigate
 
@@ -187,8 +188,8 @@ One line each. The reasoning is in the commit or the code comment beside it.
   HSTS forces that to https, and SendGrid has no certificate for it: no
   invite could be accepted for four weeks. Set in code, not the dashboard,
   and held by `test_email_service.py`.
-- Two questions, two functions. *May you see it* is `accessible_workspace_ids`.
-  *May you do it* is `assert_*_capability`.
+- Two questions, two functions: `accessible_workspace_ids` for may-you-see-it,
+  `assert_*_capability` for may-you-do-it.
 - Scope by workspace, never by uploader. Checking the uploader refused invited
   staff every document their owner added, twice, in two different places.
 - A refusal is 404 when naming a resource by id.
@@ -239,7 +240,6 @@ One line each. The reasoning is in the commit or the code comment beside it.
 - Contextual retrieval: ~1,500 LLM calls per 500-page manual, retrieved nothing
   extra, ranked slightly worse.
 - An LLM coverage classifier: regressed the agent 16.2 to 11.2.
-- Four retrieval ideas, 2026-08-14, all rejected on one corpus.
 - The slowness was the provider, not the code. Three code-level explanations were
   wrong before moving to DeepInfra fixed it.
 
