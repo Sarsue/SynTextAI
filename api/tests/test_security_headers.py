@@ -115,6 +115,31 @@ def _directives(policy: str) -> dict:
     return {d.strip().split(" ")[0]: d.strip() for d in policy.split(";")}
 
 
+def test_the_csp_lets_firebase_load_its_own_auth_iframe():
+    """frame-src must allow 'self', and this is sign-in, not hygiene.
+
+    authDomain is syntextai.com, not the default *.firebaseapp.com, so the popup
+    sign-in loads an iframe at https://syntextai.com/__/auth/iframe to receive
+    its result. An explicit frame-src replaces default-src rather than adding to
+    it, so listing third-party origins without 'self' blocked our own, the popup
+    closed with nobody listening, and clicking "Continue with Google" did
+    nothing at all.
+
+    Live from 2026-08-15, the day this policy stopped being Report-Only, until
+    2026-08-28. Invisible for all of it because an existing session never needs
+    the iframe: only people who could not get in were affected, and they cannot
+    report a bug in a product they cannot reach.
+    """
+    from api.app import _CSP_POLICY
+
+    frame_src = _directives(_CSP_POLICY)["frame-src"]
+    assert "'self'" in frame_src, (
+        "frame-src without 'self' blocks https://<our domain>/__/auth/iframe, "
+        "which is how Firebase returns the result of the sign-in popup. "
+        "Sign-in fails silently for everyone who is not already signed in."
+    )
+
+
 def test_the_csp_allows_the_posthog_hosts_the_sdk_actually_uses():
     """The browser never contacts app.posthog.com. It contacts the two regional
     hosts, and only those have to be here.
