@@ -33,6 +33,35 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
 
     // How many other organizations this person could switch to. Fetched only
     // when they are stuck, so the way out is offered only when there is one.
+    // What deleting this account would actually destroy.
+    //
+    // The copy below used to promise that documents in a shared company stay
+    // with the company. That stopped being true: every company you own goes,
+    // other members included, because you hold the card and your leaving ends
+    // the subscription. Saying so in general terms would be alarming for
+    // somebody who owns nothing and vague for somebody who owns a team, so the
+    // real numbers are fetched and named.
+    const [impact, setImpact] = React.useState<any>(null);
+    React.useEffect(() => {
+        if (!user) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const idToken = await user.getIdToken();
+                const res = await fetch('/api/v1/users/deletion-impact', {
+                    headers: { Authorization: `Bearer ${idToken}` },
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled) setImpact(data);
+            } catch {
+                // The generic warning below still stands. Better a vaguer
+                // caution than a confident number we could not fetch.
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [user]);
+
     const [otherOrganizations, setOtherOrganizations] = React.useState(0);
     React.useEffect(() => {
         if (canLeaveSettings || !user) return;
@@ -325,14 +354,25 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                         <ul className="list-disc ml-5 text-sm text-muted-foreground">
                             <li>Your account, sign-in and payment details</li>
                             <li>Your chat history</li>
-                            <li>
-                                Any company you own on your own, and everything in it,
-                                documents included
-                            </li>
+                            {(impact?.organizations || []).map((o: any) => (
+                                <li key={o.organization_id}>
+                                    <strong>{o.name}</strong>
+                                    {o.documents > 0 && `, and its ${o.documents} document${o.documents === 1 ? '' : 's'}`}
+                                    {o.other_members > 0 && `. ${o.other_members} other ${o.other_members === 1 ? 'person loses' : 'people lose'} access`}
+                                </li>
+                            ))}
+                            {!impact && <li>Any company you own, and everything in it</li>}
                         </ul>
+                        {impact?.loses_access > 0 && (
+                            <p className="text-sm text-destructive">
+                                You own a company other people are using. Deleting your
+                                account ends it for them too: you hold the card, so the
+                                subscription goes with you and nobody can take it over.
+                            </p>
+                        )}
                         <p className="text-sm text-muted-foreground">
-                            Documents you uploaded into a company that has other people in
-                            it stay with that company. It cannot be undone.
+                            Documents in a company you only belong to stay with that
+                            company. It cannot be undone.
                         </p>
                         <Button variant="destructive" onClick={() => setConfirmingDelete(true)} className="w-fit">
                             Delete My Account
@@ -344,7 +384,17 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
             <ConfirmDialog
                 open={confirmingDelete}
                 title="Delete your account?"
-                description="This permanently removes your payment details, chat history, uploaded documents and account credentials. It cannot be undone."
+                // The last screen before it happens says the number, not a
+                // category. "3 people lose access to 12 documents" is a
+                // sentence somebody can weigh; "uploaded documents" is not.
+                description={
+                    impact?.loses_access > 0
+                        ? `This deletes ${impact.organizations.map((o: any) => o.name).join(', ')}. `
+                          + `${impact.loses_access} other ${impact.loses_access === 1 ? 'person loses' : 'people lose'} access`
+                          + `${impact.documents_deleted > 0 ? ` and ${impact.documents_deleted} document${impact.documents_deleted === 1 ? '' : 's'} are deleted` : ''}. `
+                          + 'It cannot be undone.'
+                        : 'This permanently removes your payment details, chat history, uploaded documents and account credentials. It cannot be undone.'
+                }
                 confirmLabel="Delete my account"
                 destructive
                 onConfirm={handleDeleteAccount}

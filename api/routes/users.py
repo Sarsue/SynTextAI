@@ -286,6 +286,22 @@ async def create_user(
         logger.error(f"POST /users: Unexpected error creating user {email}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred during user creation.")
 
+@users_router.get("/deletion-impact", status_code=200)
+async def get_deletion_impact(
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """What deleting this account would destroy.
+
+    Read-only, and deliberately its own call: the confirmation has to be able to
+    say "this deletes Osas Inc, 3 other people lose access, 12 documents go"
+    before anybody presses anything. Static copy cannot, because it would be
+    wrong for most accounts and alarming for the rest.
+    """
+    user_id = user_data["user_id"]
+    return await store.org_repo.deletion_impact(user_id)
+
+
 # Route to delete a user
 @users_router.delete("", status_code=200)
 async def delete_user(

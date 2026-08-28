@@ -54,6 +54,10 @@ EXEMPT = {
     ("subscriptions.py", "list_plans"): "public plan list, no customer data",
     ("users.py", "create_user"): "signup, before any organization exists",
     ("users.py", "delete_user"): "acts on the authenticated caller alone",
+    ("users.py", "get_deletion_impact"): (
+        "reads only the caller's own memberships, resolved from their user_id; "
+        "names no organization it was not already a member of"
+    ),
     ("users.py", "get_user_quota"): "reads the caller's own quota",
 
     # Scoped by the authenticated user by construction: they return only what

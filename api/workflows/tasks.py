@@ -386,9 +386,25 @@ async def delete_user_task(user_id, user_gc_id: str = None):
                 except Exception as e:
                     logger.warning(f"Could not delete Stripe customer {stripe_customer_id}: {e}")
 
-        # Which organizations disappear with this person: the ones they own
-        # alone. Everything in those goes; everything in a company that
-        # survives stays, whoever uploaded it.
+        # Which organizations disappear with this person: every one they own.
+        # Everything in those goes; everything in a company they were merely a
+        # member of stays, whoever uploaded it.
+        #
+        # Owned organizations go even when other people are still in them, which
+        # was not true before. The owner holds the card and the Stripe customer
+        # and this task cancels both, so an organization left behind has no
+        # payer, and an unsubscribed organization cannot be used at all. Keeping
+        # it would leave those members a company they can neither use nor pay
+        # for, with no way to become its owner: set_member_role refuses to grant
+        # "owner" on purpose.
+        #
+        # Handing ownership to somebody staying was the other option and is
+        # worse. It gives a person a company nobody can pay for, silently, and
+        # billing access they never asked for.
+        #
+        # This destroys other people's documents, which is why
+        # GET /users/deletion-impact exists and why the dialog names the numbers
+        # before anybody presses anything.
         departing_orgs = set()
         surviving_orgs = []
         try:
@@ -398,7 +414,7 @@ async def delete_user_task(user_id, user_gc_id: str = None):
                     x for x in await store.org_repo.list_members(org_id)
                     if x["user_id"] != user_id
                 ]
-                if m["role"] == "owner" and not others:
+                if m["role"] == "owner":
                     departing_orgs.add(org_id)
                 elif others:
                     surviving_orgs.append(org_id)
