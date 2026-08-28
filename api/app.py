@@ -93,11 +93,31 @@ _CSP_POLICY = "; ".join([
     "https://us-assets.i.posthog.com https://identitytoolkit.googleapis.com "
     "https://securetoken.googleapis.com https://storage.googleapis.com wss: https://js.stripe.com "
     "https://accounts.google.com https://www.googleapis.com",
+    # 'self' IS NOT OPTIONAL AND ITS ABSENCE BROKE SIGN-IN FOR 13 DAYS.
+    #
+    # An explicit frame-src replaces default-src entirely, so listing origins
+    # here without 'self' blocks our own. Firebase's popup sign-in loads an
+    # iframe at https://syntextai.com/__/auth/iframe to receive the result of
+    # the popup, because authDomain is syntextai.com rather than the default
+    # *.firebaseapp.com. Blocked, the popup opens, the person signs in at
+    # Google, the popup closes, and the app is never told. Nothing happens, no
+    # error, no toast, nothing in the console except a CSP violation nobody was
+    # looking at.
+    #
+    # Broken from 2026-08-15, the day this policy stopped being Report-Only.
+    # Invites 1 to 4 were accepted on 3 and 4 August and every one after that
+    # failed. It stayed invisible because an existing session keeps working: the
+    # iframe is only needed to complete a NEW sign-in, so the only people who
+    # could see it were the ones who could not get in to report it.
+    #
+    # Confirmed by appending that iframe to the live page and catching the
+    # securitypolicyviolation event: blockedURI the auth iframe, violatedDirective
+    # frame-src.
+    #
     # Cited documents open in an iframe pointed at their GCS URL, so leaving
-    # storage.googleapis.com out here would break every citation the moment
-    # this policy stops being Report-Only. docs.google.com is the Drive picker,
-    # which is also an iframe.
-    "frame-src https://js.stripe.com https://storage.googleapis.com "
+    # storage.googleapis.com out here would break every citation. docs.google.com
+    # is the Drive picker, which is also an iframe.
+    "frame-src 'self' https://js.stripe.com https://storage.googleapis.com "
     "https://docs.google.com https://accounts.google.com",
     "object-src 'none'",
     "base-uri 'self'",
