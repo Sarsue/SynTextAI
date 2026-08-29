@@ -17,15 +17,6 @@
     right: 24px;
 }
 
-.settings-content {
-    width: 100%;
-    max-width: 560px;
-    margin-top: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
 .settings-section {
     padding: 24px 0;
     border-bottom: 1px solid var(--border);
@@ -55,7 +46,7 @@
         padding: 32px 16px;
     }
 
-    .settings-content {
+    .settings-shell {
         max-width: 100%;
     }
 }
@@ -91,6 +82,17 @@
  * palette to keep in step.
  */
 .settings-shell {
+    /* Takes over the layout .settings-content used to do, because that class is
+       no longer rendered. Without the width and max-width this sits inside
+       .settings-container, which centres its children, and collapses to the
+       width of its own content: the rail and the panel squeeze together and the
+       page reads as broken.
+
+       Wider than the old 560px because this is two columns now. The panel still
+       lands around the old reading width once the rail has taken its 176. */
+    width: 100%;
+    max-width: 880px;
+    margin-top: 24px;
     display: flex;
     align-items: flex-start;
     gap: 28px;
@@ -147,6 +149,11 @@
     .settings-shell {
         flex-direction: column;
         gap: 16px;
+        /* Back to stretch. The base rule uses flex-start so the rail does not
+           grow to the panel's height on a wide screen, but once the direction
+           turns to column that same value means "content width", and the panel
+           rendered at 219px inside a 358px page. */
+        align-items: stretch;
     }
 
     .settings-rail {
