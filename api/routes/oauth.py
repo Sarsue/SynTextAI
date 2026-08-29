@@ -46,6 +46,7 @@ from pydantic import BaseModel, Field
 from ..core.auth import authenticate_user, get_store
 from ..core.permissions import SCOPES
 from ..core.rate_limit import limiter
+from ..core.urls import public_app_url
 from ..repositories.repository_manager import RepositoryManager
 
 logger = logging.getLogger(__name__)
@@ -60,8 +61,7 @@ oauth_router = APIRouter(prefix="/api/v1/oauth", tags=["oauth"])
 # configuration rather than from the request: behind a proxy the Host header is
 # whatever the proxy was told to send, and an issuer that changes with the
 # request is one a client cannot pin.
-def _base_url() -> str:
-    return (os.getenv("APP_URL") or "http://localhost:3000").rstrip("/")
+_base_url = public_app_url
 
 
 # Registration is unauthenticated by design, which is what dynamic client

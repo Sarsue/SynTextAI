@@ -44,6 +44,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 
 from ..core.api_keys import looks_like_access_token, looks_like_api_key
 from ..core.permissions import Capability, capabilities_for_scopes
+from ..core.urls import public_app_url
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
 
@@ -247,7 +248,7 @@ def _unauthorized() -> HTTPException:
     and stops instead of starting the flow that would fix it. The one header is
     the difference between a dead end and a consent screen.
     """
-    base = (os.getenv("APP_URL") or "http://localhost:3000").rstrip("/")
+    base = public_app_url()
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Unauthorized",
