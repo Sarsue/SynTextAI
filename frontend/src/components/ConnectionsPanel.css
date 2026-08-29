@@ -1,0 +1,181 @@
+/* Connections. Built on the tokens in index.css so dark mode follows without a
+ * second palette to keep in step. Quiet, like the rest of Settings: somebody
+ * opens this to connect one thing or to cut one off, not to browse.
+ */
+.connections-status {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--secondary-color, #777);
+}
+
+.connections-intro {
+    margin: 0 0 14px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--secondary-color, #777);
+}
+
+.connections-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.connections-label {
+    font-size: 0.78rem;
+    color: var(--secondary-color, #777);
+}
+
+.connections-input {
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: var(--text-color, #111);
+    background-color: var(--input-background, #fff);
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+}
+
+.connections-create {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.connections-create .connections-field {
+    flex: 1 1 180px;
+    margin-bottom: 0;
+}
+
+.connections-button {
+    padding: 9px 16px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: var(--button-text-color, #fff);
+    background-color: var(--button-bg, #111);
+    border: none;
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+}
+
+.connections-button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* The token, shown once. Deliberately the loudest thing on the page: this is
+ * the only moment it exists, and a person who scrolls past it has to create a
+ * second connection to get another one. */
+.connections-token {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 14px;
+    margin-bottom: 18px;
+    border: 1px solid #d97706;
+    border-radius: var(--radius, 8px);
+    background-color: var(--card-bg, #f8f8f8);
+}
+
+.connections-token-warning {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: 0.85rem;
+    color: #d97706;
+}
+
+.connections-token-value {
+    flex: 1 1 260px;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--text-color, #111);
+    /* Selectable, so a refused clipboard is an inconvenience and not a dead
+     * end: the token can still be highlighted and copied by hand. */
+    user-select: all;
+}
+
+.connections-copy {
+    padding: 7px 14px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: var(--text-color, #111);
+    background-color: transparent;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+}
+
+.connections-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.connections-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    background-color: var(--card-bg, #f8f8f8);
+}
+
+/* Revoked and expired rows stay in the list, because "revoked on the 3rd" is
+ * the answer somebody is looking for when an integration stopped working. Faded
+ * so the live ones are still the ones the eye lands on. */
+.connections-row-dead {
+    opacity: 0.55;
+}
+
+.connections-row-main {
+    flex: 1 1 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.connections-name {
+    font-size: 0.92rem;
+    color: var(--text-color, #111);
+}
+
+.connections-prefix {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    color: var(--secondary-color, #777);
+    overflow-wrap: anywhere;
+}
+
+.connections-row-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.78rem;
+    color: var(--secondary-color, #777);
+}
+
+.connections-revoke {
+    padding: 6px 12px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    color: #b91c1c;
+    background-color: transparent;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+}
+
+.connections-revoke:hover {
+    border-color: #b91c1c;
+}

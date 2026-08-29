@@ -624,3 +624,168 @@ class OrganizationEvent(Base):
     event_type = Column(String, nullable=False)
     detail = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class WorkspaceApiKey(Base):
+    """A credential a program can hold, when the only one we had needs a browser.
+
+    A Firebase ID token exists because a person signed in and dies about an hour
+    later, so nothing without a human at a keyboard can hold one. This is the
+    second kind of credential: issued to an integration, alive until revoked.
+
+    What it deliberately does not carry is permission. There is no role column
+    and no frozen workspace list. It names its creator and one workspace, and
+    authorization looks up what that person may do *now*, on every request, then
+    narrows the result to this workspace. So a key made by an admin who is
+    removed from the workspace tomorrow stops working tomorrow, with nothing to
+    revoke and nobody to remember. Copying the role onto the row instead would
+    have made the credential outlive the access it was cut from.
+
+    scopes holds the vocabulary an OAuth grant will use later. One list of
+    names, not two to reconcile once MCP arrives.
+    """
+
+    __tablename__ = "workspace_api_keys"
+    __table_args__ = (
+        # Authentication reads exactly one row by prefix on every request.
+        # Unique because the prefix is what identifies the row, and a duplicate
+        # would make that lookup ambiguous at the moment it must not be.
+        Index("ix_workspace_api_keys_prefix", "prefix", unique=True),
+        Index("ix_workspace_api_keys_workspace_id", "workspace_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    # A ceiling, not a grant: it narrows what the creator can already see and
+    # never widens it.
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    # CASCADE, unlike OrganizationEvent.actor_user_id. An event is a record of
+    # the past and stays true once the person is gone; this is live authority
+    # borrowed from an account, so it must not outlive it.
+    created_by_user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # What a person calls it in Settings: "Claude desktop", "reporting script".
+    # The only way to tell two rows apart when choosing which to revoke, since
+    # the secret itself is shown once and never again.
+    name = Column(String, nullable=False)
+    # The non-secret half, stored in the clear so a lookup is one indexed row
+    # rather than a scan hashing every row, and so Settings has something to
+    # display beside the revoke button.
+    prefix = Column(String, nullable=False)
+    # SHA-256 of the whole token. A fast hash on purpose: this is 256 bits of
+    # randomness, not a password, so there is no dictionary to slow down, and
+    # this runs on every request.
+    token_hash = Column(String, nullable=False)
+    scopes = Column(JSONB, nullable=False, server_default=text("'[\"knowledge:read\"]'::jsonb"))
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    # Read in Settings. The column that makes an owner willing to revoke: nobody
+    # deletes a credential when they cannot tell whether anything still uses it.
+    last_used_at = Column(DateTime, nullable=True)
+    # Withdrawn on purpose, as distinct from expires_at running out. Both
+    # refuse; they read differently to somebody asking why an integration
+    # stopped working.
+    revoked_at = Column(DateTime, nullable=True)
+    # NULL means no expiry, and that is the default. Forced rotation nobody
+    # asked for mostly produces integrations that break silently on a Tuesday.
+    expires_at = Column(DateTime, nullable=True)
+
+    workspace = relationship("Workspace")
+    created_by = relationship("User")
+
+
+class OAuthClient(Base):
+    """An application that may ask for access. Not a credential in itself.
+
+    Written by the client through dynamic registration, because that is how MCP
+    clients arrive: nobody pre-registers Claude with every server it might one
+    day connect to. Registering grants nothing at all until a person approves a
+    specific workspace on the consent screen.
+
+    client_name is chosen by the client and verified by nobody, which is why the
+    consent screen shows the redirect host beside it. "Claude" is a claim; the
+    host a code would be sent to is a fact.
+    """
+
+    __tablename__ = "oauth_clients"
+    __table_args__ = (Index("ix_oauth_clients_client_id", "client_id", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String, nullable=False)
+    # NULL for a public client, which a desktop app is: it cannot keep a secret
+    # on somebody's laptop, so PKCE does that job instead.
+    client_secret_hash = Column(String, nullable=True)
+    client_name = Column(String, nullable=False)
+    redirect_uris = Column(JSONB, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class OAuthAuthorizationCode(Base):
+    """A few seconds between the consent screen and a token. Used once.
+
+    The PKCE challenge is stored; the verifier never is. That is the whole point
+    of PKCE: a code intercepted on its way back through a redirect is useless
+    without a verifier that never left the client that started the flow.
+    """
+
+    __tablename__ = "oauth_authorization_codes"
+    __table_args__ = (Index("ix_oauth_codes_hash", "code_hash", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String, nullable=False)
+    client_id = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    scopes = Column(JSONB, nullable=False)
+    code_challenge = Column(String, nullable=False)
+    code_challenge_method = Column(String(16), nullable=False)
+    # The token request has to present the same one. A code redeemed against a
+    # different redirect_uri is a redirect that was tampered with.
+    redirect_uri = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    # A code presented twice is not merely refused. It means somebody else may
+    # have held it, so the tokens it already produced are withdrawn too.
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class OAuthToken(Base):
+    """A granted connection: one app, one person, one workspace.
+
+    Deliberately the same shape as WorkspaceApiKey. It carries a user, a
+    workspace and scopes, and nothing about permission, so the live lookup in
+    core/auth decides what the holder may do exactly as it does for a key. Two
+    kinds of credential, one authorization path.
+
+    This is the row somebody revokes in Settings, which is why the refresh token
+    has no expiry of its own: the grant is the thing that ends, not the string.
+    """
+
+    __tablename__ = "oauth_tokens"
+    __table_args__ = (
+        Index("ix_oauth_tokens_access_prefix", "access_prefix", unique=True),
+        Index("ix_oauth_tokens_refresh_prefix", "refresh_prefix"),
+        Index("ix_oauth_tokens_workspace_id", "workspace_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    scopes = Column(JSONB, nullable=False)
+    access_prefix = Column(String, nullable=False)
+    access_hash = Column(String, nullable=False)
+    access_expires_at = Column(DateTime, nullable=False)
+    refresh_prefix = Column(String, nullable=True)
+    refresh_hash = Column(String, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+    workspace = relationship("Workspace")
+    user = relationship("User")

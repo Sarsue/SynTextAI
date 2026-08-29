@@ -4,6 +4,8 @@ import logging
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import ClickTracking, Mail, TrackingSettings
 
+from ..core.urls import public_app_url
+
 logger = logging.getLogger(__name__)
 
 # Read at call time, never at import.
@@ -18,16 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 def _config() -> dict:
-    # The invite link has to point at the app the recipient actually uses.
-    # The old default was https://app.syntext.ai, which is not this product's
-    # domain, so an invite that did send led nowhere. Fall back to the first
-    # configured CORS origin, which is by definition a real frontend origin.
-    cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
-    default_app_url = cors_origins[0] if cors_origins else "https://syntextai.com"
+    # The invite link has to point at the app the recipient actually uses. The
+    # reasoning, and the wrong default that made invites lead nowhere, moved to
+    # core/urls.py when OAuth needed the same answer.
     return {
         "api_key": os.getenv("SENDGRID_API_KEY"),
         "from_email": os.getenv("SENDGRID_FROM_EMAIL"),
-        "app_url": (os.getenv("APP_URL") or default_app_url).rstrip("/"),
+        "app_url": public_app_url(),
     }
 
 
