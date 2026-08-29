@@ -51,9 +51,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from ..core.auth import authenticate_user, get_store
+from ..core.auth import Principal, authenticate_api_caller, get_store
 from ..core.limits import assert_can_ask
 from ..core.log_safety import safe_text
+from ..core.permissions import Capability, refusal
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
 from ..repositories.repository_manager import RepositoryManager
 from ..services.llm_service import get_text_embedding
@@ -87,6 +88,16 @@ class SearchResult(BaseModel):
     # unlike a relevance percentage, and it is why one page ranks above another
     # in a way a person can check by opening it.
     passages: int
+    # Read off a figure the text layer could not confirm. The chat path says
+    # this in the answer and on the citation; a caller that renders its own
+    # answer from these results has no other way to learn it, and a torque value
+    # from an unverified diagram is a safety claim either way.
+    vision_caution: bool = False
+    # Only ever true when the caller named `file_id`. Retrieval drops replaced
+    # documents on its own, and deliberately does not when one document is asked
+    # for by id, so this says "you asked for this one and it has been replaced"
+    # rather than duplicating a filter that already ran.
+    superseded: bool = False
 
 
 class SearchResponse(BaseModel):
@@ -113,11 +124,26 @@ async def search_documents(
     q: str = Query(..., min_length=1, max_length=500, description="What to find"),
     workspace_id: Optional[int] = Query(None, description="Workspace to search"),
     file_id: Optional[int] = Query(None, description="Restrict to one document"),
-    user_data: Dict = Depends(authenticate_user),
+    principal: Principal = Depends(authenticate_api_caller),
     store: RepositoryManager = Depends(get_store),
 ) -> SearchResponse:
-    """Passages matching `q`, grouped into the pages they came from."""
-    user_id = user_data["user_id"]
+    """Passages matching `q`, grouped into the pages they came from.
+
+    The first route to accept a credential that is not a signed-in person. It
+    takes a Principal rather than the user dict, which is the same identity plus
+    the ceilings a machine credential carries; a human's Principal has none and
+    behaves exactly as before.
+    """
+    # The credential's own limit, checked before the role is looked up. A key
+    # whose scopes resolve to nothing is refused here rather than quietly
+    # searching, which is what fails closed when a future scope name reaches
+    # code that does not know it yet.
+    if not principal.permits(Capability.READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=refusal(Capability.READ)
+        )
+
+    user_id = principal.user_id
     query = q.strip()
     if not query:
         raise HTTPException(
@@ -148,15 +174,26 @@ async def search_documents(
     #     every access bug this codebase has had.
     accessible = await store.workspace_repo.accessible_workspace_ids(user_id)
 
+    # Live access, then the credential's ceiling. In that order and never the
+    # other way: the list being narrowed has to be the one the account holds
+    # right now, so removing somebody from a workspace takes their integrations
+    # with them, with nothing to revoke.
+    accessible = principal.limit_workspaces(accessible)
+
     if workspace_id is not None and workspace_id not in accessible:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
+    named_file_superseded = False
     if file_id is not None:
         record = await store.file_repo.get_file_by_id(file_id)
         # Authorized by the document's workspace, not by who uploaded it, or a
         # member cannot search a document their owner added.
         if not record or record.get("workspace_id") not in accessible:
             raise HTTPException(status_code=404, detail="File not found")
+        # Retrieval honours an explicit file_id even when that document has been
+        # replaced, because refusing to read a document the caller named would
+        # be a bug. Saying so is the other half of that decision.
+        named_file_superseded = record.get("superseded_by_id") is not None
 
     # Scoped to the one workspace when given, and to everything this person can
     # reach when not, which is what the query agent does with the same values.
@@ -189,6 +226,11 @@ async def search_documents(
     for chunk in chunks or []:
         key = (chunk.get("file_id"), chunk.get("page_number"))
         existing = pages.get(key)
+        # One unverified passage makes the page unverified. A page whose best
+        # chunk came off the text layer can still have the figure read into a
+        # later chunk, and a caution that depends on which passage ranked first
+        # is a caution that disappears at random.
+        unverified = bool((chunk.get("meta_data") or {}).get("vision_unverified_page"))
         if existing is None:
             pages[key] = {
                 "file_id": chunk.get("file_id"),
@@ -196,9 +238,12 @@ async def search_documents(
                 "page_number": chunk.get("page_number"),
                 "snippet": _snippet(chunk.get("content") or ""),
                 "passages": 1,
+                "vision_caution": unverified,
+                "superseded": named_file_superseded,
             }
         else:
             existing["passages"] += 1
+            existing["vision_caution"] = existing["vision_caution"] or unverified
 
     results = [SearchResult(**page) for page in list(pages.values())[:MAX_PAGES]]
     logger.info(

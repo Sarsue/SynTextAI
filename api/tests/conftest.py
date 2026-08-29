@@ -149,7 +149,17 @@ async def tenant(store):
 async def client(store):
     """An HTTP client for the real app, with authentication stubbed.
 
-    Authentication is one dependency now, so one override covers every router.
+    Authentication is two dependencies: `authenticate_user` for the site, and
+    `authenticate_api_caller` for the routes that also accept a credential a
+    program holds. Both are overridden, and both resolve to the same stubbed
+    person, so a test written before machine credentials existed still exercises
+    exactly what it did.
+
+    With one exception, deliberately. A request carrying a real API key is
+    handed to the real resolver instead of the stub, so the ceiling, revocation
+    and expiry can be driven end to end against a real row. Stubbing that too
+    would leave the entire point of the credential untested.
+
     What is being tested is what the routes do *after* deciding who you are: the
     role checks, the workspace checks, the 403s. Firebase token verification is
     a separate concern and is not exercised here.
@@ -158,8 +168,16 @@ async def client(store):
     startup event that normally populates it.
     """
     import httpx
+    from fastapi import Depends, Header
     from api.app import app
-    from api.core.auth import authenticate_user, get_store
+    from api.core.api_keys import looks_like_api_key
+    from api.core.auth import (
+        Principal,
+        authenticate_api_caller,
+        authenticate_user,
+        get_store,
+    )
+    from api.repositories.repository_manager import RepositoryManager
 
     app.state.store = store
 
@@ -172,7 +190,27 @@ async def client(store):
             "user_info": {"email": f"user{uid}@test.invalid", "user_id": f"gc-{uid}"},
         }
 
+    async def _as_current_principal(
+        authorization: str = Header(None),
+        request_store: RepositoryManager = Depends(get_store),
+    ):
+        """The same person, as a Principal. Unless a real key is presented."""
+        token = (authorization or "").split("Bearer ", 1)[-1].strip()
+        if looks_like_api_key(token):
+            # Not stubbed. This is the path the feature exists for, and a test
+            # that stubbed it would prove only that the stub works.
+            return await authenticate_api_caller(
+                authorization=authorization, store=request_store
+            )
+        user = await _as_current_user()
+        return Principal(
+            user_id=user["user_id"],
+            user_info=user["user_info"],
+            auth_method="firebase",
+        )
+
     app.dependency_overrides[authenticate_user] = _as_current_user
+    app.dependency_overrides[authenticate_api_caller] = _as_current_principal
     app.dependency_overrides[get_store] = lambda: store
 
     transport = httpx.ASGITransport(app=app)

@@ -351,6 +351,7 @@ from .routes.workspaces import workspaces_router
 from .routes.organizations import organizations_router
 from .routes.sendgrid_events import router as sendgrid_events_router
 from .routes.drafts import drafts_router
+from .routes.api_keys import api_keys_router
 
 # Include routers
 app.include_router(files_router)
@@ -366,6 +367,7 @@ app.include_router(search_router)
 app.include_router(workspaces_router)
 app.include_router(drafts_router)
 app.include_router(organizations_router)
+app.include_router(api_keys_router)
 # Public and unauthenticated by necessity: SendGrid posts here, and it holds no
 # credential of ours. Its own prefix rather than /api/v1, because it is not part
 # of the product's API and is not versioned alongside it.

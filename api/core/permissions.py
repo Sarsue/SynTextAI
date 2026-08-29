@@ -49,6 +49,9 @@ class Capability(str, Enum):
     RENAME_ORGANIZATION = "rename_organization"
     MANAGE_BILLING = "manage_billing"
 
+    # Integrations
+    MANAGE_API_KEYS = "manage_api_keys"
+
 
 _MUTATE_DOCUMENTS = {Capability.UPLOAD_DOCUMENT, Capability.DELETE_DOCUMENT}
 _MUTATE_WORKSPACES = {
@@ -111,6 +114,7 @@ _REFUSALS: Dict[Capability, str] = {
     Capability.CHANGE_MEMBER_ACCESS: "Only an owner or admin can change who sees what.",
     Capability.RENAME_ORGANIZATION: "Only an owner or admin can rename the organization.",
     Capability.MANAGE_BILLING: "Only the owner can manage billing.",
+    Capability.MANAGE_API_KEYS: "Only an owner or admin can manage API keys.",
 }
 
 
@@ -157,3 +161,38 @@ async def assert_organization_capability(
             detail=refusal(capability),
         )
     return role
+
+
+# ---------------------------------------------------------------------------
+# Scopes: what a credential asked for, as opposed to what a role holds.
+#
+# A role says what a person may do. A scope says how much of that a particular
+# credential is allowed to use. Both are consulted and the narrower one wins, so
+# an owner's API key still cannot delete a document.
+#
+# These names are the ones an OAuth grant will show on a consent screen, which
+# is why they are written in that vocabulary rather than reusing Capability
+# directly. Deciding them now costs nothing; deciding them twice, once here and
+# once when MCP arrives, would mean reconciling two lists against live
+# credentials.
+# ---------------------------------------------------------------------------
+
+SCOPES: Dict[str, FrozenSet[Capability]] = {
+    # Everything Phase 1 issues. Ask a question, search, read what comes back.
+    "knowledge:read": frozenset({Capability.READ}),
+}
+
+
+def capabilities_for_scopes(scopes) -> FrozenSet[Capability]:
+    """What a credential holding these scopes may do, at most.
+
+    An unknown scope contributes nothing rather than raising: a credential
+    written by a newer version of this code must lose the capability it cannot
+    resolve, never gain one. Failing closed here is the difference between an
+    integration that stops working and one that does something it was never
+    granted.
+    """
+    granted: set = set()
+    for name in scopes or ():
+        granted |= SCOPES.get(name, frozenset())
+    return frozenset(granted)

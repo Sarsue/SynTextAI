@@ -624,3 +624,72 @@ class OrganizationEvent(Base):
     event_type = Column(String, nullable=False)
     detail = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class WorkspaceApiKey(Base):
+    """A credential a program can hold, when the only one we had needs a browser.
+
+    A Firebase ID token exists because a person signed in and dies about an hour
+    later, so nothing without a human at a keyboard can hold one. This is the
+    second kind of credential: issued to an integration, alive until revoked.
+
+    What it deliberately does not carry is permission. There is no role column
+    and no frozen workspace list. It names its creator and one workspace, and
+    authorization looks up what that person may do *now*, on every request, then
+    narrows the result to this workspace. So a key made by an admin who is
+    removed from the workspace tomorrow stops working tomorrow, with nothing to
+    revoke and nobody to remember. Copying the role onto the row instead would
+    have made the credential outlive the access it was cut from.
+
+    scopes holds the vocabulary an OAuth grant will use later. One list of
+    names, not two to reconcile once MCP arrives.
+    """
+
+    __tablename__ = "workspace_api_keys"
+    __table_args__ = (
+        # Authentication reads exactly one row by prefix on every request.
+        # Unique because the prefix is what identifies the row, and a duplicate
+        # would make that lookup ambiguous at the moment it must not be.
+        Index("ix_workspace_api_keys_prefix", "prefix", unique=True),
+        Index("ix_workspace_api_keys_workspace_id", "workspace_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    # A ceiling, not a grant: it narrows what the creator can already see and
+    # never widens it.
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    # CASCADE, unlike OrganizationEvent.actor_user_id. An event is a record of
+    # the past and stays true once the person is gone; this is live authority
+    # borrowed from an account, so it must not outlive it.
+    created_by_user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # What a person calls it in Settings: "Claude desktop", "reporting script".
+    # The only way to tell two rows apart when choosing which to revoke, since
+    # the secret itself is shown once and never again.
+    name = Column(String, nullable=False)
+    # The non-secret half, stored in the clear so a lookup is one indexed row
+    # rather than a scan hashing every row, and so Settings has something to
+    # display beside the revoke button.
+    prefix = Column(String, nullable=False)
+    # SHA-256 of the whole token. A fast hash on purpose: this is 256 bits of
+    # randomness, not a password, so there is no dictionary to slow down, and
+    # this runs on every request.
+    token_hash = Column(String, nullable=False)
+    scopes = Column(JSONB, nullable=False, server_default=text("'[\"knowledge:read\"]'::jsonb"))
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    # Read in Settings. The column that makes an owner willing to revoke: nobody
+    # deletes a credential when they cannot tell whether anything still uses it.
+    last_used_at = Column(DateTime, nullable=True)
+    # Withdrawn on purpose, as distinct from expires_at running out. Both
+    # refuse; they read differently to somebody asking why an integration
+    # stopped working.
+    revoked_at = Column(DateTime, nullable=True)
+    # NULL means no expiry, and that is the default. Forced rotation nobody
+    # asked for mostly produces integrations that break silently on a Tuesday.
+    expires_at = Column(DateTime, nullable=True)
+
+    workspace = relationship("Workspace")
+    created_by = relationship("User")

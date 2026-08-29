@@ -135,6 +135,15 @@ enough until a customer says otherwise.
 2. **MCP server.** Expose `hybrid_search` over one workspace so a customer's own
    Claude can query their knowledge base. No new ingestion, and `hybrid_search`
    plus the tenant scoping already exist. Distribution more than a feature.
+
+   Four phases, and the whole of it is the feature rather than a menu: (1) the
+   credential and the Principal, on `develop` now; (2) Settings UI to create,
+   see last use, and revoke; (3) the MCP server itself, authenticated by a
+   pasted key, which reaches a technical customer; (4) an OAuth authorization
+   server, which is what reaches everyone else and is weeks rather than days —
+   authorize and token endpoints, refresh, PKCE, consent, dynamic client
+   registration. Phase 1 is not throwaway on the way there: OAuth becomes a
+   third resolver behind the same Principal.
 3. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
@@ -181,6 +190,35 @@ One line each. The reasoning is in the commit or the code comment beside it.
 - Analytics events carry `environment`, decided by hostname. The local
   container serves a production build, so `import.meta.env.DEV` is false there
   and testing counted as customer behaviour.
+
+**Credentials**
+- A credential carries no permission. `workspace_api_keys` names its creator and
+  one workspace, and authorization looks up what that person may do *now*, every
+  request, then intersects. Copying the role onto the row would let the key
+  outlive the access it was cut from; this way removing somebody from a
+  workspace takes their integrations with them and there is nothing to revoke.
+- Both ceilings are None for a person, which is what keeps the browser path
+  byte-for-byte what it was.
+- Machine-callable routes are an allowlist, enforced by
+  `test_api_key_ceiling.py`, and it is load-bearing rather than tidy:
+  `test_every_route_is_scoped.py` recognises eleven tenant checks and only
+  `accessible_workspace_ids` has been taught the ceiling. A Principal is safe on
+  a route that intersects and on no other.
+- The key-management routes take `authenticate_user`, never
+  `authenticate_api_caller`. A credential that can mint a credential cannot be
+  revoked.
+- An unknown scope grants nothing. A credential written by a newer version must
+  lose what this code cannot resolve, never gain it.
+- SHA-256 and not bcrypt: 256 bits of randomness has no dictionary to slow down,
+  and the hash runs on every request. The comparison is still constant time.
+- Hex, not base64url. `token_urlsafe` emits the `_` this format splits on.
+- The rate limiter keys on the key's prefix when one is present. An integration
+  calls from one server address, so per-IP would make one busy integration
+  exhaust the budget for every human behind it.
+- Search has never appeared in the Usage panel, for people either: that panel
+  counts messages, and search writes none. So Phase 1 adds no usage table, and
+  `last_used_at` is the visibility it provides. Exposing `ask` over a credential
+  is what would make the panel go blind, and that is Phase 3's problem.
 
 **Security and tenancy**
 - Invite mail goes out with SendGrid click tracking off. On, SendGrid
