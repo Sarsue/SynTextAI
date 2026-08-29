@@ -296,6 +296,12 @@ One line each. The reasoning is in the commit or the code comment beside it.
   question. Confusing the two stranded an invited colleague, silently.
 
 **Reading what the server sends**
+- `GET /api/v1/workspaces` returns `{"items": [...]}`. The route is typed
+  `Dict[str, List[WorkspaceResponse]]`, which documents the shape and not the
+  key, so the key has to be read off the response rather than guessed. Reading
+  `body.workspaces` showed an owner with five workspaces "create a workspace
+  first", and typechecked, and passed every test: the panel had no test that
+  rendered it against the real route. Found by opening the page.
 - The API serialises naive UTC with no designator and JavaScript parses that as
   LOCAL. Every timestamp was wrong by the viewer's offset. Use
   `utils/serverTime.ts`, always.

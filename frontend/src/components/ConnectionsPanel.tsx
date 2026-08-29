@@ -99,7 +99,11 @@ const ConnectionsPanel: React.FC = () => {
                 if (!res.ok) throw new Error(`status ${res.status}`);
                 const body = await res.json();
                 if (cancelled) return;
-                const list: Workspace[] = body.workspaces || [];
+                // `items`, not `workspaces`. The route is typed
+                // Dict[str, List[WorkspaceResponse]], which says nothing about
+                // the key, and reading the wrong one showed an owner with five
+                // workspaces the "create a workspace first" message.
+                const list: Workspace[] = body.items || [];
                 setWorkspaces(list);
                 setWorkspaceId(list.length ? list[0].id : null);
             } catch {
@@ -196,6 +200,12 @@ const ConnectionsPanel: React.FC = () => {
 
     if (!canManage) return null;
     if (loading) return <p className="connections-status">Loading connections…</p>;
+
+    // Before the empty state, because a failed load used to render as "create a
+    // workspace first" to somebody who has five. An error has to say it is one.
+    if (error && !workspaces.length) {
+        return <p className="connections-status">{error}</p>;
+    }
 
     if (!workspaces.length) {
         return (

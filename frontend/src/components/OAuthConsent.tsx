@@ -71,7 +71,11 @@ const OAuthConsent: React.FC = () => {
                 if (!res.ok) throw new Error(`status ${res.status}`);
                 const body = await res.json();
                 if (cancelled) return;
-                const list: Workspace[] = body.workspaces || [];
+                // `items`, not `workspaces`. The route is typed
+                // Dict[str, List[WorkspaceResponse]], which says nothing about
+                // the key, and reading the wrong one showed an owner with five
+                // workspaces the "create a workspace first" message.
+                const list: Workspace[] = body.items || [];
                 setWorkspaces(list);
                 setWorkspaceId(list.length ? list[0].id : null);
             } catch {
