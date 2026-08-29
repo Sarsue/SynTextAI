@@ -1,0 +1,106 @@
+/* The consent screen. Deliberately plain and narrow: this is a decision, not a
+ * page to explore, and everything on it exists to make the decision clear.
+ */
+.consent {
+    max-width: 460px;
+    margin: 48px auto;
+    padding: 28px;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    background-color: var(--card-bg, #f8f8f8);
+    color: var(--text-color, #111);
+}
+
+.consent-title {
+    margin: 0 0 12px;
+    font-size: 1.25rem;
+    color: var(--heading-color, #111);
+}
+
+.consent-lead {
+    margin: 0 0 16px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.consent-lead code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+}
+
+.consent-grants {
+    margin: 0 0 20px;
+    padding-left: 20px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--secondary-color, #777);
+}
+
+.consent-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+
+.consent-label {
+    font-size: 0.78rem;
+    color: var(--secondary-color, #777);
+}
+
+.consent-input {
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: var(--text-color, #111);
+    background-color: var(--input-background, #fff);
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+}
+
+.consent-note,
+.consent-status {
+    margin: 0 0 18px;
+    font-size: 0.82rem;
+    color: var(--secondary-color, #777);
+}
+
+.consent-error {
+    margin: 0 0 16px;
+    font-size: 0.85rem;
+    color: #b91c1c;
+}
+
+.consent-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.consent-allow {
+    padding: 9px 20px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: var(--button-text-color, #fff);
+    background-color: var(--button-bg, #111);
+    border: none;
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+}
+
+.consent-allow:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.consent-deny {
+    padding: 9px 20px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: var(--text-color, #111);
+    background-color: transparent;
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+}

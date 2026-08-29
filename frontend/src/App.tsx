@@ -10,6 +10,7 @@ import Welcome from './Welcome';
 import ChatApp from './components/ChatApp';
 import SettingsPage from './components/SettingsPage';
 import AcceptInvite from './components/AcceptInvite';
+import OAuthConsent from './components/OAuthConsent';
 import SelectOrganization from './components/SelectOrganization';
 import AnalyticsProvider from './components/AnalyticsProvider';
 
@@ -104,6 +105,11 @@ const App: React.FC = () => {
                                         : <Navigate to="/login" replace />
                             }
                         />
+
+                        {/* Behind requireUser, so an unauthenticated person is
+                            sent to sign in and lands back here. Approving is a
+                            decision only a signed-in person can make. */}
+                        <Route path="/oauth/consent" element={requireUser(<OAuthConsent />)} />
 
                         <Route path="/invite/:token" element={<AcceptInvite />} />
                         <Route path="*" element={<Navigate to="/" />} />

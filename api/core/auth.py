@@ -36,12 +36,13 @@ Token verification itself lives in core/utils.get_user_id and is not repeated.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from ..core.api_keys import looks_like_api_key
+from ..core.api_keys import looks_like_access_token, looks_like_api_key
 from ..core.permissions import Capability, capabilities_for_scopes
 from ..core.utils import get_user_id
 from ..repositories.repository_manager import RepositoryManager
@@ -127,7 +128,7 @@ class Principal:
 
     user_id: int
     user_info: dict
-    auth_method: str  # "firebase" | "api_key"
+    auth_method: str  # "firebase" | "api_key" | "oauth"
     # Recorded against usage so a query made by an integration is still visible
     # in the Usage panel. Named for the credential rather than the API key so
     # an OAuth token can be attributed the same way without a migration.
@@ -184,9 +185,7 @@ async def _resolve_api_key(credential: str, store: RepositoryManager) -> Princip
         # expired alike. Distinguishing them tells a stranger which of those
         # they got right.
         logger.info("API key failed verification")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
+        raise _unauthorized()
 
     await store.api_key_repo.touch_last_used(key["id"], key.get("last_used_at"))
 
@@ -200,13 +199,65 @@ async def _resolve_api_key(credential: str, store: RepositoryManager) -> Princip
     )
 
 
-# Ordered. The first detector that claims the credential resolves it, so a
-# future OAuth token is a third entry here rather than a third branch inside a
-# function that has already grown twice.
+async def _resolve_access_token(credential: str, store: RepositoryManager) -> Principal:
+    """An OAuth grant, resolved exactly the way an API key is.
+
+    The point of this function is how little there is in it. A grant carries a
+    user, a workspace and scopes, the same three things a key carries, so it
+    produces the same Principal and everything downstream is unchanged. The
+    authorization server in routes/oauth.py is a way of establishing identity,
+    not a second way of deciding permission.
+    """
+    token = credential.split("Bearer ", 1)[-1].strip()
+    grant = await store.oauth_repo.resolve_access(token)
+    if grant is None:
+        logger.info("Access token failed verification")
+        raise _unauthorized()
+
+    await store.oauth_repo.touch_last_used(grant["id"], grant.get("last_used_at"))
+
+    return Principal(
+        user_id=grant["user_id"],
+        user_info={"auth_method": "oauth", "grant_id": grant["id"]},
+        auth_method="oauth",
+        credential_id=grant["id"],
+        workspace_ceiling=frozenset({grant["workspace_id"]}),
+        capability_ceiling=capabilities_for_scopes(grant["scopes"]),
+    )
+
+
+# Ordered. The first detector that claims the credential resolves it, which is
+# what kept adding OAuth to a single entry here rather than a third branch
+# inside a function that had already grown twice.
 _RESOLVERS = (
     (lambda c: looks_like_api_key(c.split("Bearer ", 1)[-1].strip()), _resolve_api_key),
+    (
+        lambda c: looks_like_access_token(c.split("Bearer ", 1)[-1].strip()),
+        _resolve_access_token,
+    ),
     (lambda c: True, _resolve_firebase),
 )
+
+
+def _unauthorized() -> HTTPException:
+    """401 with the pointer a client needs to go and get a token.
+
+    RFC 9728. Without this header an MCP client meeting a 401 has no way to
+    discover that there IS an authorization server, so it reports "unauthorized"
+    and stops instead of starting the flow that would fix it. The one header is
+    the difference between a dead end and a consent screen.
+    """
+    base = (os.getenv("APP_URL") or "http://localhost:3000").rstrip("/")
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Unauthorized",
+        headers={
+            "WWW-Authenticate": (
+                'Bearer resource_metadata='
+                f'"{base}/.well-known/oauth-protected-resource"'
+            )
+        },
+    )
 
 
 async def authenticate_api_caller(
@@ -223,14 +274,10 @@ async def authenticate_api_caller(
     """
     if not authorization:
         logger.info("Request without an Authorization header")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
+        raise _unauthorized()
 
     for claims, resolve in _RESOLVERS:
         if claims(authorization):
             return await resolve(authorization, store)
 
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-    )
+    raise _unauthorized()

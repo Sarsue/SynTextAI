@@ -154,7 +154,12 @@ def test_the_secret_is_not_recoverable_from_the_hash():
 # about the ceiling so far. A Principal is safe on a route that intersects with
 # it and on no other, so adding a name here means having checked that route's
 # own tenant check honours `limit_workspaces`.
-MACHINE_CALLABLE = {"search.py"}
+MACHINE_CALLABLE = {
+    "search.py",
+    # Reaches its tenant through the same `accessible_workspace_ids` then
+    # `limit_workspaces` pair search does, in `_reachable_workspaces`.
+    "mcp.py",
+}
 
 ROUTES_DIR = pathlib.Path(__file__).resolve().parent.parent / "routes"
 

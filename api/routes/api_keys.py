@@ -1,5 +1,9 @@
 """Issuing, listing and revoking the credentials an integration holds.
 
+Two kinds share this surface: API keys, issued here, and OAuth grants, which are
+approved on the consent screen in routes/oauth.py and only listed and revoked
+here. Whoever reads this screen is asking one question about both of them.
+
 WHO MAY CALL THIS
 
 `authenticate_user`, not `authenticate_api_caller`. Deliberately: minting a
@@ -21,7 +25,7 @@ from datetime import datetime
 from typing import List, Optional
 import logging
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 from ..core.auth import authenticate_user, get_store
@@ -51,6 +55,10 @@ class ApiKeySummary(BaseModel):
     last_used_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    # "api_key" or "oauth". The two are the same question to whoever is reading
+    # this screen — what has access, when did it last use it, how do I stop it —
+    # so they are one list with a kind on each row rather than two lists.
+    kind: str = "api_key"
 
 
 class CreatedApiKey(ApiKeySummary):
@@ -110,7 +118,36 @@ async def list_api_keys(
         store, user_id, workspace_id, Capability.MANAGE_API_KEYS
     )
     rows = await store.api_key_repo.list_for_workspace(workspace_id)
-    return [ApiKeySummary(**{k: v for k, v in r.items() if k != "created_by_user_id"}) for r in rows]
+    keys = [
+        ApiKeySummary(
+            **{k: v for k, v in r.items() if k != "created_by_user_id"}, kind="api_key"
+        )
+        for r in rows
+    ]
+
+    # Apps somebody approved through the consent screen. No prefix to show: an
+    # OAuth token is never seen by a person, so there is nothing for them to
+    # recognise it by except the name the client registered.
+    grants = [
+        ApiKeySummary(
+            id=g["id"],
+            name=g["name"],
+            prefix="",
+            scopes=g["scopes"],
+            created_at=g["created_at"],
+            last_used_at=g["last_used_at"],
+            kind="oauth",
+        )
+        for g in await store.oauth_repo.list_for_workspace(workspace_id)
+    ]
+
+    # Newest first across both kinds, so the row somebody just made is at the
+    # top whichever way they made it.
+    return sorted(
+        keys + grants,
+        key=lambda c: c.created_at or datetime.min,
+        reverse=True,
+    )
 
 
 @api_keys_router.delete(
@@ -119,15 +156,39 @@ async def list_api_keys(
 async def revoke_api_key(
     workspace_id: int = Path(...),
     key_id: int = Path(...),
+    kind: str = Query(
+        "api_key",
+        description="Which list the row came from: api_key or oauth.",
+    ),
     user_data: dict = Depends(authenticate_user),
     store: RepositoryManager = Depends(get_store),
 ) -> None:
-    """Withdraw a key. Immediate: the next request carrying it is refused."""
+    """Withdraw a connection. Immediate: the next request carrying it is refused.
+
+    `kind` is required in substance even though it has a default, because the
+    two tables number their rows independently: workspace_api_keys id 5 and
+    oauth_tokens id 5 both exist, both belong to this workspace, and trying one
+    table and falling through to the other would revoke whichever happened to
+    match first. That is a silent wrong-row revocation, which looks to the
+    customer like a key that stopped working for no reason and an app that
+    kept working after they cut it off.
+    """
     user_id = user_data["user_id"]
     await assert_workspace_capability(
         store, user_id, workspace_id, Capability.MANAGE_API_KEYS
     )
-    # 404 rather than 403 when the key belongs to another workspace, which is
-    # the rule everywhere here for a resource named by an id.
-    if not await store.api_key_repo.revoke(key_id, workspace_id):
+
+    if kind == "oauth":
+        revoked = await store.oauth_repo.revoke(key_id, workspace_id)
+    elif kind == "api_key":
+        revoked = await store.api_key_repo.revoke(key_id, workspace_id)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="kind has to be api_key or oauth.",
+        )
+
+    # 404 rather than 403 when it belongs to another workspace, which is the
+    # rule everywhere here for a resource named by an id.
+    if not revoked:
         raise HTTPException(status_code=404, detail="Key not found")

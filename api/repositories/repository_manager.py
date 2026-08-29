@@ -16,6 +16,7 @@ from .async_workspace_repository import AsyncWorkspaceRepository
 from .async_organization_repository import AsyncOrganizationRepository
 from .async_agent_run_repository import AsyncAgentRunRepository
 from .async_api_key_repository import AsyncApiKeyRepository
+from .async_oauth_repository import AsyncOAuthRepository
 
 logger = logging.getLogger(__name__)
 
@@ -49,4 +50,5 @@ class RepositoryManager:
         self.usage_repo = AsyncUsageRepository(database_url)
         self.draft_repo = AsyncGeneratedDocumentRepository(database_url)
         self.api_key_repo = AsyncApiKeyRepository(database_url)
+        self.oauth_repo = AsyncOAuthRepository(database_url)
         logger.info("All async repositories initialized successfully")

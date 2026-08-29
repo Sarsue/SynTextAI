@@ -30,7 +30,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-from .api_keys import parse_prefix
+from .api_keys import any_prefix
 
 
 def credential_or_address(request: Request) -> str:
@@ -43,7 +43,10 @@ def credential_or_address(request: Request) -> str:
     """
     header = request.headers.get("authorization") or ""
     token = header.split("Bearer ", 1)[-1].strip()
-    prefix = parse_prefix(token)
+    # Any kind of credential we issue, not only an API key: an OAuth access
+    # token is held by a program for exactly the same reason and needs its own
+    # budget for exactly the same reason.
+    prefix = any_prefix(token)
     if prefix:
         return f"key:{prefix}"
     return get_remote_address(request)

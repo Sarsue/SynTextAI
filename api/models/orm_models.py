@@ -693,3 +693,99 @@ class WorkspaceApiKey(Base):
 
     workspace = relationship("Workspace")
     created_by = relationship("User")
+
+
+class OAuthClient(Base):
+    """An application that may ask for access. Not a credential in itself.
+
+    Written by the client through dynamic registration, because that is how MCP
+    clients arrive: nobody pre-registers Claude with every server it might one
+    day connect to. Registering grants nothing at all until a person approves a
+    specific workspace on the consent screen.
+
+    client_name is chosen by the client and verified by nobody, which is why the
+    consent screen shows the redirect host beside it. "Claude" is a claim; the
+    host a code would be sent to is a fact.
+    """
+
+    __tablename__ = "oauth_clients"
+    __table_args__ = (Index("ix_oauth_clients_client_id", "client_id", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String, nullable=False)
+    # NULL for a public client, which a desktop app is: it cannot keep a secret
+    # on somebody's laptop, so PKCE does that job instead.
+    client_secret_hash = Column(String, nullable=True)
+    client_name = Column(String, nullable=False)
+    redirect_uris = Column(JSONB, nullable=False)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class OAuthAuthorizationCode(Base):
+    """A few seconds between the consent screen and a token. Used once.
+
+    The PKCE challenge is stored; the verifier never is. That is the whole point
+    of PKCE: a code intercepted on its way back through a redirect is useless
+    without a verifier that never left the client that started the flow.
+    """
+
+    __tablename__ = "oauth_authorization_codes"
+    __table_args__ = (Index("ix_oauth_codes_hash", "code_hash", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    code_hash = Column(String, nullable=False)
+    client_id = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    scopes = Column(JSONB, nullable=False)
+    code_challenge = Column(String, nullable=False)
+    code_challenge_method = Column(String(16), nullable=False)
+    # The token request has to present the same one. A code redeemed against a
+    # different redirect_uri is a redirect that was tampered with.
+    redirect_uri = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    # A code presented twice is not merely refused. It means somebody else may
+    # have held it, so the tokens it already produced are withdrawn too.
+    consumed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class OAuthToken(Base):
+    """A granted connection: one app, one person, one workspace.
+
+    Deliberately the same shape as WorkspaceApiKey. It carries a user, a
+    workspace and scopes, and nothing about permission, so the live lookup in
+    core/auth decides what the holder may do exactly as it does for a key. Two
+    kinds of credential, one authorization path.
+
+    This is the row somebody revokes in Settings, which is why the refresh token
+    has no expiry of its own: the grant is the thing that ends, not the string.
+    """
+
+    __tablename__ = "oauth_tokens"
+    __table_args__ = (
+        Index("ix_oauth_tokens_access_prefix", "access_prefix", unique=True),
+        Index("ix_oauth_tokens_refresh_prefix", "refresh_prefix"),
+        Index("ix_oauth_tokens_workspace_id", "workspace_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id = Column(
+        Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    scopes = Column(JSONB, nullable=False)
+    access_prefix = Column(String, nullable=False)
+    access_hash = Column(String, nullable=False)
+    access_expires_at = Column(DateTime, nullable=False)
+    refresh_prefix = Column(String, nullable=True)
+    refresh_hash = Column(String, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+    workspace = relationship("Workspace")
+    user = relationship("User")

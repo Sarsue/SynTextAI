@@ -155,10 +155,12 @@ async def client(store):
     person, so a test written before machine credentials existed still exercises
     exactly what it did.
 
-    With one exception, deliberately. A request carrying a real API key is
-    handed to the real resolver instead of the stub, so the ceiling, revocation
-    and expiry can be driven end to end against a real row. Stubbing that too
-    would leave the entire point of the credential untested.
+    With one exception, deliberately. A request carrying any credential we issue
+    — an API key or an OAuth access token — is handed to the real resolver
+    instead of the stub, so ceilings, revocation, rotation and expiry are driven
+    end to end against real rows. Stubbing those would leave the entire point of
+    the credential untested, and quietly: the request still succeeds, as the
+    person the stub returns.
 
     What is being tested is what the routes do *after* deciding who you are: the
     role checks, the workspace checks, the 403s. Firebase token verification is
@@ -170,7 +172,7 @@ async def client(store):
     import httpx
     from fastapi import Depends, Header
     from api.app import app
-    from api.core.api_keys import looks_like_api_key
+    from api.core.api_keys import any_prefix
     from api.core.auth import (
         Principal,
         authenticate_api_caller,
@@ -180,6 +182,18 @@ async def client(store):
     from api.repositories.repository_manager import RepositoryManager
 
     app.state.store = store
+
+    # Rate limiting off for the suite. It keys on the client address, every
+    # test shares one, and a file that walks a flow several times legitimately
+    # exceeds a budget written for one customer connecting one app. Leaving it
+    # on made eight OAuth tests fail with 429 where they assert 200 and 400,
+    # which reads as a broken authorization server rather than a throttle.
+    #
+    # Nothing here asserts on the budgets, so nothing is lost by this. If a test
+    # for them is ever written it should turn the limiter back on for itself.
+    from api.core.rate_limit import limiter
+    was_enabled = limiter.enabled
+    limiter.enabled = False
 
     current = {"user_id": None}
 
@@ -194,9 +208,14 @@ async def client(store):
         authorization: str = Header(None),
         request_store: RepositoryManager = Depends(get_store),
     ):
-        """The same person, as a Principal. Unless a real key is presented."""
+        """The same person, as a Principal. Unless a real credential is shown."""
         token = (authorization or "").split("Bearer ", 1)[-1].strip()
-        if looks_like_api_key(token):
+        # Any credential we issue, not only an API key. Matching `stx_live_`
+        # alone meant an OAuth access token fell through to the stub and every
+        # request carrying one was served as the signed-in owner: a revoked
+        # grant kept working, and the tests that should have caught it passed
+        # for the wrong reason.
+        if any_prefix(token):
             # Not stubbed. This is the path the feature exists for, and a test
             # that stubbed it would prove only that the stub works.
             return await authenticate_api_caller(
@@ -223,3 +242,4 @@ async def client(store):
         yield Client()
 
     app.dependency_overrides.clear()
+    limiter.enabled = was_enabled

@@ -41,6 +41,7 @@ TENANT_CHECKS = (
     "check_can_upload_to_workspace",
     "_authorized_draft",
     "_may_see_file",
+    "_reachable_workspaces",
     "_billing_organization_id",
     "org_repo.get_role",
     "user_owns_chat_history",
@@ -73,6 +74,25 @@ EXEMPT = {
     ("sendgrid_events.py", "sendgrid_events"): "SendGrid webhook, signature verified",
     ("internal.py", "notify_client_endpoint"): "internal, shared-secret verified",
     ("internal.py", "eval_query_endpoint"): "internal, shared-secret verified",
+
+    # The authorization server. Every one of these runs before any workspace is
+    # named, and the one step that DOES name one, `approve`, is absent from this
+    # list on purpose: it calls accessible_workspace_ids, because deciding which
+    # workspace a grant reaches is the whole job of the consent screen.
+    ("oauth.py", "protected_resource_metadata"): "public discovery document, no customer data",
+    ("oauth.py", "authorization_server_metadata"): "public discovery document, no customer data",
+    ("oauth.py", "register_client"): (
+        "dynamic client registration, unauthenticated by design; a registered "
+        "client reaches nothing until a person approves a workspace for it"
+    ),
+    ("oauth.py", "authorize"): (
+        "validates the request and redirects to the consent screen; names no "
+        "workspace and reads no tenant data"
+    ),
+    ("oauth.py", "token"): (
+        "exchanges a code or a refresh token for the grant already approved; "
+        "the workspace was decided at consent and is carried on the code"
+    ),
 
     # Deliberately reachable without membership: that is the point of an invite.
     ("workspaces.py", "get_invite_info"): "invite token IS the authorization",

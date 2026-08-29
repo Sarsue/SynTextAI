@@ -136,14 +136,9 @@ enough until a customer says otherwise.
    Claude can query their knowledge base. No new ingestion, and `hybrid_search`
    plus the tenant scoping already exist. Distribution more than a feature.
 
-   Four phases, and the whole of it is the feature rather than a menu: (1) the
-   credential and the Principal, on `develop` now; (2) Settings UI to create,
-   see last use, and revoke; (3) the MCP server itself, authenticated by a
-   pasted key, which reaches a technical customer; (4) an OAuth authorization
-   server, which is what reaches everyone else and is weeks rather than days —
-   authorize and token endpoints, refresh, PKCE, consent, dynamic client
-   registration. Phase 1 is not throwaway on the way there: OAuth becomes a
-   third resolver behind the same Principal.
+   All four phases are built and on `develop`: the credential and the Principal,
+   the Connections screen, the MCP server, and the OAuth authorization server.
+   Not deployed. See "Credentials" and "The authorization server" below.
 3. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
@@ -219,6 +214,44 @@ One line each. The reasoning is in the commit or the code comment beside it.
   counts messages, and search writes none. So Phase 1 adds no usage table, and
   `last_used_at` is the visibility it provides. Exposing `ask` over a credential
   is what would make the panel go blind, and that is Phase 3's problem.
+
+**The authorization server**
+- One Principal, three ways to arrive at it: Firebase, an API key, an OAuth
+  access token. `_RESOLVERS` in `core/auth.py` is ordered and dispatches on the
+  token's tag, so adding a credential type is an entry there and nothing else.
+  This is why the API-key work was not thrown away when OAuth arrived.
+- S256 only. `plain` PKCE makes the challenge equal the verifier, so an
+  intercepted authorization request carries everything needed to redeem its own
+  code. No implicit grant and no password grant, and none of the three are
+  advertised in the metadata, so a client cannot negotiate down to them.
+- A replayed authorization code withdraws every token it already produced.
+  Refusing the second request while leaving the first request's tokens alive
+  protects nothing: a code presented twice means somebody else may have held it.
+- The code is claimed in one UPDATE with `consumed_at IS NULL` in its WHERE.
+  Checking and then writing leaves exactly the race this is guarding.
+- Refresh tokens rotate. A stolen one is good for one use, and then the real
+  client's next refresh fails loudly instead of silently sharing the grant.
+- The workspace comes from the person on the consent screen, never from the
+  client's request, and is checked against `accessible_workspace_ids` rather
+  than trusted from the form.
+- `/authorize` refuses an unregistered client or redirect with a plain error and
+  never a redirect carrying one. Bouncing an error to an unverified URL is how
+  an open redirect gets built by accident.
+- Registration is unauthenticated because that is what dynamic client
+  registration means, and it is harmless because a registered client reaches
+  nothing until somebody approves a workspace for it.
+- A 401 from `authenticate_api_caller` carries `WWW-Authenticate` with the
+  resource-metadata URL. Without it an MCP client meeting a 401 reports
+  "unauthorized" and stops, instead of starting the flow that would fix it.
+- Keys and grants are separate tables numbering their rows independently, so
+  revoke takes an explicit `kind`. Trying one table and falling through to the
+  other revokes the wrong row: a key that stops for no reason, and an app that
+  keeps working after it was cut off.
+- MCP returns retrieval, not answers. Search is under a second; answering goes
+  through the worker, and a tool call that stalls for ten seconds is broken in
+  somebody else's chat window. The calling model does the reasoning.
+- The MCP tool descriptions carry the vision caution, because they are the only
+  instructions we get to give a model we do not run.
 
 **Security and tenancy**
 - Invite mail goes out with SendGrid click tracking off. On, SendGrid

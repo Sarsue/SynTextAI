@@ -8,6 +8,7 @@ import './SettingsPage.css'; // Import the CSS file
 import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
 import UsagePanel from './UsagePanel';
+import ConnectionsPanel from './ConnectionsPanel';
 import { Stripe } from '@stripe/stripe-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -329,6 +330,14 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 <div className="settings-section">
                     <h2 className="section-title">Usage</h2>
                     <UsagePanel />
+                </div>
+
+                {/* Under Usage rather than beside Organization: what has access
+                    and what it has been doing are the same question, and this
+                    is the screen somebody is already on when they ask it. */}
+                <div className="settings-section">
+                    <h2 className="section-title">Connections</h2>
+                    <ConnectionsPanel />
                 </div>
 
                 <div className="settings-section">
