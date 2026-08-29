@@ -55,8 +55,16 @@ const SubscriptionNotice: React.FC<SubscriptionNoticeProps> = ({ darkMode = fals
                         </span>
                     </div>
                 </div>
+                {/* The hash, not a bare path. This app is a HashRouter, so
+                    href="/settings" loaded the site at an empty hash and landed
+                    on the marketing homepage: somebody whose card had just
+                    failed clicked "Fix payment" and was shown the sales page.
+
+                    Named to the section as well, now that there is one, so it
+                    opens on the form rather than on whatever section comes
+                    first. */}
                 <Button asChild size="sm">
-                    <a href="/settings">Fix payment</a>
+                    <a href="#/settings/plan">Fix payment</a>
                 </Button>
             </div>
         </div>

@@ -217,6 +217,21 @@ const Home: React.FC = () => {
                     <strong>$99 a month</strong> for 10 people, then $9 each.
                     <span className="home-price-meta">Cancel anytime.</span>
                 </p>
+
+                {/* One line, where the objection actually lands. "We already use
+                    ChatGPT" is the standard brush-off, and the answer is not a
+                    feature block explaining a protocol nobody here has heard of.
+                    It is a sentence and a link, for the minority who care. */}
+                <p className="home-price-meta home-connect-line">
+                    Already using Claude?{' '}
+                    <Link
+                        to="/connect"
+                        className="home-link"
+                        onClick={() => posthog.capture('homepage_connect_click')}
+                    >
+                        Connect it to your documents
+                    </Link>.
+                </p>
             </section>
 
             {/* The product, in the first screen. A real answer, from real

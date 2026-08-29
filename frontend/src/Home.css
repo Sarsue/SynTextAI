@@ -829,3 +829,11 @@ body {
     .home-thing--reverse .home-thing-shot { order: 2; }
     .home-shot { padding-bottom: 48px; }
 }
+
+/* The connect line under the price. Quiet on purpose: it is for the minority
+ * of visitors who already live in an AI tool, and it must not compete with the
+ * price or the call to action beside it. */
+.home-connect-line {
+    display: block;
+    margin-top: 10px;
+}
