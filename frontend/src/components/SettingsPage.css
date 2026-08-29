@@ -80,3 +80,93 @@
     flex: 1 1 12rem;
     min-width: 0;
 }
+
+/* The section rail.
+ *
+ * Settings used to be one page with seven headings stacked down it, which is
+ * why Team never fit and lived in a dialog somewhere else. One panel at a time,
+ * with the rail as the table of contents.
+ *
+ * Built on the tokens in index.css so dark mode follows without a second
+ * palette to keep in step.
+ */
+.settings-shell {
+    display: flex;
+    align-items: flex-start;
+    gap: 28px;
+}
+
+.settings-rail {
+    flex: 0 0 176px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: sticky;
+    top: 16px;
+}
+
+.settings-rail-item {
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    text-align: left;
+    color: var(--secondary-color, #777);
+    background-color: transparent;
+    border: none;
+    border-radius: var(--radius, 8px);
+    cursor: pointer;
+}
+
+.settings-rail-item:hover {
+    color: var(--text-color, #111);
+    background-color: var(--card-bg, #f8f8f8);
+}
+
+/* The current section. Marked by weight and a filled ground rather than a
+ * colour, because the one accent in this palette is doing work elsewhere. */
+.settings-rail-item.is-active {
+    color: var(--text-color, #111);
+    background-color: var(--card-bg, #f8f8f8);
+    font-weight: 600;
+}
+
+.settings-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* One panel at a time means the heading is no longer separating a section from
+ * the next one; it is naming the page. */
+.settings-panel .settings-section {
+    margin-bottom: 20px;
+}
+
+/* Narrow screens: the rail becomes a scrolling row above the panel rather than
+ * a column stealing half the width. */
+@media (max-width: 720px) {
+    .settings-shell {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .settings-rail {
+        flex: 0 0 auto;
+        position: static;
+        flex-direction: row;
+        gap: 4px;
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 4px;
+    }
+
+    .settings-rail-item {
+        white-space: nowrap;
+    }
+}
+
+/* The team panel is a section body now, not a dialog, so it gets the page's
+ * width instead of a modal's. The old dialog capped at sm:max-w-md and outgrew
+ * the viewport at about four people. */
+.team-panel {
+    max-width: 620px;
+}

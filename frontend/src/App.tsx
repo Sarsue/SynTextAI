@@ -95,6 +95,20 @@ const App: React.FC = () => {
                                 )
                             }
                         />
+                        {/* Two routes, not one optional parameter: the bare
+                            /settings still works for every existing link, and
+                            /settings/team is what the workspace selector and a
+                            bookmark point at. */}
+                        <Route
+                            path="/settings/:section"
+                            element={
+                                resolving
+                                    ? waiting
+                                    : user
+                                        ? <SettingsPage stripePromise={stripePromise} user={user} />
+                                        : <Navigate to="/login" replace />
+                            }
+                        />
                         <Route
                             path="/settings"
                             element={

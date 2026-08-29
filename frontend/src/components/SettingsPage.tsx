@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { getAuth, signOut } from 'firebase/auth';
 import { X } from 'lucide-react';
 import PaymentView from './PaymentView';
@@ -9,6 +9,7 @@ import { User } from 'firebase/auth';
 import { useUserContext } from '../UserContext';
 import UsagePanel from './UsagePanel';
 import ConnectionsPanel from './ConnectionsPanel';
+import TeamPanel from './TeamPanel';
 import { Stripe } from '@stripe/stripe-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +24,41 @@ interface SettingsPageProps {
 const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
     const navigate = useNavigate();
     const { darkMode, setDarkMode, setUser, orgContext, activeOrganizationId, setActiveOrganization, clearActiveOrganization } = useUserContext();
+
+    const { section } = useParams<{ section?: string }>();
+
+    /* Every section, in the order they are worth reading: what you are paying
+       for, who you are, who else is here, what they have been doing, what is
+       connected, then the two that are settings in the ordinary sense.
+
+       `when` decides whether the row appears. It mirrors what the API already
+       enforces, so a hidden row is never the only thing standing between
+       somebody and a panel they may not open. */
+    const SECTIONS = [
+        /* Named for what is behind it. An owner gets the payment form; somebody
+           on a colleague's plan gets an explanation of what they are covered by,
+           and no form. Labelling both "Plan" put a rail item and a panel heading
+           side by side saying different words about the same section. */
+        {
+            id: 'plan',
+            label: orgContext && !orgContext.can_manage_billing ? 'Plan' : 'Payment',
+            when: true,
+        },
+        { id: 'organization', label: 'Organization', when: !!orgContext?.can_rename_organization },
+        { id: 'team', label: 'Team', when: !!orgContext?.can_manage_members },
+        { id: 'usage', label: 'Usage', when: !!orgContext?.can_manage_members },
+        { id: 'connections', label: 'Connections', when: !!orgContext?.can_manage_members },
+        { id: 'theme', label: 'Theme', when: true },
+        { id: 'account', label: 'Delete Account', when: true },
+    ];
+    const visibleSections = SECTIONS.filter((s) => s.when);
+
+    /* An unknown or hidden section falls back to the first visible one rather
+       than rendering an empty panel. That covers a stale bookmark, a link to a
+       section this person cannot see, and /settings with nothing after it. */
+    const active = visibleSections.some((s) => s.id === section)
+        ? (section as string)
+        : (visibleSections[0]?.id ?? 'plan');
     const { addToast } = useToast();
     const [orgName, setOrgName] = React.useState('');
     const [isRenaming, setIsRenaming] = React.useState(false);
@@ -213,180 +249,232 @@ const SettingsPage: React.FC<SettingsPageProps> = ({ stripePromise, user }) => {
                 </Button>
             )}
 
-            {/* Settings Content */}
-            <div className="settings-content">
-                {!canLeaveSettings && (
-                    <div className="settings-section">
-                        <p className="text-sm">
-                            <strong>{orgContext?.name || 'This organization'}</strong> has no
-                            plan yet. Choose one below to start using it.
-                        </p>
-                        {/* An exit. Somebody who signed up for their own company
-                            while already belonging to another was trapped here:
-                            closing goes to /chat, /chat requires a plan, and it
-                            bounced straight back with nothing to click. Only
-                            offered when there is somewhere else to go, or the
-                            chooser would auto-resolve and return them here. */}
-                        {otherOrganizations > 0 && (
-                            <p className="text-sm text-muted-foreground" style={{ marginTop: 8 }}>
-                                Or{' '}
-                                <button
-                                    type="button"
-                                    className="auth-link"
-                                    onClick={() => navigate('/select-organization')}
-                                >
-                                    switch to another organization
-                                </button>{' '}
-                                you belong to.
-                            </p>
-                        )}
-                    </div>
-                )}
-                {/* Payment, owners only.
+            {/* A rail of sections, one panel at a time.
 
-                    An invited member has no subscription of their own: their
-                    access is paid for by whoever owns the workspace. Showing
-                    them a payment form pushed them into starting a second,
-                    duplicate trial for an organization that already pays. If
-                    the owner's plan lapses they are told who to talk to, and
-                    are never asked to fix somebody else's billing. */}
-                {orgContext && !orgContext.can_manage_billing ? (
-                    <div className="settings-section">
-                        <h2 className="section-title">Plan</h2>
-                        <div className="section-content">
-                            {orgContext.entitled ? (
-                                <p className="text-sm text-muted-foreground">
-                                    Your access is included in your team's plan. The workspace
-                                    owner manages billing, so there's nothing for you to set up.
-                                </p>
-                            ) : (
-                                <p className="text-sm text-muted-foreground">
-                                    Your team's plan needs attention, so some features are
-                                    unavailable. Contact your workspace owner to restore access.
+                This was one page with seven headings stacked down it, so Team
+                did not fit and lived in a dialog beside the workspace list
+                instead. A section per panel gives every one of them a name, a
+                URL, and room to grow.
+
+                The rail lists only what this person may actually open. Hiding a
+                row is a courtesy, not the control: every panel behind it asks
+                the API, which refuses on its own. */}
+            <div className="settings-shell">
+                <nav className="settings-rail" aria-label="Settings sections">
+                    {visibleSections.map((s) => (
+                        <button
+                            key={s.id}
+                            type="button"
+                            className={`settings-rail-item${s.id === active ? ' is-active' : ''}`}
+                            aria-current={s.id === active ? 'page' : undefined}
+                            onClick={() => navigate(`/settings/${s.id}`)}
+                        >
+                            {s.label}
+                        </button>
+                    ))}
+                </nav>
+
+                <div className="settings-panel">
+                    {!canLeaveSettings && (
+                        <div className="settings-section">
+                            <p className="text-sm">
+                                <strong>{orgContext?.name || 'This organization'}</strong> has no
+                                plan yet. Choose one below to start using it.
+                            </p>
+                            {/* An exit. Somebody who signed up for their own company
+                                while already belonging to another was trapped here:
+                                closing goes to /chat, /chat requires a plan, and it
+                                bounced straight back with nothing to click. Only
+                                offered when there is somewhere else to go, or the
+                                chooser would auto-resolve and return them here. */}
+                            {otherOrganizations > 0 && (
+                                <p className="text-sm text-muted-foreground" style={{ marginTop: 8 }}>
+                                    Or{' '}
+                                    <button
+                                        type="button"
+                                        className="auth-link"
+                                        onClick={() => navigate('/select-organization')}
+                                    >
+                                        switch to another organization
+                                    </button>{' '}
+                                    you belong to.
                                 </p>
                             )}
                         </div>
-                    </div>
-                ) : (
-                    <div className="settings-section">
-                        <h2 className="section-title">Payment</h2>
-                        <div className="section-content">
-                            <PaymentView
-                                stripePromise={stripePromise}
-                                user={user}
-                                darkMode={darkMode}
-                            />
+                    )}
+
+                    {active === 'plan' && (
+                        <>
+                            {/* Payment, owners only.
+
+                                An invited member has no subscription of their own: their
+                                access is paid for by whoever owns the workspace. Showing
+                                them a payment form pushed them into starting a second,
+                                duplicate trial for an organization that already pays. If
+                                the owner's plan lapses they are told who to talk to, and
+                                are never asked to fix somebody else's billing. */}
+                            {orgContext && !orgContext.can_manage_billing ? (
+                                <div className="settings-section">
+                                    <h2 className="section-title">Plan</h2>
+                                    <div className="section-content">
+                                        {orgContext.entitled ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                Your access is included in your team's plan. The workspace
+                                                owner manages billing, so there's nothing for you to set up.
+                                            </p>
+                                        ) : (
+                                            <p className="text-sm text-muted-foreground">
+                                                Your team's plan needs attention, so some features are
+                                                unavailable. Contact your workspace owner to restore access.
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="settings-section">
+                                    <h2 className="section-title">Payment</h2>
+                                    <div className="section-content">
+                                        <PaymentView
+                                            stripePromise={stripePromise}
+                                            user={user}
+                                            darkMode={darkMode}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {active === 'organization' && (
+                        <>
+                            {/* Organization, for owners and admins.
+
+                                Organizations are created with a name derived from the signup
+                                email, so they start out reading as "drsmith's Organization".
+                                That is what teammates see in the chooser and what invite
+                                emails announce, so it needs to be editable here and not only
+                                during onboarding, which is easy to skip. */}
+                            {orgContext?.can_rename_organization && (
+                                <div className="settings-section">
+                                    <h2 className="section-title">Organization</h2>
+                                    <div className="section-content">
+                                        <label className="settings-label" htmlFor="org-name-input">
+                                            Company name
+                                        </label>
+                                        <div className="settings-inline-form">
+                                            <Input
+                                                id="org-name-input"
+                                                value={orgName}
+                                                onChange={(e) => setOrgName(e.target.value)}
+                                                placeholder="Bayview Dental"
+                                            />
+                                            <Button
+                                                onClick={handleRenameOrganization}
+                                                disabled={
+                                                    isRenaming ||
+                                                    !orgName.trim() ||
+                                                    orgName.trim() === (orgContext.name || '')
+                                                }
+                                            >
+                                                {isRenaming ? 'Saving...' : 'Save'}
+                                            </Button>
+                                        </div>
+                                        <p className="text-sm text-muted-foreground">
+                                            Your team sees this name when you invite them.
+                                        </p>
+                                        <p className="text-sm text-muted-foreground">
+                                            {orgContext.seats_used}{' '}
+                                            {orgContext.seats_used === 1 ? 'member' : 'members'}
+                                            {orgContext.seat_limit
+                                                ? ` of ${orgContext.seat_limit} seats`
+                                                : ''}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {active === 'team' && (
+                        <div className="settings-section">
+                            <h2 className="section-title">Team</h2>
+                            <TeamPanel />
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Organization, for owners and admins.
-
-                    Organizations are created with a name derived from the signup
-                    email, so they start out reading as "drsmith's Organization".
-                    That is what teammates see in the chooser and what invite
-                    emails announce, so it needs to be editable here and not only
-                    during onboarding, which is easy to skip. */}
-                {orgContext?.can_rename_organization && (
-                    <div className="settings-section">
-                        <h2 className="section-title">Organization</h2>
-                        <div className="section-content">
-                            <label className="settings-label" htmlFor="org-name-input">
-                                Company name
-                            </label>
-                            <div className="settings-inline-form">
-                                <Input
-                                    id="org-name-input"
-                                    value={orgName}
-                                    onChange={(e) => setOrgName(e.target.value)}
-                                    placeholder="Bayview Dental"
-                                />
-                                <Button
-                                    onClick={handleRenameOrganization}
-                                    disabled={
-                                        isRenaming ||
-                                        !orgName.trim() ||
-                                        orgName.trim() === (orgContext.name || '')
-                                    }
-                                >
-                                    {isRenaming ? 'Saving...' : 'Save'}
-                                </Button>
+                    {active === 'usage' && (
+                            <div className="settings-section">
+                                <h2 className="section-title">Usage</h2>
+                                <UsagePanel />
                             </div>
-                            <p className="text-sm text-muted-foreground">
-                                Your team sees this name when you invite them.
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                                {orgContext.seats_used}{' '}
-                                {orgContext.seats_used === 1 ? 'member' : 'members'}
-                                {orgContext.seat_limit
-                                    ? ` of ${orgContext.seat_limit} seats`
-                                    : ''}
-                            </p>
-                        </div>
-                    </div>
-                )}
+                    )}
 
-                {/* Theme Section */}
-                <div className="settings-section">
-                    <h2 className="section-title">Usage</h2>
-                    <UsagePanel />
-                </div>
+                    {active === 'connections' && (
+                        <>
+                                {/* Under Usage rather than beside Organization: what has access
+                                    and what it has been doing are the same question, and this
+                                    is the screen somebody is already on when they ask it. */}
+                                <div className="settings-section">
+                                    <h2 className="section-title">Connections</h2>
+                                    <ConnectionsPanel />
+                                </div>
+                        </>
+                    )}
 
-                {/* Under Usage rather than beside Organization: what has access
-                    and what it has been doing are the same question, and this
-                    is the screen somebody is already on when they ask it. */}
-                <div className="settings-section">
-                    <h2 className="section-title">Connections</h2>
-                    <ConnectionsPanel />
-                </div>
+                    {active === 'theme' && (
+                            <div className="settings-section">
+                                <h2 className="section-title">Theme</h2>
+                                <div className="section-content">
+                                    <DarkModeToggle darkMode={darkMode} setDarkMode={setDarkMode} />
+                                </div>
+                            </div>
+                    )}
 
-                <div className="settings-section">
-                    <h2 className="section-title">Theme</h2>
-                    <div className="section-content">
-                        <DarkModeToggle darkMode={darkMode} setDarkMode={setDarkMode} />
-                    </div>
-                </div>
-
-                {/* Account Management Section */}
-                <div className="settings-section">
-                    <h2 className="section-title text-destructive">Delete Account</h2>
-                    <div className="section-content">
-                        {/* Says what actually happens. It promised to erase
-                            "uploaded files" full stop, which is wrong for a
-                            document sitting in a company workspace: that
-                            document belongs to the company, and erasing it
-                            would mean one person leaving takes their
-                            colleagues' knowledge base with them. */}
-                        <p className="text-sm text-muted-foreground">
-                            This permanently erases:
-                        </p>
-                        <ul className="list-disc ml-5 text-sm text-muted-foreground">
-                            <li>Your account, sign-in and payment details</li>
-                            <li>Your chat history</li>
-                            {(impact?.organizations || []).map((o: any) => (
-                                <li key={o.organization_id}>
-                                    <strong>{o.name}</strong>
-                                    {o.documents > 0 && `, and its ${o.documents} document${o.documents === 1 ? '' : 's'}`}
-                                    {o.other_members > 0 && `. ${o.other_members} other ${o.other_members === 1 ? 'person loses' : 'people lose'} access`}
-                                </li>
-                            ))}
-                            {!impact && <li>Any company you own, and everything in it</li>}
-                        </ul>
-                        {impact?.loses_access > 0 && (
-                            <p className="text-sm text-destructive">
-                                You own a company other people are using. Deleting your
-                                account ends it for them too: you hold the card, so the
-                                subscription goes with you and nobody can take it over.
-                            </p>
-                        )}
-                        <p className="text-sm text-muted-foreground">
-                            Documents in a company you only belong to stay with that
-                            company. It cannot be undone.
-                        </p>
-                        <Button variant="destructive" onClick={() => setConfirmingDelete(true)} className="w-fit">
-                            Delete My Account
-                        </Button>
-                    </div>
+                    {active === 'account' && (
+                        <>
+                                {/* Account Management Section */}
+                                <div className="settings-section">
+                                    <h2 className="section-title text-destructive">Delete Account</h2>
+                                    <div className="section-content">
+                                        {/* Says what actually happens. It promised to erase
+                                            "uploaded files" full stop, which is wrong for a
+                                            document sitting in a company workspace: that
+                                            document belongs to the company, and erasing it
+                                            would mean one person leaving takes their
+                                            colleagues' knowledge base with them. */}
+                                        <p className="text-sm text-muted-foreground">
+                                            This permanently erases:
+                                        </p>
+                                        <ul className="list-disc ml-5 text-sm text-muted-foreground">
+                                            <li>Your account, sign-in and payment details</li>
+                                            <li>Your chat history</li>
+                                            {(impact?.organizations || []).map((o: any) => (
+                                                <li key={o.organization_id}>
+                                                    <strong>{o.name}</strong>
+                                                    {o.documents > 0 && `, and its ${o.documents} document${o.documents === 1 ? '' : 's'}`}
+                                                    {o.other_members > 0 && `. ${o.other_members} other ${o.other_members === 1 ? 'person loses' : 'people lose'} access`}
+                                                </li>
+                                            ))}
+                                            {!impact && <li>Any company you own, and everything in it</li>}
+                                        </ul>
+                                        {impact?.loses_access > 0 && (
+                                            <p className="text-sm text-destructive">
+                                                You own a company other people are using. Deleting your
+                                                account ends it for them too: you hold the card, so the
+                                                subscription goes with you and nobody can take it over.
+                                            </p>
+                                        )}
+                                        <p className="text-sm text-muted-foreground">
+                                            Documents in a company you only belong to stay with that
+                                            company. It cannot be undone.
+                                        </p>
+                                        <Button variant="destructive" onClick={() => setConfirmingDelete(true)} className="w-fit">
+                                            Delete My Account
+                                        </Button>
+                                    </div>
+                                </div>
+                        </>
+                    )}
                 </div>
             </div>
 
