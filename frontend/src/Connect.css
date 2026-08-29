@@ -1,0 +1,105 @@
+/* The connect page. Built on Home.css so it is the same site rather than a
+ * documentation island, and on the tokens in index.css so dark mode follows.
+ */
+.connect-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    max-width: 640px;
+}
+
+.connect-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+}
+
+.connect-step-number {
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted, #bbb);
+    padding-top: 2px;
+}
+
+.connect-step-title {
+    margin: 0 0 6px;
+    font-size: 1.02rem;
+    font-weight: 600;
+    color: var(--heading-color, #111);
+}
+
+.connect-step-text {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--secondary-color, #777);
+}
+
+/* The one thing on this page a person actually types, so it is the one thing
+ * that looks typed. Selectable as a whole, because it gets copied. */
+.connect-code {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 9px 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86rem;
+    color: var(--text-color, #111);
+    background-color: var(--card-bg, #f8f8f8);
+    border: 1px solid var(--border-color, #e8e8e8);
+    border-radius: var(--radius, 8px);
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.connect-columns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px;
+    max-width: 640px;
+}
+
+.connect-column {
+    flex: 1 1 240px;
+}
+
+.connect-column-title {
+    margin: 0 0 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #bbb);
+}
+
+.connect-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: var(--secondary-color, #777);
+}
+
+.connect-body,
+.connect-note {
+    max-width: 640px;
+    margin: 0 0 14px;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    color: var(--secondary-color, #777);
+}
+
+.connect-note {
+    margin-top: 24px;
+    padding-left: 14px;
+    border-left: 2px solid var(--border-color, #e8e8e8);
+}
+
+.connect-body--muted {
+    font-size: 0.88rem;
+    color: var(--text-muted, #bbb);
+}
+
+.connect-cta {
+    padding-bottom: 8px;
+}

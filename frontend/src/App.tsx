@@ -4,6 +4,7 @@ import { Elements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import { useUserContext } from './UserContext';
 import Home from './Home';
+import Connect from './Connect';
 import Auth, { AuthRef } from './Auth';
 import SignUp from './SignUp';
 import Welcome from './Welcome';
@@ -56,6 +57,10 @@ const App: React.FC = () => {
                     <div className="app-container">
                         <Routes>
                         <Route path="/" element={<Home />} />
+                        {/* Public on purpose. Half its job is answering "does
+                            this work with the AI we already use" for somebody
+                            who has not signed up yet. */}
+                        <Route path="/connect" element={<Connect />} />
                         <Route path="/login" element={<Auth ref={authRef} />} />
                         {/* Its own route, not a mode on the sign-in page.
                             Signing in enters a company you belong to; signing
