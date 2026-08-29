@@ -45,6 +45,7 @@ from ..core.auth import Principal, authenticate_api_caller, get_store
 from ..core.limits import assert_can_ask
 from ..core.permissions import Capability
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
+from ..core.urls import public_app_url
 from ..repositories.repository_manager import RepositoryManager
 from ..services.llm_service import get_text_embedding
 
@@ -79,8 +80,11 @@ TOOLS: List[Dict[str, Any]] = [
             "from. Use this whenever the question is about their business: "
             "their policies, procedures, contracts, manuals, pricing, clients, "
             "or anything a general model could not know. Prefer it over "
-            "answering from memory, and cite the document and page in your "
-            "reply so the reader can check it. If a passage is marked READ FROM "
+            "answering from memory. Cite the document and page in your reply, "
+            "and include the passage's `open:` link so the reader can go and "
+            "see the page for themselves: what you get here is text extracted "
+            "from the document, and the page itself is what settles whether a "
+            "number is right. If a passage is marked READ FROM "
             "A FIGURE, the text layer could not confirm it: say so plainly in "
             "your answer and tell the reader to check that page before acting "
             "on any number in it."
@@ -142,6 +146,28 @@ def _error(request_id: Any, code: int, message: str) -> JSONResponse:
 
 def _tool_text(text: str, is_error: bool = False) -> Dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+def _page_link(file_id: Any, page_number: Any) -> str:
+    """The app address that opens this document at this page.
+
+    The hash is not decoration: the frontend is a HashRouter, so "/#/doc/59/62"
+    is the path and "/doc/59/62" is a 404 from nginx.
+
+    This is a reference, not a grant. Following it lands on the app's own route,
+    which signs the reader in and mints the storage URL per request after the
+    workspace check, exactly as a citation click does. Putting the signed URL
+    here instead would have leaked a credential-free link to a private document
+    into a transcript, and it would have died thirty minutes later.
+
+    Nothing about this is specific to MCP. Any surface that carries a citation
+    as text rather than as a click -- Teams, WhatsApp, an emailed answer -- wants
+    this same URL, which is why the route is /doc and not /mcp/doc.
+    """
+    base = public_app_url()
+    if page_number is None:
+        return f"{base}/#/doc/{file_id}"
+    return f"{base}/#/doc/{file_id}/{page_number}"
 
 
 def _snippet(text: str) -> str:
@@ -234,6 +260,12 @@ async def _search_knowledge(
         where = page["file_name"]
         if page["page_number"] is not None:
             where += f", page {page['page_number']}"
+        # The way back to the document itself. get_page returns the text we
+        # extracted, which is the right thing for the model to read and the
+        # wrong thing to settle an argument with: where extraction lost a
+        # table's shape, the printed page still has it. So the passage carries
+        # an address a person can open, and the reader checks the original.
+        link = _page_link(page["file_id"], page["page_number"])
         # The caution is written into the passage itself rather than a field
         # beside it, because a field is easy for a model to skip and this is the
         # one that turns a torque value into a safety claim.
@@ -246,7 +278,8 @@ async def _search_knowledge(
         )
         lines.append(
             f"--- {where} (file_id={page['file_id']}, "
-            f"page_number={page['page_number']}){caution} ---\n{page['text']}"
+            f"page_number={page['page_number']}) open: {link}{caution} "
+            f"---\n{page['text']}"
         )
 
     return _tool_text("\n\n".join(lines))
@@ -287,8 +320,10 @@ async def _get_page(
                     "\n\n[This document has been replaced by a newer version. "
                     "Tell the reader before quoting it.]"
                 )
+            link = _page_link(file_id, page_number)
             return _tool_text(
-                f"--- {name}, page {page_number} ---\n{page.get('content') or ''}{note}"
+                f"--- {name}, page {page_number} open: {link} ---"
+                f"\n{page.get('content') or ''}{note}"
             )
 
     return _tool_text(

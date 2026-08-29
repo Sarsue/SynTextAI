@@ -13,6 +13,7 @@ import SettingsPage from './components/SettingsPage';
 import AcceptInvite from './components/AcceptInvite';
 import OAuthConsent from './components/OAuthConsent';
 import SelectOrganization from './components/SelectOrganization';
+import DocumentPage from './components/DocumentPage';
 import AnalyticsProvider from './components/AnalyticsProvider';
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_API_KEY || "");
@@ -129,6 +130,21 @@ const App: React.FC = () => {
                             sent to sign in and lands back here. Approving is a
                             decision only a signed-in person can make. */}
                         <Route path="/oauth/consent" element={requireUser(<OAuthConsent />)} />
+
+                        {/* A citation with an address. Everywhere else the
+                            viewer opens from React state, which only works for
+                            a reader already inside a conversation. Any surface
+                            where a citation is text rather than a click -- MCP,
+                            Teams, WhatsApp, an emailed answer -- needs a URL,
+                            and they can all use this one.
+
+                            Behind requireUser: the link is a reference, not a
+                            grant, and the storage URL is still minted per
+                            request after the workspace check. The page is
+                            optional so a link to a whole document is still a
+                            link. */}
+                        <Route path="/doc/:fileId/:page" element={requireUser(<DocumentPage />)} />
+                        <Route path="/doc/:fileId" element={requireUser(<DocumentPage />)} />
 
                         <Route path="/invite/:token" element={<AcceptInvite />} />
                         <Route path="*" element={<Navigate to="/" />} />

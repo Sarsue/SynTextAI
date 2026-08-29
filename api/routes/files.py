@@ -548,7 +548,19 @@ async def get_file_access_url(
     if not signed:
         raise HTTPException(status_code=502, detail="Could not open this document")
 
-    return {"url": signed, "expires_in": int(SIGNED_URL_TTL.total_seconds())}
+    return {
+        "url": signed,
+        "expires_in": int(SIGNED_URL_TTL.total_seconds()),
+        # The four fields below are for a caller that has no file row to read
+        # them off. Every caller inside the chat already holds the row from the
+        # file list and ignores these; the /doc deep link arrives from outside
+        # the app with nothing but an id, and the viewer needs a name to title
+        # itself and a status before it decides whether to render anything.
+        "file_name": file_record.get("file_name"),
+        "file_type": file_record.get("file_type"),
+        "status": file_record.get("processing_status") or "uploaded",
+        "superseded_by_id": file_record.get("superseded_by_id"),
+    }
 
 
 @files_router.get("/{file_id}/content", response_class=JSONResponse)
