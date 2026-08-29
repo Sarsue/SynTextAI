@@ -49,8 +49,9 @@ const Connect: React.FC = () => {
                 </h1>
                 <p className="home-subtext">
                     Connect Claude to one Syntext workspace and it stops guessing. It
-                    searches your own handbooks, policies and contracts, and cites the
-                    page it took the answer from.
+                    searches your own handbooks, policies and contracts, and every
+                    answer links to the page it came from. Click the citation and the
+                    document opens there.
                 </p>
             </section>
 
@@ -104,7 +105,7 @@ const Connect: React.FC = () => {
                         <ul className="connect-list">
                             <li>Search the one workspace you chose</li>
                             <li>Read pages it finds there</li>
-                            <li>Cite the document and page, so you can check it</li>
+                            <li>Link you to the exact page, so you can check it yourself</li>
                         </ul>
                     </div>
                     <div className="connect-column">
