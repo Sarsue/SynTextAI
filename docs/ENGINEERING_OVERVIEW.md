@@ -121,6 +121,34 @@ Live in production.
 - Security: CORS locked, CSP enforced, rate limits on paid endpoints, security
   headers, no exception text to clients, signed document URLs.
 
+**Deep-linked citations** (`/#/doc/:fileId/:page`, 2026-08-29)
+
+A citation with an address. The viewer had always been a dialog inside `/chat`
+opened by React state, so "this document at this page" had no URL and could not
+be bookmarked, shared, or reached from outside the app.
+
+MCP exposed the gap but is not the reason it is general. Any surface that
+carries a citation as text rather than a click needs this: MCP today, Teams,
+WhatsApp, a browser extension or an emailed answer next. All of them use the
+same URL, which is why the route is `/doc` and not `/mcp/doc`. It also gives
+the web app the shareable citation link it never had.
+
+The viewer, the signing and the authorization are reused untouched. The link is
+a reference and not a grant: following it signs the reader in and mints the
+storage URL per request after the workspace check. The signed URL is
+deliberately absent from MCP output, because that would put a credential-free
+link to a private document into a transcript and would expire in 30 minutes.
+
+*What did not work, and why it matters more than the feature.* Driving this in
+an automation browser showed the PDF opening at page 1 instead of the cited
+page, and it was reverted on that reading. The reading was worthless: the
+existing citation click, which works in production, does exactly the same thing
+in that browser, because Chrome drops `#page=N` on a cold cross-origin PDF
+load. The control test was never run before the conclusion. Three separate
+findings this session came from environment artifacts of this kind, including a
+hidden browser pane reporting a 0px viewport. **Run the known-good path through
+the same harness before believing a negative result.**
+
 ## Outstanding
 
 In order. The bet is depth on documents we already hold, not more ways to get
