@@ -155,18 +155,22 @@ In order. The bet is depth on documents we already hold, not more ways to get
 documents in. Ingress today is upload plus the Google Drive picker, and that is
 enough until a customer says otherwise.
 
-1. **Memory.** Standing facts per organization and workspace, editable, seeded
+1. **Memory.** *Paused 2026-08-28: Osas is not convinced, and it has not been
+   argued back.* Standing facts per organization and workspace, editable, seeded
    from the feedback that already arrives. `message_feedback.reason` and
    `.comment` are collected today and read by nobody. *"Cited the 2019 policy,
    we are on the 2024 one"* is a standing fact being handed over and thrown
-   away. The other end of document currency, now shipped.
+   away. The other end of document currency, now shipped. Do not start this
+   without asking again.
 2. **MCP server.** Expose `hybrid_search` over one workspace so a customer's own
    Claude can query their knowledge base. No new ingestion, and `hybrid_search`
    plus the tenant scoping already exist. Distribution more than a feature.
 
-   All four phases are built and on `develop`: the credential and the Principal,
-   the Connections screen, the MCP server, and the OAuth authorization server.
-   Not deployed. See "Credentials" and "The authorization server" below.
+   All four phases shipped: the credential and the Principal, the Connections
+   screen, the MCP server, and the OAuth authorization server. Deployed
+   2026-08-28, plus deep-linked citations 2026-08-29. Driven end to end against
+   production through a real connector. See "Credentials" and "The authorization
+   server" below.
 3. **Agent tool layer.** A fresh build, not a flag. `tool_agent.py` and
    `document_tools.py` were deleted in 40ca829 after the two systems scored 16.2
    and 17.0 calling the same `hybrid_search`, with three regressions from the
@@ -193,6 +197,57 @@ enough until a customer says otherwise.
 |---|---|
 | Slack, Teams | Need an admin, and SMBs mostly are not there |
 | Computer-use on payer portals | Hardest on the list, credentials are heavy |
+
+## What we can honestly claim
+
+Written 2026-08-29 after an AI-generated sales pitch was checked against the
+code and roughly a third of it turned out to be false. Every false claim was a
+*plausible* feature for a product like this, which is exactly why they survived
+a read-through and would have failed in a meeting. Check against this before
+putting capability claims in a deck, on the site, or in an email.
+
+**True today**
+
+| Claim | Where it lives |
+|---|---|
+| Permissions resolved live, per request; a connection can never exceed its creator, and dies the day they lose access | `core/auth.py` Principal, ceilings |
+| One connection reaches exactly one workspace | `workspace_ceiling` |
+| Only the passages that answer the question leave, never the corpus | `routes/mcp.py` |
+| Documents private at rest; signed URL per request, 30 min, after an access check | `core/utils.py`, `files/access-url` |
+| Every passage links to the page, and the link is a reference not a key | `/#/doc/:fileId/:page` |
+| Every chunk is bound to the page and document it came from | `chunks` → `segments` → `files` |
+| A superseded document stops answering, and says so if named | `superseded_by_id` |
+| Says when nothing matches rather than answering from general knowledge | tool description + `_search_knowledge` |
+| Flags a passage read off a figure that the text layer could not confirm | `vision_unverified_page` |
+| Search cost roughly flat in library size; generation on the customer's own subscription | hybrid search + MCP |
+| Nothing to install; hosted, browser consent, works beyond the CLI | `routes/oauth.py` |
+| `drive.file` scope only, never keys to the whole Drive | `services/connectors.py` |
+| Revocation UI showing last-used per connection | Settings → Connections |
+
+**Not built, could be**
+
+| Gap | Cost |
+|---|---|
+| Exportable per-user, per-document access log | Real work. Today: `last_used_at`, `cited_file_ids` on runs, org membership events. First thing a regulated buyer asks for. |
+| Background re-sync from Drive/SharePoint | **A decision, not a task.** Requires long-lived Drive credentials, which forfeits the `drive.file` posture we sell. |
+| Slack/Teams | Written, not wired. And it is a place to *ask*, never a source to index. |
+| "What is indexed" tool for the connector | Small. Does not exist. |
+| Wikis, chat history as sources | New connectors. |
+| Document author | We store the uploader, not the author. |
+
+**Never claim**
+
+- **"Data stays contained in your system."** Contradicts MCP, which is the thing
+  being sold. Passages go to Anthropic. Say so first, unprompted; the honest
+  version is the stronger argument.
+- **"Forces the AI to rely on verified records."** Nothing forces a model we do
+  not run. Tool descriptions persuade.
+- **"Continuously indexes Slack/Teams."** The inverse of the design.
+- **"Unlimited capacity."** 100MB/file, plan-scoped document counts.
+- **"Immutable."** Overclaim. "Bound to the page it came from" is true and enough.
+- **Pitching this as a local/terminal developer tool.** It is hosted and works in
+  the Claude apps. That framing describes an architecture we did not build and
+  narrows the market to the customers least likely to pay a SaaS fee.
 
 ## Decisions not to re-litigate
 
