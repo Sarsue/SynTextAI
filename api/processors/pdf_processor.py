@@ -27,6 +27,28 @@ from api.core.utils import chunk_text
 # The extractor. By the PyMuPDF authors and pinned to the same version, so it
 # is the library already in this file rather than a second PDF stack.
 import pymupdf4llm
+
+# Two extraction paths ship in this library and the default is the wrong one for
+# us. Measured 2026-08-30 over the same 147 real pages and the same reference
+# data:
+#
+#                    rows intact   spaces kept inside cells   per page
+#     layout (default)     78%              67%                0.94s
+#     rag                  85%              76%                1.87s
+#
+# The layout path welds words together when it reassembles a cell: "released
+# inplace of the WavyFin", "Replaced existingcopper coils". The raw text layer
+# has those spaces, so it is the reassembly losing them, not the PDF. It costs
+# retrieval directly, because the keyword arm of hybrid_search tokenises on
+# words and "forperformance" matches nothing a person would type.
+#
+# Twice the time per page buys both. Ingestion is a background worker job where
+# nobody is waiting, and this still replaces vision calls that cost ~146s a page.
+# Accuracy is the product; speed here is not the binding constraint.
+#
+# use_layout() is the library's own switch, not a private flag, and it is global
+# so it is set once here rather than per call.
+pymupdf4llm.use_layout(False)
 logger = logging.getLogger(__name__)
 
 class PDFProcessor(FileProcessor):

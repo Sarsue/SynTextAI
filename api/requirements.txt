@@ -35,11 +35,17 @@ llama-index-core>=0.10.0
 nltk>=3.8.1
 
 # PDF / OCR
-PyMuPDF>=1.23.0
+#
+# These two are pinned together and must stay that way. pymupdf4llm compares its
+# own version against PyMuPDF's at import and raises ImportError on a mismatch,
+# so a floating range on either one can produce a build that cannot import the
+# PDF processor at all. That failure lands in the ingestion worker, where it
+# would look like every upload silently failing rather than like a bad pin.
+PyMuPDF==1.28.2
 # Structure-aware extraction: a page becomes markdown with its tables intact,
 # instead of the flat string get_text() returns. Same authors as PyMuPDF and
 # released in lockstep with it, so this is not a second PDF stack.
-pymupdf4llm>=0.0.17
+pymupdf4llm==1.28.2
 pytesseract>=0.3.10
 Pillow>=10.0.0
 
