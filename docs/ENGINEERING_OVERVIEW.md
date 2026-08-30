@@ -266,13 +266,58 @@ reference data, `get_text()` scores 4% and `pymupdf4llm` scores 78%. The
 direction of the sprint never changed; the size of the win was understated and
 two different defects were being added together.
 
-*Still open, and now stated properly.* **Space loss inside cells: 15% of 616
-multi-word cells.** "Burr Oak Louvered Fin released inplace of the WavyFin",
-"Replaced existingcopper coils", "Redesign from 2 row to 3 row forperformance
-improvement". The row is intact and the words are welded. It is the same defect
-that corrupted the reference data when Tesseract was switched on globally, so
-suspect the extraction flags before writing any repair. Do not reach for a
-dictionary splitter until the setting has been ruled out.
+*Space loss inside cells: found and fixed, 2026-08-30.* The Tesseract hypothesis
+was wrong; OCR flags changed nothing. `pymupdf4llm` ships two extraction paths
+and defaulted to the wrong one for us. The layout path welds words when it
+reassembles a cell, and the raw text layer has the spaces, so the reassembly was
+losing them rather than the PDF lacking them.
+
+|  | rows intact | spaces kept | per page |
+|---|---|---|---|
+| layout (was default) | 78% | 67% | 0.94s |
+| **rag** (now) | **88%** | **78%** | 1.87s |
+
+Not cosmetic: the keyword arm of `hybrid_search` tokenises on words, so
+"forperformance" matches nothing anybody would type and the passage becomes
+reachable only by the vector arm. Twice the time per page buys both numbers, and
+ingestion is a background job that still replaces vision calls at ~146s a page.
+
+Use `pymupdf4llm.use_layout()`, the library's own switch. Setting the private
+`_use_layout` flag instead scores 85/76 rather than 88/78, because the function
+rebinds other state as well as the flag.
+
+Per document, which is what matters for where we sell:
+
+    safe_care (dental infection control)   100% rows   96% spaces
+    trane_dc                                95%        85%
+    hch6                                    87%        90%
+    goodman_gvxc                            86%        80%
+    goodman_gszc7                           84%        69%
+
+Dense HVAC spec tables are the hard case. Policy and procedure documents, which
+is what dental, legal and accounting customers upload, are at the top of that
+list. We are stress-testing on the worst corpus we own, which is the right way
+round.
+
+*Two robustness fixes found while doing it.*
+
+`pymupdf4llm` is synchronous CPU work and was being called inline from an async
+function. `get_text()` was milliseconds a page and hid the pattern; at 1.9s a
+page a long manual blocks the event loop for minutes, stalling `_hold_lease`
+(renews every 5 min against a 15 min expiry) and every other tenant queued
+behind that worker slot. Past the lease the run is reclaimed as abandoned while
+still running, and the symptom is large documents failing for no visible reason.
+Now `asyncio.to_thread`, which this codebase already used in three other places.
+
+`PyMuPDF` and `pymupdf4llm` are pinned equal and must stay that way: the latter
+compares versions at import and raises `ImportError` on a mismatch. With `>=` on
+both, a rebuild could produce an image where the PDF processor cannot import,
+surfacing in the worker as every upload failing rather than as a bad pin.
+
+*Untested, and not to be claimed.* Legal and accounting document shapes: scanned
+contracts, tax forms, field-based forms. The evidence is one dental-adjacent PDF
+and four HVAC manuals. Get real contracts or invoices and run the same
+measurement before saying the pipeline is ready for those verticals.
 
 *Also open.* The residual short chunks are bare page numbers, one occurrence
 each rather than one string twenty-three times, so a rule that eats digits needs
