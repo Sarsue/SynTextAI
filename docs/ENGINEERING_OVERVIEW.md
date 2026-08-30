@@ -198,6 +198,59 @@ enough until a customer says otherwise.
 | Slack, Teams | Need an admin, and SMBs mostly are not there |
 | Computer-use on payer portals | Hardest on the list, credentials are heavy |
 
+**Ingestion review sprint** (2026-08-30)
+
+The finding, before the numbers: **the pipeline discarded structure the PDF
+already contained, then paid a model to guess it back.** `page.get_text()`
+returns a flat string on line one. The digit-ratio gate, the vision model and
+the numeric guardrail were all machinery to detect and repair that loss.
+
+Measured across five real manuals, 406 pages, 231 holding a table:
+
+| | |
+|---|---|
+| Table pages the gate never sent to vision | **147 of 231** |
+| Table rows keeping their cells on one line, `get_text()` | **4%** of 912 |
+| Same, `pymupdf4llm` | **51%** |
+| Page 7 of hch6 alone | 0% → 93% |
+| Vision pages across the corpus | 103 → 51 (4.2 → 2.1 model-hours) |
+| Chunks under 40 chars, after the heading fix | 19% → 10% |
+| Chunks emitted | 624 → 555 |
+
+Why the gate could not be fixed by tuning: digit ratio is a whole-page average
+and losing a table is a local event. Page 7 scores 0.0377 against a 0.12
+threshold because the rest of the page is prose about defrost timers. No value
+of that constant finds it without dragging in every page that quotes a
+temperature.
+
+A second bug fell out. `VISION_VECTOR_DRAWINGS >= 60` was calibrated on one page
+of one document (the Goodman nomenclature diagram, 202 drawings) on the
+reasoning that "pages that are genuinely tables or prose have very few". Ruled
+tables are drawn with vector lines: hch6's median page has **715**. So the
+numeric guardrail was treating **186 table pages** as unverifiable figures and
+keeping vision output it was written to reject. Table presence is now the
+discriminator.
+
+*Instrument failures worth remembering, both caught only by checking a case
+whose answer was already known.* Importing `pymupdf4llm` switches on Tesseract
+globally and changes `find_tables` cell text, so ground truth computed in the
+same process came back as `outdoorairtempsensor` and the first run reported a
+meaningless 2% vs 11%. Ground truth now comes from an isolated process. And a
+scratch file named `api.py` on `sys.path` shadowed the `api` package, silently
+re-running an old script instead of the import.
+
+*What is deliberately not claimed.* No benchmark was run. Osas's call, and
+correct: benchmarking a pipeline known to be broken anchors the work to a number
+that measures the breakage. Extraction fidelity is a deterministic property of a
+page and needs no model to check, which is a tighter signal than 22 questions at
+the far end.
+
+*Still open.* 51% is a floor, not a grade: half the rows still fail the strict
+one-line test, most likely multi-line cells and complex headers, and that is an
+extraction question rather than a chunking one since chunking loses none of it.
+The residual short chunks are bare page numbers, one occurrence each.
+Reprocessing: none was done. Only newly ingested documents get any of this.
+
 ## What we can honestly claim
 
 Written 2026-08-29 after an AI-generated sales pitch was checked against the
