@@ -146,3 +146,54 @@ def test_a_single_row_wider_than_the_budget_is_kept_whole():
 def test_empty_input_is_not_a_crash():
     assert chunk_markdown("") == []
     assert chunk_markdown("   \n\n  ") == []
+
+
+def test_a_heading_is_not_a_chunk_of_its_own():
+    """A label with nothing under it cannot answer anything.
+
+    Measured 2026-08-30 across 147 real pages: 121 of 624 chunks were under 40
+    characters and the most common was "**SERVICING**", twenty-three times. It
+    is a running page header, and structural extraction correctly marks it as a
+    heading, which is what made it flush as its own prose block.
+    """
+    page = (
+        "**SERVICING**\n\n"
+        "# **TROUBLESHOOTING**\n\n"
+        "The outdoor fan motor is checked with the power off and the leads "
+        "disconnected at the control board, using a meter set to ohms.\n"
+    )
+    chunks = [c["content"] for c in chunk_markdown(page)]
+
+    assert len(chunks) == 1, f"heading was chunked on its own: {chunks}"
+    assert "SERVICING" in chunks[0]
+    assert "TROUBLESHOOTING" in chunks[0]
+    assert "outdoor fan motor" in chunks[0]
+
+
+def test_a_trailing_heading_attaches_to_what_came_before():
+    """Nothing follows it, so it goes backward rather than becoming a chunk."""
+    page = (
+        "The crankcase heater is de-energized when the compressor is running "
+        "and energized when the ambient is below 42 F.\n\n"
+        "**NEXT SECTION**\n"
+    )
+    chunks = [c["content"] for c in chunk_markdown(page)]
+
+    assert len(chunks) == 1, f"trailing heading became its own chunk: {chunks}"
+    assert "NEXT SECTION" in chunks[0]
+
+
+def test_a_table_still_keeps_its_rows_whole():
+    """The heading change must not reach the table path."""
+    page = (
+        "## Required Liquid Line Temperature\n\n"
+        "| Pressure | 6F | 8F | 10F |\n"
+        "| --- | --- | --- | --- |\n"
+        "| 251 | 78 | 76 | 74 |\n"
+        "| 259 | 80 | 78 | 76 |\n"
+    )
+    chunks = [c["content"] for c in chunk_markdown(page)]
+
+    body = "\n".join(chunks)
+    assert "| 251 | 78 | 76 | 74 |" in body, "a row was split"
+    assert "Required Liquid Line Temperature" in body, "the caption was lost"

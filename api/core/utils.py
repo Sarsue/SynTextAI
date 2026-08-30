@@ -450,6 +450,59 @@ def clean_text(text: str, content_type: str) -> str:
 
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 
+# A heading, in either shape the extractor produces: "## Servicing", and a line
+# that is nothing but bold text, which is how a running page header arrives.
+_HEADING_LINE = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]{1,60}\*\*\s*$)")
+
+
+def _is_heading_only(text: str) -> bool:
+    """Whether this piece is a label with nothing under it."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines or len(text) > 120:
+        return False
+    return all(_HEADING_LINE.match(ln) for ln in lines)
+
+
+def _attach_orphan_headings(pieces: List[str]) -> List[str]:
+    """Give a heading the content it heads, instead of a chunk of its own.
+
+    WHY
+
+    Measured 2026-08-30 over 147 real pages: 121 of 624 chunks, 19%, were under
+    40 characters, and the most common was "**SERVICING**" twenty-three times.
+    Those are running page headers. Structural extraction correctly identifies
+    them as headings, which is an improvement in fidelity and made this worse,
+    because a heading with no body still flushed as its own prose block.
+
+    Each one costs an embedding, occupies a retrieval slot, and can answer
+    nothing. On a query with no good match they are what comes back.
+
+    They are not junk in principle: "# TROUBLESHOOTING" is real structure, and a
+    passage is easier to place when it carries the heading it sits under. So
+    they are attached forward rather than dropped, which is the same thing
+    _chunk_table already does by repeating the caption into every piece.
+
+    A trailing heading attaches backward, because there is nothing after it. A
+    page consisting only of headings keeps them: dropping the page entirely is
+    worse than a thin chunk.
+    """
+    out: List[str] = []
+    pending: List[str] = []
+    for piece in pieces:
+        if _is_heading_only(piece):
+            pending.append(piece)
+            continue
+        if pending:
+            piece = "\n".join(pending + [piece])
+            pending = []
+        out.append(piece)
+    if pending:
+        if out:
+            out[-1] = out[-1] + "\n" + "\n".join(pending)
+        else:
+            out.extend(pending)
+    return out
+
 
 def _split_markdown_blocks(text: str) -> List[Dict[str, Any]]:
     """Separate a page into table blocks and everything else.
@@ -594,6 +647,8 @@ def chunk_markdown(text: str, target_chunk_tokens: int = 400) -> List[Dict[str, 
             chunk_overlap=int(target_chunk_tokens * 0.2),
         )
         pieces.extend(splitter.split_text(prose))
+
+    pieces = _attach_orphan_headings(pieces)
 
     return [
         {"content": p, "metadata": {"section": i + 1, "doc_type": "markdown"}}
