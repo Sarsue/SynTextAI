@@ -73,7 +73,7 @@ async def test_extraction_puts_the_flags_on_the_page(store, doc_file, monkeypatc
         n = page.number + 1
         return f"| col |\n| --- |\n| {n} |", (UNVERIFIED if n == 1 else {})
 
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
 
     pages = await processor.extract_text_with_page_numbers(
@@ -95,7 +95,7 @@ async def test_a_resumed_page_is_no_more_trusted_than_a_fresh_one(
         n = page.number + 1
         return f"| col |\n| --- |\n| {n} |", (UNVERIFIED if n == 1 else {})
 
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
     await processor.extract_text_with_page_numbers(_pdf_bytes(2), file_id=doc_file["id"])
 

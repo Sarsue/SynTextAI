@@ -24,6 +24,9 @@ from api.services.llm_service import (
     VISION_DPI,
 )
 from api.core.utils import chunk_text
+# The extractor. By the PyMuPDF authors and pinned to the same version, so it
+# is the library already in this file rather than a second PDF stack.
+import pymupdf4llm
 logger = logging.getLogger(__name__)
 
 class PDFProcessor(FileProcessor):
@@ -143,35 +146,61 @@ class PDFProcessor(FileProcessor):
             }
         }
     
-    # A page goes to the vision model only when the text layer has probably
-    # failed it. Measured on the 433-page HVAC corpus: reading every page would
-    # take 17 hours at 146 seconds a page, and roughly three quarters of those
-    # pages are prose the text layer already handles at 4/4 on citations.
+    # The vision model reads a page only when the page's words are not in the
+    # file to be read.
     #
-    # Two signals, both free to compute before deciding:
+    # WHAT THIS USED TO BE, AND WHY IT WAS WRONG
     #
-    #   digits      a table is mostly numbers. Prose is not. 12% of characters
-    #               being digits separates the charging charts and spec tables
-    #               in this corpus from the paragraphs around them.
-    #   image area  a page that is mostly picture is a diagram, and the words
-    #               on it are labels whose meaning comes from where they point.
+    # It used to route on how numeric a page was: 12% of characters being
+    # digits sent the page to vision, on the reasoning that a table is mostly
+    # numbers and prose is not. Measured 2026-08-30 across five real manuals,
+    # 406 pages, that gate missed 147 of the 231 pages that contain a table:
     #
-    # Deliberately not "does the page have a table", because detecting that
-    # reliably is the same problem as reading it.
-    VISION_DIGIT_RATIO = float(os.getenv("VISION_DIGIT_RATIO", "0.12"))
+    #   goodman_gszc7   54 table pages,  44 never sent to vision
+    #   goodman_gvxc    59 table pages,  55 never sent
+    #   hch6            58 table pages,   4 never sent
+    #   trane_dc        42 table pages,  26 never sent
+    #   safe_care       18 table pages,  18 never sent
+    #
+    # The reason is structural, not a bad threshold. Digit ratio is a whole-page
+    # average and losing a table is a local event. Page 7 of hch6 holds the
+    # flash code table and scored 0.0377, three times under the threshold,
+    # because the rest of the page is prose about defrost timers. There is no
+    # value of this constant that finds that page without dragging in every
+    # page of prose that happens to quote a temperature.
+    #
+    # The deeper error was what vision was being asked to do. get_text() throws
+    # the layout away on line one; the gate then tried to guess whether that had
+    # cost anything, and vision was paid to reconstruct it. Extraction is now
+    # structural (see _structured_pages), so the layout is never discarded and
+    # there is nothing to reconstruct.
+    #
+    # So vision is back to the only job it can do that nothing else can: pages
+    # whose words are not in the file. A scan, and a figure whose labels are
+    # drawn as vector art. Measured 2026-08-14, the goodman nomenclature diagram
+    # is exactly that, and reading it gained four benchmark questions.
     VISION_IMAGE_AREA = float(os.getenv("VISION_IMAGE_AREA", "0.35"))
 
-    def _page_needs_vision(self, page, text: str) -> bool:
-        """Whether the text layer probably lost this page."""
-        stripped = text.strip()
-        if not stripped:
-            # No text at all. This used to be the only case OCR handled, and on
-            # 433 pages of real service manuals it never once fired.
+    def _page_is_unreadable_without_vision(self, page, text: str) -> bool:
+        """Whether this page's content is absent from the file's text.
+
+        Not "did we extract it badly", which is now the extractor's problem.
+        This is "is it there at all".
+        """
+        if not text.strip():
+            # A scan. Nothing to read but pixels.
             return True
 
-        digits = sum(c.isdigit() for c in stripped)
-        if digits / len(stripped) >= self.VISION_DIGIT_RATIO:
-            return True
+        # A page drawn rather than written. The discriminator is the presence of
+        # a table, because a ruled table is also hundreds of vector operations:
+        # hch6's median page has 715 of them, so drawing count alone calls a
+        # spec table a diagram. Where a table is detected the words are real
+        # text in real cells, and the extractor can read them.
+        try:
+            if page.find_tables().tables:
+                return False
+        except Exception:
+            logger.debug("Could not look for tables", exc_info=True)
 
         try:
             page_area = page.rect.width * page.rect.height
@@ -181,10 +210,12 @@ class PDFProcessor(FileProcessor):
                 image_area += (r[2] - r[0]) * (r[3] - r[1])
             if page_area and image_area / page_area >= self.VISION_IMAGE_AREA:
                 return True
+            if len(page.get_drawings()) >= self.VISION_VECTOR_DRAWINGS:
+                return True
         except Exception:
-            # A page whose image geometry cannot be read is not worth failing
-            # ingestion over; the text layer still applies.
-            logger.debug("Could not measure image area", exc_info=True)
+            # A page whose geometry cannot be read is not worth failing
+            # ingestion over; the extracted text still applies.
+            logger.debug("Could not measure page geometry", exc_info=True)
 
         return False
 
@@ -217,6 +248,52 @@ class PDFProcessor(FileProcessor):
             # If the page cannot be inspected, keep the stricter behaviour.
             return True
         return True
+
+    def _structured_pages(self, doc) -> Dict[int, str]:
+        """Every page as markdown, with its tables still tables.
+
+        WHY THIS REPLACED page.get_text()
+
+        get_text() returns one flat string. The PDF knows where its ruling
+        lines and cell boundaries are, and that string is what is left after
+        throwing them away, so a two-column table arrives as one run of codes
+        followed by one run of meanings with nothing joining them.
+
+        Measured 2026-08-30 on the 147 pages of five real manuals that hold a
+        table, asking whether a row's first and last cell survive on one line:
+
+            get_text()     4% of 912 rows
+            pymupdf4llm   51% of 912 rows
+
+        Same measurement, page 7 of hch6, the flash code table that started
+        this: 0% to 93%. Code 73 is a shorted contactor and 74 is an open one,
+        and before this those numbers and those meanings were in different
+        paragraphs. Sending a technician to the wrong part on a live 230V
+        circuit is the failure this prevents.
+
+        Deterministic, local, and about 1.5s a page against roughly 146s for a
+        vision call on the same page.
+
+        Falls back to get_text() per document rather than raising. A document
+        that ingests with poor structure is worth more than one that does not
+        ingest, and the caller cannot tell the difference except in quality.
+        """
+        try:
+            chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
+        except Exception as e:
+            logger.warning(
+                f"Structural extraction failed ({type(e).__name__}), falling back "
+                f"to the flat text layer for this document"
+            )
+            return {}
+
+        out: Dict[int, str] = {}
+        for i, chunk in enumerate(chunks, 1):
+            try:
+                out[i] = sanitize_extracted_text(chunk.get("text") or "")
+            except Exception:
+                continue
+        return out
 
     async def _read_page_with_vision(self, page, text_layer: str):
         """Read a page with the vision model, and check its numbers.
@@ -329,9 +406,12 @@ class PDFProcessor(FileProcessor):
         """
         page_texts = []
         page_flags: Dict[int, Any] = {}
-        # Pages whose text is vision markdown rather than PDF character soup.
-        # The chunker needs to know: markdown has structure to respect, and a
-        # text layer only has pipes that are not tables.
+        # Pages whose text is markdown with structure worth respecting, from
+        # either source. The chunker needs to know, because it cuts markdown on
+        # row boundaries and a flat text layer only has pipes that are not
+        # tables. Two sets rather than one: `vision_pages` also decides what is
+        # worth caching in `page_reads`, since only vision output was paid for.
+        markdown_pages: set = set()
         vision_pages: set = set()
         read_by_vision = 0
         resumed = 0
@@ -352,21 +432,38 @@ class PDFProcessor(FileProcessor):
 
         try:
             with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+                # Structure first, for the whole document at once. Whatever
+                # comes back is markdown and keeps its tables; anything this
+                # misses falls back to the flat layer per page below.
+                structured = self._structured_pages(doc)
+
                 layer = {}
                 needs_vision = []
                 for page_num, page in enumerate(doc, 1):
-                    layer[page_num] = sanitize_extracted_text(page.get_text("text"))
+                    flat = sanitize_extracted_text(page.get_text("text"))
+                    text = structured.get(page_num) or flat
+                    layer[page_num] = text
+                    # Tables survived extraction, so the markdown chunker is the
+                    # right one. It cuts on row boundaries and repeats the
+                    # header, where the general splitter counts to 400 tokens
+                    # and lands mid-row.
+                    if structured.get(page_num):
+                        markdown_pages.add(page_num)
                     hit = cached.get(page_num)
                     if hit and hit.get("source") == "vision":
                         # Already paid for. Its flags come back with it, so a
                         # resumed page is no more trusted than a fresh one.
                         layer[page_num] = hit["text"]
                         vision_pages.add(page_num)
+                        markdown_pages.add(page_num)
                         if hit.get("flags"):
                             page_flags[page_num] = hit["flags"]
                         resumed += 1
                         continue
-                    if self._page_needs_vision(page, layer[page_num]):
+                    # `flat`, not the structured text: the question is whether
+                    # the words are in the file at all, and a scanned page has
+                    # an empty text layer no matter how well it is parsed.
+                    if self._page_is_unreadable_without_vision(page, flat):
                         needs_vision.append(page_num)
 
                 if resumed:
@@ -413,6 +510,7 @@ class PDFProcessor(FileProcessor):
                         if markdown:
                             layer[n] = markdown
                             vision_pages.add(n)
+                            markdown_pages.add(n)
                             read_by_vision += 1
                             if flags:
                                 page_flags[n] = flags
@@ -441,12 +539,14 @@ class PDFProcessor(FileProcessor):
                         "page_num": page_num,
                         "text": f"Page {page_num}\n{text.strip()}",  # Use 'text' for consistency
                         # Tells the chunker this page has structure worth
-                        # respecting. Only pages the vision model actually
-                        # produced markdown for: a page that fell back to its
-                        # text layer is not markdown, and running the markdown
-                        # chunker over PDF character soup would find pipes that
-                        # are not tables.
-                        "is_markdown": page_num in vision_pages,
+                        # respecting, so it cuts on row boundaries and repeats
+                        # the header rather than counting to 400 tokens and
+                        # landing mid-row. True for structural extraction and
+                        # for vision, false only where both failed and the flat
+                        # text layer is standing in: running the markdown
+                        # chunker over character soup finds pipes that are not
+                        # tables.
+                        "is_markdown": page_num in markdown_pages,
                     }
                     # How this page was read, when there is anything to say
                     # about it. A figure page kept despite carrying numbers the

@@ -36,6 +36,10 @@ nltk>=3.8.1
 
 # PDF / OCR
 PyMuPDF>=1.23.0
+# Structure-aware extraction: a page becomes markdown with its tables intact,
+# instead of the flat string get_text() returns. Same authors as PyMuPDF and
+# released in lockstep with it, so this is not a second PDF stack.
+pymupdf4llm>=0.0.17
 pytesseract>=0.3.10
 Pillow>=10.0.0
 

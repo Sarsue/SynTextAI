@@ -87,7 +87,7 @@ async def test_a_vision_page_is_on_disk_before_extraction_finishes(
     """
     processor = PDFProcessor(store)
     vision = _CountingVision(fail_on={3})
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", vision)
 
     pages = await processor.extract_text_with_page_numbers(
@@ -106,7 +106,7 @@ async def test_a_vision_page_is_on_disk_before_extraction_finishes(
 async def test_a_rerun_does_not_buy_the_same_page_twice(store, doc_file, monkeypatch):
     """The point of the whole thing, in one number: the second run reads fewer pages."""
     processor = PDFProcessor(store)
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
 
     first = _CountingVision(fail_on={3})
     monkeypatch.setattr(processor, "_read_page_with_vision", first)
@@ -132,7 +132,7 @@ async def test_without_a_file_id_nothing_is_cached(store, doc_file, monkeypatch)
     """The non-ingest callers must behave exactly as they did before this landed."""
     processor = PDFProcessor(store)
     vision = _CountingVision()
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", vision)
 
     await processor.extract_text_with_page_numbers(_pdf_bytes(2))
@@ -143,7 +143,7 @@ async def test_without_a_file_id_nothing_is_cached(store, doc_file, monkeypatch)
 async def test_a_failed_cache_write_does_not_fail_the_ingest(store, doc_file, monkeypatch):
     """It is a cache. Losing it costs money, and must never cost a document."""
     processor = PDFProcessor(store)
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", _CountingVision())
 
     async def boom(*a, **k):
@@ -157,16 +157,29 @@ async def test_a_failed_cache_write_does_not_fail_the_ingest(store, doc_file, mo
     assert len(pages) == 2, "a broken cache took the document down with it"
 
 
-async def test_only_vision_pages_are_marked_as_markdown(store, doc_file, monkeypatch):
+async def test_a_page_that_lost_its_structure_is_not_marked_as_markdown(
+    store, doc_file, monkeypatch
+):
     """The flag that decides which chunker a page gets.
 
-    A page that fell back to its text layer is PDF character soup, not markdown.
-    Running the markdown chunker over it would find pipes that are not tables
-    and split on structure that is not there.
+    It used to mean "vision read this", because vision was the only source of
+    markdown. Structural extraction is now the ordinary path, so the flag means
+    what it always should have: this page's text has structure to respect.
+
+    False in one case only, and it is the case that matters: structural
+    extraction failed for the document AND vision did not read the page, so
+    what is left is the flat text layer. Running the markdown chunker over that
+    finds pipes that are not tables and splits on structure that is not there.
     """
     processor = PDFProcessor(store)
-    # Only page 2 goes to vision; page 3's call fails, so it is not markdown.
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: page.number + 1 in (2, 3))
+    # No structure available for this document at all.
+    monkeypatch.setattr(processor, "_structured_pages", lambda doc: {})
+    # Only page 2 goes to vision; page 3's call fails, so it falls back.
+    monkeypatch.setattr(
+        processor,
+        "_page_is_unreadable_without_vision",
+        lambda page, text: page.number + 1 in (2, 3),
+    )
     monkeypatch.setattr(processor, "_read_page_with_vision", _CountingVision(fail_on={3}))
 
     pages = await processor.extract_text_with_page_numbers(
@@ -177,6 +190,35 @@ async def test_only_vision_pages_are_marked_as_markdown(store, doc_file, monkeyp
     assert flags == {1: False, 2: True, 3: False}
 
 
+async def test_structural_extraction_marks_a_page_as_markdown(
+    store, doc_file, monkeypatch
+):
+    """The ordinary path: no vision, and the page still chunks as markdown.
+
+    This is the change that stopped 147 table pages across five real manuals
+    from being cut by the general splitter. Before it, a page reached the
+    markdown chunker only if the vision model had been paid to read it.
+    """
+    processor = PDFProcessor(store)
+    monkeypatch.setattr(
+        processor, "_structured_pages", lambda doc: {1: "| a | b |\n|---|---|\n| 1 | 2 |"}
+    )
+    # Nothing needs vision: the words are all in the file.
+    monkeypatch.setattr(
+        processor, "_page_is_unreadable_without_vision", lambda page, text: False
+    )
+    vision = _CountingVision()
+    monkeypatch.setattr(processor, "_read_page_with_vision", vision)
+
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(1), file_id=doc_file["id"]
+    )
+
+    assert vision.pages_read == [], "vision was called for a page already readable"
+    assert pages[0]["is_markdown"] is True
+    assert "| a | b |" in pages[0]["text"]
+
+
 async def test_a_resumed_vision_page_is_still_markdown(store, doc_file, monkeypatch):
     """A page recovered from the cache must chunk the same way as a fresh one.
 
@@ -185,7 +227,7 @@ async def test_a_resumed_vision_page_is_still_markdown(store, doc_file, monkeypa
     splitter that breaks tables.
     """
     processor = PDFProcessor(store)
-    monkeypatch.setattr(processor, "_page_needs_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
 
     monkeypatch.setattr(processor, "_read_page_with_vision", _CountingVision(fail_on={2}))
     await processor.extract_text_with_page_numbers(_pdf_bytes(2), file_id=doc_file["id"])
