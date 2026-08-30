@@ -210,9 +210,10 @@ Measured across five real manuals, 406 pages, 231 holding a table:
 | | |
 |---|---|
 | Table pages the gate never sent to vision | **147 of 231** |
-| Table rows keeping their cells on one line, `get_text()` | **4%** of 912 |
-| Same, `pymupdf4llm` | **51%** |
+| Table row integrity, `get_text()` | **4%** of 976 |
+| Same, `pymupdf4llm` | **78%** |
 | Page 7 of hch6 alone | 0% → 93% |
+| Space loss inside cells, the defect that remains | **15%** of 616 multi-word cells |
 | Vision pages across the corpus | 103 → 51 (4.2 → 2.1 model-hours) |
 | Chunks under 40 chars, after the heading fix | 19% → 10% |
 | Chunks emitted | 624 → 555 |
@@ -245,11 +246,38 @@ that measures the breakage. Extraction fidelity is a deterministic property of a
 page and needs no model to check, which is a tighter signal than 22 questions at
 the far end.
 
-*Still open.* 51% is a floor, not a grade: half the rows still fail the strict
-one-line test, most likely multi-line cells and complex headers, and that is an
-extraction question rather than a chunking one since chunking loses none of it.
-The residual short chunks are bare page numbers, one occurrence each.
-Reprocessing: none was done. Only newly ingested documents get any of this.
+*The 51% that commit f362387 and its predecessor report is wrong. The figure is
+78%.* Worth keeping the mistake visible, because it was a third lying instrument
+in the same sprint and it hid a real defect inside a fake one.
+
+The metric asked whether a row's first and last cell appear on one line, with
+whitespace normalised to single spaces. Two things broke it:
+
+  - A source cell containing a newline is rendered by the extractor as
+    `A<br>B` inside a single markdown cell. The row is perfectly intact. The
+    reference text had `A B`, so every one of those 284 rows scored as a
+    failure. They pass at 2%, which should have been the tell: a number that
+    extreme is a metric artifact, not a result.
+  - The rest were counted as "lost rows" when the row was there and the words
+    inside a cell had run together.
+
+Comparing characters and ignoring spacing, on the same 976 rows and the same
+reference data, `get_text()` scores 4% and `pymupdf4llm` scores 78%. The
+direction of the sprint never changed; the size of the win was understated and
+two different defects were being added together.
+
+*Still open, and now stated properly.* **Space loss inside cells: 15% of 616
+multi-word cells.** "Burr Oak Louvered Fin released inplace of the WavyFin",
+"Replaced existingcopper coils", "Redesign from 2 row to 3 row forperformance
+improvement". The row is intact and the words are welded. It is the same defect
+that corrupted the reference data when Tesseract was switched on globally, so
+suspect the extraction flags before writing any repair. Do not reach for a
+dictionary splitter until the setting has been ruled out.
+
+*Also open.* The residual short chunks are bare page numbers, one occurrence
+each rather than one string twenty-three times, so a rule that eats digits needs
+its own measurement first. Reprocessing: none was done. Only newly ingested
+documents get any of this.
 
 ## What we can honestly claim
 
