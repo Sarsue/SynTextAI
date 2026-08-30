@@ -57,6 +57,32 @@ const Connect: React.FC = () => {
 
             <div className="home-divider" />
 
+            {/* Before the instructions, not after. Anyone reading this page is
+                one drag away from putting the PDF into Claude instead, and a
+                person who has not been given a reason does not read setup
+                steps. */}
+            <section className="home-section">
+                <h2 className="home-section-heading">Why not just upload the file?</h2>
+                <p className="connect-body">
+                    For one document you read once, do that. It is quicker and we would
+                    tell you the same.
+                </p>
+                <p className="connect-body">
+                    This is for the fiftieth question against the same hundred
+                    documents, asked by eleven people, where the documents change and
+                    half the askers should not see all of them.
+                </p>
+                <p className="connect-body">
+                    An upload is a snapshot. Revise the policy and every chat holding
+                    the old copy keeps answering from it, confidently, with nothing to
+                    say it is out of date. An upload also has no idea who may read what,
+                    so a file meant for three people reaches everyone in the
+                    conversation.
+                </p>
+            </section>
+
+            <div className="home-divider" />
+
             <section className="home-section">
                 <h2 className="home-section-heading">Setup</h2>
                 <div className="connect-steps">
@@ -122,6 +148,34 @@ const Connect: React.FC = () => {
                     permissions of whoever set it up, and it checks them on every
                     question. If that person leaves the workspace, the connection stops
                     working the same day. There is nothing to remember to switch off.
+                </p>
+            </section>
+
+            <div className="home-divider" />
+
+            {/* Said first and unprompted, because it is the question underneath
+                every other question on this page. A page that waits to be asked
+                where the text goes reads like a page with something to hide,
+                and the honest answer is a better argument than the evasion. */}
+            <section className="home-section">
+                <h2 className="home-section-heading">What Claude sees</h2>
+                <p className="connect-body">
+                    The paragraphs that answer the question, and nothing else. Not your
+                    whole library, not your other workspaces, and not documents the
+                    person who connected it cannot already open.
+                </p>
+                <p className="connect-body">
+                    So yes, parts of your documents do reach Claude. That is how it
+                    answers them. The difference is how much: upload a file and the
+                    whole thing crosses over and stays in the conversation. Connect
+                    instead and Claude gets a handful of paragraphs and a link back to
+                    the page.
+                </p>
+                <p className="connect-note">
+                    If your policy is that no document text may reach an outside AI at
+                    all, this connector is not for you. Neither is pasting the file into
+                    a chat window, which is worth checking whether anyone is already
+                    doing.
                 </p>
             </section>
 
