@@ -271,7 +271,33 @@ class PDFProcessor(FileProcessor):
             return True
         return True
 
-    def _structured_pages(self, doc) -> Dict[int, str]:
+    @staticmethod
+    def _structured_pages_blocking(pdf_data: bytes) -> Dict[int, str]:
+        """The CPU half of _structured_pages. Runs on a worker thread.
+
+        Opens its own Document from the bytes rather than borrowing the caller's.
+        PyMuPDF objects are not for sharing across threads, and "nothing else
+        touches this document during the await" is an invariant that holds today
+        and would be nobody's job to preserve.
+        """
+        try:
+            with fitz.open(stream=pdf_data, filetype="pdf") as doc:
+                chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
+                out: Dict[int, str] = {}
+                for i, chunk in enumerate(chunks, 1):
+                    try:
+                        out[i] = sanitize_extracted_text(chunk.get("text") or "")
+                    except Exception:
+                        continue
+                return out
+        except Exception as e:
+            logger.warning(
+                f"Structural extraction failed ({type(e).__name__}), falling back "
+                f"to the flat text layer for this document"
+            )
+            return {}
+
+    async def _structured_pages(self, pdf_data: bytes) -> Dict[int, str]:
         """Every page as markdown, with its tables still tables.
 
         WHY THIS REPLACED page.get_text()
@@ -293,29 +319,24 @@ class PDFProcessor(FileProcessor):
         paragraphs. Sending a technician to the wrong part on a live 230V
         circuit is the failure this prevents.
 
-        Deterministic, local, and about 1.5s a page against roughly 146s for a
+        Deterministic, local, and about 1.9s a page against roughly 146s for a
         vision call on the same page.
+
+        OFF THE EVENT LOOP, WHICH IS NOT OPTIONAL
+
+        This is synchronous CPU work and a long document is minutes of it. The
+        worker renews its own job lease from an asyncio task on this loop
+        (workers/worker.py, _hold_lease), and other tenants are queued behind
+        this same slot. Called inline it blocks both: the heartbeat stops, and
+        past the 15 minute lease the run is reclaimed as abandoned while it is
+        still running. get_text() was milliseconds a page and hid this; at 1.9s
+        a page it does not.
 
         Falls back to get_text() per document rather than raising. A document
         that ingests with poor structure is worth more than one that does not
         ingest, and the caller cannot tell the difference except in quality.
         """
-        try:
-            chunks = pymupdf4llm.to_markdown(doc, page_chunks=True)
-        except Exception as e:
-            logger.warning(
-                f"Structural extraction failed ({type(e).__name__}), falling back "
-                f"to the flat text layer for this document"
-            )
-            return {}
-
-        out: Dict[int, str] = {}
-        for i, chunk in enumerate(chunks, 1):
-            try:
-                out[i] = sanitize_extracted_text(chunk.get("text") or "")
-            except Exception:
-                continue
-        return out
+        return await asyncio.to_thread(self._structured_pages_blocking, pdf_data)
 
     async def _read_page_with_vision(self, page, text_layer: str):
         """Read a page with the vision model, and check its numbers.
@@ -457,7 +478,7 @@ class PDFProcessor(FileProcessor):
                 # Structure first, for the whole document at once. Whatever
                 # comes back is markdown and keeps its tables; anything this
                 # misses falls back to the flat layer per page below.
-                structured = self._structured_pages(doc)
+                structured = await self._structured_pages(pdf_data)
 
                 layer = {}
                 needs_vision = []

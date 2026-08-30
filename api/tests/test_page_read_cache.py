@@ -173,7 +173,9 @@ async def test_a_page_that_lost_its_structure_is_not_marked_as_markdown(
     """
     processor = PDFProcessor(store)
     # No structure available for this document at all.
-    monkeypatch.setattr(processor, "_structured_pages", lambda doc: {})
+    async def _no_structure(pdf_data):
+        return {}
+    monkeypatch.setattr(processor, "_structured_pages", _no_structure)
     # Only page 2 goes to vision; page 3's call fails, so it falls back.
     monkeypatch.setattr(
         processor,
@@ -200,9 +202,9 @@ async def test_structural_extraction_marks_a_page_as_markdown(
     markdown chunker only if the vision model had been paid to read it.
     """
     processor = PDFProcessor(store)
-    monkeypatch.setattr(
-        processor, "_structured_pages", lambda doc: {1: "| a | b |\n|---|---|\n| 1 | 2 |"}
-    )
+    async def _one_table(pdf_data):
+        return {1: "| a | b |\n|---|---|\n| 1 | 2 |"}
+    monkeypatch.setattr(processor, "_structured_pages", _one_table)
     # Nothing needs vision: the words are all in the file.
     monkeypatch.setattr(
         processor, "_page_is_unreadable_without_vision", lambda page, text: False
