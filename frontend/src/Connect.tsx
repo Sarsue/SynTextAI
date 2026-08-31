@@ -132,6 +132,7 @@ const Connect: React.FC = () => {
                             <li>Search the one workspace you chose</li>
                             <li>Read pages it finds there</li>
                             <li>Link you to the exact page, so you can check it yourself</li>
+                            <li>List documents Syntext has drafted, by title, so it does not rewrite one you already have</li>
                         </ul>
                     </div>
                     <div className="connect-column">

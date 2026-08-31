@@ -128,6 +128,22 @@ TOOLS: List[Dict[str, Any]] = [
             "required": ["file_id", "page_number"],
         },
     },
+    {
+        "name": "list_drafts",
+        "description": (
+            "List the documents SyntextAI has already drafted for this "
+            "workspace: the title of each, whether it is still a draft or has "
+            "been approved into the knowledge base, and when it was written. "
+            "Check this before writing a policy, procedure or SOP from "
+            "scratch, because the business may already have one and rewriting "
+            "it creates a second version nobody asked for. Titles and status "
+            "only; to read what a draft says, open it in SyntextAI. Note that "
+            "a draft is NOT part of the knowledge base and search_knowledge "
+            "will not find it: it becomes searchable only after a person "
+            "approves it, which is deliberate."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -331,9 +347,73 @@ async def _get_page(
     )
 
 
+async def _list_drafts(
+    principal: Principal,
+    store: RepositoryManager,
+    reachable: List[int],
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    """What has already been written, so it is not written twice.
+
+    Read only and metadata only: titles, status, dates. No content and no
+    prompt, which is what list_for_workspace already omits and for the same
+    reason. Somebody wanting to read a draft opens it in the product, where the
+    approval decision lives.
+
+    Deliberately not an answer to "what do we say about X". A draft is not part
+    of the knowledge base and search_knowledge cannot reach it, because a
+    generated document that could be retrieved would make the model's output
+    the model's source. This tool exists so the model knows a draft is there,
+    not so it can quote from it.
+
+    No embedding call, so no plan gate: this is a database read.
+    """
+    if not reachable:
+        return _tool_text(
+            "This connection no longer has access to any workspace. "
+            "Ask the workspace owner to check it in Settings under Connections."
+        )
+
+    rows: List[Dict[str, Any]] = []
+    for workspace_id in reachable:
+        try:
+            page = await store.draft_repo.list_for_workspace(workspace_id, limit=50)
+        except Exception:
+            logger.warning("Could not list drafts for a workspace", exc_info=True)
+            continue
+        rows.extend(page.get("items") or [])
+
+    if not rows:
+        return _tool_text(
+            "SyntextAI has not drafted any documents for this workspace yet."
+        )
+
+    rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+
+    lines: List[str] = []
+    for row in rows[:50]:
+        title = row.get("title") or "Untitled"
+        approved = row.get("ingested_file_id") is not None
+        state = (
+            "approved, and now part of the knowledge base"
+            if approved
+            else f"{row.get('status') or 'draft'}, not yet in the knowledge base"
+        )
+        when = str(row.get("created_at") or "")[:10]
+        lines.append(f"- {title} ({state}{', ' + when if when else ''})")
+
+    return _tool_text(
+        "Documents SyntextAI has drafted for this workspace:\n"
+        + "\n".join(lines)
+        + "\n\nOnly the approved ones are searchable. To read a draft, or to "
+        "approve one, open SyntextAI."
+    )
+
+
 HANDLERS = {
     "search_knowledge": _search_knowledge,
     "get_page": _get_page,
+    "list_drafts": _list_drafts,
 }
 
 
