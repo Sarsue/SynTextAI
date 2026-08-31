@@ -232,7 +232,39 @@ class PDFProcessor(FileProcessor):
                 image_area += (r[2] - r[0]) * (r[3] - r[1])
             if page_area and image_area / page_area >= self.VISION_IMAGE_AREA:
                 return True
-            if len(page.get_drawings()) >= self.VISION_VECTOR_DRAWINGS:
+
+            # Drawn rather than written, measured against how much this page
+            # says. A raw drawing count cannot tell a wiring diagram from a
+            # page of prose with ruled lines on it: measured 2026-08-31 over
+            # 167 real pages, the old threshold of 60 sent 43 of them to
+            # vision, and the ones just above it looked like this:
+            #
+            #     goodman_gszc7 p85    158 drawings   1,522 chars of text
+            #     goodman_gvxc  p54     66 drawings   1,552 chars of text
+            #
+            # 1,500 characters is a full page of prose. At 146 seconds a page
+            # that mistake cost about an hour per manual.
+            #
+            # Drawings per character separates the two cleanly, because a
+            # figure draws a great deal and says almost nothing:
+            #
+            #      2.88   1,430 drawings    496 chars   last of the prose
+            #     18.10   2,226 drawings    123 chars   first of the figures
+            #
+            # A 6x gap with nothing inside it. 5.0 sits in the middle of that
+            # gap. The absolute floor is belt and braces: every page above the
+            # gap has thousands of drawings, so it changes nothing here and
+            # stops a nearly-blank page with a few lines on it from qualifying.
+            #
+            # This is the same question the rest of this function asks. If a
+            # page's words are in the text layer, the extractor can read them
+            # and vision has nothing to add; a page whose labels are vector art
+            # has the drawings and not the words, which is exactly a high ratio.
+            drawings = len(page.get_drawings())
+            if (
+                drawings >= self.VISION_VECTOR_DRAWINGS
+                and drawings / max(len(text.strip()), 1) >= self.VISION_DRAWN_PER_CHAR
+            ):
                 return True
         except Exception:
             # A page whose geometry cannot be read is not worth failing
@@ -245,7 +277,11 @@ class PDFProcessor(FileProcessor):
     # rather than written, so its text layer cannot account for what is on it.
     # Measured 2026-08-14: the goodman nomenclature diagram has 202, and pages
     # that are genuinely tables or prose have very few.
-    VISION_VECTOR_DRAWINGS = int(os.getenv("VISION_VECTOR_DRAWINGS", "60"))
+    # A floor, not the test. See _page_is_unreadable_without_vision: the test
+    # is drawings per character, and this only stops a nearly-blank page from
+    # reaching it on a handful of rules.
+    VISION_VECTOR_DRAWINGS = int(os.getenv("VISION_VECTOR_DRAWINGS", "200"))
+    VISION_DRAWN_PER_CHAR = float(os.getenv("VISION_DRAWN_PER_CHAR", "5.0"))
 
     def _text_layer_is_credible(self, page) -> bool:
         """Whether this page's text layer can arbitrate the vision output.

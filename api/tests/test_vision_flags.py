@@ -291,3 +291,58 @@ async def test_a_figure_that_cannot_be_stored_does_not_lose_the_page(
 
     assert "Nomenclature" in pages[0]["text"]
     assert "figure_url" not in (pages[0].get("flags") or {})
+
+
+def _page_with(drawings: int, text_chars: int):
+    """A stand-in page: n drawing operations and m characters of text."""
+    class _Rect:
+        width = height = 100.0
+    class _Page:
+        rect = _Rect()
+        number = 0
+        def get_images(self, full=False): return []
+        def get_image_bbox(self, img): return None
+        def get_drawings(self): return [None] * drawings
+        def find_tables(self):
+            class _F: tables = []
+            return _F()
+    return _Page(), "x" * text_chars
+
+
+def test_a_page_of_prose_with_ruled_lines_is_not_a_figure():
+    """The mistake that cost an hour a manual.
+
+    Measured 2026-08-31 over 167 real pages: a raw drawing count of 60 sent 43
+    of them to the vision model at 146 seconds each, and the ones just above
+    the line were pages like goodman_gszc7 p85, 158 drawings and 1,522
+    characters. That is a full page of prose with rules on it, and its words
+    are in the text layer where the extractor can read them.
+    """
+    processor = PDFProcessor(store=None)
+    page, text = _page_with(drawings=158, text_chars=1522)
+    assert processor._page_is_unreadable_without_vision(page, text) is False
+
+
+def test_a_page_that_is_drawn_rather_than_written_is_a_figure():
+    """The case vision exists for: the labels are vector art, not text.
+
+    trane_dc p25, 2,226 drawings and 123 characters. The words on that page are
+    not in the file to be read, which is the only thing vision can fix.
+    """
+    processor = PDFProcessor(store=None)
+    page, text = _page_with(drawings=2226, text_chars=123)
+    assert processor._page_is_unreadable_without_vision(page, text) is True
+
+
+def test_a_nearly_blank_page_with_a_few_rules_is_not_a_figure():
+    """The absolute floor. A high ratio on almost nothing is not a diagram."""
+    processor = PDFProcessor(store=None)
+    page, text = _page_with(drawings=40, text_chars=3)
+    assert processor._page_is_unreadable_without_vision(page, text) is False
+
+
+def test_a_page_with_no_text_at_all_still_goes_to_vision():
+    """A scan. Nothing to read but pixels, whatever the drawing count."""
+    processor = PDFProcessor(store=None)
+    page, _ = _page_with(drawings=0, text_chars=0)
+    assert processor._page_is_unreadable_without_vision(page, "") is True
