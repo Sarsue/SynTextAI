@@ -463,8 +463,22 @@ def _is_heading_only(text: str) -> bool:
     return all(_HEADING_LINE.match(ln) for ln in lines)
 
 
-def _attach_orphan_headings(pieces: List[str]) -> List[str]:
-    """Give a heading the content it heads, instead of a chunk of its own.
+def _is_junk(text: str) -> bool:
+    """A piece that cannot answer anything, whatever it is retrieved for.
+
+    Bare page furniture: "60", "428 04 170100", "iii". No question has these as
+    its answer, and each one costs an embedding and occupies a retrieval slot.
+
+    Deliberately not a length rule. "Resistance at 25C: 5 kOhm." is 24
+    characters and is exactly the kind of specification this product exists to
+    find. The test is whether anything here is a word.
+    """
+    stripped = re.sub(r"[^A-Za-z]", "", text)
+    return len(stripped) < 3
+
+
+def _attach_orphans(pieces: List[str]) -> List[str]:
+    """Give a heading the content it heads, and drop what is only furniture.
 
     WHY
 
@@ -474,10 +488,7 @@ def _attach_orphan_headings(pieces: List[str]) -> List[str]:
     them as headings, which is an improvement in fidelity and made this worse,
     because a heading with no body still flushed as its own prose block.
 
-    Each one costs an embedding, occupies a retrieval slot, and can answer
-    nothing. On a query with no good match they are what comes back.
-
-    They are not junk in principle: "# TROUBLESHOOTING" is real structure, and a
+    They are not junk in principle: "TROUBLESHOOTING" is real structure, and a
     passage is easier to place when it carries the heading it sits under. So
     they are attached forward rather than dropped, which is the same thing
     _chunk_table already does by repeating the caption into every piece.
@@ -485,10 +496,16 @@ def _attach_orphan_headings(pieces: List[str]) -> List[str]:
     A trailing heading attaches backward, because there is nothing after it. A
     page consisting only of headings keeps them: dropping the page entirely is
     worse than a thin chunk.
+
+    Bare page numbers are different and are dropped outright. A heading tells a
+    reader where they are; "60" tells them nothing, and attaching it forward
+    only puts a stray number at the head of an unrelated passage.
     """
+    kept = [p for p in pieces if not _is_junk(p)]
+
     out: List[str] = []
     pending: List[str] = []
-    for piece in pieces:
+    for piece in kept:
         if _is_heading_only(piece):
             pending.append(piece)
             continue
@@ -504,25 +521,54 @@ def _attach_orphan_headings(pieces: List[str]) -> List[str]:
     return out
 
 
+# A section heading. Only the "#" form: measured on real extractor output, a
+# bold-only line is as often half a sentence ("**BEGINNING REPAIRS.**") as it is
+# a heading, so it stays content and is handled by _attach_orphans instead.
+_MD_HEADING = re.compile(r"^\s*(#{1,6})\s+(.+?)\s*$")
+
+
 def _split_markdown_blocks(text: str) -> List[Dict[str, Any]]:
-    """Separate a page into table blocks and everything else.
+    """Separate a page into table blocks and everything else, under its headings.
 
     A markdown table is a run of consecutive lines that all start and end with
     a pipe. The heading line immediately above it, if there is one, belongs to
     the table: a chunk reading "| 251 | 78 | 76 | 74 |" is useless without
     something saying it is the required liquid line temperature.
+
+    Each block also carries the heading path it sits under, so a passage about
+    defrost intervals knows it is under TROUBLESHOOTING. Headings are consumed
+    into that path rather than left in the text: they come back as a prefix on
+    every piece cut from the block, which is what stops one section's heading
+    from being the only thing a chunk contains.
     """
     lines = text.splitlines()
     blocks: List[Dict[str, Any]] = []
     buf: List[str] = []
+    stack: List[Tuple[int, str]] = []
+
+    def path() -> List[str]:
+        return [title for _, title in stack]
 
     def flush_prose():
         if buf:
-            blocks.append({"kind": "prose", "lines": list(buf)})
+            blocks.append({"kind": "prose", "lines": list(buf), "path": path()})
             buf.clear()
 
     i = 0
     while i < len(lines):
+        heading = _MD_HEADING.match(lines[i])
+        if heading:
+            flush_prose()
+            level = len(heading.group(1))
+            title = heading.group(2).replace("*", "").strip()
+            # A deeper heading nests; an equal or shallower one replaces.
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            if title:
+                stack.append((level, title))
+            i += 1
+            continue
+
         if _TABLE_ROW.match(lines[i]):
             j = i
             while j < len(lines) and (_TABLE_ROW.match(lines[j]) or not lines[j].strip()):
@@ -537,9 +583,6 @@ def _split_markdown_blocks(text: str) -> List[Dict[str, Any]]:
                 j += 1
 
             # The caption or heading directly above the table comes with it.
-            # Blank lines in between are skipped: "## Required Liquid Line
-            # Temperature\n\n| ... |" is one thing, and losing the heading to a
-            # newline leaves every chunk of the table unlabelled.
             caption: List[str] = []
             while buf and not buf[-1].strip():
                 buf.pop()
@@ -550,6 +593,7 @@ def _split_markdown_blocks(text: str) -> List[Dict[str, Any]]:
                 "kind": "table",
                 "caption": caption,
                 "lines": [ln for ln in lines[i:j] if ln.strip()],
+                "path": path(),
             })
             i = j
             continue
@@ -582,7 +626,15 @@ def _chunk_table(block: Dict[str, Any], count_tokens, target_chunk_tokens: int) 
     and the separator. A single row wider than the budget is emitted alone and
     over-length rather than cut, because half a row is worse than a long one.
     """
-    caption = block.get("caption") or []
+    # The section path joins the caption, deduplicated. The caption is the line
+    # directly above the table and is usually the table's own title, which is
+    # more specific than the section; the path says which section that title is
+    # in. Both, because "DELUXE SPLIT CONDENSERS" and "PRODUCT IDENTIFICATION"
+    # answer different halves of "what am I looking at".
+    caption = list(block.get("path") or [])
+    for line in block.get("caption") or []:
+        if line.strip() and line.strip() not in caption:
+            caption.append(line)
     rows = block["lines"]
     if not rows:
         return []
@@ -631,30 +683,89 @@ def chunk_markdown(text: str, target_chunk_tokens: int = 400) -> List[Dict[str, 
         return len(enc.encode(content))
 
     blocks = _split_markdown_blocks(text)
-    pieces: List[str] = []
+
+    # (section path, piece). The path travels with the piece so orphan
+    # attachment and junk removal still see the bare text, and the breadcrumb is
+    # added last. Prefixing first would make every piece look substantial and
+    # nothing would ever be recognised as furniture.
+    pieces: List[Tuple[List[str], str]] = []
     for block in blocks:
+        path = block.get("path") or []
         if block["kind"] == "table":
-            pieces.extend(_chunk_table(block, count_tokens, target_chunk_tokens))
+            for piece in _chunk_table(block, count_tokens, target_chunk_tokens):
+                pieces.append((path, piece))
             continue
         prose = "\n".join(block["lines"]).strip()
         if not prose:
             continue
         if count_tokens(prose) <= target_chunk_tokens:
-            pieces.append(prose)
+            pieces.append((path, prose))
             continue
         splitter = RecursiveTextSplitter(
             chunk_size=target_chunk_tokens,
             chunk_overlap=int(target_chunk_tokens * 0.2),
         )
-        pieces.extend(splitter.split_text(prose))
+        for piece in splitter.split_text(prose):
+            pieces.append((path, piece))
 
-    pieces = _attach_orphan_headings(pieces)
+    # Orphan attachment runs within a section, not across one. A heading at the
+    # end of a section belongs to that section, and merging it into the next
+    # one would file it under the wrong place.
+    resolved: List[Tuple[List[str], str]] = []
+    run: List[str] = []
+    run_path: Optional[List[str]] = None
+    # Headings that had nothing to attach to in their own section. A run that
+    # is nothing but headings is page furniture sitting above the next real
+    # section, so it crosses the boundary rather than becoming its own chunk.
+    # Keeping the rule strictly within-section put "**SERVICING**" back on its
+    # own, which is the thing this exists to prevent.
+    carry: List[str] = []
 
-    return [
-        {"content": p, "metadata": {"section": i + 1, "doc_type": "markdown"}}
-        for i, p in enumerate(pieces)
-        if p.strip()
-    ]
+    def close_run():
+        nonlocal carry
+        if not run:
+            return
+        attached = _attach_orphans(carry + run)
+        if all(_is_heading_only(p) for p in attached):
+            carry = attached
+            return
+        carry = []
+        resolved.extend((run_path, p) for p in attached)
+
+    for path, piece in pieces + [(None, None)]:
+        if path != run_path:
+            close_run()
+            run, run_path = [], path
+        if piece is not None:
+            run.append(piece)
+    close_run()
+    if carry and resolved:
+        # Nothing ever followed them. Attach backward rather than drop.
+        last_path, last = resolved[-1]
+        resolved[-1] = (last_path, last + "\n" + "\n".join(carry))
+
+    out: List[Dict[str, Any]] = []
+    for i, (path, piece) in enumerate(resolved):
+        if not piece.strip():
+            continue
+        # The breadcrumb goes in the text, not only in metadata, because the
+        # text is what gets embedded and what the keyword arm searches. This is
+        # the same reason _chunk_table repeats its caption into every piece: a
+        # passage that does not say what it is about can only be found by the
+        # words that happen to be in it.
+        crumb = " > ".join(path) if path else ""
+        content = f"{crumb}\n{piece}" if crumb and crumb not in piece else piece
+        out.append({
+            "content": content,
+            "metadata": {
+                "section": i + 1,
+                "doc_type": "markdown",
+                # The real section, as opposed to the counter above, which is
+                # just this piece's position on the page.
+                "section_path": path,
+            },
+        })
+    return out
 
 
 def chunk_text(

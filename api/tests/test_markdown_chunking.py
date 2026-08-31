@@ -47,6 +47,12 @@ def _rows(n: int) -> list:
 
 
 CAPTION = "## Required Liquid Line Temperature"
+# What a chunk must actually contain. A "##" heading is consumed into the
+# section path and comes back as its text on every piece cut from that section,
+# so the words survive and the markdown markers do not. Asserting the raw "##"
+# form would be testing the syntax rather than whether a reader can tell what
+# the table is.
+CAPTION_TEXT = "Required Liquid Line Temperature"
 HEADER = "| Liquid Pressure (psig) | 6F | 8F | 10F | 12F | 14F | 16F |"
 SEP = "| --- | --- | --- | --- | --- | --- | --- |"
 
@@ -81,7 +87,7 @@ def test_every_piece_of_a_table_says_what_its_columns_are():
     assert len(pieces) > 1, "the fixture must be big enough to split, or this proves nothing"
     for content in pieces:
         assert HEADER in content, "a table chunk lost its header row"
-        assert CAPTION in content, "a table chunk lost its caption"
+        assert CAPTION_TEXT in content, "a table chunk lost its caption"
 
 
 def test_the_general_chunker_really_does_break_this():
@@ -108,7 +114,7 @@ def test_a_caption_separated_by_a_blank_line_still_comes_with_the_table():
     immediately above and therefore always found the blank."""
     page = "\n".join([CAPTION, "", HEADER, SEP] + _rows(40))
     for content in _table_chunks(chunk_markdown(page)):
-        assert CAPTION in content
+        assert CAPTION_TEXT in content
 
 
 def test_a_table_small_enough_to_fit_is_left_whole():
