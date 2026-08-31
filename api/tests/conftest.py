@@ -243,3 +243,38 @@ async def client(store):
 
     app.dependency_overrides.clear()
     limiter.enabled = was_enabled
+
+
+# THE SUITE DOES NOT GET THE REAL BUCKET, FOR THE SAME REASON IT DOES NOT GET
+# THE REAL DATABASE
+#
+# One bucket holds every customer's documents, and the suite runs with real
+# credentials to it. Nothing stopped a test from writing there except each test
+# remembering to fake the upload, which is a convention rather than a guarantee.
+#
+# On 2026-08-31 the convention failed. Figure storage was added inside the PDF
+# processor, which no existing stub covered because every stub replaced
+# upload_bytes_to_gcs at the route it was imported into. Running the suite put
+# 76 PNGs into the live bucket, in test-fixture workspace paths, before anyone
+# noticed. Harmless that time. It was harmless because of what the new code
+# happened to do, not because of anything preventing it.
+#
+# So the client itself refuses. A test that reaches object storage now fails
+# with a sentence explaining what to stub, instead of quietly uploading. Any
+# test that genuinely needs storage behaviour should fake the function it calls,
+# which is what the import and draft tests already do.
+@pytest.fixture(autouse=True)
+def _no_real_object_storage(monkeypatch):
+    from google.cloud import storage
+
+    def _refuse(*args, **kwargs):
+        raise AssertionError(
+            "This test reached real object storage. Stub the function it calls "
+            "(upload_bytes_to_gcs, upload_to_gcs, download_from_gcs, "
+            "generate_signed_url) where the module under test imported it. "
+            "See test_import_sources.py and test_generated_documents.py."
+        )
+
+    monkeypatch.setattr(storage.Client, "from_service_account_json", _refuse)
+    monkeypatch.setattr(storage, "Client", _refuse)
+

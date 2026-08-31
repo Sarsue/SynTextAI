@@ -249,3 +249,24 @@ async def test_a_document_over_the_limit_is_refused():
         connectors._ensure_size("huge.pdf", connectors.MAX_IMPORT_BYTES + 1)
 
     assert "over the" in str(refused.value)
+
+
+async def test_the_suite_cannot_write_to_real_object_storage():
+    """The conftest guard is only worth having if it fires. This is that check.
+
+    Written because the failure it prevents was silent. On 2026-08-31 figure
+    storage was added inside the PDF processor, which no existing stub covered
+    because every stub replaces upload_bytes_to_gcs at the route that imported
+    it. The suite put 76 PNGs into the live customer bucket over an afternoon,
+    and the only symptom was one assertion mentioning a storage.googleapis.com
+    URL.
+
+    If someone removes the autouse fixture, this fails on the next run rather
+    than a month later.
+    """
+    from api.core.utils import upload_bytes_to_gcs
+
+    # upload_bytes_to_gcs catches its own exceptions and returns None, so the
+    # guard shows up as a refusal to produce a URL rather than as a raise.
+    result = await upload_bytes_to_gcs(b"not a real file", 1, 1, "guard-check.png")
+    assert result is None, "a test just wrote to object storage for real"
