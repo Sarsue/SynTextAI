@@ -48,6 +48,9 @@ import asyncio
 import json
 import logging
 import os
+
+import requests
+
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -149,6 +152,85 @@ async def announce_client_event(
         CLIENT_CHANNEL,
         {"user_id": str(int(user_id)), "event_type": event_type, "data": data},
     )
+
+
+async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> bool:
+    """Get one event to one person's browser: Redis, then HTTP, then say so.
+
+    ONE COPY, BECAUSE TWO DRIFTED
+
+    This existed twice. The worker's copy published to Redis first and sent the
+    shared secret on the HTTP fallback. The copy inside update_file_status did
+    neither: no publish, and a POST with no headers to an endpoint that requires
+    them. requests.post does not raise on a 403 and the result was discarded, so
+    every file status change the worker produced was refused by the API in
+    silence, and a customer watching an upload saw nothing until they reloaded.
+
+    Both callers now come here. The header cannot be forgotten in one place and
+    remembered in the other, because there is only one place.
+
+    Returns True when the event was handed off. False means the browser will not
+    hear about this one, which the caller may or may not care about.
+    """
+    if not user_id:
+        return False
+
+    if await announce_client_event(int(user_id), event_type, data):
+        return True
+
+    base = (os.getenv("API_BASE_URL") or "").rstrip("/")
+    if not base:
+        logger.warning(
+            "API_BASE_URL is not set, so %s for user %s cannot fall back to "
+            "HTTP and will not reach the browser",
+            event_type, user_id,
+        )
+        return False
+
+    secret = os.getenv("INTERNAL_API_SECRET", "")
+    if not secret:
+        # Named, never printed. The receiving end fails closed on a missing
+        # secret, so without this the symptom is silence.
+        logger.warning(
+            "INTERNAL_API_SECRET is not set, so %s for user %s will be refused "
+            "by the API. Set it in the environment of both the API and the "
+            "worker.",
+            event_type, user_id,
+        )
+
+    payload = {
+        "user_id": str(int(user_id)),
+        "event_type": event_type,
+        "data": data,
+    }
+    headers = {"X-Internal-Secret": secret} if secret else {}
+
+    def _post() -> bool:
+        try:
+            response = requests.post(
+                f"{base}/api/v1/internal/notify-client",
+                json=payload, headers=headers, timeout=5,
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not notify the browser of %s for user %s: %s",
+                event_type, user_id, type(e).__name__,
+            )
+            return False
+        if response.status_code >= 400:
+            # The status code and nothing else. A refusal here is about the
+            # secret, and a log line is not the place for it: not the value,
+            # not its length, not a prefix.
+            logger.warning(
+                "The API refused a %s notification for user %s with HTTP %s. "
+                "A 403 means the shared secret does not match between worker "
+                "and API; a 503 means it is not configured.",
+                event_type, user_id, response.status_code,
+            )
+            return False
+        return True
+
+    return await asyncio.to_thread(_post)
 
 
 async def listen(

@@ -4,6 +4,7 @@ Async File repository for managing file-related database operations.
 from typing import Optional, List, Dict, Any
 import logging
 from ..core.utils import sanitize_extracted_text
+from ..core.events import notify_client
 import asyncio
 
 from .async_base_repository import AsyncBaseRepository
@@ -1204,6 +1205,9 @@ class AsyncFileRepository(AsyncBaseRepository):
                 await session.commit()
                 logger.info(f"Updated file {file_id} status to {status}")
 
+                # Straight to the browser when this runs inside the API, which
+                # holds the socket. In the worker it is a no-op and notify_client
+                # below is the one that matters.
                 try:
                     await websocket_manager.send_message(
                         user_id=str(user_id),
@@ -1213,26 +1217,20 @@ class AsyncFileRepository(AsyncBaseRepository):
                 except Exception as ws_err:
                     logger.debug(f"WebSocket notify failed for file {file_id} status update: {ws_err}")
 
-                api_base_url = os.getenv("API_BASE_URL")
-                if api_base_url:
-                    api_base_url = api_base_url.rstrip("/")
-                    url = f"{api_base_url}/api/v1/internal/notify-client"
-                    payload = {
-                        "user_id": str(int(user_id)),
-                        "event_type": "file_status_update",
-                        "data": {"file_id": int(file_id), "status": status},
-                    }
-
-                    def _post():
-                        try:
-                            requests.post(url, json=payload, timeout=5)
-                        except Exception:
-                            return
-
-                    try:
-                        await asyncio.to_thread(_post)
-                    except Exception:
-                        pass
+                # The shared path: Redis, then an authenticated HTTP fallback.
+                # This used to be a hand-rolled POST with no headers, to an
+                # endpoint that requires them and answers 403. requests.post
+                # does not raise on a 403 and the result was thrown away, so
+                # every status change reached the API, was refused, and nobody
+                # heard: an upload sat at "extracting" until the page reloaded.
+                try:
+                    await notify_client(
+                        int(user_id),
+                        "file_status_update",
+                        {"file_id": int(file_id), "status": status},
+                    )
+                except Exception:
+                    logger.debug("Could not announce a file status change", exc_info=True)
 
                 return True
             except Exception as e:

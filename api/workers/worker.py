@@ -18,7 +18,6 @@ import os
 import sys
 import signal
 import time
-import requests
 from contextlib import asynccontextmanager
 from sqlalchemy import text
 from datetime import datetime, timedelta
@@ -33,6 +32,10 @@ from api.core.events import (
     announce_client_event,
     is_enabled as is_events_enabled,
     listen,
+    # One copy, shared with update_file_status. The worker's own version and
+    # the repository's had drifted: only this one sent the shared secret, so
+    # every file status change was refused by the API in silence.
+    notify_client,
 )
 from api.core.timing import emit
 from api.models.orm_models import AgentRun
@@ -139,7 +142,6 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:3000").rstrip("/")
 # Only used on the fallback path, when a Redis publish did not go out. The
 # endpoint refuses without it, so an unset value here means notifications are
 # lost during a Redis outage rather than being accepted from anybody.
-INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
 
 query_semaphore = asyncio.Semaphore(QUERY_CONCURRENCY)
@@ -517,43 +519,6 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
             finished_at=datetime.utcnow(),
         )
         return
-
-
-async def notify_client(user_id: int, event_type: str, data: Dict[str, Any]) -> None:
-    """Notify the API to relay an event to the frontend over WebSocket.
-
-    We route notifications by DB user_id. The API registers each WebSocket connection
-    under both firebase uid AND db user id, so the worker doesn't need to parse URLs.
-
-    Redis first, HTTP second, and the fallback is deliberate. Publishing is
-    non-blocking and costs no round trip, but a published message reaches only
-    a listener that is connected at that instant. This is the one notification
-    path where losing a message is visible to a customer: they would sit
-    watching a spinner for an answer that is already saved in the database.
-    So when the publish does not go out, we make the old direct call rather
-    than shrug.
-    """
-    if not user_id:
-        return
-
-    if await announce_client_event(int(user_id), event_type, data):
-        return
-
-    url = f"{API_BASE_URL}/api/v1/internal/notify-client"
-    payload = {
-        "user_id": str(int(user_id)),
-        "event_type": event_type,
-        "data": data,
-    }
-    headers = {"X-Internal-Secret": INTERNAL_API_SECRET} if INTERNAL_API_SECRET else {}
-
-    def _post():
-        try:
-            requests.post(url, json=payload, headers=headers, timeout=5)
-        except Exception as e:
-            logger.warning(f"Failed to notify client for user {user_id}: {e}")
-
-    await asyncio.to_thread(_post)
 
 
 async def renew_lease(run_id: uuid.UUID) -> bool:
