@@ -69,18 +69,23 @@ async def test_extraction_puts_the_flags_on_the_page(store, doc_file, monkeypatc
     """Page 1 could not be verified, page 2 was read cleanly."""
     processor = PDFProcessor(store)
 
-    async def fake_vision(page, text_layer):
+    async def fake_vision(page, text_layer, png: bytes = b""):
         n = page.number + 1
         return f"| col |\n| --- |\n| {n} |", (UNVERIFIED if n == 1 else {})
 
     monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
+    # Never touch object storage from a test. Without this the suite writes a
+    # figure into the real bucket on every run.
+    async def _no_upload(png, file_id, workspace_id, page_num):
+        return None
+    monkeypatch.setattr(processor, "_store_figure", _no_upload)
 
     pages = await processor.extract_text_with_page_numbers(
         _pdf_bytes(2), file_id=doc_file["id"]
     )
 
-    assert pages[0]["flags"] == UNVERIFIED
+    assert {k: v for k, v in pages[0]["flags"].items() if k != "figure_url"} == UNVERIFIED
     assert "flags" not in pages[1], "a clean page should carry no flags at all"
 
 
@@ -91,12 +96,17 @@ async def test_a_resumed_page_is_no_more_trusted_than_a_fresh_one(
     second attempt at a document must not quietly launder an unverified page."""
     processor = PDFProcessor(store)
 
-    async def fake_vision(page, text_layer):
+    async def fake_vision(page, text_layer, png: bytes = b""):
         n = page.number + 1
         return f"| col |\n| --- |\n| {n} |", (UNVERIFIED if n == 1 else {})
 
     monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
     monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
+    # Never touch object storage from a test. Without this the suite writes a
+    # figure into the real bucket on every run.
+    async def _no_upload(png, file_id, workspace_id, page_num):
+        return None
+    monkeypatch.setattr(processor, "_store_figure", _no_upload)
     await processor.extract_text_with_page_numbers(_pdf_bytes(2), file_id=doc_file["id"])
 
     async def must_not_run(page, text_layer):
@@ -107,7 +117,7 @@ async def test_a_resumed_page_is_no_more_trusted_than_a_fresh_one(
         _pdf_bytes(2), file_id=doc_file["id"]
     )
 
-    assert pages[0]["flags"] == UNVERIFIED
+    assert {k: v for k, v in pages[0]["flags"].items() if k != "figure_url"} == UNVERIFIED
 
 
 async def test_storage_puts_the_flags_where_a_citation_can_reach_them(store, doc_file):
@@ -223,3 +233,61 @@ def test_the_prompt_tells_the_model_what_to_do_with_it():
     src = inspect.getsource(syntext_agent.SyntextAgent.query_pipeline)
     assert "READ FROM A FIGURE" in src
     assert "safety claim" in src
+
+
+async def test_a_figure_page_keeps_its_picture(store, doc_file, monkeypatch):
+    """The words read off a diagram are not the diagram.
+
+    A wiring diagram means what it means by where its lines go, and the vision
+    model's paragraph about it cannot carry that. The page is already rendered
+    to PNG to be sent to the model, so keeping those bytes costs nothing and
+    gives a citation something to show rather than only describe.
+    """
+    processor = PDFProcessor(store)
+
+    async def fake_vision(page, text_layer, png: bytes = b""):
+        assert png, "the caller should hand the already-rendered page over"
+        return "## Nomenclature\n\nModel AB-21", {}
+
+    stored = {}
+
+    async def fake_store(png, file_id, workspace_id, page_num):
+        stored["png_bytes"] = len(png)
+        stored["page"] = page_num
+        return f"https://example.invalid/{file_id}-figure-p{page_num}.png"
+
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
+    monkeypatch.setattr(processor, "_store_figure", fake_store)
+
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(1), file_id=doc_file["id"]
+    )
+
+    assert stored["page"] == 1
+    assert stored["png_bytes"] > 0, "an empty render would store nothing useful"
+    assert pages[0]["flags"]["figure_url"].endswith("figure-p1.png")
+
+
+async def test_a_figure_that_cannot_be_stored_does_not_lose_the_page(
+    store, doc_file, monkeypatch
+):
+    """Best effort. The transcription is still worth having on its own."""
+    processor = PDFProcessor(store)
+
+    async def fake_vision(page, text_layer, png: bytes = b""):
+        return "## Nomenclature\n\nModel AB-21", {}
+
+    async def failing_store(png, file_id, workspace_id, page_num):
+        return None
+
+    monkeypatch.setattr(processor, "_page_is_unreadable_without_vision", lambda page, text: True)
+    monkeypatch.setattr(processor, "_read_page_with_vision", fake_vision)
+    monkeypatch.setattr(processor, "_store_figure", failing_store)
+
+    pages = await processor.extract_text_with_page_numbers(
+        _pdf_bytes(1), file_id=doc_file["id"]
+    )
+
+    assert "Nomenclature" in pages[0]["text"]
+    assert "figure_url" not in (pages[0].get("flags") or {})

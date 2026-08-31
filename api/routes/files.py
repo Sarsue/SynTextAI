@@ -563,6 +563,51 @@ async def get_file_access_url(
     }
 
 
+@files_router.get("/{file_id}/figure", response_class=JSONResponse)
+async def get_page_figure_url(
+    file_id: int,
+    page: int = Query(..., ge=1, description="Page whose figure to open"),
+    user_data: Dict = Depends(authenticate_user),
+    store: RepositoryManager = Depends(get_store),
+):
+    """A short-lived URL for the picture of one figure page.
+
+    A figure page is read by the vision model, which turns a wiring diagram
+    into a paragraph. The paragraph is what gets searched; the picture is what
+    a technician actually needs, because a diagram means what it means by where
+    its lines go.
+
+    Authorized exactly as the document is, per request against the document's
+    workspace, and signed the same way. A figure is part of the document and is
+    no less sensitive than the page it was cut from.
+
+    404 when that page has no stored figure, which is the ordinary case: only
+    pages the vision model read have one.
+    """
+    file_record = await store.file_repo.get_file_by_id(file_id)
+    if not file_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    workspace_id = file_record.get("workspace_id")
+    if workspace_id is not None:
+        await check_can_read_workspace(workspace_id, user_data["user_id"], store)
+    elif file_record.get("user_id") != user_data["user_id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    figure_url = await store.file_repo.get_page_figure(file_id, page)
+    if not figure_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That page has no stored figure",
+        )
+
+    signed = generate_signed_url(figure_url)
+    if not signed:
+        raise HTTPException(status_code=502, detail="Could not open this figure")
+
+    return {"url": signed, "expires_in": int(SIGNED_URL_TTL.total_seconds())}
+
+
 @files_router.get("/{file_id}/content", response_class=JSONResponse)
 async def get_file_content(
     file_id: int,

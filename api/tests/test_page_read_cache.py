@@ -67,7 +67,7 @@ class _CountingVision:
         self.pages_read = []
         self.fail_on = fail_on or set()
 
-    async def __call__(self, page, text_layer):
+    async def __call__(self, page, text_layer, png: bytes = b""):
         n = page.number + 1
         if n in self.fail_on:
             raise RuntimeError("vision endpoint is down")

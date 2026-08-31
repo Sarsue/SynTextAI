@@ -3,7 +3,7 @@ PDF processor module - Handles extraction and processing of PDF documents.
 """
 import logging
 import re
-from ..core.utils import sanitize_extracted_text
+from ..core.utils import sanitize_extracted_text, upload_bytes_to_gcs
 import os
 import asyncio
 import gc
@@ -338,7 +338,40 @@ class PDFProcessor(FileProcessor):
         """
         return await asyncio.to_thread(self._structured_pages_blocking, pdf_data)
 
-    async def _read_page_with_vision(self, page, text_layer: str):
+    async def _store_figure(
+        self, png: bytes, file_id: Optional[int], workspace_id: Optional[int], page_num: int
+    ) -> Optional[str]:
+        """Keep the picture of a figure page, not just the words read off it.
+
+        WHY
+
+        A figure page is read by the vision model, which turns a wiring diagram
+        into a paragraph describing it. That paragraph is searchable and is the
+        right thing for a model to read. It is the wrong thing for a technician
+        to act on, because a diagram means what it means by where its lines go,
+        and no transcription carries that.
+
+        The image costs nothing extra to obtain: this page is already rendered
+        to PNG to be sent to the vision model, and until now those bytes were
+        handed to the model and dropped. Same bucket, same never-public rule,
+        same signed-URL-per-request access as the document itself.
+
+        Best effort. A figure that could not be stored must not fail the page:
+        the transcription is still worth having.
+        """
+        if not png or file_id is None or workspace_id is None:
+            return None
+        try:
+            return await upload_bytes_to_gcs(
+                png, workspace_id, int(file_id), f"figure-p{page_num}.png"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Could not store the figure for page {page_num}: {type(e).__name__}"
+            )
+            return None
+
+    async def _read_page_with_vision(self, page, text_layer: str, png: bytes = b""):
         """Read a page with the vision model, and check its numbers.
 
         THE GUARDRAIL, AND THE PAGES IT MUST NOT BE APPLIED TO
@@ -383,8 +416,11 @@ class PDFProcessor(FileProcessor):
         Returns (markdown, flags). Empty markdown means fall back.
         """
         try:
-            pix = page.get_pixmap(dpi=VISION_DPI)
-            markdown = await read_page(pix.tobytes("png"), hint=text_layer)
+            # Rendered by the caller when it also stored the figure, so a page
+            # is rasterised once rather than once per purpose.
+            if not png:
+                png = page.get_pixmap(dpi=VISION_DPI).tobytes("png")
+            markdown = await read_page(png, hint=text_layer)
         except Exception as e:
             logger.warning(f"Could not render page for vision: {type(e).__name__}")
             return "", {}
@@ -512,6 +548,17 @@ class PDFProcessor(FileProcessor):
                 if resumed:
                     logger.info(f"Resumed {resumed} page(s) already read by the vision model")
 
+                # Where a stored figure goes. Looked up once and only when there
+                # is a figure to store, so nothing changes for a document that
+                # is all text.
+                workspace_id = None
+                if needs_vision and file_id is not None:
+                    try:
+                        record = await self.store.file_repo.get_file_by_id(int(file_id))
+                        workspace_id = (record or {}).get("workspace_id")
+                    except Exception:
+                        logger.debug("Could not resolve workspace for figures", exc_info=True)
+
                 # Concurrently, because a page takes about 146 seconds and
                 # doing 112 of them one after another is four and a half hours
                 # for one corpus. The cap exists because the far end is a
@@ -526,7 +573,24 @@ class PDFProcessor(FileProcessor):
 
                     async def read_one(n: int):
                         async with gate:
-                            markdown, flags = await self._read_page_with_vision(doc[n - 1], layer[n])
+                            page_obj = doc[n - 1]
+                            png = b""
+                            try:
+                                png = page_obj.get_pixmap(dpi=VISION_DPI).tobytes("png")
+                            except Exception:
+                                logger.debug("Could not rasterise page", exc_info=True)
+                            figure_url = await self._store_figure(
+                                png, file_id, workspace_id, n
+                            )
+                            markdown, flags = await self._read_page_with_vision(
+                                page_obj, layer[n], png=png
+                            )
+                            if figure_url:
+                                # On the page's flags, which already reach the
+                                # segment's meta_data and come back with every
+                                # search result. A citation can then show the
+                                # figure rather than only describe it.
+                                flags = {**(flags or {}), "figure_url": figure_url}
                         # Saved here rather than after the gather, because the
                         # gather is the hour that keeps getting interrupted.
                         if markdown:

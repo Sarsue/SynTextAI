@@ -925,6 +925,33 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Could not read pages for file {file_id}: {e}")
                 return []
 
+    async def get_page_figure(self, file_id: int, page_number: int) -> Optional[str]:
+        """The stored picture of one page, if that page had one.
+
+        Read from the segment's meta_data rather than derived from the file id
+        and page number. The path is predictable, so it could be built without
+        asking, but then the endpoint would happily sign a URL for a figure that
+        was never stored and hand the reader a 404 from object storage instead
+        of an honest answer from us.
+        """
+        async with self.get_async_session() as session:
+            try:
+                row = (await session.execute(
+                    text("""SELECT meta_data FROM segments
+                            WHERE file_id = :fid AND page_number = :pg
+                            LIMIT 1"""),
+                    {"fid": int(file_id), "pg": int(page_number)},
+                )).first()
+            except Exception as e:
+                logger.error(f"Could not read figure for {file_id} p{page_number}: {e}")
+                return None
+        meta = (row[0] if row else None) or {}
+        if isinstance(meta, dict):
+            flags = meta.get("flags") if isinstance(meta.get("flags"), dict) else meta
+            url = flags.get("figure_url") if isinstance(flags, dict) else None
+            return url if isinstance(url, str) and url else None
+        return None
+
     async def set_document_currency(
         self,
         file_id: int,
