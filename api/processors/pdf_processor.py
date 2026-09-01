@@ -3,7 +3,11 @@ PDF processor module - Handles extraction and processing of PDF documents.
 """
 import logging
 import re
-from ..core.utils import sanitize_extracted_text, upload_bytes_to_gcs
+from ..core.utils import (
+    sanitize_extracted_text,
+    upload_bytes_to_gcs,
+    collapse_repeated_cells,
+)
 import os
 import asyncio
 import gc
@@ -322,7 +326,13 @@ class PDFProcessor(FileProcessor):
                 out: Dict[int, str] = {}
                 for i, chunk in enumerate(chunks, 1):
                     try:
-                        out[i] = sanitize_extracted_text(chunk.get("text") or "")
+                        # Collapsed here rather than in the chunker, because
+                        # this text is also what is stored as the page and what
+                        # get_page hands back. Fixing it downstream would leave
+                        # the duplication in everything a reader opens.
+                        out[i] = collapse_repeated_cells(
+                            sanitize_extracted_text(chunk.get("text") or "")
+                        )
                     except Exception:
                         continue
                 return out

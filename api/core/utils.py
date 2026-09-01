@@ -521,6 +521,70 @@ def _attach_orphans(pieces: List[str]) -> List[str]:
     return out
 
 
+# Long enough that no merged cell is this. Measured 2026-09-01 across five
+# manuals: the repeated cells that are genuine merges are short ("Temperature
+# abnormal.", "K2", "---"), and the ones that are the extractor spreading a
+# swallowed paragraph across every column start at 413 characters.
+REPEATED_CELL_CHARS = 200
+
+
+def collapse_repeated_cells(markdown: str) -> str:
+    """Store a swallowed paragraph once, not once per column.
+
+    WHY
+
+    Prose sitting under a table is sometimes taken to be part of it, and
+    markdown has no way to say "this cell spans the row", so the extractor
+    writes the text into every column. Page 7 of hch6 carries the whole UNIT
+    OPERATION section four times, 2,164 characters each.
+
+    It is not a correctness problem: the text is there and the rows around it
+    are intact. It is waste with a cost. We embed the same paragraph four
+    times, and the chunk that holds it has its meaning diluted by three
+    redundant copies of itself.
+
+    Deliberately NOT a rule against big cells. A cell that genuinely holds a
+    lot is captured correctly and stays. This only removes a repeat.
+
+    The duplicates are blanked rather than dropped so the row keeps its column
+    count and the table stays a table.
+    """
+    if "|" not in markdown:
+        return markdown
+
+    any_change = False
+    out = []
+    for line in markdown.splitlines():
+        if not _TABLE_ROW.match(line):
+            out.append(line)
+            continue
+        cells = line.strip().strip("|").split("|")
+        seen = set()
+        changed = False
+        for i, cell in enumerate(cells):
+            key = cell.strip()
+            if len(key) < REPEATED_CELL_CHARS:
+                continue
+            if key in seen:
+                cells[i] = ""
+                changed = True
+            else:
+                seen.add(key)
+        if changed:
+            any_change = True
+            out.append("|" + "|".join(cells) + "|")
+        else:
+            out.append(line)
+
+    if not any_change:
+        # Byte for byte. splitlines and join alone drop a trailing newline, so
+        # a page with nothing to collapse still came back different, and a
+        # measurement that says it edited pages it did not touch is worse than
+        # no measurement.
+        return markdown
+    return "\n".join(out) + ("\n" if markdown.endswith("\n") else "")
+
+
 # A section heading. Only the "#" form: measured on real extractor output, a
 # bold-only line is as often half a sentence ("**BEGINNING REPAIRS.**") as it is
 # a heading, so it stays content and is handled by _attach_orphans instead.

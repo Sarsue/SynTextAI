@@ -203,3 +203,62 @@ def test_a_table_still_keeps_its_rows_whole():
     body = "\n".join(chunks)
     assert "| 251 | 78 | 76 | 74 |" in body, "a row was split"
     assert "Required Liquid Line Temperature" in body, "the caption was lost"
+
+
+# ---------------------------------------------------------------------------
+# A swallowed paragraph, stored once rather than once per column
+# ---------------------------------------------------------------------------
+from api.core.utils import collapse_repeated_cells  # noqa: E402
+
+
+def test_a_paragraph_spread_across_every_column_is_stored_once():
+    """Found by reading a real page in production, not by a test.
+
+    Prose under a table is sometimes taken to be part of it, and markdown has
+    no way to say "this spans the row", so the extractor writes the text into
+    every column. Page 7 of hch6 carried the whole UNIT OPERATION section four
+    times, 2,164 characters each: embedded four times, and diluting the chunk
+    that holds it with three redundant copies of itself.
+    """
+    # A distinctive marker once per cell, so the count measures duplication
+    # rather than how often the filler sentence repeats inside one cell.
+    body = "UNIT_OPERATION_MARKER " + ("time delays and defrost intervals. " * 8)
+    page = f"|{body}|{body}|{body}|{body}|"
+
+    out = collapse_repeated_cells(page)
+
+    assert out.count("UNIT_OPERATION_MARKER") == 1, "the paragraph is still repeated"
+    assert out.count("|") == page.count("|"), "the row lost its column count"
+    assert len(out) < len(page) / 3, "most of the duplication should be gone"
+
+
+def test_a_merged_cell_is_left_alone():
+    """Repeated short cells are a real table, not the extractor spreading prose.
+
+    trane_dc p57 genuinely reads "Temperature abnormal." in three columns. The
+    rule is about length, not repetition, and the shortest real over-capture
+    measured across five manuals was 413 characters.
+    """
+    page = "|20|Temperature abnormal.|Temperature abnormal.|Temperature abnormal.|"
+    assert collapse_repeated_cells(page) == page
+
+
+def test_a_big_cell_that_is_not_repeated_is_kept_whole():
+    """Not a rule against large cells. Osas's call, and the right one: if a cell
+    genuinely holds that much, capturing it whole is correct behaviour."""
+    big = "x" * 3000
+    page = f"|code|{big}|"
+    assert collapse_repeated_cells(page) == page
+
+
+def test_a_page_with_nothing_to_collapse_comes_back_byte_for_byte():
+    """splitlines and join alone drop a trailing newline, so a page that needed
+    no change still came back different, and a diff that lies about what it
+    touched is worse than no diff."""
+    page = "# Heading\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+    assert collapse_repeated_cells(page) == page
+
+
+def test_text_with_no_table_is_returned_unchanged():
+    prose = "The crankcase heater is de-energized when the compressor is running.\n"
+    assert collapse_repeated_cells(prose) == prose
