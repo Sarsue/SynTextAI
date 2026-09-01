@@ -324,6 +324,70 @@ each rather than one string twenty-three times, so a rule that eats digits needs
 its own measurement first. Reprocessing: none was done. Only newly ingested
 documents get any of this.
 
+**Ingestion sprint, day two** (2026-09-01). Parked here to go and find
+customers, which is the right call: the pipeline is proven on the documents we
+own and the next real information comes from documents we do not.
+
+Where it ended, all deployed:
+
+| | before | after |
+|---|---|---|
+| Table row integrity | 4% | **88%** |
+| Cell spaces preserved | — | **78%** |
+| Chunks carrying a section | 0% | **69%** |
+| Junk chunks | 19% | **0-1%** |
+| Vision pages | 103 of 406 | **24 of 406** |
+| Duplicated text | — | **80k chars removed, 7%** |
+
+Verified in production on a real reingest, not just locally: page 7 of hch6 now
+reads `|25|Invalid Model Plug|73|Contactor Shorted|`. Code 73 is a shorted
+contactor and 74 is an open one, and before this those numbers and those
+meanings were in different paragraphs.
+
+Also shipped that day: sections carried into chunk text, figure pages stored as
+images and served at `/files/{id}/figure?page=N`, `list_drafts` on MCP so a
+policy is not written twice, and the test suite made unable to reach the real
+bucket.
+
+**Two bugs found that were not in the pipeline at all.**
+
+File status never reached the browser. The websocket lives in the API and
+ingestion runs in the worker, so the worker posts to an internal endpoint that
+requires a shared secret. There were two copies of that call and only the
+worker's sent the header; `update_file_status` posted without it and was
+answered 403 every time. `requests.post` does not raise on a 403 and the
+response was discarded, so an upload sat at "extracting" until the page was
+reloaded, with no exception and no log line. One shared `notify_client` now,
+and it says when it fails.
+
+The vision gate was still routing on raw drawing count, the constant already
+proved not to generalise. 43 of 51 vision pages came from it, at 146 seconds
+each, and the pages just over the line were prose with ruled borders
+(158 drawings, 1,522 characters). Drawings **per character** separates figures
+from ruled prose with a 6x gap and no overlap. That number, 5.0, is from five
+HVAC manuals: the reasoning generalises, the number may not, and forms are what
+should break it first.
+
+**The measuring instruments.** Three lied this sprint, all producing confident
+plausible numbers: a hidden browser pane reporting a 0px viewport, a scratch
+file named `api.py` shadowing the package, and `pymupdf4llm` turning Tesseract
+on globally so `find_tables` returned `outdoorairtempsensor`. That last one made
+a report say 2% vs 11% for extractors really at 4% and 78%. Hence the subprocess
+in `evals/extraction_report.py` and the comment telling you not to merge it back.
+
+**What no automated check caught.** The four-times-duplicated paragraph was
+found by calling `get_page` and reading it. Every metric said that page was
+fine, because the metrics ask whether structure survived and have no opinion
+about the same text being stored four times.
+
+**Picking this back up.** `python api/evals/extraction_report.py <pdf>` scores
+any document in seconds with no model calls: rows, spaces, sections, junk,
+vision pages and time. Run it on the first real customer document of a new type
+before assuming anything. Untested shapes: scanned contracts, tax forms, any
+field-based form. Not built: figure display in the web chat (backend is done),
+and section coverage on documents that put headings inside table cells (1% on
+hch6, 94% on goodman_gvxc).
+
 ## What we can honestly claim
 
 Written 2026-08-29 after an AI-generated sales pitch was checked against the
