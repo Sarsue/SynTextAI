@@ -2,7 +2,8 @@ import os
 import re
 import logging
 from urllib.parse import urlparse
-from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Tuple
 
 from api.services.llm_service import token_count, MAX_TOKENS_CONTEXT, generate_explanation
 from api.rag.chunk_selector import SmartChunkSelector
@@ -127,6 +128,33 @@ def strip_untrusted_links(answer: str) -> Tuple[str, int]:
     return cleaned, defanged
 
 
+# What the verifier leaves where a claim's citation did not hold up and no
+# other retrieved passage supported it either. A private token rather than
+# prose, so render decides the wording in one place and nothing a model writes
+# can be mistaken for it.
+UNVERIFIED_MARK = "\u27e6unverified\u27e7"
+_UNVERIFIED_NOTE = " _(I could not confirm this in your documents.)_"
+
+
+@dataclass
+class Draft:
+    """An answer before a reader sees it.
+
+    kind is "answer" (text carries [Segment N] markers, segments are what N
+    counts), "uncited" (the model answered but would not cite, twice) or
+    "final" (a fixed message: nothing retrieved, a refusal, an error). Only an
+    "answer" is worth verifying.
+    """
+    kind: str
+    text: str
+    segments: List[Dict] = field(default_factory=list)
+    source_targets: Dict[int, tuple] = field(default_factory=dict)
+
+    @classmethod
+    def final(cls, text: str) -> "Draft":
+        return cls("final", text)
+
+
 class SyntextAgent:
     """Interface for conversing with document content using large context LLMs."""
 
@@ -226,9 +254,28 @@ class SyntextAgent:
         return formatted_context, source_targets
     
     async def query_pipeline(self, query: str, convo_history: str, top_k_results: List[Dict], language: str, comprehension_level: str) -> str:
+        """Draft and render in one step, with no verification between them.
+
+        What the fallback path uses when the agent graph itself has failed.
+        The graph runs compose, then the verifier, then render.
         """
-        Enhanced main pipeline using large context: formats context, prompts LLM to cite sources precisely, 
-        appends detailed source map.
+        draft = await self.compose(query, convo_history, top_k_results, language, comprehension_level)
+        return self.render(draft)
+
+    async def compose(
+        self,
+        query: str,
+        convo_history: str,
+        top_k_results: List[Dict],
+        language: str,
+        comprehension_level: str,
+        model: Optional[str] = None,
+    ) -> "Draft":
+        """Write the answer with its internal [Segment N] markers still in place.
+
+        Stops before the markers become links, because that is the point at
+        which a citation can still be checked and moved: the verifier works on
+        segment numbers, and a link is only a page.
         """
         try:
             if top_k_results:
@@ -239,7 +286,7 @@ class SyntextAgent:
                 if convo_history and len(convo_history) > 1500:  # If history is long
                     try:
                         summarization_prompt = f"Summarize this conversation history briefly, focusing on the most important points and context needed to answer follow-up questions:\n\n{convo_history}"
-                        history_summary = await generate_explanation(summarization_prompt, language=language, comprehension_level=comprehension_level)
+                        history_summary = await generate_explanation(summarization_prompt, language=language, comprehension_level=comprehension_level, model=model)
                         history_prompt = f"\n\nPrevious Conversation Summary:\n{history_summary}\n\n"
                     except Exception as e:
                         logger.warning(f"Failed to summarize conversation history: {e}")
@@ -373,12 +420,13 @@ class SyntextAgent:
                     full_prompt,
                     language=language,
                     comprehension_level=comprehension_level,
-                    max_context_tokens=MAX_TOKENS_CONTEXT
+                    max_context_tokens=MAX_TOKENS_CONTEXT,
+                    model=model,
                 )
 
                 if not llm_answer_with_citations:
                     logger.error("No response generated from LLM")
-                    return "Sorry, I couldn't generate a response. Please try again."
+                    return Draft.final("Sorry, I couldn't generate a response. Please try again.")
 
                 if _declined(llm_answer_with_citations):
                     # It read the pages and said they do not answer the question.
@@ -386,7 +434,7 @@ class SyntextAgent:
                     # retry path exists for a missing citation marker, not for a
                     # verdict already given.
                     logger.info("Model declined: retrieved context does not answer the question")
-                    return _NO_ANSWER
+                    return Draft.final(_NO_ANSWER)
 
                 # Step 7.5: Validate citation format. If we provided context, we require at least
                 # one valid [Segment N] citation, and N must refer to an existing segment.
@@ -413,6 +461,7 @@ class SyntextAgent:
                             language=language,
                             comprehension_level=comprehension_level,
                             max_context_tokens=MAX_TOKENS_CONTEXT,
+                            model=model,
                         ) or ""
                         retry_cited = _cited_segments(retry)
                         if _declined(retry):
@@ -420,7 +469,7 @@ class SyntextAgent:
                             # them answer the question. That is the one case
                             # where saying so is true.
                             logger.info("Model judged the retrieved context insufficient")
-                            return _NO_ANSWER
+                            return Draft.final(_NO_ANSWER)
                         elif retry_cited:
                             llm_answer_with_citations = retry
                             cited = retry_cited
@@ -445,97 +494,114 @@ class SyntextAgent:
                         if not cited:
                             uncited_answer = True
 
-                if uncited_answer:
-                    consulted = []
-                    for idx in range(1, min(num_segments, 3) + 1):
-                        entry = source_targets.get(idx)
-                        if entry and entry[1] not in [c[1] for c in consulted]:
-                            consulted.append(entry)
-                    pages = "\n".join(f"- [{text}]({target})" for text, target in consulted)
-                    return (
-                        llm_answer_with_citations
-                        + "\n\n_I could not tie each statement above to a specific page. "
-                        "These are the pages I searched, so you can check it yourself:_\n"
-                        + pages
-                    )
-
-                # Step 8: Replace the internal markers with citations a reader
-                # can act on. [Segment 2] means nothing to a dental practice;
-                # a link to page 36 of their own handbook is the product. The
-                # marker format stays as-is for validation above, so accuracy is
-                # unchanged and only what reaches the customer differs.
-                #
-                # The list must describe the answer, not the retrieval. Numbering
-                # it by segment index published every chunk the search returned,
-                # so an answer that cited one page still showed "1..4" — four
-                # entries for a single document, three of which appear nowhere in
-                # the text, and a lone [2] in the body with no [1] above it.
-                # Renumber by order of first appearance and keep only what the
-                # answer actually leans on. Two segments from the same page are
-                # one citation to a reader, so they collapse by target.
-                display_number: Dict[int, int] = {}
-                target_number: Dict[str, int] = {}
-                ordered_sources: List[Tuple[int, str, str]] = []
-
-                for idx in cited:
-                    entry = source_targets.get(idx)
-                    if not entry:
-                        continue
-                    text, target = entry
-                    if target in target_number:
-                        # Same page, already cited under an earlier number.
-                        display_number[idx] = target_number[target]
-                        continue
-                    number = len(ordered_sources) + 1
-                    display_number[idx] = number
-                    target_number[target] = number
-                    ordered_sources.append((number, text, target))
-
-                def _linkify(match):
-                    # A combined [Segment 2, 3] becomes the links it stands for,
-                    # deduplicated: two segments off one page read as one citation.
-                    links = []
-                    for raw in match.group(1).split(","):
-                        number = display_number.get(int(raw.strip()))
-                        if number is None or number in links:
-                            continue
-                        links.append(number)
-                    return "".join(
-                        f"[[{n}]]({ordered_sources[n - 1][2]})" for n in links
-                    )
-
-                llm_answer_with_citations = _CITATION_RE.sub(
-                    _linkify, llm_answer_with_citations
-                )
-
-                # The frontend splits the answer on this exact marker to lift the
-                # citations into their own styled box and render its own heading.
-                source_map = "\n".join(
-                    ["\n\n**Sources:**"]
-                    + [f"{n}. [{text}]({target})" for n, text, target in ordered_sources]
-                )
-
-                final_response = llm_answer_with_citations + "\n\n" + source_map
-
-                # Last thing before the answer leaves. The source map is built
-                # from verified segments so its links survive; anything the
-                # model wrote pointing elsewhere does not.
-                final_response, defanged = strip_untrusted_links(final_response)
-                if defanged:
-                    logger.warning({
-                        "event": "answer.untrusted_links_removed",
-                        "count": defanged,
-                    })
-
-                return final_response
+                kind = "uncited" if uncited_answer else "answer"
+                return Draft(kind, llm_answer_with_citations, top_k_results, source_targets)
 
             # No relevant document chunks found
             logger.info("No relevant document chunks found for query.")
-            return "I couldn't find relevant information in your documents to answer this question. Please try rephrasing your question or upload additional relevant content."
+            return Draft.final("I couldn't find relevant information in your documents to answer this question. Please try rephrasing your question or upload additional relevant content.")
 
         except Exception as e:
             logger.error(f"Exception occurred in query pipeline: {e}", exc_info=True)
-            return "Syntext ran into issues processing this query. Please try again."
+            return Draft.final("Syntext ran into issues processing this query. Please try again.")
+
+
+    def render(self, draft: "Draft") -> str:
+        """Turn a draft into what the reader sees: links, a source list, and
+        nothing linked that we did not put there."""
+        if draft.kind == "final":
+            return draft.text
+
+        answer = draft.text
+        source_targets = draft.source_targets
+        num_segments = len(draft.segments)
+
+        if draft.kind == "uncited":
+            consulted = []
+            for idx in range(1, min(num_segments, 3) + 1):
+                entry = source_targets.get(idx)
+                if entry and entry[1] not in [c[1] for c in consulted]:
+                    consulted.append(entry)
+            pages = "\n".join(f"- [{text}]({target})" for text, target in consulted)
+            answer, _ = strip_untrusted_links(answer)
+            return (
+                answer
+                + "\n\n_I could not tie each statement above to a specific page. "
+                "These are the pages I searched, so you can check it yourself:_\n"
+                + pages
+            )
+
+        # Read the markers again rather than trusting a list made earlier: the
+        # verifier may have moved a citation or removed one since compose.
+        cited = [i for i in _cited_segments(answer) if 1 <= i <= num_segments]
+
+        # Step 8: Replace the internal markers with citations a reader
+        # can act on. [Segment 2] means nothing to a dental practice;
+        # a link to page 36 of their own handbook is the product.
+        #
+        # The list must describe the answer, not the retrieval. Numbering
+        # it by segment index published every chunk the search returned,
+        # so an answer that cited one page still showed "1..4": four
+        # entries for a single document, three of which appear nowhere in
+        # the text, and a lone [2] in the body with no [1] above it.
+        # Renumber by order of first appearance and keep only what the
+        # answer actually leans on. Two segments from the same page are
+        # one citation to a reader, so they collapse by target.
+        display_number: Dict[int, int] = {}
+        target_number: Dict[str, int] = {}
+        ordered_sources: List[Tuple[int, str, str]] = []
+
+        for idx in cited:
+            entry = source_targets.get(idx)
+            if not entry:
+                continue
+            text, target = entry
+            if target in target_number:
+                # Same page, already cited under an earlier number.
+                display_number[idx] = target_number[target]
+                continue
+            number = len(ordered_sources) + 1
+            display_number[idx] = number
+            target_number[target] = number
+            ordered_sources.append((number, text, target))
+
+        def _linkify(match):
+            # A combined [Segment 2, 3] becomes the links it stands for,
+            # deduplicated: two segments off one page read as one citation.
+            # A number outside the range is dropped rather than left as text.
+            links = []
+            for raw in match.group(1).split(","):
+                number = display_number.get(int(raw.strip()))
+                if number is None or number in links:
+                    continue
+                links.append(number)
+            return "".join(
+                f"[[{n}]]({ordered_sources[n - 1][2]})" for n in links
+            )
+
+        answer = _CITATION_RE.sub(_linkify, answer)
+        answer = answer.replace(UNVERIFIED_MARK, _UNVERIFIED_NOTE)
+
+        final_response = answer
+        if ordered_sources:
+            # The frontend splits the answer on this exact marker to lift the
+            # citations into their own styled box and render its own heading.
+            source_map = "\n".join(
+                ["\n\n**Sources:**"]
+                + [f"{n}. [{text}]({target})" for n, text, target in ordered_sources]
+            )
+            final_response = answer + "\n\n" + source_map
+
+        # Last thing before the answer leaves. The source map is built
+        # from verified segments so its links survive; anything the
+        # model wrote pointing elsewhere does not.
+        final_response, defanged = strip_untrusted_links(final_response)
+        if defanged:
+            logger.warning({
+                "event": "answer.untrusted_links_removed",
+                "count": defanged,
+            })
+        return final_response
 
 
 if __name__ == "__main__":

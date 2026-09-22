@@ -8,7 +8,9 @@ from typing_extensions import TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from api.agents import verifier
 from api.agents.evidence import EvidenceSet
+from api.agents.models import WORKER_MODEL
 from api.rag.chunk_selector import SmartChunkSelector
 from api.rag.query_processor import DefaultQueryProcessor
 from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
@@ -138,6 +140,8 @@ class QueryAgentState(TypedDict, total=False):
     last_query: str
     last_added: int
 
+    draft: Any
+    verification: Dict[str, Any]
     response: str
     mode: str
 
@@ -157,6 +161,8 @@ class QueryAgent:
         workflow.add_node("check_coverage", self._check_coverage)
         workflow.add_node("select_context", self._select_context)
         workflow.add_node("generate", self._generate)
+        workflow.add_node("verify", self._verify)
+        workflow.add_node("render", self._render)
 
         workflow.set_entry_point("process_query")
         workflow.add_edge("process_query", "retrieve")
@@ -189,7 +195,9 @@ class QueryAgent:
             {"retrieve": "retrieve", "answer": "select_context"},
         )
         workflow.add_edge("select_context", "generate")
-        workflow.add_edge("generate", END)
+        workflow.add_edge("generate", "verify")
+        workflow.add_edge("verify", "render")
+        workflow.add_edge("render", END)
 
         return workflow.compile()
 
@@ -224,6 +232,7 @@ class QueryAgent:
             "information_needs": final_state.get("information_needs", []),
             "covered_needs": final_state.get("covered_needs", []),
             "retrievals": final_state.get("retrievals", 1),
+            "verification": final_state.get("verification"),
         }
 
     async def _process_query(self, state: QueryAgentState) -> QueryAgentState:
@@ -480,29 +489,25 @@ class QueryAgent:
         return {"context_chunks": context_chunks}
 
     async def _generate(self, state: QueryAgentState) -> QueryAgentState:
-        message = state.get("message") or ""
-        formatted_history = state.get("formatted_history") or ""
-        context_chunks = state.get("context_chunks") or []
-        language = state.get("language") or "English"
-        comprehension_level = state.get("comprehension_level") or "beginner"
-
-        response = await self._syntext.query_pipeline(
-            message,
-            formatted_history,
-            context_chunks,
-            language,
-            comprehension_level,
+        """Write the draft, with its [Segment N] markers still checkable."""
+        draft = await self._syntext.compose(
+            state.get("message") or "",
+            state.get("formatted_history") or "",
+            state.get("context_chunks") or [],
+            state.get("language") or "English",
+            state.get("comprehension_level") or "beginner",
+            model=WORKER_MODEL,
         )
+        logger.info({
+            "event": "query_agent.generate",
+            "kind": draft.kind,
+            "context_chunks": len(state.get("context_chunks") or []),
+        })
+        return {"draft": draft}
 
-        logger.info(
-            {
-                "event": "query_agent.generate",
-                "has_response": bool(response),
-                "context_chunks": len(context_chunks),
-            }
-        )
+    async def _verify(self, state: QueryAgentState) -> QueryAgentState:
+        draft, report = await verifier.verify(state["draft"])
+        return {"draft": draft, "verification": report.as_dict()}
 
-        return {
-            "response": response,
-            "mode": "enhanced",
-        }
+    async def _render(self, state: QueryAgentState) -> QueryAgentState:
+        return {"response": self._syntext.render(state["draft"]), "mode": "enhanced"}

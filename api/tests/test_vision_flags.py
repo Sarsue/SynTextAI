@@ -230,7 +230,7 @@ def test_the_prompt_tells_the_model_what_to_do_with_it():
     import inspect
     from api.services import syntext_agent
 
-    src = inspect.getsource(syntext_agent.SyntextAgent.query_pipeline)
+    src = inspect.getsource(syntext_agent.SyntextAgent.compose)
     assert "READ FROM A FIGURE" in src
     assert "safety claim" in src
 

@@ -326,7 +326,10 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
     keep = {
         k: result.get(k)
         for k in ("mode", "rewritten_query", "expanded_terms",
-                  "information_needs", "covered_needs", "retrievals", "error")
+                  "information_needs", "covered_needs", "retrievals", "error",
+                  # What the verifier found: how many cited claims held up,
+                  # how many had their citation moved, how many it flagged.
+                  "verification")
         if result.get(k) is not None
     }
     chunks = result.get("context_chunks") or []

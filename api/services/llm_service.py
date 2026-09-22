@@ -444,7 +444,10 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
 
 
 async def gradient_chat(
-    prompt: str, max_tokens: int = 800, reasoning_effort: Optional[str] = None
+    prompt: str,
+    max_tokens: int = 800,
+    reasoning_effort: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> str:
     """Generate text using OpenAI-compatible chat completions over HTTP."""
     if not MODEL_ACCESS_KEY:
@@ -457,7 +460,9 @@ async def gradient_chat(
         "Authorization": f"Bearer {MODEL_ACCESS_KEY}",
     }
     data = {
-        "model": CHAT_MODEL,
+        # Each agent may run on its own model (see api/agents/models.py), so
+        # a stronger model can be tried on one role without moving the rest.
+        "model": model or CHAT_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
         "temperature": TEMPERATURE,
@@ -501,7 +506,7 @@ async def gradient_chat(
 def token_count(content: str, model: str = None) -> int:
     return max(1, int(len(content.split()) * 1.5))
 
-async def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_tokens: int = None) -> str:
+async def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_tokens: int = None, model: Optional[str] = None) -> str:
     """Generates an explanation/answer for a prompt via the real LLM (gradient_chat).
 
     Previously routed through a DSPy predictor that was never actually
@@ -540,7 +545,7 @@ async def generate_explanation(text_chunk: str, language: str = "English", compr
         truncated_chunk = text_chunk
 
     try:
-        response = await gradient_chat(truncated_chunk, max_tokens=1500)
+        response = await gradient_chat(truncated_chunk, max_tokens=1500, model=model)
         if response:
             return response
         logging.warning(f"LLM returned empty response for chunk: {truncated_chunk[:50]}...")
