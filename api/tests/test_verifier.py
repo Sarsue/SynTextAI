@@ -130,3 +130,13 @@ def test_render_links_moved_citations_and_drops_out_of_range_ones():
     rendered = AnswerComposer().render(_draft("A [Segment 2]. B [Segment 9]."))
     assert "[[1]](https://storage.googleapis.com/b/handbook.pdf#page=9)" in rendered
     assert "Segment" not in rendered
+
+
+def test_a_segment_named_in_prose_does_not_reach_the_reader():
+    rendered = AnswerComposer().render(_draft(
+        "Limits are listed in Table 3 (see Segment 10). Refunds take 30 days [Segment 2]. "
+        "Our segment 2 customers are dentists [Segment 1]."
+    ))
+    assert "Segment 10" not in rendered and "Table 3." in rendered
+    # A customer's own words about segments stay.
+    assert "segment 2 customers" in rendered

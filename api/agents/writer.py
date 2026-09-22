@@ -68,8 +68,10 @@ def _prompt(question: str, shifted: List[Tuple[WorkerResult, str]]) -> str:
         "3. If different documents give different answers to the same thing, do "
         "not choose between them and do not merge them. Give each with the "
         "document it comes from, then ask which one the reader means.\n"
-        "4. Keep any caution that a value was read from a figure.\n"
-        "5. Be complete and direct. No preamble about documents or answers.\n\n"
+        "4. Never mention the markers or sources in words (not \"[1] lists\", not "
+        "\"see Segment 3\"). State the fact and put the marker after it.\n"
+        "5. Keep any caution that a value was read from a figure.\n"
+        "6. Be complete and direct. No preamble about documents or answers.\n\n"
         f"QUESTION\n{question}\n\n{parts}\n\nANSWER\n"
     )
 

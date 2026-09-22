@@ -135,6 +135,15 @@ def strip_untrusted_links(answer: str) -> Tuple[str, int]:
 UNVERIFIED_MARK = "\u27e6unverified\u27e7"
 _UNVERIFIED_NOTE = " _(I could not confirm this in your documents.)_"
 
+# A segment named in prose rather than cited: "(see Segment 10)", "see
+# Segments 3 and 4". Capitalised and parenthesised or after "see", because a
+# customer's own document may talk about market segments and those words stay.
+# Only ever matched after the real citations have become links.
+_STRAY_SEGMENT_RE = re.compile(
+    r"\s*\((?:see |from |in )?Segments?\s+\d+(?:\s*(?:,|and)\s*\d+)*\)"
+    r"|\bsee Segments?\s+\d+(?:\s*(?:,|and)\s*\d+)*"
+)
+
 
 @dataclass
 class Draft:
@@ -580,6 +589,11 @@ class AnswerComposer:
             )
 
         answer = _CITATION_RE.sub(_linkify, answer)
+        # "Segment" is internal plumbing, and a model sometimes names one in
+        # prose, outside the brackets, where nothing turns it into a link:
+        # "listed in Table 3 (see Segment 10)" reached a reader on
+        # 2026-09-22. Whatever is left after linking goes.
+        answer = _STRAY_SEGMENT_RE.sub("", answer)
         answer = answer.replace(UNVERIFIED_MARK, _UNVERIFIED_NOTE)
 
         final_response = answer
