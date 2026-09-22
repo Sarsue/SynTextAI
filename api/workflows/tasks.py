@@ -20,7 +20,7 @@ from typing import Optional, List, Dict, Any
 from api.models.async_db import get_database_url
 from api.processors.factory import FileProcessingFactory
 from urllib.parse import urlparse
-from api.agents.query_agent import QueryAgent
+from api.agents.answer_agent import AnswerAgent
 from api.agents.ingestion_agent import IngestionAgent
 
 # Load environment variables
@@ -51,7 +51,7 @@ stripe.api_key = os.getenv('STRIPE_SECRET')
 DATABASE_URL = get_database_url()
 store = RepositoryManager(database_url=DATABASE_URL)
 syntext = SyntextAgent()
-query_agent = QueryAgent(store=store, syntext=syntext)
+answer_agent = AnswerAgent(store=store, syntext=syntext)
 
 class FileUtils:
     """Utility class for file-related operations."""
@@ -294,7 +294,7 @@ async def run_query_pipeline(
     try:
         logger.info({"event": "run_query_pipeline.agent_start", "message": safe_text(message)})
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="pipeline") as ctx:
-            result = await query_agent.run(
+            result = await answer_agent.run(
                 user_id=user_id,
                 message=message,
                 language=language,

@@ -320,13 +320,16 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
     too early" and "it asked the same thing three times", which are four
     different fixes that look identical from the answer alone.
     """
-    # "turns", "searches", "reads" and "outlines" were tool-agent counters and
-    # went with it in 40ca829. Nothing has produced them since, so they were
-    # names describing a system that no longer exists. Removed 2026-08-15.
+    # Runs recorded before the multi-agent graph also carry
+    # "information_needs", "covered_needs" and "retrievals", from the search
+    # loop the coordinator replaced. Nothing writes them any more.
     keep = {
         k: result.get(k)
         for k in ("mode", "rewritten_query", "expanded_terms",
-                  "information_needs", "covered_needs", "retrievals", "error",
+                  "error",
+                  # Which path the coordinator chose and why, and per document
+                  # worker whether that document answered.
+                  "plan", "workers",
                   # What the verifier found: how many cited claims held up,
                   # how many had their citation moved, how many it flagged.
                   "verification")
