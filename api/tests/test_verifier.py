@@ -7,7 +7,7 @@ a unit test, and lives in api/evals/verifier_check.py.
 import pytest
 
 from api.agents import verifier
-from api.services.syntext_agent import UNVERIFIED_MARK, Draft, SyntextAgent
+from api.services.answer_composer import UNVERIFIED_MARK, Draft, AnswerComposer
 
 SEGMENTS = [
     {"file_name": "handbook.pdf", "page_number": 3, "content": "Vacation accrues at 1.25 days per month of service.", "file_url": "https://storage.googleapis.com/b/handbook.pdf"},
@@ -17,7 +17,7 @@ SEGMENTS = [
 
 
 def _draft(text):
-    _, targets = SyntextAgent()._format_context_and_sources(SEGMENTS)
+    _, targets = AnswerComposer()._format_context_and_sources(SEGMENTS)
     return Draft("answer", text, SEGMENTS, targets)
 
 
@@ -79,7 +79,7 @@ async def test_a_claim_nothing_supports_keeps_its_words_and_loses_its_link(monke
     assert "Refunds take 90 days." + UNVERIFIED_MARK in out.text
     assert report.unverified == 1
 
-    rendered = SyntextAgent().render(out)
+    rendered = AnswerComposer().render(out)
     assert "could not confirm" in rendered
     assert "**Sources:**" not in rendered
 
@@ -127,6 +127,6 @@ async def test_only_answers_are_verified(monkeypatch):
 
 
 def test_render_links_moved_citations_and_drops_out_of_range_ones():
-    rendered = SyntextAgent().render(_draft("A [Segment 2]. B [Segment 9]."))
+    rendered = AnswerComposer().render(_draft("A [Segment 2]. B [Segment 9]."))
     assert "[[1]](https://storage.googleapis.com/b/handbook.pdf#page=9)" in rendered
     assert "Segment" not in rendered

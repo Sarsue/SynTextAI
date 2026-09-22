@@ -8,7 +8,7 @@ import pytest
 
 from api.agents import answer_agent, coordinator, verifier, writer
 from api.agents.document_worker import WorkerResult
-from api.services.syntext_agent import Draft, SyntextAgent
+from api.services.answer_composer import Draft, AnswerComposer
 
 
 def _chunk(file_id, name, page, content, score=1.0):
@@ -45,7 +45,7 @@ class FakeStore:
         self.workspace_repo = W()
 
 
-class FakeSyntext(SyntextAgent):
+class FakeComposer(AnswerComposer):
     """compose answers from whatever it is given, citing segment 1."""
 
     def __init__(self):
@@ -82,8 +82,8 @@ def stub_models(monkeypatch):
     return replies
 
 
-async def _ask(store, syntext, **kw):
-    agent = answer_agent.AnswerAgent(store=store, syntext=syntext)
+async def _ask(store, composer, **kw):
+    agent = answer_agent.AnswerAgent(store=store, composer=composer)
     return await agent.run(user_id=1, message="vacation and refunds?", language="English",
                            comprehension_level="beginner", workspace_id=1, **kw)
 
@@ -91,11 +91,11 @@ async def _ask(store, syntext, **kw):
 async def test_one_document_takes_the_single_path(stub_models):
     stub_models["decide which documents"] = "1: vacation"
     stub_models["checking whether each claim"] = "1: SUPPORTED"
-    syntext = FakeSyntext()
-    out = await _ask(FakeStore(), syntext)
+    composer = FakeComposer()
+    out = await _ask(FakeStore(), composer)
     assert out["mode"] == "single" and out["workers"] == []
     # The single path reads the broad evidence, both documents, as before.
-    assert syntext.seen == [[1, 2]]
+    assert composer.seen == [[1, 2]]
     assert out["verification"]["supported"] == 1
 
 
@@ -105,14 +105,14 @@ async def test_two_documents_get_a_worker_each_and_one_combined_answer(stub_mode
         "Vacation accrues monthly [Segment 1]. Refunds must be in writing [Segment 2]."
     )
     stub_models["checking whether each claim"] = "1: SUPPORTED\n2: SUPPORTED"
-    store, syntext = FakeStore(), FakeSyntext()
-    out = await _ask(store, syntext)
+    store, composer = FakeStore(), FakeComposer()
+    out = await _ask(store, composer)
 
     assert out["mode"] == "multi"
     assert sorted(w["file_id"] for w in out["workers"]) == [1, 2]
     # Each worker searched and read its own document only.
     assert sorted(c for c in store.file_repo.calls if c) == [1, 2]
-    assert sorted(syntext.seen) == [[1], [2]]
+    assert sorted(composer.seen) == [[1], [2]]
     # The second document's citation resolves to the second document's page.
     assert "policy.pdf#page=7" in out["response"]
     assert "handbook.pdf#page=3" in out["response"]
@@ -121,13 +121,13 @@ async def test_two_documents_get_a_worker_each_and_one_combined_answer(stub_mode
 
 async def test_a_question_about_one_file_never_asks_the_coordinator(stub_models):
     stub_models["decide which documents"] = "1: x\n2: y"
-    out = await _ask(FakeStore(), FakeSyntext(), file_id=1)
+    out = await _ask(FakeStore(), FakeComposer(), file_id=1)
     assert out["plan"] == "scoped" and out["mode"] == "single"
 
 
 async def test_an_unreadable_plan_falls_back_to_the_single_path(stub_models):
     stub_models["decide which documents"] = "Both look relevant to me."
-    out = await _ask(FakeStore(), FakeSyntext())
+    out = await _ask(FakeStore(), FakeComposer())
     assert out["plan"] == "unreadable" and out["mode"] == "single"
 
 

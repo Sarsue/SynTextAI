@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Tuple
 from api.agents.document_worker import WorkerResult
 from api.agents.models import WRITER_EFFORT, WRITER_MODEL
 from api.services import llm_service
-from api.services.syntext_agent import _CITATION_RE, _cited_segments, _declined, Draft, SyntextAgent
+from api.services.answer_composer import _CITATION_RE, _cited_segments, _declined, Draft, AnswerComposer
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def write(question: str, results: List[WorkerResult]) -> Draft:
         return uncited[0].draft if uncited else Draft.final(results[0].draft.text if results else "")
 
     segments, shifted = merge(answered)
-    _, targets = SyntextAgent()._format_context_and_sources(segments)
+    _, targets = AnswerComposer()._format_context_and_sources(segments)
 
     if len(answered) == 1:
         # One document had the answer. Nothing to combine.

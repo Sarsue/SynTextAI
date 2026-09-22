@@ -10,7 +10,7 @@ from api.core.seats import sync_seats_to_stripe
 from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs, delete_workspace_objects
 from api.repositories.repository_manager import RepositoryManager
 from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding
-from api.services.syntext_agent import SyntextAgent
+from api.services.answer_composer import AnswerComposer
 import stripe
 from api.core.websocket_manager import websocket_manager
 from dotenv import load_dotenv
@@ -21,7 +21,6 @@ from api.models.async_db import get_database_url
 from api.processors.factory import FileProcessingFactory
 from urllib.parse import urlparse
 from api.agents.answer_agent import AnswerAgent
-from api.agents.ingestion_agent import IngestionAgent
 
 # Load environment variables
 load_dotenv()
@@ -47,11 +46,11 @@ LANGUAGE_CODE_MAP = {
 # Initialize Stripe
 stripe.api_key = os.getenv('STRIPE_SECRET')
 
-# Initialize DocSynthStore and SyntextAgent
+# The store, and the agent graph that answers questions
 DATABASE_URL = get_database_url()
 store = RepositoryManager(database_url=DATABASE_URL)
-syntext = SyntextAgent()
-answer_agent = AnswerAgent(store=store, syntext=syntext)
+composer = AnswerComposer()
+answer_agent = AnswerAgent(store=store, composer=composer)
 
 class FileUtils:
     """Utility class for file-related operations."""
@@ -229,35 +228,23 @@ async def process_file_data(
     language: str = "en",
     comprehension_level: str = "Beginner",
 ) -> Dict[str, Any]:
-    """Processes the uploaded file via the LangGraph ingestion agent with a safe fallback."""
-    try:
-        ingestion_agent = IngestionAgent(process_fn=_process_file_data_impl)
-        return await ingestion_agent.run(
-            user_id=user_id,
-            file_id=file_id,
-            filename=filename,
-            file_url=file_url,
-            workspace_id=workspace_id,
-            language=language,
-            comprehension_level=comprehension_level,
-        )
-    except Exception as agent_error:
-        logger.warning(
-            {
-                "event": "process_file_data.agent_failed_fallback",
-                "file_id": file_id,
-                "error": str(agent_error),
-            }
-        )
-        return await _process_file_data_impl(
-            user_id=user_id,
-            file_id=file_id,
-            filename=filename,
-            file_url=file_url,
-            workspace_id=workspace_id,
-            language=language,
-            comprehension_level=comprehension_level,
-        )
+    """Ingest one uploaded file.
+
+    Ingestion is a pipeline, not an agent: no model decides what happens next,
+    so it is a function call. It used to go through a one-node LangGraph
+    wrapper, which added a graph and a fallback path around a single call and
+    changed nothing. Runs are still recorded under agent_name "IngestionAgent",
+    which is a label on existing rows, not this code.
+    """
+    return await _process_file_data_impl(
+        user_id=user_id,
+        file_id=file_id,
+        filename=filename,
+        file_url=file_url,
+        workspace_id=workspace_id,
+        language=language,
+        comprehension_level=comprehension_level,
+    )
 
 
 async def run_query_pipeline(
@@ -331,7 +318,7 @@ async def run_query_pipeline(
                 accessible_workspace_ids=accessible_ids,
             )
             ctx["chunks"] = len(topK_chunks or [])
-            response = await syntext.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
+            response = await composer.query_pipeline(message, formatted_history, topK_chunks, language, comprehension_level)
         return {
             "response": response,
             "context_chunks": topK_chunks,

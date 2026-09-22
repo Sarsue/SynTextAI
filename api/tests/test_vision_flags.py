@@ -177,9 +177,9 @@ def test_the_model_is_told_a_segment_came_from_a_figure():
     citation identical to a verified one. The model is the only thing that knows
     which figure it is about to quote, so it has to be told.
     """
-    from api.services.syntext_agent import SyntextAgent
+    from api.services.answer_composer import AnswerComposer
 
-    context, _ = SyntextAgent()._format_context_and_sources(
+    context, _ = AnswerComposer()._format_context_and_sources(
         [_result(1, unverified=True, numbers=["134", "2.1"])]
     )
     assert "READ FROM A FIGURE" in context
@@ -189,9 +189,9 @@ def test_the_model_is_told_a_segment_came_from_a_figure():
 
 def test_a_verified_segment_carries_no_caution():
     """Cautioning everything is the same as cautioning nothing."""
-    from api.services.syntext_agent import SyntextAgent
+    from api.services.answer_composer import AnswerComposer
 
-    context, targets = SyntextAgent()._format_context_and_sources(
+    context, targets = AnswerComposer()._format_context_and_sources(
         [_result(1, unverified=False)]
     )
     assert "READ FROM A FIGURE" not in context
@@ -200,9 +200,9 @@ def test_a_verified_segment_carries_no_caution():
 
 def test_the_citation_itself_says_so():
     """The reader may skip the sentence and click the link."""
-    from api.services.syntext_agent import SyntextAgent
+    from api.services.answer_composer import AnswerComposer
 
-    _, targets = SyntextAgent()._format_context_and_sources(
+    _, targets = AnswerComposer()._format_context_and_sources(
         [_result(1, unverified=True)]
     )
     label, target = targets[1]
@@ -213,9 +213,9 @@ def test_the_citation_itself_says_so():
 
 def test_only_the_flagged_segment_is_marked():
     """One unverified page in a set of three must not taint the other two."""
-    from api.services.syntext_agent import SyntextAgent
+    from api.services.answer_composer import AnswerComposer
 
-    _, targets = SyntextAgent()._format_context_and_sources([
+    _, targets = AnswerComposer()._format_context_and_sources([
         _result(1, unverified=False),
         _result(2, unverified=True),
         _result(3, unverified=False),
@@ -228,9 +228,9 @@ def test_only_the_flagged_segment_is_marked():
 def test_the_prompt_tells_the_model_what_to_do_with_it():
     """The header is evidence; the instruction is what makes it an answer."""
     import inspect
-    from api.services import syntext_agent
+    from api.services import answer_composer
 
-    src = inspect.getsource(syntext_agent.SyntextAgent.compose)
+    src = inspect.getsource(answer_composer.AnswerComposer.compose)
     assert "READ FROM A FIGURE" in src
     assert "safety claim" in src
 

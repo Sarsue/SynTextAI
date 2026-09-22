@@ -167,7 +167,7 @@ VISION_PROMPT = (
     "each label with the part it points to."
 )
 
-# Max tokens allowed for combined context in syntext_agent
+# Max tokens allowed for combined context in answer_composer
 try:
     MAX_TOKENS_CONTEXT = int(os.getenv("MAX_TOKENS_CONTEXT", "120000"))
 except ValueError:

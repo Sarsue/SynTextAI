@@ -8,8 +8,8 @@ WHY THIS EXISTS
 
 A thumbs-down on its own is a tally: three people were unhappy. Joined to the
 run that produced the answer it becomes a diagnosis, because agent_runs already
-records what was asked, how many retrievals it took, whether coverage was
-satisfied, and how much context the model was handed.
+records what was asked, which documents the coordinator sent it to, which of
+them answered, what the verifier found, and how much context was read.
 
 That join is the whole reason for the message_id column added in
 20260808_message_feedback. Without it a rating can only be matched to a run by
@@ -22,11 +22,12 @@ somewhere different, so the tally decides what is worth working on:
 
     wrong_source        cited the wrong place. Rank or chunk boundaries.
     not_in_documents    answered from the model, not the documents. Grounding.
-    incomplete          a second source was needed and did not arrive. Coverage.
+    incomplete          a second source was needed and did not arrive. The
+                        coordinator's plan says whether it was even asked for.
     wrong               had the right context and still got it wrong. The model.
 
-`covered: no` alongside a complaint is the strongest single signal here: the
-pipeline knew it had not satisfied the question and answered anyway.
+`unverified` above zero alongside a complaint is the strongest single signal
+here: the verifier had already said part of the answer was not in the pages.
 
 DELIBERATELY A CLI, NOT A PAGE
 
@@ -107,17 +108,21 @@ async def main() -> None:
         print(_wrap(row.get("answer"), indent="    "))
 
         if run:
-            needs = run.get("covered_needs") or []
-            # The pipeline's own verdict on whether it had what it needed.
-            # A complaint on top of "no" is the cheapest lead in the file.
-            covered = "yes" if needs else "no"
+            v = run.get("verification") or {}
             print(
-                f"  pipeline: retrievals={run.get('retrievals')} "
-                f"context_chunks={run.get('context_chunks')} covered={covered} "
-                f"mode={run.get('mode')}"
+                f"  pipeline: mode={run.get('mode')} plan={run.get('plan')} "
+                f"context_chunks={run.get('context_chunks')}"
             )
-            if needs:
-                print(f"    covered_needs: {', '.join(str(n) for n in needs)}")
+            for w in run.get("workers") or []:
+                print(f"    document {w.get('file_id')}: {w.get('kind')}, {w.get('chunks')} chunks")
+            if v:
+                # The system's own verdict on its citations. A complaint on
+                # top of a non-zero "unverified" is the cheapest lead here.
+                print(
+                    f"    verifier: {v.get('status')} claims={v.get('claims')} "
+                    f"supported={v.get('supported')} moved={v.get('recited')} "
+                    f"unverified={v.get('unverified')}"
+                )
         else:
             # Not a failure. Runs from before the message link existed, and
             # anything pruned since, have nothing to join to.
@@ -139,12 +144,15 @@ async def main() -> None:
         with_run = [r for r in complaints if r.get("run")]
         unlinked = len(complaints) - len(with_run)
 
-        uncovered = sum(1 for r in with_run if not r["run"].get("covered_needs"))
-        if uncovered:
+        flagged = sum(
+            1 for r in with_run
+            if ((r["run"].get("verification") or {}).get("unverified") or 0) > 0
+        )
+        if flagged:
             print()
             print(
-                f"  {uncovered} of {len(with_run)} complaints with a run came from one "
-                "that had not satisfied the question and answered anyway."
+                f"  {flagged} of {len(with_run)} complaints with a run came from an "
+                "answer the verifier had already flagged as partly unconfirmed."
             )
         if unlinked:
             print()

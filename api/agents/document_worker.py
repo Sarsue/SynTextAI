@@ -27,7 +27,7 @@ from api.agents.evidence import EvidenceSet
 from api.agents.models import WORKER_MODEL
 from api.rag.chunk_selector import SmartChunkSelector
 from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
-from api.services.syntext_agent import Draft
+from api.services.answer_composer import Draft
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class WorkerResult:
 async def answer_from_document(
     *,
     store: Any,
-    syntext: Any,
+    composer: Any,
     user_id: int,
     workspace_id: Optional[int],
     accessible_workspace_ids: Optional[List[int]],
@@ -99,7 +99,7 @@ async def answer_from_document(
         f"{question}\n\n(From this document, find: {focus}. Other documents cover "
         "the rest, so answer only what this one says.)"
     )
-    draft = await syntext.compose(
+    draft = await composer.compose(
         asked, formatted_history, chunks, language, comprehension_level, model=WORKER_MODEL,
     )
     logger.info({"event": "document_worker.done", "file_id": file_id,

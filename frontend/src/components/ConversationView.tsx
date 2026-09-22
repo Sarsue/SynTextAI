@@ -145,7 +145,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
         setSelectedFile(null);
     };
 
-    // Written by syntext_agent when a segment came from a figure the text layer
+    // Written by answer_composer when a segment came from a figure the text layer
     // could not confirm. Matched rather than parsed: the citation line is
     // markdown built server side, and this is the one token both ends agree on.
     const UNVERIFIED_MARKER = 'read from a figure, unverified';

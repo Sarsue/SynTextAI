@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from api.agents.models import VERIFIER_EFFORT, VERIFIER_MODEL
 from api.services import llm_service
-from api.services.syntext_agent import UNVERIFIED_MARK, Draft, _CITATION_RE
+from api.services.answer_composer import UNVERIFIED_MARK, Draft, _CITATION_RE
 
 logger = logging.getLogger(__name__)
 

@@ -155,7 +155,7 @@ class Draft:
         return cls("final", text)
 
 
-class SyntextAgent:
+class AnswerComposer:
     """Interface for conversing with document content using large context LLMs."""
 
     def __init__(self):

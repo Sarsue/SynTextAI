@@ -100,9 +100,9 @@ class AnswerState(TypedDict, total=False):
 
 
 class AnswerAgent:
-    def __init__(self, *, store: Any, syntext: Any):
+    def __init__(self, *, store: Any, composer: Any):
         self._store = store
-        self._syntext = syntext
+        self._composer = composer
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -243,7 +243,7 @@ class AnswerAgent:
         state, a = task["state"], task["assignment"]
         result = await answer_from_document(
             store=self._store,
-            syntext=self._syntext,
+            composer=self._composer,
             user_id=state["user_id"],
             workspace_id=state.get("workspace_id"),
             accessible_workspace_ids=state.get("accessible_ids"),
@@ -289,7 +289,7 @@ class AnswerAgent:
         return {"context_chunks": chunks}
 
     async def _generate(self, state: AnswerState) -> AnswerState:
-        draft = await self._syntext.compose(
+        draft = await self._composer.compose(
             state.get("message") or "",
             state.get("formatted_history") or "",
             state.get("context_chunks") or [],
@@ -305,4 +305,4 @@ class AnswerAgent:
         return {"draft": draft, "verification": report.as_dict()}
 
     async def _render(self, state: AnswerState) -> AnswerState:
-        return {"response": self._syntext.render(state["draft"])}
+        return {"response": self._composer.render(state["draft"])}
