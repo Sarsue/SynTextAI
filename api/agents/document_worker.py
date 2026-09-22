@@ -72,27 +72,33 @@ async def answer_from_document(
     seed: List[Dict[str, Any]],
 ) -> WorkerResult:
     # The passages the broad search already found in this document count as
-    # one search, and the worker's own search, aimed at its focus, as another.
-    # The evidence set fuses them by rank, as it does any two retrievals.
+    # one search. The worker then searches this document for the whole
+    # question AND for its focus, and the evidence set fuses all three by rank.
+    #
+    # Both, because the focus alone narrows too far. Asked what to track "for
+    # taxes and for travel expenses", the coordinator gave IRS 334 the focus
+    # "car expenses"; a search for that found the car pages and never the
+    # meals pages the answer also needed (benchmark q19, 2026-09-22).
     evidence = EvidenceSet()
     evidence.add(seed, question)
-    try:
-        query = focus if focus and focus != question else question
-        emb = await get_text_embedding(query)
-        found = await store.file_repo.hybrid_search(
-            user_id=user_id,
-            query=query,
-            query_embedding=emb,
-            workspace_id=workspace_id,
-            file_id=file_id,
-            top_k=WORKER_TOP_K,
-            accessible_workspace_ids=accessible_workspace_ids,
-        )
-        evidence.add(found or [], query)
-    except Exception as e:
-        # The seed alone is still this document's evidence.
-        logger.warning({"event": "document_worker.search_failed", "file_id": file_id,
-                        "error": str(e)[:300]})
+    queries = [question] + ([focus] if focus and focus != question else [])
+    for query in queries:
+        try:
+            emb = await get_text_embedding(query)
+            found = await store.file_repo.hybrid_search(
+                user_id=user_id,
+                query=query,
+                query_embedding=emb,
+                workspace_id=workspace_id,
+                file_id=file_id,
+                top_k=WORKER_TOP_K,
+                accessible_workspace_ids=accessible_workspace_ids,
+            )
+            evidence.add(found or [], query)
+        except Exception as e:
+            # Whatever was already found is still this document's evidence.
+            logger.warning({"event": "document_worker.search_failed", "file_id": file_id,
+                            "error": str(e)[:300]})
 
     chunks = _selector.select(evidence.as_chunks(), question, token_budget=WORKER_TOKEN_BUDGET)
     asked = question if not focus or focus == question else (

@@ -110,8 +110,9 @@ async def test_two_documents_get_a_worker_each_and_one_combined_answer(stub_mode
 
     assert out["mode"] == "multi"
     assert sorted(w["file_id"] for w in out["workers"]) == [1, 2]
-    # Each worker searched and read its own document only.
-    assert sorted(c for c in store.file_repo.calls if c) == [1, 2]
+    # Each worker searched its own document only: once for the whole
+    # question and once for its focus.
+    assert sorted(c for c in store.file_repo.calls if c) == [1, 1, 2, 2]
     assert sorted(composer.seen) == [[1], [2]]
     # The second document's citation resolves to the second document's page.
     assert "policy.pdf#page=7" in out["response"]
