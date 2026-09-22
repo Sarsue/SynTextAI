@@ -140,3 +140,10 @@ def test_a_segment_named_in_prose_does_not_reach_the_reader():
     assert "Segment 10" not in rendered and "Table 3." in rendered
     # A customer's own words about segments stay.
     assert "segment 2 customers" in rendered
+
+
+def test_a_line_of_bare_markers_cites_the_text_above_it():
+    claims = verifier.split_claims("E4 means the cooling system is abnormal.\n\n[Segment 1] [Segment 2]")
+    assert len(claims) == 1
+    assert claims[0].segments == [1, 2]
+    assert claims[0].text.startswith("E4 means")

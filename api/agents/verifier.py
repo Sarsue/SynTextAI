@@ -95,6 +95,11 @@ def split_claims(text: str) -> List[Claim]:
     """Every cited statement in the answer, with where it sits in the text."""
     claims: List[Claim] = []
     offset = 0
+    # Where the last line with words on it began. A line holding nothing but
+    # markers ("[Segment 1] [Segment 2]" closing an answer) cites the text
+    # above it; without this such answers produced no claims at all and went
+    # out unchecked.
+    prev_text_start: Optional[int] = None
     for line in text.split("\n"):
         pending_start: Optional[int] = None
         for m in _SENTENCE_RE.finditer(line):
@@ -119,12 +124,21 @@ def split_claims(text: str) -> List[Claim]:
             claim_text = re.sub(r"\s+", " ", claim_text)
             claim_text = re.sub(r" ([.,;:!?])", r"\1", claim_text).strip(" -*|#>").strip()
             if not claim_text:
-                continue
+                if prev_text_start is None:
+                    continue
+                start = prev_text_start
+                body = text[start:e]
+                claim_text = re.sub(r"\s+", " ", _CITATION_RE.sub("", body))
+                claim_text = re.sub(r" ([.,;:!?])", r"\1", claim_text).strip(" -*|#>").strip()
+                if not claim_text:
+                    continue
             seen: List[int] = []
             for n in markers:
                 if n not in seen:
                     seen.append(n)
             claims.append(Claim(start, e, claim_text, seen))
+        if _CITATION_RE.sub("", line).strip(" -*|#>\t"):
+            prev_text_start = offset
         offset += len(line) + 1
     return claims
 

@@ -201,19 +201,37 @@ class AnswerAgent:
     async def _retrieve(self, state: AnswerState) -> AnswerState:
         """One broad search across everything the asker can see.
 
-        Plus a small search per expanded term. Every result is folded into one
-        evidence set, which ranks a passage by where it placed in each search
-        rather than by scores that different searches cannot share.
+        Plus a small search per expanded term, APPENDED after the main results
+        and ranked as one list, exactly as the pipeline before this did. Adding
+        each term search to the evidence set as its own retrieval looks
+        equivalent and is not: rank fusion gives a term search's first hit the
+        same weight as the main search's first hit, so five loosely related
+        passages per term jumped ahead of the main search's ranks 6 to 25.
+        That was measured, by accident, on 2026-09-22: every HVAC question
+        that regressed took this single-document path (error codes, charging
+        charts), and nothing else on the path had changed.
         """
         query = state.get("rewritten_query") or state.get("message") or ""
-        evidence = EvidenceSet()
-        evidence.add(await self._search(state, query, RETRIEVAL_TOP_K), query)
+        results = list(await self._search(state, query, RETRIEVAL_TOP_K))
         for term in (state.get("expanded_terms") or [])[:3]:
             try:
-                evidence.add(await self._search(state, term, 5), term)
+                results.extend(await self._search(state, term, 5))
             except Exception as e:
                 logger.warning({"event": "answer_agent.expansion_term_error", "error": str(e)[:200]})
-        logger.info({"event": "answer_agent.retrieve", "evidence": len(evidence)})
+
+        # Dedupe by (file, segment) keeping the first, highest-ranked copy,
+        # as the old pipeline did before handing one list to the evidence set.
+        seen, unique = set(), []
+        for r in results:
+            key = (r.get("file_id"), r.get("segment_id") if r.get("segment_id") is not None else r.get("chunk_id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(r)
+
+        evidence = EvidenceSet()
+        evidence.add(unique, query)
+        logger.info({"event": "answer_agent.retrieve", "results": len(results), "evidence": len(evidence)})
         return {"evidence": evidence}
 
     async def _plan(self, state: AnswerState) -> AnswerState:
