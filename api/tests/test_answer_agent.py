@@ -113,7 +113,11 @@ async def test_two_documents_get_a_worker_each_and_one_combined_answer(stub_mode
     # Each worker searched its own document only: once for the whole
     # question and once for its focus.
     assert sorted(c for c in store.file_repo.calls if c) == [1, 1, 2, 2]
-    assert sorted(composer.seen) == [[1], [2]]
+        # Each worker wrote from its own document only. The single-document
+    # draft started alongside the coordinator may also appear, and is
+    # discarded: the answer below is the workers'.
+    seen = composer.seen
+    assert [1] in seen and [2] in seen
     # The second document's citation resolves to the second document's page.
     assert "policy.pdf#page=7" in out["response"]
     assert "handbook.pdf#page=3" in out["response"]
@@ -169,3 +173,71 @@ async def test_documents_that_do_not_answer_are_left_out(monkeypatch):
 def test_candidates_rank_documents_by_their_evidence():
     docs = coordinator.candidates(HANDBOOK + POLICY + POLICY)
     assert [d["file_id"] for d in docs] == [2, 1]
+
+
+
+async def test_the_single_path_uses_the_draft_written_during_planning(stub_models):
+    """The draft starts with the coordinator, not after it, and is used once."""
+    import asyncio
+    order = []
+    stub_models["checking whether each claim"] = "1: SUPPORTED"
+
+    async def slow_plan(prompt, **kw):
+        order.append("coordinator started")
+        await asyncio.sleep(0.05)
+        order.append("coordinator done")
+        return "1: vacation"
+
+    class Recording(FakeComposer):
+        async def compose(self, *a, **k):
+            order.append("draft started")
+            return await super().compose(*a, **k)
+
+    composer = Recording()
+    import api.agents.coordinator as coord
+    orig = coord.llm_service.gradient_chat
+
+    async def route(prompt, **kw):
+        if "decide which documents" in prompt:
+            return await slow_plan(prompt, **kw)
+        return await orig(prompt, **kw)
+
+    coord.llm_service.gradient_chat = route
+    try:
+        out = await _ask(FakeStore(), composer)
+    finally:
+        coord.llm_service.gradient_chat = orig
+    assert out["mode"] == "single"
+    assert composer.seen == [[1, 2]]
+    assert order.index("draft started") < order.index("coordinator done")
+
+
+
+async def test_a_slow_coordinator_falls_back_to_the_single_path(stub_models, monkeypatch):
+    import asyncio
+
+    async def stuck(prompt, **kw):
+        if "decide which documents" in prompt:
+            await asyncio.sleep(5)
+            return "1: x\n2: y"
+        return "1: SUPPORTED" if "checking whether each claim" in prompt else ""
+
+    monkeypatch.setattr(answer_agent, "COORDINATOR_DEADLINE", 0.05)
+    monkeypatch.setattr(coordinator.llm_service, "gradient_chat", stuck)
+    out = await _ask(FakeStore(), FakeComposer())
+    assert out["plan"] == "deadline" and out["mode"] == "single"
+    assert "handbook.pdf" in out["response"]
+
+
+async def test_slow_related_terms_do_not_hold_up_the_search(stub_models, monkeypatch):
+    import asyncio
+
+    async def slow_process(message, history):
+        await asyncio.sleep(5)
+        return message, ["never used"]
+
+    monkeypatch.setattr(answer_agent, "TERMS_DEADLINE", 0.05)
+    monkeypatch.setattr(answer_agent.query_processor, "process", slow_process)
+    stub_models["decide which documents"] = "1: vacation"
+    out = await _ask(FakeStore(), FakeComposer())
+    assert out["expanded_terms"] == [] and out["response"]

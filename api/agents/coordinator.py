@@ -55,7 +55,7 @@ class Assignment:
 @dataclass
 class Plan:
     assignments: List[Assignment] = field(default_factory=list)
-    reason: str = "single"  # single | multi | scoped | one_candidate | unreadable | error
+    reason: str = "single"  # single | multi | scoped | one_candidate | unreadable | error | deadline
 
     @property
     def is_multi(self) -> bool:

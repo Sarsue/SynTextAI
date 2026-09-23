@@ -1,9 +1,19 @@
 """The answer agent: how a question becomes a cited answer.
 
-    process_query ─► retrieve ─► plan ─┬─► select_context ─► generate ──┬─► verify ─► render
-                                       │   (one document)                │
-                                       └─► document_worker × N ─► write ─┘
+    process_query ─► retrieve ─► plan ─┬──────────────────────────────┬─► verify ─► render
+                                       │  (one document: the draft     │
+                                       │   was written during plan)    │
+                                       └─► document_worker × N ─► write┘
                                            (several, in parallel)
+
+Written for speed as well as correctness. Measured 2026-09-23 on gpt-oss-20b,
+before these changes: 14.1s mean per answer, of which 2.0s was the coordinator
+with everything waiting on it, 1.4s four searches run one after another, and
+1.0s generating related search terms before any search began. Now the single-
+document draft is written WHILE the coordinator decides (most questions take
+that path, so the draft is usually ready when the decision lands, and on the
+multi path it is cancelled), the searches run together, and the main search
+starts while the related terms are still being generated.
 
 Four agents, each with one job and its own model setting (api/agents/models.py):
 
@@ -37,6 +47,7 @@ from __future__ import annotations
 import logging
 import operator
 import os
+import asyncio
 from typing import Annotated, Any, Dict, List, Optional
 
 from langgraph.graph import END, StateGraph
@@ -73,6 +84,16 @@ CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
 # aimed at a different need helps. Twenty-five stays.
 RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
 
+# Deadlines on the two calls an answer can do without. The provider's latency
+# has a long tail: the related-terms call, normally about a second, took 17.8s
+# once in eight runs, and the coordinator ranged from 2s to 11s (2026-09-23).
+# Each step waits on the one before, so one slow reply held up the whole
+# answer. Past these, the question goes on without related terms, or down the
+# single-document path, which is the pipeline as it was before the
+# coordinator existed. Normal replies land well inside them.
+TERMS_DEADLINE = float(os.getenv("TERMS_DEADLINE", "4"))
+COORDINATOR_DEADLINE = float(os.getenv("COORDINATOR_DEADLINE", "6"))
+
 
 class AnswerState(TypedDict, total=False):
     user_id: int
@@ -86,6 +107,8 @@ class AnswerState(TypedDict, total=False):
 
     rewritten_query: str
     expanded_terms: List[str]
+    # The main search, when it could start before the related terms existed.
+    main_results: Optional[List[Dict[str, Any]]]
     evidence: Any
     plan: Any
 
@@ -110,8 +133,6 @@ class AnswerAgent:
         g.add_node("process_query", self._process_query)
         g.add_node("retrieve", self._retrieve)
         g.add_node("plan", self._plan)
-        g.add_node("select_context", self._select_context)
-        g.add_node("generate", self._generate)
         g.add_node("document_worker", self._document_worker)
         g.add_node("write", self._write)
         g.add_node("verify", self._verify)
@@ -120,9 +141,7 @@ class AnswerAgent:
         g.set_entry_point("process_query")
         g.add_edge("process_query", "retrieve")
         g.add_edge("retrieve", "plan")
-        g.add_conditional_edges("plan", self._route, ["select_context", "document_worker"])
-        g.add_edge("select_context", "generate")
-        g.add_edge("generate", "verify")
+        g.add_conditional_edges("plan", self._route, ["verify", "document_worker"])
         g.add_edge("document_worker", "write")
         g.add_edge("write", "verify")
         g.add_edge("verify", "render")
@@ -171,20 +190,48 @@ class AnswerAgent:
 
     async def _process_query(self, state: AnswerState) -> AnswerState:
         message = state.get("message") or ""
-        rewritten, expanded = await query_processor.process(message, state.get("formatted_history"))
-        logger.info({
-            "event": "answer_agent.process_query",
-            "rewritten_query": safe_text(rewritten, "r"),
-            "expanded_terms_count": len(expanded or []),
-        })
         # Retrieval is scoped by workspace, not by uploader. Without this an
         # invited staff member matched zero chunks, because the documents
         # belong to the owner who uploaded them.
         accessible = None
         if state.get("workspace_id") is None:
             accessible = await self._store.workspace_repo.accessible_workspace_ids(state["user_id"])
+
+        # With no conversation history the rewrite step returns the question
+        # unchanged (query_processor.process), so the main search does not
+        # need to wait for the related terms, a model call of about a second.
+        # Started now, used only if the question really did come back as-is.
+        main: Optional[asyncio.Task] = None
+        if not state.get("formatted_history"):
+            main = asyncio.create_task(
+                self._search({**state, "accessible_ids": accessible}, message, RETRIEVAL_TOP_K)
+            )
+        try:
+            rewritten, expanded = await asyncio.wait_for(
+                query_processor.process(message, state.get("formatted_history")),
+                timeout=TERMS_DEADLINE,
+            )
+        except asyncio.TimeoutError:
+            logger.warning({"event": "answer_agent.terms_deadline", "seconds": TERMS_DEADLINE})
+            rewritten, expanded = message, []
+        except BaseException:
+            if main:
+                main.cancel()
+            raise
+        main_results = None
+        if main is not None:
+            if rewritten == message:
+                main_results = await main
+            else:
+                main.cancel()
+        logger.info({
+            "event": "answer_agent.process_query",
+            "rewritten_query": safe_text(rewritten, "r"),
+            "expanded_terms_count": len(expanded or []),
+            "search_started_early": main_results is not None,
+        })
         return {"rewritten_query": rewritten, "expanded_terms": expanded or [],
-                "accessible_ids": accessible}
+                "accessible_ids": accessible, "main_results": main_results}
 
     async def _search(self, state: AnswerState, query: str, top_k: int) -> List[Dict[str, Any]]:
         emb = await get_text_embedding(query)
@@ -212,12 +259,25 @@ class AnswerAgent:
         charts), and nothing else on the path had changed.
         """
         query = state.get("rewritten_query") or state.get("message") or ""
-        results = list(await self._search(state, query, RETRIEVAL_TOP_K))
-        for term in (state.get("expanded_terms") or [])[:3]:
+
+        async def term_search(term: str) -> List[Dict[str, Any]]:
             try:
-                results.extend(await self._search(state, term, 5))
+                return await self._search(state, term, 5)
             except Exception as e:
                 logger.warning({"event": "answer_agent.expansion_term_error", "error": str(e)[:200]})
+                return []
+
+        async def main_search() -> List[Dict[str, Any]]:
+            early = state.get("main_results")
+            return list(early) if early is not None else await self._search(state, query, RETRIEVAL_TOP_K)
+
+        # All at once; they were run one after another. gather keeps the
+        # order it was given, so the list is still the main results first and
+        # then each term's, which is what the ranking below depends on.
+        found = await asyncio.gather(
+            main_search(), *(term_search(t) for t in (state.get("expanded_terms") or [])[:3])
+        )
+        results = [r for batch in found for r in batch]
 
         # Dedupe by (file, segment) keeping the first, highest-ranked copy,
         # as the old pipeline did before handing one list to the evidence set.
@@ -235,18 +295,46 @@ class AnswerAgent:
         return {"evidence": evidence}
 
     async def _plan(self, state: AnswerState) -> AnswerState:
+        """Decide the path, and write the single-document answer meanwhile.
+
+        The draft does not depend on the decision, only on the evidence, so
+        it starts at the same moment as the coordinator instead of after it.
+        When the coordinator chooses several documents the draft is thrown
+        away; on gpt-oss-20b that costs a fraction of a cent, against about
+        two seconds saved on every question that takes the single path.
+        """
         evidence: EvidenceSet = state["evidence"]
-        plan = await coordinator.plan(
-            state.get("message") or "",
-            evidence.as_chunks(),
-            scoped=state.get("file_id") is not None,
-        )
-        return {"plan": plan}
+        context = (await self._select_context(state))["context_chunks"]
+        draft_task = asyncio.create_task(self._compose(state, context))
+        try:
+            plan = await asyncio.wait_for(
+                coordinator.plan(
+                    state.get("message") or "",
+                    evidence.as_chunks(),
+                    scoped=state.get("file_id") is not None,
+                ),
+                timeout=COORDINATOR_DEADLINE,
+            )
+        except asyncio.TimeoutError:
+            logger.warning({"event": "answer_agent.coordinator_deadline", "seconds": COORDINATOR_DEADLINE})
+            plan = coordinator.Plan(reason="deadline")
+        except BaseException:
+            draft_task.cancel()
+            raise
+        if plan.is_multi:
+            draft_task.cancel()
+            try:
+                await draft_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            return {"plan": plan}
+        return {"plan": plan, "draft": await draft_task,
+                "context_chunks": context, "mode": "single"}
 
     def _route(self, state: AnswerState):
         plan = state["plan"]
         if not plan.is_multi:
-            return "select_context"
+            return "verify"
         evidence = state["evidence"].as_chunks()
         return [
             Send("document_worker", {
@@ -306,16 +394,20 @@ class AnswerAgent:
         logger.info({"event": "answer_agent.select_context", "selected_chunks": len(chunks)})
         return {"context_chunks": chunks}
 
-    async def _generate(self, state: AnswerState) -> AnswerState:
+    async def _compose(self, state: AnswerState, context: List[Dict[str, Any]]):
         draft = await self._composer.compose(
             state.get("message") or "",
             state.get("formatted_history") or "",
-            state.get("context_chunks") or [],
+            context,
             state.get("language") or "English",
             state.get("comprehension_level") or "beginner",
             model=WORKER_MODEL,
         )
         logger.info({"event": "answer_agent.generate", "kind": draft.kind})
+        return draft
+
+    async def _generate(self, state: AnswerState) -> AnswerState:
+        draft = await self._compose(state, state.get("context_chunks") or [])
         return {"draft": draft, "mode": state.get("mode") or "single"}
 
     async def _verify(self, state: AnswerState) -> AnswerState:
