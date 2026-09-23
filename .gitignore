@@ -238,3 +238,7 @@ do_github_actions*
 # Copies of env files made while editing. These hold live secrets.
 .env.backup-*
 .env.bak
+
+# Benchmark runs are working output, not source. The runner recreates the
+# folder; keep the numbers that matter in the commit that acts on them.
+api/evals/results/
