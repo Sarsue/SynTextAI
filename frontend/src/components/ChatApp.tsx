@@ -211,11 +211,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         }
 
         const botMessage: Message = {
-            id: Date.now(),
+            // The saved id when the server sent one. A Date.now() placeholder
+            // cannot be rated, so thumbs only appeared after a reload.
+            id: incomingChatMessage.messageId ?? Date.now(),
             sender: 'bot',
             content: incomingChatMessage.content,
             timestamp: new Date().toISOString(),
             feedback: null,
+            trace: incomingChatMessage.trace,
         };
 
         setHistories(prev => ({

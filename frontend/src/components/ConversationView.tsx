@@ -6,6 +6,7 @@ import { Copy } from 'lucide-react';
 import './ConversationView.css';
 import { History, Message, MessageFeedback } from './types';
 import AnswerFeedback from './AnswerFeedback';
+import AnswerTrace from './AnswerTrace';
 import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
 import { UploadedFile } from './types';
@@ -237,6 +238,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
                                 )}
                             </div>
                         )}
+                        {isBot && message.trace && <AnswerTrace trace={message.trace} />}
                         <div className="message-metadata">
                             <div className="message-timestamp" title={message.timestamp}>
                                 {formatServerTime(message.timestamp)}

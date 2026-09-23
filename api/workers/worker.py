@@ -306,6 +306,36 @@ async def _acquire_slot(run_type: str, payload: Dict[str, Any]):
             yield
 
 
+from api.agents.trace import public_trace
+
+
+def _live_trace(result: Dict[str, Any], started_at: Optional[datetime]) -> Optional[Dict[str, Any]]:
+    """The reader's summary of how this answer was made, or None.
+
+    Never raises. It is a line under an answer that has already been saved,
+    and the first version failed the whole answer on a timestamp: started_at
+    comes back from Postgres timezone-aware and datetime.utcnow() is naive, so
+    the subtraction raised and the reader got "can't subtract offset-naive and
+    offset-aware datetimes" in place of their answer (driven 2026-09-23).
+    """
+    try:
+        # Names come from the chunks the answer was built from, which are
+        # this workspace's documents by construction.
+        names = {
+            c.get("file_id"): c.get("file_name")
+            for c in (result.get("context_chunks") or [])
+            if isinstance(c, dict) and c.get("file_id")
+        }
+        seconds = None
+        if started_at is not None:
+            now = datetime.now(started_at.tzinfo) if started_at.tzinfo else datetime.utcnow()
+            seconds = (now - started_at).total_seconds()
+        return public_trace(_run_record(result), seconds, names)
+    except Exception as e:
+        logger.warning(f"Could not build the answer trace: {e}")
+        return None
+
+
 def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
     """What is worth keeping about a query run.
 
@@ -489,6 +519,11 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                         await store.chat_repo.link_run_to_message(
                             run_id, int(answer_message_id)
                         )
+                    # What the reader may see of how this answer was made,
+                    # the same summary a reload builds from the stored run.
+                    # Names come from the chunks the answer was built from,
+                    # which are this workspace's documents by construction.
+                    trace = _live_trace(result, started_at)
                     await notify_client(
                         user_id=int(user_id),
                         event_type="message_received",
@@ -496,6 +531,11 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                             "status": "success",
                             "history_id": int(history_id),
                             "message": str(response),
+                            # The saved id, so the answer can be rated at once
+                            # rather than only after a reload replaces the
+                            # placeholder id the browser gave it.
+                            "message_id": int(answer_message_id) if answer_message_id else None,
+                            "trace": trace,
                         },
                     )
 

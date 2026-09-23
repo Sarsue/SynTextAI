@@ -62,6 +62,21 @@ export interface Message {
      */
     feedback?: MessageFeedback | null;
 
+    /**
+     * How this answer was made, for the reader: which documents, what the
+     * citation check found, how long it took. Built by the server
+     * (api/agents/trace.py). Absent on questions and on answers older than
+     * the multi-agent graph.
+     */
+    trace?: AnswerTrace | null;
+
+}
+
+export interface AnswerTrace {
+    path: 'single' | 'multi';
+    documents: { name: string; answered: boolean }[];
+    checked: { claims: number; confirmed: number; moved: number; unconfirmed: number } | null;
+    seconds: number | null;
 }
 
 /** A chip from the thumbs-down form. The backend validates the set. */

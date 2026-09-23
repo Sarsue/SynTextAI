@@ -147,3 +147,39 @@ def test_a_line_of_bare_markers_cites_the_text_above_it():
     assert len(claims) == 1
     assert claims[0].segments == [1, 2]
     assert claims[0].text.startswith("E4 means")
+
+
+async def test_the_allowance_grows_with_the_number_of_claims(monkeypatch):
+    seen = []
+
+    async def fake(prompt, **kwargs):
+        seen.append(kwargs["max_tokens"])
+        return "\n".join(f"{i}: SUPPORTED" for i in range(1, 9))
+
+    monkeypatch.setattr(verifier.llm_service, "gradient_chat", fake)
+    text = " ".join(f"Fact {i} [Segment 1]." for i in range(8))
+    await verifier.verify(_draft(text))
+    # Eight claims are two batches; each gets room for the claims it holds.
+    assert sorted(seen) == [verifier.BASE_TOKENS + 2 * verifier.TOKENS_PER_CLAIM,
+                            verifier.BASE_TOKENS + 6 * verifier.TOKENS_PER_CLAIM]
+
+
+async def test_many_claims_are_checked_in_parallel_batches_and_mapped_back(monkeypatch):
+    prompts = []
+
+    async def fake(prompt, **kwargs):
+        prompts.append(prompt)
+        # Every batch numbers its claims from 1. Reject the second claim of
+        # each batch, so a mapping error would show up as the wrong claims.
+        n = prompt.count("(cites passage")
+        return "\n".join(f"{i}: {'NOT SUPPORTED' if i == 2 else 'SUPPORTED'}" for i in range(1, n + 1)) \
+            if "checking whether each claim" in prompt else "\n".join(f"{i}: NONE" for i in range(1, 9))
+
+    monkeypatch.setattr(verifier.llm_service, "gradient_chat", fake)
+    text = " ".join(f"Fact number {i} holds [Segment 1]." for i in range(1, 15))
+    out, report = await verifier.verify(_draft(text))
+    checks = [p for p in prompts if "checking whether each claim" in p]
+    assert len(checks) == 3  # 14 claims in batches of 6
+    assert report.claims == 14 and report.supported == 11 and report.unverified == 3
+    # The rejected ones are claims 2, 8 and 14 of the answer.
+    assert "Fact number 2 holds." in out.text.split(verifier.UNVERIFIED_MARK)[0]

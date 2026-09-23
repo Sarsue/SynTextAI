@@ -15,6 +15,8 @@ from ..models import ChatHistory as ChatHistoryORM
 from ..models import Message as MessageORM
 from ..models import MessageFeedback as MessageFeedbackORM
 from ..models import AgentRun as AgentRunORM
+from ..models import File as FileORM
+from ..agents.trace import public_trace
 
 # Import SQLAlchemy async components
 from sqlalchemy import select, and_, or_, desc, func
@@ -247,6 +249,12 @@ class AsyncChatRepository(AsyncBaseRepository):
                 feedback_rows = (await session.execute(feedback_stmt)).scalars().all()
                 by_message = {f.message_id: f for f in feedback_rows}
 
+                traces = await self._traces_for(
+                    session,
+                    [m.id for m in messages_orm if m.sender == "bot"],
+                    accessible_workspace_ids,
+                )
+
                 result = []
                 for msg in messages_orm:
                     got = by_message.get(msg.id)
@@ -264,6 +272,7 @@ class AsyncChatRepository(AsyncBaseRepository):
                             if got
                             else None
                         ),
+                        "trace": traces.get(msg.id),
                     }
                     result.append(message_dict)
 
@@ -271,6 +280,59 @@ class AsyncChatRepository(AsyncBaseRepository):
             except Exception as e:
                 logger.error(f"Error getting messages: {e}", exc_info=True)
                 return []
+
+    async def _traces_for(
+        self,
+        session: AsyncSession,
+        message_ids: List[int],
+        accessible_workspace_ids: Optional[List[int]],
+    ) -> Dict[int, Dict[str, Any]]:
+        """How each answer was made, for the reader. See api/agents/trace.py.
+
+        Only called for messages already authorized above. Document names are
+        looked up again and filtered by workspace, because a document can move
+        to a workspace this reader cannot see after it answered their question,
+        and its name should not follow it.
+        """
+        if not message_ids:
+            return {}
+        try:
+            runs = (await session.execute(
+                select(AgentRunORM.message_id, AgentRunORM.result,
+                       AgentRunORM.started_at, AgentRunORM.finished_at)
+                .where(and_(AgentRunORM.message_id.in_(message_ids),
+                            AgentRunORM.run_type == "answer_query"))
+            )).all()
+            file_ids = set()
+            for r in runs:
+                rec = r.result or {}
+                file_ids.update(w.get("file_id") for w in rec.get("workers") or [])
+                file_ids.update(rec.get("cited_file_ids") or [])
+            file_ids.discard(None)
+            names: Dict[int, str] = {}
+            if file_ids:
+                cond = [FileORM.id.in_(file_ids)]
+                if accessible_workspace_ids is not None:
+                    cond.append(FileORM.workspace_id.in_(accessible_workspace_ids))
+                for fid, fname in (await session.execute(
+                    select(FileORM.id, FileORM.file_name).where(and_(*cond))
+                )).all():
+                    names[fid] = fname
+            out: Dict[int, Dict[str, Any]] = {}
+            for r in runs:
+                seconds = (
+                    (r.finished_at - r.started_at).total_seconds()
+                    if r.finished_at and r.started_at else None
+                )
+                trace = public_trace(r.result, seconds, names)
+                if trace:
+                    out[r.message_id] = trace
+            return out
+        except Exception as e:
+            # A missing trace costs a line of UI; a failure here must not cost
+            # the conversation.
+            logger.warning(f"Could not build answer traces: {e}")
+            return {}
 
     # --- feedback on an answer ---------------------------------------------
     #

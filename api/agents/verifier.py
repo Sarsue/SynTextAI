@@ -32,6 +32,7 @@ treated as a failure.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
@@ -236,10 +237,59 @@ def _rewrite(text: str, claim: Claim, new_segment: Optional[int]) -> str:
     return text[:claim.start] + body + text[claim.end:]
 
 
-async def _ask(prompt: str) -> str:
+# The output allowance grows with the number of claims. A reasoning model
+# thinks out of the same budget it answers from, and a flat 1,200 tokens held
+# three claims comfortably (the known-answer check) but not eight: gpt-oss-20b
+# spent all of it thinking, returned nothing three times, and with the retry
+# backoff one answer took 61 seconds and went out unchecked (driven
+# 2026-09-23; the cost record showed 3,744 output tokens for no verdicts).
+# The extra tokens cost almost nothing on that model.
+BASE_TOKENS = 1500
+TOKENS_PER_CLAIM = 400
+MAX_TOKENS = 8000
+
+
+def _budget(claims: int) -> int:
+    return min(MAX_TOKENS, BASE_TOKENS + TOKENS_PER_CLAIM * max(1, claims))
+
+
+async def _ask(prompt: str, claims: int = 1) -> str:
     return await llm_service.gradient_chat(
-        prompt, max_tokens=1200, reasoning_effort=VERIFIER_EFFORT, model=VERIFIER_MODEL
+        prompt, max_tokens=_budget(claims), reasoning_effort=VERIFIER_EFFORT, model=VERIFIER_MODEL
     )
+
+
+# Claims checked per call. Batches run at the same time, so an answer with
+# seventeen claims costs about as long as one with six. One call for all of
+# them was the slowest step in the product (30s for 17 claims), because a
+# reasoning model's thinking grows with everything it is asked at once.
+BATCH_SIZE = 6
+
+
+async def _check_all(numbered: List[Tuple[int, Claim]], segments: List[Dict[str, Any]]) -> Dict[int, bool]:
+    """Verdicts for every claim, keyed by its number in the whole answer.
+
+    Each batch is numbered from 1 in its own prompt, so the model never sees a
+    claim 14 without claims 1 to 13, and its reply is mapped back here. A batch
+    that fails or comes back unreadable leaves its claims unchecked; the
+    others still count.
+    """
+    batches = [numbered[i:i + BATCH_SIZE] for i in range(0, len(numbered), BATCH_SIZE)]
+
+    async def one(batch: List[Tuple[int, Claim]]) -> Dict[int, bool]:
+        local = [(j, c) for j, (_, c) in enumerate(batch, start=1)]
+        try:
+            reply = await _ask(_check_prompt(local, segments), len(local))
+        except Exception as e:
+            logger.warning({"event": "verifier.batch_failed", "error": str(e)[:200]})
+            return {}
+        got = {int(n): v.upper().startswith("SUPPORTED") for n, v in _VERDICT_RE.findall(reply or "")}
+        return {batch[j - 1][0]: ok for j, ok in got.items() if 1 <= j <= len(batch)}
+
+    verdicts: Dict[int, bool] = {}
+    for part in await asyncio.gather(*(one(b) for b in batches)):
+        verdicts.update(part)
+    return verdicts
 
 
 async def verify(draft: Draft) -> Tuple[Draft, Report]:
@@ -257,11 +307,10 @@ async def verify(draft: Draft) -> Tuple[Draft, Report]:
     segments = draft.segments
     try:
         numbered = list(enumerate(claims, start=1))
-        reply = await _ask(_check_prompt(numbered, segments))
-        verdicts = {int(n): v.upper().startswith("SUPPORTED") for n, v in _VERDICT_RE.findall(reply or "")}
+        verdicts = await _check_all(numbered, segments)
         if not verdicts:
             report.status = "error"
-            report.error = "unparseable" if reply else "empty"
+            report.error = "no_verdicts"
             report.unchecked = len(claims)
             logger.warning({"event": "verifier.no_verdicts", "reason": report.error})
             return draft, report
@@ -279,7 +328,7 @@ async def verify(draft: Draft) -> Tuple[Draft, Report]:
         to_recheck = [(i, c, _candidates(c, segments)) for i, c in failed]
         to_recheck = [t for t in to_recheck if t[2]]
         if to_recheck:
-            reply = await _ask(_recite_prompt(to_recheck, segments))
+            reply = await _ask(_recite_prompt(to_recheck, segments), len(to_recheck))
             picks = {int(n): p for n, p in _PICK_RE.findall(reply or "")}
             for i, _, cands in to_recheck:
                 pick = picks.get(i, "NONE")

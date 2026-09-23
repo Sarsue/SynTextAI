@@ -1,0 +1,107 @@
+/* One quiet line under an answer; the working, on request. Uses the app's own
+   tokens (index.css), so light and dark follow the rest of the product. */
+
+.answer-trace {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.answer-trace-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px 2px 2px;
+    margin-left: -2px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+
+.answer-trace-toggle:hover {
+    color: var(--text);
+    background: var(--bg-surface);
+}
+
+.answer-trace-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.answer-trace-chevron {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    transition: transform 0.15s ease;
+}
+
+.answer-trace.is-open .answer-trace-chevron {
+    transform: rotate(90deg);
+}
+
+.answer-trace-steps {
+    list-style: none;
+    margin: 6px 0 2px;
+    padding: 0 0 0 10px;
+    border-left: 1px solid var(--border);
+    counter-reset: step;
+}
+
+.answer-trace-steps > li {
+    counter-increment: step;
+    padding: 4px 0 6px 12px;
+}
+
+.answer-trace-step {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.answer-trace-step::before {
+    content: counter(step) ". ";
+    color: var(--text-secondary);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+}
+
+.answer-trace-note {
+    margin: 2px 0 0;
+    line-height: 1.45;
+}
+
+.answer-trace-docs,
+.answer-trace-counts {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+}
+
+.answer-trace-docs li,
+.answer-trace-counts li {
+    padding: 1px 0;
+    overflow-wrap: anywhere;
+}
+
+.answer-trace-docs li.is-quiet {
+    color: var(--text-muted);
+}
+
+.answer-trace-counts .num {
+    display: inline-block;
+    min-width: 1.4em;
+    color: var(--text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.answer-trace-counts li.is-caution {
+    color: #9a6700;
+}
+
+.dark-mode .answer-trace-counts li.is-caution {
+    color: #d4a72c;
+}

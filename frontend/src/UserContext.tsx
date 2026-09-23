@@ -13,12 +13,16 @@ import { UploadedFile, PaginationState } from './components/types';
 import { useToast } from './contexts/ToastContext';
 import { User as FirebaseUser, getAuth, onAuthStateChanged } from 'firebase/auth';
 import { KnownWebSocketMessage, FileStatusUpdatePayload } from './types/websocketTypes';
+import { AnswerTrace } from './components/types';
 
 export interface IncomingChatMessage {
     historyId: number | null;
     content: string;
     isError: boolean;
     receivedAt: number;
+    /** The saved message id, so the answer can be rated before any reload. */
+    messageId: number | null;
+    trace: AnswerTrace | null;
 }
 
 export interface OrgContext {
@@ -455,6 +459,8 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                                 : (data.message || ''),
                             isError: data.status === 'error',
                             receivedAt: Date.now(),
+                            messageId: typeof data.message_id === 'number' ? data.message_id : null,
+                            trace: data.trace ?? null,
                         });
                         break;
                     }
