@@ -109,9 +109,11 @@ async def main() -> None:
 
         if run:
             v = run.get("verification") or {}
+            cost = (run.get("cost") or {}).get("cost_usd")
             print(
                 f"  pipeline: mode={run.get('mode')} plan={run.get('plan')} "
                 f"context_chunks={run.get('context_chunks')}"
+                + (f" cost=${cost:.4f}" if cost is not None else "")
             )
             for w in run.get("workers") or []:
                 print(f"    document {w.get('file_id')}: {w.get('kind')}, {w.get('chunks')} chunks")

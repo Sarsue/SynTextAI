@@ -330,6 +330,8 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
                   # Which path the coordinator chose and why, and per document
                   # worker whether that document answered.
                   "plan", "workers",
+                  # What the provider charged for this question, per model.
+                  "cost",
                   # What the verifier found: how many cited claims held up,
                   # how many had their citation moved, how many it flagged.
                   "verification")

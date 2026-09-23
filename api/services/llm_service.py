@@ -23,6 +23,8 @@ rather than per call. Close it on shutdown with `aclose_client()`.
 import asyncio
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Callable, List, Dict, Any, Optional
 import base64
 import httpx
@@ -205,6 +207,58 @@ async def aclose_client() -> None:
     _client = None
 
 
+# What the inference provider charged, per model, for whatever is running now.
+#
+# DeepInfra returns `usage.estimated_cost` on every response, chat and
+# embeddings alike, and until 2026-09-23 it was thrown away, so the only cost
+# figures anybody had were estimates made from token counts and a price list.
+# A ledger is opened around one unit of work (a question, an ingest) with
+# `cost_ledger()`, and every response that comes back while it is open is added
+# to it, including ones a caller rejects and retries, because those were paid
+# for too.
+#
+# A ContextVar rather than a parameter, because the calls happen five layers
+# down in code that has no reason to know about billing, and because asyncio
+# copies the context into every task it starts: the parallel document workers
+# LangGraph launches all see the same ledger object and add to it.
+_ledger: ContextVar[Optional[Dict[str, Dict[str, Any]]]] = ContextVar("inference_ledger", default=None)
+
+
+@contextmanager
+def cost_ledger():
+    ledger: Dict[str, Dict[str, Any]] = {}
+    token = _ledger.set(ledger)
+    try:
+        yield ledger
+    finally:
+        _ledger.reset(token)
+
+
+def _record_usage(payload: Dict[str, Any], body: Dict[str, Any]) -> None:
+    ledger = _ledger.get()
+    if ledger is None or not isinstance(body, dict):
+        return
+    usage = body.get("usage") or {}
+    row = ledger.setdefault(str(payload.get("model") or "unknown"), {
+        "calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+    })
+    row["calls"] += 1
+    row["input_tokens"] += int(usage.get("prompt_tokens") or 0)
+    row["output_tokens"] += int(usage.get("completion_tokens") or 0)
+    row["cost_usd"] += float(usage.get("estimated_cost") or 0.0)
+
+
+def cost_summary(ledger: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """The ledger as it is stored on a run: a total and the per-model rows."""
+    by_model = {
+        m: {**r, "cost_usd": round(r["cost_usd"], 6)} for m, r in sorted(ledger.items())
+    }
+    return {
+        "cost_usd": round(sum(r["cost_usd"] for r in ledger.values()), 6),
+        "by_model": by_model,
+    }
+
+
 async def _post_json(
     url: str,
     headers: Dict[str, str],
@@ -232,6 +286,7 @@ async def _post_json(
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             body = resp.json()
+            _record_usage(payload, body)
             if accept is None or accept(body):
                 return body
             last_err = ValueError("response rejected by caller's accept()")
@@ -371,6 +426,9 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
         # size, routing and queueing as explanations for a slow page, all three
         # of which had been guessed at and two of which had been wrong.
         "stream": True,
+        # A streamed response reports what it cost only when asked, in one
+        # last event with no choices. See cost_ledger.
+        "stream_options": {"include_usage": True},
     }
     headers = {
         "Content-Type": "application/json",
@@ -415,6 +473,8 @@ async def read_page(image_png: bytes, hint: str = "") -> str:
                         # A malformed keepalive or comment frame is not worth
                         # losing a two-minute page over.
                         continue
+                    if event.get("usage"):
+                        _record_usage(data, event)
                     choice = (event.get("choices") or [{}])[0]
                     piece = (choice.get("delta") or {}).get("content")
                     if choice.get("finish_reason"):

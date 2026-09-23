@@ -9,7 +9,7 @@ from api.core.timing import emit, stage
 from api.core.seats import sync_seats_to_stripe
 from api.core.utils import download_from_gcs, chunk_text, delete_from_gcs, delete_workspace_objects
 from api.repositories.repository_manager import RepositoryManager
-from api.services.llm_service import get_text_embeddings_in_batches, get_text_embedding
+from api.services.llm_service import cost_ledger, cost_summary, get_text_embeddings_in_batches, get_text_embedding
 from api.services.answer_composer import AnswerComposer
 import stripe
 from api.core.websocket_manager import websocket_manager
@@ -236,15 +236,21 @@ async def process_file_data(
     changed nothing. Runs are still recorded under agent_name "IngestionAgent",
     which is a label on existing rows, not this code.
     """
-    return await _process_file_data_impl(
-        user_id=user_id,
-        file_id=file_id,
-        filename=filename,
-        file_url=file_url,
-        workspace_id=workspace_id,
-        language=language,
-        comprehension_level=comprehension_level,
-    )
+    # What reading the document cost: embeddings, and the vision model for
+    # pages the text layer loses, which is most of the spend on a manual.
+    with cost_ledger() as ledger:
+        result = await _process_file_data_impl(
+            user_id=user_id,
+            file_id=file_id,
+            filename=filename,
+            file_url=file_url,
+            workspace_id=workspace_id,
+            language=language,
+            comprehension_level=comprehension_level,
+        )
+    if isinstance(result, dict):
+        result["cost"] = cost_summary(ledger)
+    return result
 
 
 async def run_query_pipeline(
@@ -273,6 +279,9 @@ async def run_query_pipeline(
     # normal path below is the fallback for every failure here.
     cached = await query_cache.get(**cache_key_parts)
     if cached is not None:
+        # The cost stored with the cached answer was paid by the question that
+        # produced it. Serving it again is free.
+        cached = {**cached, "cost": {"cost_usd": 0.0, "by_model": {}, "cached": True}}
         with stage("query", user_id=user_id, workspace_id=workspace_id, mode="cached") as ctx:
             ctx["chunks"] = cached.get("context_chunk_count") or 0
         logger.info({"event": "run_query_pipeline.cache_hit", "workspace_id": workspace_id})
@@ -280,7 +289,8 @@ async def run_query_pipeline(
 
     try:
         logger.info({"event": "run_query_pipeline.agent_start", "message": safe_text(message)})
-        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="pipeline") as ctx:
+        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="pipeline") as ctx, \
+                cost_ledger() as ledger:
             result = await answer_agent.run(
                 user_id=user_id,
                 message=message,
@@ -291,6 +301,7 @@ async def run_query_pipeline(
                 file_id=file_id,
             )
             ctx["chunks"] = len(result.get("context_chunks") or [])
+            result["cost"] = cost_summary(ledger)
         await query_cache.put(result=result, **cache_key_parts)
         return result
     except Exception as agent_error:
@@ -301,7 +312,8 @@ async def run_query_pipeline(
                 "error": str(agent_error),
             }
         )
-        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="fallback") as ctx:
+        with stage("query", user_id=user_id, workspace_id=workspace_id, mode="fallback") as ctx, \
+                cost_ledger() as ledger:
             query_embedding = await get_text_embedding(message)
             # Same workspace-first scoping as the agent path, so the fallback
             # does not silently return nothing for invited staff.
@@ -326,6 +338,9 @@ async def run_query_pipeline(
             "expanded_terms": [],
             "mode": "fallback",
             "error": str(agent_error),
+            # Only the fallback's own calls. Whatever the failed graph spent
+            # before it raised is lost with its ledger.
+            "cost": cost_summary(ledger),
         }
 
 async def delete_user_task(user_id, user_gc_id: str = None):
