@@ -49,8 +49,11 @@ process_query ─► retrieve ─► plan ─┬──────────�
 6. **render** (`services/answer_composer.py`): markers become page links, links
    the model invented are stripped.
 
-The reader sees one collapsed line under each answer ("Checked 13 claims ·
-8.1s") that opens into these steps: `agents/trace.py`, `AnswerTrace.tsx`.
+While it runs, the reader sees the current step with a clock and the text as
+it is written (`agents/progress.py`, `StreamingAnswer.tsx`). Streamed text is
+unchecked, so nothing in it is clickable and citations are plain numbers; the
+final checked message replaces it. After, one collapsed line under the answer
+("Checked 13 claims · 8.1s") opens into the steps: `agents/trace.py`.
 
 ## Models and cost
 
