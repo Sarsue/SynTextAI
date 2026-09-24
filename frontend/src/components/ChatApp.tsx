@@ -65,6 +65,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
         authLoading,
         incomingChatMessage,
         clearIncomingChatMessage,
+        answerProgress,
         activeOrganizationId,
         orgContext,
         accessChangedAt,
@@ -1165,6 +1166,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ user: initialUser, onLogout }) => {
                             files={userFiles}
                             history={currentHistory !== null && histories[currentHistory] ? histories[currentHistory] : null}
                             awaitingReply={awaitingReplyFor !== null && awaitingReplyFor === currentHistory}
+                            progress={currentHistory !== null ? answerProgress[currentHistory] : undefined}
                             onCopy={handleCopy}
                             onFeedbackChange={handleFeedbackChange}
                         />

@@ -306,6 +306,7 @@ async def _acquire_slot(run_type: str, payload: Dict[str, Any]):
             yield
 
 
+from api.agents.progress import ProgressPublisher
 from api.agents.trace import public_trace
 
 
@@ -491,15 +492,28 @@ async def process_agent_run(run_id: uuid.UUID) -> None:
                 formatted_history = await store.chat_repo.format_user_chat_history(
                     int(history_id), int(user_id), accessible_workspace_ids=accessible_ids
                 )
-                result = await run_query_pipeline(
-                    user_id=int(user_id),
-                    message=str(message),
-                    language=str(language),
-                    comprehension_level=str(comprehension_level),
-                    formatted_history=formatted_history,
-                    workspace_id=int(workspace_id) if workspace_id is not None else None,
-                    file_id=int(file_id) if file_id is not None else None,
-                )
+                # Each step and the answer's text, to the asker's browser as
+                # they happen. Closed before the final answer is sent, so the
+                # finished message is always the last thing the browser hears.
+                progress = ProgressPublisher(
+                    lambda payload: notify_client(
+                        user_id=int(user_id), event_type="answer_progress", data=payload
+                    ),
+                    history_id=int(history_id),
+                ).start()
+                try:
+                    result = await run_query_pipeline(
+                        user_id=int(user_id),
+                        message=str(message),
+                        language=str(language),
+                        comprehension_level=str(comprehension_level),
+                        formatted_history=formatted_history,
+                        workspace_id=int(workspace_id) if workspace_id is not None else None,
+                        file_id=int(file_id) if file_id is not None else None,
+                        progress=progress,
+                    )
+                finally:
+                    await progress.close()
                 response = result.get("response")
                 if response:
                     answer_message_id = await store.chat_repo.add_message(

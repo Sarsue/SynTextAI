@@ -13,7 +13,7 @@ import { UploadedFile, PaginationState } from './components/types';
 import { useToast } from './contexts/ToastContext';
 import { User as FirebaseUser, getAuth, onAuthStateChanged } from 'firebase/auth';
 import { KnownWebSocketMessage, FileStatusUpdatePayload } from './types/websocketTypes';
-import { AnswerTrace } from './components/types';
+import { AnswerProgress, AnswerTrace } from './components/types';
 
 export interface IncomingChatMessage {
     historyId: number | null;
@@ -115,6 +115,8 @@ interface UserContextType {
     // Answers arrive over the websocket, but the conversation lives in ChatApp,
     // so the socket handler parks the latest one here for it to consume.
     incomingChatMessage: IncomingChatMessage | null;
+    /** Answers being made right now, by conversation. */
+    answerProgress: Record<number, AnswerProgress>;
     // Timestamp of the last access change pushed from the server.
     accessChangedAt: number;
     /** Bumped when a document in the current workspace is written, renamed,
@@ -182,6 +184,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [isMemberOnly, setIsMemberOnly] = useState<boolean>(false);
     const [currentWorkspaceRole, setCurrentWorkspaceRole] = useState<string | null>(null);
     const [incomingChatMessage, setIncomingChatMessage] = useState<IncomingChatMessage | null>(null);
+    const [answerProgress, setAnswerProgress] = useState<Record<number, AnswerProgress>>({});
     // Bumped whenever access changes, so views holding workspace-scoped lists
     // can refetch without each of them subscribing to the socket.
     const [accessChangedAt, setAccessChangedAt] = useState<number>(0);
@@ -450,8 +453,43 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         break;
                     }
 
+                    // The steps of an answer and its text as it is written,
+                    // bundled by the worker about ten times a second. The
+                    // final message_received replaces all of it.
+                    case 'answer_progress': {
+                        const data: any = parsedMessage.data || {};
+                        const historyId = data.history_id;
+                        if (typeof historyId !== 'number' || !Array.isArray(data.events)) break;
+                        setAnswerProgress(prev => {
+                            let cur: AnswerProgress = prev[historyId] ?? {
+                                historyId, stage: 'searching', info: {}, text: '',
+                                elapsed: 0, receivedAt: Date.now(),
+                            };
+                            for (const e of data.events) {
+                                if (e.kind === 'stage') {
+                                    cur = { ...cur, stage: e.stage, info: e.info || {},
+                                            elapsed: Number(e.elapsed) || 0, receivedAt: Date.now() };
+                                } else if (e.kind === 'text') {
+                                    cur = { ...cur, text: cur.text + (e.text || '') };
+                                } else if (e.kind === 'reset') {
+                                    cur = { ...cur, text: '' };
+                                }
+                            }
+                            return { ...prev, [historyId]: cur };
+                        });
+                        break;
+                    }
+
                     case 'message_received': {
                         const data: any = parsedMessage.data || {};
+                        if (typeof data.history_id === 'number') {
+                            setAnswerProgress(prev => {
+                                if (!(data.history_id in prev)) return prev;
+                                const next = { ...prev };
+                                delete next[data.history_id];
+                                return next;
+                            });
+                        }
                         setIncomingChatMessage({
                             historyId: data.history_id ?? null,
                             content: data.status === 'error'
@@ -843,6 +881,7 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentWorkspaceRole,
         setCurrentWorkspaceRole,
         incomingChatMessage,
+        answerProgress,
         clearIncomingChatMessage,
         accessChangedAt,
         draftsChangedAt,

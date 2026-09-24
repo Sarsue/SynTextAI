@@ -25,7 +25,7 @@ import json
 import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Callable, List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional, Protocol
 import base64
 import httpx
 import os
@@ -563,10 +563,92 @@ async def gradient_chat(
     return str(content).strip()
 
 
+class TextSink(Protocol):
+    """Where streamed answer text goes. See api/agents/progress.py."""
+
+    def text(self, piece: str) -> None: ...
+
+    def reset(self) -> None: ...
+
+
+async def stream_chat(
+    prompt: str,
+    sink: "TextSink",
+    max_tokens: int = 800,
+    reasoning_effort: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    """gradient_chat, with the answer handed to `sink` as it is written.
+
+    Returns the whole text, exactly as gradient_chat would, so callers treat
+    the result the same way; the sink is only for showing it early.
+
+    Only `content` is streamed. A reasoning model also streams its thinking,
+    as `reasoning_content`, and none of that is the answer.
+
+    Falls back to the plain call when the stream fails or ends with no answer,
+    the same empty-reply failure `_has_content` retries for. If some text had
+    already been shown, the sink is told to reset first, so the reader never
+    keeps half of a failed attempt.
+    """
+    if not MODEL_ACCESS_KEY:
+        logger.error("MODEL_ACCESS_KEY not configured for chat")
+        return ""
+    url = f"{INFERENCE_BASE_URL.rstrip('/')}/chat/completions"
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {MODEL_ACCESS_KEY}"}
+    data: Dict[str, Any] = {
+        "model": model or CHAT_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max(int(max_tokens), MIN_COMPLETION_TOKENS),
+        "temperature": TEMPERATURE,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    effort = reasoning_effort if reasoning_effort is not None else CHAT_REASONING_EFFORT
+    if effort:
+        data["reasoning_effort"] = effort
+
+    parts: List[str] = []
+    try:
+        client = await get_client()
+        async with client.stream("POST", url, headers=headers, json=data) as response:
+            if response.status_code != 200:
+                await response.aread()
+                raise ValueError(f"stream refused: {response.status_code}")
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload)
+                except ValueError:
+                    continue
+                if event.get("usage"):
+                    _record_usage(data, event)
+                choice = (event.get("choices") or [{}])[0]
+                piece = (choice.get("delta") or {}).get("content")
+                if piece:
+                    parts.append(piece)
+                    sink.text(piece)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning("Streamed answer failed (%s); asking again without streaming", type(e).__name__)
+
+    text = "".join(parts).strip()
+    if text:
+        return text
+    if parts:
+        sink.reset()
+    return await gradient_chat(prompt, max_tokens=max_tokens, reasoning_effort=reasoning_effort, model=model)
+
+
 def token_count(content: str, model: str = None) -> int:
     return max(1, int(len(content.split()) * 1.5))
 
-async def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_tokens: int = None, model: Optional[str] = None) -> str:
+async def generate_explanation(text_chunk: str, language: str = "English", comprehension_level: str = "Beginner", max_context_tokens: int = None, model: Optional[str] = None, sink: Optional["TextSink"] = None) -> str:
     """Generates an explanation/answer for a prompt via the real LLM (gradient_chat).
 
     Previously routed through a DSPy predictor that was never actually
@@ -605,7 +687,10 @@ async def generate_explanation(text_chunk: str, language: str = "English", compr
         truncated_chunk = text_chunk
 
     try:
-        response = await gradient_chat(truncated_chunk, max_tokens=1500, model=model)
+        if sink is not None:
+            response = await stream_chat(truncated_chunk, sink, max_tokens=1500, model=model)
+        else:
+            response = await gradient_chat(truncated_chunk, max_tokens=1500, model=model)
         if response:
             return response
         logging.warning(f"LLM returned empty response for chunk: {truncated_chunk[:50]}...")

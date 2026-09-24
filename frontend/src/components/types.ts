@@ -72,6 +72,21 @@ export interface Message {
 
 }
 
+/**
+ * An answer while it is being made: the step it is on and the text written so
+ * far. Unchecked: the final message replaces it. See api/agents/progress.py.
+ */
+export interface AnswerProgress {
+    historyId: number;
+    stage: 'searching' | 'reading' | 'writing' | 'checking' | string;
+    info: Record<string, number>;
+    text: string;
+    /** Seconds since the answer started, as of the latest step. */
+    elapsed: number;
+    /** When that step arrived here, so the clock can keep ticking locally. */
+    receivedAt: number;
+}
+
 export interface AnswerTrace {
     path: 'single' | 'multi';
     documents: { name: string; answered: boolean }[];

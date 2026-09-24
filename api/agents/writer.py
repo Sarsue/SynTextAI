@@ -76,7 +76,7 @@ def _prompt(question: str, shifted: List[Tuple[WorkerResult, str]]) -> str:
     )
 
 
-async def write(question: str, results: List[WorkerResult]) -> Draft:
+async def write(question: str, results: List[WorkerResult], sink: Any = None) -> Draft:
     answered = [r for r in results if r.draft.kind == "answer"]
     if not answered:
         # Nobody could cite. An uncited answer is still better than nothing;
@@ -89,14 +89,22 @@ async def write(question: str, results: List[WorkerResult]) -> Draft:
 
     if len(answered) == 1:
         # One document had the answer. Nothing to combine.
+        if sink is not None:
+            sink.text(shifted[0][1])
         return Draft("answer", shifted[0][1], segments, targets)
 
     text = ""
     try:
-        text = await llm_service.gradient_chat(
-            _prompt(question, shifted), max_tokens=1500,
-            reasoning_effort=WRITER_EFFORT, model=WRITER_MODEL,
-        ) or ""
+        if sink is not None:
+            text = await llm_service.stream_chat(
+                _prompt(question, shifted), sink, max_tokens=1500,
+                reasoning_effort=WRITER_EFFORT, model=WRITER_MODEL,
+            ) or ""
+        else:
+            text = await llm_service.gradient_chat(
+                _prompt(question, shifted), max_tokens=1500,
+                reasoning_effort=WRITER_EFFORT, model=WRITER_MODEL,
+            ) or ""
     except Exception as e:
         logger.warning({"event": "writer.failed", "error": str(e)[:300]})
 
@@ -104,5 +112,8 @@ async def write(question: str, results: List[WorkerResult]) -> Draft:
     if not text.strip() or _declined(text) or not valid:
         logger.info({"event": "writer.fallback_to_plain", "had_text": bool(text.strip())})
         text = _plain(shifted)
+        if sink is not None:
+            sink.reset()
+            sink.text(text)
     logger.info({"event": "writer.done", "documents": len(answered), "segments": len(segments)})
     return Draft("answer", text, segments, targets)

@@ -55,6 +55,7 @@ from langgraph.types import Send
 from typing_extensions import TypedDict
 
 from api.agents import coordinator, verifier, writer
+from api.agents.progress import NO_PROGRESS, Deferred, Progress
 from api.agents.document_worker import WorkerResult, answer_from_document
 from api.agents.evidence import EvidenceSet
 from api.agents.models import WORKER_MODEL
@@ -116,6 +117,8 @@ class AnswerState(TypedDict, total=False):
     worker_results: Annotated[List[Any], operator.add]
 
     context_chunks: List[Dict[str, Any]]
+    # Where each step and the answer's text are reported as they happen.
+    progress: Any
     draft: Any
     verification: Dict[str, Any]
     response: str
@@ -158,8 +161,10 @@ class AnswerAgent:
         formatted_history: str = "",
         workspace_id: int | None = None,
         file_id: int | None = None,
+        progress: Optional[Progress] = None,
     ) -> Dict[str, Any]:
         final: AnswerState = await self._graph.ainvoke({
+            "progress": progress or NO_PROGRESS,
             "user_id": user_id,
             "message": message,
             "formatted_history": formatted_history,
@@ -188,8 +193,12 @@ class AnswerAgent:
             "verification": final.get("verification"),
         }
 
+    def _progress(self, state: AnswerState) -> Progress:
+        return state.get("progress") or NO_PROGRESS
+
     async def _process_query(self, state: AnswerState) -> AnswerState:
         message = state.get("message") or ""
+        self._progress(state).stage("searching")
         # Retrieval is scoped by workspace, not by uploader. Without this an
         # invited staff member matched zero chunks, because the documents
         # belong to the owner who uploaded them.
@@ -305,7 +314,10 @@ class AnswerAgent:
         """
         evidence: EvidenceSet = state["evidence"]
         context = (await self._select_context(state))["context_chunks"]
-        draft_task = asyncio.create_task(self._compose(state, context))
+        # The draft's text is held until this decision is made: if the answer
+        # turns out to need several documents, the reader never sees it.
+        held = Deferred()
+        draft_task = asyncio.create_task(self._compose(state, context, sink=held))
         try:
             plan = await asyncio.wait_for(
                 coordinator.plan(
@@ -321,13 +333,18 @@ class AnswerAgent:
         except BaseException:
             draft_task.cancel()
             raise
+        progress = self._progress(state)
         if plan.is_multi:
+            held.discard()
+            progress.stage("reading", documents=len(plan.assignments))
             draft_task.cancel()
             try:
                 await draft_task
             except (asyncio.CancelledError, Exception):
                 pass
             return {"plan": plan}
+        progress.stage("writing")
+        held.release(progress)
         return {"plan": plan, "draft": await draft_task,
                 "context_chunks": context, "mode": "single"}
 
@@ -372,6 +389,8 @@ class AnswerAgent:
         results = sorted(results, key=lambda r: order.get(r.file_id, len(order)))
         chunks = [c for r in results for c in r.chunks]
 
+        progress = self._progress(state)
+        progress.stage("writing")
         if not any(r.answered for r in results):
             # No single document answered. The broad context still might, so
             # fall back to the single path rather than refusing.
@@ -381,7 +400,7 @@ class AnswerAgent:
             out = await self._generate(state)
             return {**fallback, **out, "mode": "multi_fallback"}
 
-        draft = await writer.write(state.get("message") or "", results)
+        draft = await writer.write(state.get("message") or "", results, sink=progress)
         return {"draft": draft, "context_chunks": chunks, "mode": "multi"}
 
     async def _select_context(self, state: AnswerState) -> AnswerState:
@@ -394,7 +413,7 @@ class AnswerAgent:
         logger.info({"event": "answer_agent.select_context", "selected_chunks": len(chunks)})
         return {"context_chunks": chunks}
 
-    async def _compose(self, state: AnswerState, context: List[Dict[str, Any]]):
+    async def _compose(self, state: AnswerState, context: List[Dict[str, Any]], sink: Any = None):
         draft = await self._composer.compose(
             state.get("message") or "",
             state.get("formatted_history") or "",
@@ -402,16 +421,22 @@ class AnswerAgent:
             state.get("language") or "English",
             state.get("comprehension_level") or "beginner",
             model=WORKER_MODEL,
+            sink=sink,
         )
         logger.info({"event": "answer_agent.generate", "kind": draft.kind})
         return draft
 
     async def _generate(self, state: AnswerState) -> AnswerState:
-        draft = await self._compose(state, state.get("context_chunks") or [])
+        draft = await self._compose(state, state.get("context_chunks") or [], sink=self._progress(state))
         return {"draft": draft, "mode": state.get("mode") or "single"}
 
     async def _verify(self, state: AnswerState) -> AnswerState:
-        draft, report = await verifier.verify(state["draft"])
+        draft = state["draft"]
+        if draft.kind == "answer":
+            claims = len(verifier.split_claims(draft.text))
+            if claims:
+                self._progress(state).stage("checking", claims=claims)
+        draft, report = await verifier.verify(draft)
         return {"draft": draft, "verification": report.as_dict()}
 
     async def _render(self, state: AnswerState) -> AnswerState:

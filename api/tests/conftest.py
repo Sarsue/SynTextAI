@@ -278,3 +278,30 @@ def _no_real_object_storage(monkeypatch):
     monkeypatch.setattr(storage.Client, "from_service_account_json", _refuse)
     monkeypatch.setattr(storage, "Client", _refuse)
 
+
+
+# The same guard for the model provider. On 2026-09-23 a unit test for the
+# writer reached DeepInfra: the fixture stubbed gradient_chat, the new
+# streaming call was not stubbed, and the "fake" combined answer came back
+# from a live model, costing money and making the test depend on the network.
+# Every chat and embedding request goes through llm_service's shared client,
+# so that client refuses. Tests that need HTTP behaviour replace get_client
+# themselves (test_cost_ledger.py), which overrides this.
+@pytest.fixture(autouse=True)
+def _no_real_model_calls(monkeypatch):
+    from api.services import llm_service
+
+    class _Refusing:
+        def _refuse(self, *args, **kwargs):
+            raise AssertionError(
+                "This test reached the real model provider. Stub the call it "
+                "makes (gradient_chat, stream_chat, get_text_embedding) where "
+                "the module under test uses it. See test_answer_agent.py."
+            )
+
+        post = stream = _refuse
+
+    async def _client():
+        return _Refusing()
+
+    monkeypatch.setattr(llm_service, "get_client", _client)

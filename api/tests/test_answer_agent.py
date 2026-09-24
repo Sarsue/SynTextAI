@@ -51,12 +51,15 @@ class FakeComposer(AnswerComposer):
     def __init__(self):
         self.seen = []
 
-    async def compose(self, query, history, chunks, language, level, model=None):
+    async def compose(self, query, history, chunks, language, level, model=None, sink=None):
         self.seen.append([c["file_id"] for c in chunks])
         if not chunks:
             return Draft.final("nothing")
         _, targets = self._format_context_and_sources(chunks)
-        return Draft("answer", f"{chunks[0]['content']} [Segment 1]", chunks, targets)
+        text = f"{chunks[0]['content']} [Segment 1]"
+        if sink is not None:
+            sink.text(text)
+        return Draft("answer", text, chunks, targets)
 
 
 @pytest.fixture
@@ -75,7 +78,16 @@ def stub_models(monkeypatch):
     async def fake_process(message, history):
         return message, []
 
+    async def fake_stream(prompt, sink, **kw):
+        text = await fake_chat(prompt, **kw)
+        if text:
+            sink.text(text)
+        return text
+
     monkeypatch.setattr(coordinator.llm_service, "gradient_chat", fake_chat)
+    # The streaming call too. Unstubbed, the writer reached the real provider
+    # from a unit test and the "fake" answer came back from a live model.
+    monkeypatch.setattr(coordinator.llm_service, "stream_chat", fake_stream)
     monkeypatch.setattr(answer_agent, "get_text_embedding", fake_embed)
     monkeypatch.setattr("api.agents.document_worker.get_text_embedding", fake_embed)
     monkeypatch.setattr(answer_agent.query_processor, "process", fake_process)

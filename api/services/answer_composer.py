@@ -279,13 +279,20 @@ class AnswerComposer:
         language: str,
         comprehension_level: str,
         model: Optional[str] = None,
+        sink: Any = None,
     ) -> "Draft":
         """Write the answer with its internal [Segment N] markers still in place.
 
         Stops before the markers become links, because that is the point at
         which a citation can still be checked and moved: the verifier works on
         segment numbers, and a link is only a page.
+
+        `sink` receives the answer's text as it is written, for showing it
+        early (api/agents/progress.py). It sees the raw draft, markers and
+        all; the browser treats it as unchecked until the final message.
         """
+        from api.agents.progress import RefusalGate
+        gate = RefusalGate(sink) if sink is not None else None
         try:
             if top_k_results:
                 # Step 1: Format context and generate the source map string with enhanced details
@@ -431,6 +438,7 @@ class AnswerComposer:
                     comprehension_level=comprehension_level,
                     max_context_tokens=MAX_TOKENS_CONTEXT,
                     model=model,
+                    sink=gate,
                 )
 
                 if not llm_answer_with_citations:
@@ -457,6 +465,11 @@ class AnswerComposer:
                         # the reminder to the end of a prompt already holding
                         # twenty-five pages buried it.
                         logger.info("LLM response missing citations; retrying once with an explicit reminder")
+                        # The streamed attempt is being replaced; take it off
+                        # the screen. The retry is not streamed: the final
+                        # message is moments away and replaces it anyway.
+                        if gate is not None:
+                            gate.reset()
                         retry_prompt = (
                             "Your previous answer was rejected because it carried no citations.\n"
                             "Rewrite it so that every factual claim is followed by the marker of the "

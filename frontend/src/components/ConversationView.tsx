@@ -4,9 +4,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Copy } from 'lucide-react';
 import './ConversationView.css';
-import { History, Message, MessageFeedback } from './types';
+import { AnswerProgress, History, Message, MessageFeedback } from './types';
 import AnswerFeedback from './AnswerFeedback';
 import AnswerTrace from './AnswerTrace';
+import StreamingAnswer from './StreamingAnswer';
 import { useUserContext } from '../UserContext';
 import FileViewerComponent from './FileViewerComponent';
 import { UploadedFile } from './types';
@@ -17,13 +18,15 @@ interface ConversationViewProps {
     history: History | null;
     /** A question has been queued and its answer has not arrived yet. */
     awaitingReply?: boolean;
+    /** The answer being made in this conversation, if one is. */
+    progress?: AnswerProgress;
     onCopy: (message: Message) => void;
     /** Records this caller's rating of one answer, or clears it when null. */
     onFeedbackChange: (messageId: number, feedback: MessageFeedback | null) => void;
 }
 
 
-const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awaitingReply = false, onCopy, onFeedbackChange }) => {
+const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awaitingReply = false, progress, onCopy, onFeedbackChange }) => {
     const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     // The whole value of a citation is landing on the cited page. The click
     // handler parsed the URL but kept only the matched file record, whose
@@ -60,8 +63,11 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
     useEffect(() => {
         // Also on awaitingReply, or the indicator appears below the fold and the
         // wait looks exactly as silent as it did before.
+        // And when an answer in progress moves to a new step or first shows
+        // text, but not on every piece of streamed text, which would drag the
+        // page away from someone already reading.
         scrollToBottom();
-    }, [history, awaitingReply]);
+    }, [history, awaitingReply, progress?.stage, Boolean(progress?.text)]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -275,7 +281,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ files, history, awa
                 <div className="opening-file-notice" aria-live="polite">Opening document…</div>
             )}
 
-            {awaitingReply && (
+            {progress ? (
+                <StreamingAnswer progress={progress} />
+            ) : awaitingReply && (
                 <div className="chat-message received thinking-message" aria-live="polite">
                     <div className="thinking-indicator">
                         <span className="thinking-dots" aria-hidden="true">

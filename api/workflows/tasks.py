@@ -262,8 +262,13 @@ async def run_query_pipeline(
     formatted_history: str = "",
     workspace_id: int | None = None,
     file_id: int | None = None,
+    progress: Any = None,
 ) -> Dict[str, Any]:
-    """Run retrieval + generation for a single query without persisting chat messages."""
+    """Run retrieval + generation for a single query without persisting chat messages.
+
+    `progress` receives each step and the answer's text as it is written
+    (api/agents/progress.py). A cached answer has nothing to report.
+    """
     cache_key_parts = dict(
         workspace_id=workspace_id,
         question=message,
@@ -299,6 +304,7 @@ async def run_query_pipeline(
                 formatted_history=formatted_history,
                 workspace_id=workspace_id,
                 file_id=file_id,
+                progress=progress,
             )
             ctx["chunks"] = len(result.get("context_chunks") or [])
             result["cost"] = cost_summary(ledger)

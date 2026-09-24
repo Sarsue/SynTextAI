@@ -1,0 +1,22 @@
+/* The answer while it is being made. Same bubble as a finished answer, so the
+   swap to the checked version is a change of content, not of layout. */
+
+.streaming-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.streaming-answer .message-content + .streaming-status {
+    margin-top: 10px;
+}
+
+.streaming-note {
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}

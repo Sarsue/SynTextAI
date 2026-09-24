@@ -16,6 +16,21 @@ import pytest_asyncio
 
 from api.routes import drafts as drafts_route
 
+
+# Drafting embeds the request to find passages. These tests stubbed the model
+# that writes the draft but not the embedding, so every run sent real requests
+# to the provider until conftest's _no_real_model_calls refused them. The
+# vector's direction does not matter here: the tests control what the search
+# returns through the fixture documents, not through similarity.
+@pytest.fixture(autouse=True)
+def _fake_embedding(monkeypatch):
+    from api.services import llm_service
+
+    async def embed(text):
+        return [0.01] * 1024
+
+    monkeypatch.setattr(llm_service, "get_text_embedding", embed)
+
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 DIM = 1024
