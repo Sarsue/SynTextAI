@@ -61,7 +61,7 @@ class Passages(BaseModel):
 
     passage_ids: List[str] = Field(
         default_factory=list,
-        description=("Ids of the passages from this document that answer, most "
+        description=("Ids of every passage from this document the answer needs, most "
                      "important first. Empty if this document does not answer."),
     )
 
@@ -75,7 +75,7 @@ def _prompt(file_name: str, file_id: int) -> str:
 - Every passage you have read stays available by its id, so never repeat a search.
 - Stop as soon as you have what is needed. You have at most {MAX_TOOL_CALLS} tool calls; after that you must decide.
 
-Then give passage_ids, most important first, or an empty list if this document does not answer."""
+Then give passage_ids: every passage the answer needs, most important first, not only the best one. The writer sees nothing else, so a fact, number, table row or condition you leave out is missing from the answer. Give an empty list if this document does not answer."""
 
 
 @dataclass

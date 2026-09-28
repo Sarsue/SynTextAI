@@ -75,9 +75,11 @@ class Findings(BaseModel):
 
     passage_ids: List[str] = Field(
         default_factory=list,
-        description=("Ids of the passages that answer the question, most important "
-                     "first, for example [\"c812\", \"p77\"]. Only passages you read "
-                     "that actually state the answer."),
+        description=("Ids of every passage the answer needs, most important first, "
+                     "for example [\"c812\", \"c813\", \"p77\"]. Include each one that "
+                     "states part of the answer, and the neighbouring passage when a "
+                     "table, list or rule continues into it. Leave out only passages "
+                     "that do not help."),
     )
     delegate: List[Delegation] = Field(
         default_factory=list,
@@ -86,6 +88,11 @@ class Findings(BaseModel):
     )
 
 
+# "Every passage the answer needs, not only the best one": it chose a single
+# passage for 9 of 12 benchmark questions, and "how long do I keep tax records"
+# lost its "3 years" because the table was in the passage it left out. With
+# this wording, same 12, one run each: expected page cited 12/12 (was 10/12),
+# expected facts 8/12 to 9/12 (2026-09-28).
 SYSTEM_PROMPT = f"""You find the passages in the user's documents that answer their question. You do not write the answer: another step writes it from the passages you choose.
 
 How to work:
@@ -97,7 +104,7 @@ How to work:
 - Stop as soon as you have what the answer needs. You have at most {MAX_TOOL_CALLS} tool calls; after that you must decide.
 
 Then give your decision:
-- passage_ids: the passages that answer, most important first.
+- passage_ids: every passage the answer needs, most important first. Not only the best one: the writer sees nothing else, so a fact, number, table row or condition you leave out is missing from the answer. When a passage introduces a table or list that continues in another passage, include both. Leave out passages that do not help.
 - delegate: only when the question needs several documents each read in depth: it compares documents, combines facts that live in different documents, or several documents each give their own answer to it. One entry per document with what to find there, at most {MAX_DOCUMENTS}. When you delegate, passage_ids may be empty.
 - If the documents do not answer the question, return empty lists."""
 
