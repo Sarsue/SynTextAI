@@ -105,7 +105,7 @@ def _agent(scope: Scope, file_id: int, file_name: str, progress: Progress, seen:
         middleware=[
             ToolCallLimitMiddleware(run_limit=MAX_TOOL_CALLS, exit_behavior="continue"),
             ModelCallLimitMiddleware(run_limit=MAX_MODEL_CALLS, exit_behavior="end"),
-            chat_models.require_tool_call("Passages"),
+            chat_models.require_tool_call("Passages", MAX_TOOL_CALLS),
         ],
         name="document_worker",
     )

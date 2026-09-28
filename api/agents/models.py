@@ -23,13 +23,21 @@ def _effort(env: str) -> str:
 
 # Not the chat model. The coordinator drives a search loop, and gpt-oss-20b
 # drove it badly on the first real runs (2026-09-28): near-identical searches
-# over and over, and most questions ended with no decision at all. With
-# Qwen3-235B-Instruct in its place, same code, same questions, it searched each
-# document, decided, and sent a two-document question to two workers. About
-# three times gpt-oss-20b per token ($0.09 in, $0.55 out per million), about
-# half a cent a question; chosen with Osas over the far dearer Sonnet.
-COORDINATOR_MODEL = (os.getenv("COORDINATOR_MODEL") or "").strip() or "Qwen/Qwen3-235B-A22B-Instruct-2507"
-COORDINATOR_EFFORT = _effort("COORDINATOR_REASONING_EFFORT")
+# over and over, and most questions ended with no decision at all.
+#
+# Tried in its place, same code, same three questions, one run each:
+#
+#     researcher              one turn   car records   Ontario   tax + OSHA
+#     Qwen3-235B-Instruct     9-11s      65s           20s       62s, 12/13 confirmed
+#     gpt-oss-120b, low       1-2s       21s           10s       36s, 11/11 confirmed
+#
+# Qwen judged better (it answered car records in part, where 120b said the
+# documents do not cover it) but on DeepInfra every turn took ten seconds and
+# it ran out of time before deciding. Osas chose 120b for speed. About a tenth
+# of a cent a question either way.
+COORDINATOR_MODEL = (os.getenv("COORDINATOR_MODEL") or "").strip() or "openai/gpt-oss-120b"
+# Low, as measured above. Each turn is a short tool call; thinking is time.
+COORDINATOR_EFFORT = (os.getenv("COORDINATOR_REASONING_EFFORT") or "low").strip().lower()
 
 WORKER_MODEL = _model("WORKER_MODEL")
 

@@ -51,7 +51,7 @@ class _Cost(AsyncCallbackHandler):
 logger = logging.getLogger(__name__)
 
 
-def require_tool_call(decision_tool: str, attempts: int = 2):
+def require_tool_call(decision_tool: str, budget: int, attempts: int = 2):
     """Middleware: a turn with no tool call is asked again, not taken as the end.
 
     create_agent ends its loop on the first turn without a tool call, and
@@ -66,6 +66,12 @@ def require_tool_call(decision_tool: str, attempts: int = 2):
 
     So the missing turn is asked for again, with a reminder that the only way
     to finish is the decision tool.
+
+    And once `budget` tool calls have been made, the search tools are taken
+    away, leaving only the decision. LangChain's ToolCallLimitMiddleware
+    refuses calls past its limit but leaves the tools on offer, and in the app
+    on 2026-09-28 gpt-oss-120b kept asking for refused searches until it ran
+    out of turns, then ended with no decision.
     """
     from langchain.agents.middleware import AgentMiddleware, ModelResponse
     from langchain_core.messages import AIMessage, HumanMessage
@@ -84,6 +90,10 @@ def require_tool_call(decision_tool: str, attempts: int = 2):
 
     class RequireToolCall(AgentMiddleware):
         async def awrap_model_call(self, request, handler):
+            used = sum(len(getattr(m, "tool_calls", None) or []) for m in request.messages
+                       if isinstance(m, AIMessage))
+            if used >= budget:
+                request = request.override(tools=[])
             response = await handler(request)
             for attempt in range(attempts):
                 turn = _turn(response)

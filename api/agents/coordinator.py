@@ -153,7 +153,7 @@ def _agent(scope: Scope, progress: Progress):
             # is told so, which leaves it the turn it needs to decide.
             ToolCallLimitMiddleware(run_limit=MAX_TOOL_CALLS, exit_behavior="continue"),
             ModelCallLimitMiddleware(run_limit=MAX_MODEL_CALLS, exit_behavior="end"),
-            chat_models.require_tool_call("Findings"),
+            chat_models.require_tool_call("Findings", MAX_TOOL_CALLS),
         ],
         name="coordinator",
     )

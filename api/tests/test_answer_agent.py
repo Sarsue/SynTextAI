@@ -384,3 +384,34 @@ def test_a_passage_already_read_comes_back_as_its_id():
     again = _listing(HANDBOOK, "none", seen)
     assert "Vacation accrues" in first and "Refund requests" in first
     assert "Vacation accrues" not in again and "[c1]" in again and "Nothing new" in again
+
+
+async def test_when_the_search_budget_is_spent_only_the_decision_is_left(monkeypatch, stub_models):
+    """A model that keeps asking for searches past the limit is left with
+    nothing to call but the decision."""
+    offered = []
+
+    class Greedy(ScriptedModel):
+        tools: Any = None
+
+        def bind_tools(self, tools, **kwargs):
+            return Greedy(tools=[getattr(t, "name", None) or t.get("function", {}).get("name") for t in tools])
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            offered.append(self.tools)
+            if self.tools == ["Findings"]:
+                return ChatResult(generations=[ChatGeneration(message=turn(("Findings", {"passage_ids": ["c1"]})))])
+            q = f"q{sum(isinstance(m, AIMessage) for m in messages)}"
+            return ChatResult(generations=[ChatGeneration(message=turn(("search", {"query": q})))])
+
+    monkeypatch.setattr(chat_models, "chat_model", lambda *a, **k: Greedy())
+
+    async def fake_embed(text):
+        return [0.0]
+
+    monkeypatch.setattr("api.agents.tools.get_text_embedding", fake_embed)
+    store, composer = FakeStore(), FakeComposer()
+    out = await _ask(store, composer)
+    assert out["plan"] == "answer" and composer.seen == [[1]]
+    assert len(store.file_repo.calls) == coordinator.MAX_TOOL_CALLS
+    assert offered[-1] == ["Findings"]

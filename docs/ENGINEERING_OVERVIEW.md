@@ -37,7 +37,7 @@ research ─┬─► answer ─────────────────
    `search_document`, `read_page`, all scoped to the asker's workspaces in SQL.
    It searches until it has the answer, then decides through a `ToolStrategy`
    tool: these passages answer it, or these documents each need a worker.
-   Runs on Qwen3-235B-Instruct (`COORDINATOR_MODEL`). Limits: 5 tool calls,
+   Runs on gpt-oss-120b at low effort (`COORDINATOR_MODEL`). Limits: 5 tool calls,
    30s. Cut off, it answers from everything it read.
 2. One set of passages: **answer** composes from exactly those. Several
    documents: a **document worker** (`document_worker.py`) per document, the
@@ -63,7 +63,8 @@ final checked message replaces it. After, one collapsed line under the answer
 Each agent's model is its own setting (`api/agents/models.py`), falling back to
 `MODEL_CHAT_ID`: `COORDINATOR_MODEL`, `WORKER_MODEL`, `WRITER_MODEL`,
 `VERIFIER_MODEL`, plus `*_REASONING_EFFORT`. Production sets them through the
-`ENV_FILE_CONTENT` GitHub secret. All are gpt-oss-20b today.
+`ENV_FILE_CONTENT` GitHub secret. The coordinator defaults to gpt-oss-120b at
+low effort; the rest are gpt-oss-20b.
 
 Every question and every upload records what the provider actually charged,
 per model, on its run (`agent_runs.result.cost`). gpt-oss-20b: about $0.90
@@ -130,9 +131,10 @@ Wait for the deploy run, then confirm the live bundle changed.
   25). A search aimed at a different need helps. That is why workers exist.
 - Retrieval is the model's (2026-09-28), although an earlier model-chosen search
   lost to the fixed pipeline (16.2 vs 17.0). First real runs on gpt-oss-20b: it
-  repeats searches and often never decides; Qwen3-235B as coordinator decided
-  and delegated properly. Seen passages come back as ids, identical searches
-  are not rerun, and model calls exceed tool calls so the last turn can decide.
+  repeats searches and often never decides. Qwen3-235B judged well but took 10s
+  a turn on DeepInfra; gpt-oss-120b at low effort takes 1-2s and decides, so it
+  runs the coordinator. Seen passages come back as ids, identical searches are
+  not rerun, and model calls exceed tool calls so the last turn can decide.
 - The verifier runs at low effort in batches: same accuracy as medium, 37s to 8s.
 - Rejected after measuring: cross-encoder reranking, contextual retrieval, a
   per-document cap on search results.
@@ -143,5 +145,5 @@ Wait for the deploy run, then confirm the live bundle changed.
   `test_every_route_is_scoped.py` guards it.
 - Rate limits (30 questions, 10 uploads per minute per IP) are a first guess.
 - `nltk` has an open advisory with no fix; the affected code is never called.
-- Agentic answers take 40-55s against about 10s for the fixed pipeline: each
+- Agentic answers take 10-40s against about 10s for the fixed pipeline: each
   search round is a model call.
