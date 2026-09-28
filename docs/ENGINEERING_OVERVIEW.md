@@ -63,8 +63,9 @@ final checked message replaces it. After, one collapsed line under the answer
 Each agent's model is its own setting (`api/agents/models.py`), falling back to
 `MODEL_CHAT_ID`: `COORDINATOR_MODEL`, `WORKER_MODEL`, `WRITER_MODEL`,
 `VERIFIER_MODEL`, plus `*_REASONING_EFFORT`. Production sets them through the
-`ENV_FILE_CONTENT` GitHub secret. The coordinator defaults to gpt-oss-120b at
-low effort; the rest are gpt-oss-20b.
+`ENV_FILE_CONTENT` GitHub secret. Searching (the coordinator, and each worker's search,
+`WORKER_SEARCH_MODEL`) defaults to gpt-oss-120b at low effort; writing and
+checking are gpt-oss-20b.
 
 Every question and every upload records what the provider actually charged,
 per model, on its run (`agent_runs.result.cost`). gpt-oss-20b: about $0.90

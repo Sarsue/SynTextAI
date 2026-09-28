@@ -39,7 +39,19 @@ COORDINATOR_MODEL = (os.getenv("COORDINATOR_MODEL") or "").strip() or "openai/gp
 # Low, as measured above. Each turn is a short tool call; thinking is time.
 COORDINATOR_EFFORT = (os.getenv("COORDINATOR_REASONING_EFFORT") or "low").strip().lower()
 
+# A document worker does two jobs: it searches its document (a tool loop, the
+# same kind of job as the coordinator's) and then writes its answer. They were
+# one setting; searching is now its own, on the coordinator's model, because
+# gpt-oss-20b drove a search loop badly (see COORDINATOR_MODEL). Writing stays
+# on WORKER_MODEL.
+# Writing stays on gpt-oss-20b at medium. Checked 2026-09-28 against 120b at
+# low, same passages from the same researcher, 12 benchmark questions, one run:
+# 20b-medium cited an expected page 10/12, carried the expected facts 8/12,
+# 25/27 claims confirmed, 6.3s; 120b-low 8/12, 6/12, 22/26, 5.2s, and refused
+# twice with the answer in front of it.
 WORKER_MODEL = _model("WORKER_MODEL")
+WORKER_SEARCH_MODEL = (os.getenv("WORKER_SEARCH_MODEL") or "").strip() or COORDINATOR_MODEL
+WORKER_SEARCH_EFFORT = (os.getenv("WORKER_SEARCH_REASONING_EFFORT") or COORDINATOR_EFFORT).strip().lower()
 
 WRITER_MODEL = _model("WRITER_MODEL")
 WRITER_EFFORT = _effort("WRITER_REASONING_EFFORT")

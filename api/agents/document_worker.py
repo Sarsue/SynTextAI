@@ -33,7 +33,7 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 
 from api.agents import chat_models
-from api.agents.models import WORKER_MODEL
+from api.agents.models import WORKER_MODEL, WORKER_SEARCH_EFFORT, WORKER_SEARCH_MODEL
 from api.agents.progress import NO_PROGRESS, Progress
 from api.agents.tools import Scope, _listing, document_tools, found_passages, passage_id, searches_made
 from api.rag.chunk_selector import SmartChunkSelector
@@ -98,7 +98,7 @@ def _agent(scope: Scope, file_id: int, file_name: str, progress: Progress, seen:
     from langchain.agents.structured_output import ToolStrategy
 
     return create_agent(
-        chat_models.chat_model(WORKER_MODEL),
+        chat_models.chat_model(WORKER_SEARCH_MODEL, WORKER_SEARCH_EFFORT),
         document_tools(scope, progress, names={file_id: file_name}, seen=seen),
         system_prompt=_prompt(file_name, file_id),
         response_format=ToolStrategy(Passages),
