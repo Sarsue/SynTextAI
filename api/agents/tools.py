@@ -36,12 +36,15 @@ from api.services.llm_service import get_text_embedding
 logger = logging.getLogger(__name__)
 
 # Passages per search. Small, because the model reads every one of them and
-# can always search again; the old fixed pipeline took 25 and could not.
-SEARCH_TOP_K = 8
+# can always search again; the old fixed pipeline took 25 and could not. Was 8:
+# every passage read is time spent on every later turn, and answers took 40 to
+# 55s (2026-09-28), so fewer and shorter, traded for speed with Osas.
+SEARCH_TOP_K = 5
 
-# How much of each passage the model reads. A chunk is usually shorter; a page
-# can be much longer.
-PASSAGE_CHARS = 1500
+# How much of each passage the model reads to judge it. The answer is written
+# from the whole passage; this is only what the searcher sees. A page read with
+# read_page is shown longer.
+PASSAGE_CHARS = 900
 PAGE_CHARS = 6000
 
 # Documents list_documents shows.

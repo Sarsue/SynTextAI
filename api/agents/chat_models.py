@@ -29,7 +29,7 @@ from api.services import llm_service
 # Enough for a tool call or a list of passage ids plus the thinking before it.
 AGENT_MAX_TOKENS = 2000
 
-# One model call. The whole search has its own deadline (research.py).
+# One model call. The whole search has its own deadline (coordinator.py).
 CALL_TIMEOUT = 60.0
 
 
@@ -119,6 +119,10 @@ async def run_agent(agent: Any, inputs: Dict[str, Any], deadline: float) -> Tupl
         return last, True
 
 
+def _reasons(model: str) -> bool:
+    return "gpt-oss" in model or "thinking" in model.lower()
+
+
 def chat_model(model: str, effort: Optional[str] = None, max_tokens: int = AGENT_MAX_TOKENS) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
@@ -127,7 +131,9 @@ def chat_model(model: str, effort: Optional[str] = None, max_tokens: int = AGENT
         base_url=llm_service.INFERENCE_BASE_URL,
         api_key=llm_service.MODEL_ACCESS_KEY or "unset",
         temperature=llm_service.TEMPERATURE,
-        reasoning_effort=effort or None,
+        # Only reasoning models take this; an instruct model (the coordinator's
+        # Qwen) has no thinking to bound.
+        reasoning_effort=(effort or None) if _reasons(model) else None,
         max_tokens=max(max_tokens, llm_service.MIN_COMPLETION_TOKENS),
         timeout=CALL_TIMEOUT,
         max_retries=2,

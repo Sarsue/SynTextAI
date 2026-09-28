@@ -37,7 +37,8 @@ research ─┬─► answer ─────────────────
    `search_document`, `read_page`, all scoped to the asker's workspaces in SQL.
    It searches until it has the answer, then decides through a `ToolStrategy`
    tool: these passages answer it, or these documents each need a worker.
-   Limits: 8 tool calls, 45s. Cut off, it answers from everything it read.
+   Runs on Qwen3-235B-Instruct (`COORDINATOR_MODEL`). Limits: 5 tool calls,
+   30s. Cut off, it answers from everything it read.
 2. One set of passages: **answer** composes from exactly those. Several
    documents: a **document worker** (`document_worker.py`) per document, the
    same kind of agent confined to its one file, then the **writer**

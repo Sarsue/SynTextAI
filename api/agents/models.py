@@ -21,7 +21,14 @@ def _effort(env: str) -> str:
     return (os.getenv(env) or CHAT_REASONING_EFFORT).strip().lower()
 
 
-COORDINATOR_MODEL = _model("COORDINATOR_MODEL")
+# Not the chat model. The coordinator drives a search loop, and gpt-oss-20b
+# drove it badly on the first real runs (2026-09-28): near-identical searches
+# over and over, and most questions ended with no decision at all. With
+# Qwen3-235B-Instruct in its place, same code, same questions, it searched each
+# document, decided, and sent a two-document question to two workers. About
+# three times gpt-oss-20b per token ($0.09 in, $0.55 out per million), about
+# half a cent a question; chosen with Osas over the far dearer Sonnet.
+COORDINATOR_MODEL = (os.getenv("COORDINATOR_MODEL") or "").strip() or "Qwen/Qwen3-235B-A22B-Instruct-2507"
 COORDINATOR_EFFORT = _effort("COORDINATOR_REASONING_EFFORT")
 
 WORKER_MODEL = _model("WORKER_MODEL")

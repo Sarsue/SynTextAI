@@ -51,7 +51,9 @@ MAX_DOCUMENTS = 4
 MAX_PASSAGES = 12
 
 # Tool calls per question: several rounds of searching and reading.
-MAX_TOOL_CALLS = int(os.getenv("RESEARCH_MAX_TOOL_CALLS", "8"))
+# Was 8; lowered for speed (2026-09-28). Searches made in one turn run
+# together, so a budget of 5 is not five rounds unless the model wants it.
+MAX_TOOL_CALLS = int(os.getenv("RESEARCH_MAX_TOOL_CALLS", "5"))
 # Model calls, always more than tool calls. With the two equal, a model that
 # made one tool call a turn spent its last turn searching and had none left to
 # decide, which is what the first real runs did (2026-09-28): eight searches,
@@ -60,7 +62,7 @@ MAX_MODEL_CALLS = MAX_TOOL_CALLS + 2
 
 # Wall clock for the whole search. The provider's latency has a long tail;
 # past this, the answer is written from what was found.
-DEADLINE = float(os.getenv("RESEARCH_DEADLINE", "45"))
+DEADLINE = float(os.getenv("RESEARCH_DEADLINE", "30"))
 
 
 class Delegation(BaseModel):
@@ -87,7 +89,8 @@ class Findings(BaseModel):
 SYSTEM_PROMPT = f"""You find the passages in the user's documents that answer their question. You do not write the answer: another step writes it from the passages you choose.
 
 How to work:
-- Search with your own queries. Phrase them the way the document would say it, not as a question. A question with several parts needs a search for each part.
+- Search with your own queries. Phrase them the way the document would say it, not as a question.
+- Be fast: make all the searches you already know you need in ONE turn, as several tool calls at once. A question with several parts, or about several documents, gets a search for each in that same turn.
 - Judge what comes back. A passage counts only if it actually states what the question asks. When nothing answers, search again with different words, search inside the most likely document with search_document, or read_page when a passage is cut off or a table continues.
 - Use list_documents when the question names a document or you need to know what exists.
 - Every passage you have read stays available by its id, so never repeat a search. A search that finds nothing new means: search for something different, or decide.

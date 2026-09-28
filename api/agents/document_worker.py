@@ -42,10 +42,10 @@ from api.services.llm_service import MAX_TOKENS_CONTEXT
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_CALLS = int(os.getenv("WORKER_MAX_TOOL_CALLS", "5"))
+MAX_TOOL_CALLS = int(os.getenv("WORKER_MAX_TOOL_CALLS", "4"))
 # Always more than tool calls, so the last turn can decide (coordinator.py).
 MAX_MODEL_CALLS = MAX_TOOL_CALLS + 2
-DEADLINE = float(os.getenv("WORKER_DEADLINE", "40"))
+DEADLINE = float(os.getenv("WORKER_DEADLINE", "30"))
 MAX_PASSAGES = 10
 
 # A worker's share of the context when it answers from everything it read.
@@ -69,7 +69,8 @@ class Passages(BaseModel):
 def _prompt(file_name: str, file_id: int) -> str:
     return f"""You find the passages in ONE document, "{file_name}" (document_id {file_id}), that answer a question. Another step writes the answer from the passages you choose.
 
-- Search this document with search_document. Phrase queries the way the document would say it. A question with several parts needs a search for each part.
+- Search this document with search_document. Phrase queries the way the document would say it.
+- Be fast: make all the searches you already know you need in ONE turn, as several tool calls at once.
 - Judge what comes back: a passage counts only if it states what is asked. When nothing answers, search again with different words, or read_page when a passage is cut off or a table continues.
 - Every passage you have read stays available by its id, so never repeat a search.
 - Stop as soon as you have what is needed. You have at most {MAX_TOOL_CALLS} tool calls; after that you must decide.
