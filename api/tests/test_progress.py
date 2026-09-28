@@ -6,8 +6,8 @@ final answer is always the last thing sent.
 """
 import asyncio
 
-from api.agents import answer_agent, coordinator
-from api.agents.progress import Deferred, Progress, ProgressPublisher, RefusalGate
+from api.agents import answer_agent
+from api.agents.progress import Progress, ProgressPublisher, RefusalGate
 
 
 class Recorder(Progress):
@@ -57,24 +57,6 @@ def test_a_bolded_refusal_is_still_a_refusal():
     assert r.shown == ""
 
 
-def test_a_discarded_draft_is_never_seen():
-    r = Recorder()
-    d = Deferred()
-    d.text("a draft nobody should see")
-    d.discard()
-    d.text(" more")
-    assert r.events == []
-
-
-def test_a_released_draft_shows_what_it_held_then_goes_live():
-    r = Recorder()
-    d = Deferred()
-    d.text("held ")
-    d.release(r)
-    d.text("live")
-    assert r.shown == "held live"
-
-
 async def test_the_publisher_bundles_text_and_keeps_order():
     sent = []
 
@@ -112,7 +94,7 @@ async def test_nothing_is_sent_after_close():
 
 # --- through the graph ------------------------------------------------------
 
-from api.tests.test_answer_agent import FakeComposer, FakeStore, stub_models  # noqa: E402,F401
+from api.tests.test_answer_agent import FakeComposer, FakeStore, agents, stub_models, turn  # noqa: E402,F401
 
 
 async def _ask(progress, **kw):
@@ -121,28 +103,38 @@ async def _ask(progress, **kw):
                            comprehension_level="beginner", workspace_id=1, progress=progress, **kw)
 
 
-async def test_single_path_reports_searching_writing_then_checking(stub_models):
-    stub_models["decide which documents"] = "1: vacation"
+async def test_each_search_the_model_makes_is_shown_as_it_happens(agents, stub_models):
+    agents["coordinator"] = [
+        turn(("search", {"query": "vacation accrual"})),
+        turn(("search_document", {"document_id": 1, "query": "carry over"})),
+        turn(("Findings", {"passage_ids": ["c1"]})),
+    ]
     stub_models["checking whether each claim"] = "1: SUPPORTED"
     r = Recorder()
     await _ask(r)
-    stages = [e[1] for e in r.events if e[0] == "stage"]
-    assert stages == ["searching", "writing", "checking"]
+    stages = [(e[1], e[2]) for e in r.events if e[0] == "stage"]
+    assert stages == [
+        ("searching", {}),
+        ("searching", {"query": "vacation accrual"}),
+        ("reading", {"document": "handbook.pdf", "query": "carry over"}),
+        ("writing", {}),
+        ("checking", {"claims": 1}),
+    ]
     assert r.shown.startswith("Vacation accrues")
-    # The draft's text arrives after "writing" and before "checking".
     kinds = [e[1] if e[0] == "stage" else e[0] for e in r.events]
     assert kinds.index("writing") < kinds.index("text") < kinds.index("checking")
 
 
-async def test_multi_path_shows_the_combined_answer_never_the_discarded_draft(stub_models):
-    stub_models["decide which documents"] = "1: vacation\n2: refunds"
+async def test_multi_path_shows_only_the_combined_answer(agents, stub_models):
+    agents["coordinator"] = [
+        turn(("search", {"query": "vacation refunds"})),
+        turn(("Findings", {"delegate": [{"document_id": 1, "find": "vacation"},
+                                        {"document_id": 2, "find": "refunds"}]})),
+    ]
+    agents["worker"] = [turn(("Passages", {"passage_ids": ["c1", "c2"]}))]
     stub_models["Write ONE answer"] = "Vacation accrues monthly [Segment 1]. Refunds in writing [Segment 2]."
     stub_models["checking whether each claim"] = "1: SUPPORTED\n2: SUPPORTED"
     r = Recorder()
     await _ask(r)
-    stages = [(e[1], e[2]) for e in r.events if e[0] == "stage"]
-    assert [s for s, _ in stages] == ["searching", "reading", "writing", "checking"]
-    assert stages[1][1] == {"documents": 2}
-    # Only the writer's answer was shown. The single-document draft, which
-    # contains both documents' first passages, was not.
+    # The workers' own drafts are not streamed; only the writer's answer is.
     assert r.shown == "Vacation accrues monthly [Segment 1]. Refunds in writing [Segment 2]."

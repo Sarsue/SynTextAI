@@ -24,7 +24,11 @@ stripe>=8.0.0
 posthog>=3.5.0
 
 # RAG / tokenization
-langgraph>=0.2.0
+langgraph>=1.2.0
+# The agents' tool loop (create_agent, ToolStrategy, call-limit middleware)
+# and their model client. See api/agents/chat_models.py.
+langchain>=1.4,<2
+langchain-openai>=1.6,<2
 tiktoken>=0.6.0
 tenacity>=8.3.0
 

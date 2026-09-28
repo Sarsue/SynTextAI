@@ -1,53 +1,29 @@
 """The answer agent: how a question becomes a cited answer.
 
-    process_query ─► retrieve ─► plan ─┬──────────────────────────────┬─► verify ─► render
-                                       │  (one document: the draft     │
-                                       │   was written during plan)    │
-                                       └─► document_worker × N ─► write┘
-                                           (several, in parallel)
+    research ─┬─► answer ─────────────────────────────┬─► verify ─► render
+              │   (the passages the coordinator chose) │
+              └─► document_worker × N ─► write ────────┘
+                  (several documents, in parallel)
 
-Written for speed as well as correctness. Measured 2026-09-23 on gpt-oss-20b,
-before these changes: 14.1s mean per answer, of which 2.0s was the coordinator
-with everything waiting on it, 1.4s four searches run one after another, and
-1.0s generating related search terms before any search began. Now the single-
-document draft is written WHILE the coordinator decides (most questions take
-that path, so the draft is usually ready when the decision lands, and on the
-multi path it is cancelled), the searches run together, and the main search
-starts while the related terms are still being generated.
+Agentic retrieval, decided with Osas 2026-09-28: the model controls what is
+searched and judges what comes back. Nothing here searches on its own.
 
 Four agents, each with one job and its own model setting (api/agents/models.py):
 
-    coordinator      plan: which documents does this question need?
-    document worker  answer from one document only
+    coordinator      search until the answer's passages are found; decide
+                     whether one answer covers it or documents need workers
+    document worker  search one document and answer from it alone
     writer           combine the workers' answers into one
     verifier         does each cited page say what the answer says?
 
-The single-document path is the pipeline this replaced, unchanged: one broad
-search, the best passages, one answer. Most questions take it. The
-coordinator sends a question down the other path only when it needs more than
-one document, and the verifier checks both.
-
-WHAT THIS REPLACED, AND THE NUMBERS A CHANGE HAS TO BEAT
-
-A search loop used to sit where the coordinator is: split the question into
-needs, search again for any need the first search had not covered. On the
-citation benchmark it scored 21.0 against 19.0 for a single search (range 19-22
-against 18-21), and moved multi-document questions from 3.7 to 4.8 of 10. It
-never shipped: +2.0 is inside the benchmark's own noise. Workers take the same
-idea further, a search aimed at each need, and add what the loop could not:
-a separate, small answer per document.
-
-Before that, a tool-calling agent that chose its own searches scored 16.2
-against the pipeline's 17.0 calling the same search, and a model judging
-whether a need was covered took it to 11.2. So here the model decides WHICH
-documents, and code decides everything the retriever can decide better.
+The coordinator and the workers are LangChain agents (create_agent, with the
+tools in tools.py). The writer and the verifier are single calls: they have
+nothing to look up.
 """
 from __future__ import annotations
 
 import logging
 import operator
-import os
-import asyncio
 from typing import Annotated, Any, Dict, List, Optional
 
 from langgraph.graph import END, StateGraph
@@ -55,45 +31,20 @@ from langgraph.types import Send
 from typing_extensions import TypedDict
 
 from api.agents import coordinator, verifier, writer
-from api.agents.progress import NO_PROGRESS, Deferred, Progress
 from api.agents.document_worker import WorkerResult, answer_from_document
-from api.agents.evidence import EvidenceSet
 from api.agents.models import WORKER_MODEL
-from api.core.log_safety import safe_text
+from api.agents.progress import NO_PROGRESS, Progress
+from api.agents.tools import Scope
 from api.rag.chunk_selector import SmartChunkSelector
-from api.rag.query_processor import DefaultQueryProcessor
-from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
+from api.services.llm_service import MAX_TOKENS_CONTEXT
 
 logger = logging.getLogger(__name__)
 
-query_processor = DefaultQueryProcessor()
 chunk_selector = SmartChunkSelector()
 
-# Room for the retrieved pages, leaving the rest of the window for the
-# instructions, the conversation history and the generated answer.
+# Room for the passages when the answer is written from everything the
+# coordinator read, because it ran out of time or calls before choosing.
 CONTEXT_TOKEN_BUDGET = max(3000, int(MAX_TOKENS_CONTEXT * 0.5))
-
-# How many chunks the broad search returns. Swept against the pages the
-# benchmark knows are correct, then end to end:
-#
-#     top_k   retrieval recall   citations (3 runs)
-#        25             23/27    19.0 (18-21)
-#        40             25/27    17.7 (16-19)
-#
-# Two more questions arrived with every source they needed, and fewer were
-# answered correctly. More of the same ranked list hurts this model; a search
-# aimed at a different need helps. Twenty-five stays.
-RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", "25"))
-
-# Deadlines on the two calls an answer can do without. The provider's latency
-# has a long tail: the related-terms call, normally about a second, took 17.8s
-# once in eight runs, and the coordinator ranged from 2s to 11s (2026-09-23).
-# Each step waits on the one before, so one slow reply held up the whole
-# answer. Past these, the question goes on without related terms, or down the
-# single-document path, which is the pipeline as it was before the
-# coordinator existed. Normal replies land well inside them.
-TERMS_DEADLINE = float(os.getenv("TERMS_DEADLINE", "4"))
-COORDINATOR_DEADLINE = float(os.getenv("COORDINATOR_DEADLINE", "6"))
 
 
 class AnswerState(TypedDict, total=False):
@@ -104,13 +55,8 @@ class AnswerState(TypedDict, total=False):
     comprehension_level: str
     workspace_id: Optional[int]
     file_id: Optional[int]
-    accessible_ids: Optional[List[int]]
 
-    rewritten_query: str
-    expanded_terms: List[str]
-    # The main search, when it could start before the related terms existed.
-    main_results: Optional[List[Dict[str, Any]]]
-    evidence: Any
+    scope: Any
     plan: Any
 
     # Each worker appends its result; the writer reads them all.
@@ -133,18 +79,16 @@ class AnswerAgent:
 
     def _build_graph(self):
         g: StateGraph = StateGraph(AnswerState)
-        g.add_node("process_query", self._process_query)
-        g.add_node("retrieve", self._retrieve)
-        g.add_node("plan", self._plan)
+        g.add_node("research", self._research)
+        g.add_node("answer", self._answer)
         g.add_node("document_worker", self._document_worker)
         g.add_node("write", self._write)
         g.add_node("verify", self._verify)
         g.add_node("render", self._render)
 
-        g.set_entry_point("process_query")
-        g.add_edge("process_query", "retrieve")
-        g.add_edge("retrieve", "plan")
-        g.add_conditional_edges("plan", self._route, ["verify", "document_worker"])
+        g.set_entry_point("research")
+        g.add_conditional_edges("research", self._route, ["answer", "document_worker"])
+        g.add_edge("answer", "verify")
         g.add_edge("document_worker", "write")
         g.add_edge("write", "verify")
         g.add_edge("verify", "render")
@@ -179,15 +123,16 @@ class AnswerAgent:
         return {
             "response": final.get("response", ""),
             "context_chunks": final.get("context_chunks", []),
-            "rewritten_query": final.get("rewritten_query", message),
-            "expanded_terms": final.get("expanded_terms", []),
             "mode": final.get("mode", "single"),
             "plan": plan.reason if plan else None,
-            # Per document: whether it answered and how much it read. The
-            # difference between "the coordinator picked the wrong document"
-            # and "the right document did not say" is in here.
+            # The queries the models chose, coordinator first, then each
+            # worker's. The difference between "it searched for the wrong
+            # thing" and "it found the page and the answer ignored it".
+            "searches": (plan.searches if plan else []) + [q for w in workers for q in w.searches],
+            # Per document: whether it answered and how much it read.
             "workers": [
-                {"file_id": w.file_id, "kind": w.draft.kind, "chunks": len(w.chunks)}
+                {"file_id": w.file_id, "kind": w.draft.kind, "chunks": len(w.chunks),
+                 "searches": len(w.searches)}
                 for w in workers
             ],
             "verification": final.get("verification"),
@@ -196,180 +141,58 @@ class AnswerAgent:
     def _progress(self, state: AnswerState) -> Progress:
         return state.get("progress") or NO_PROGRESS
 
-    async def _process_query(self, state: AnswerState) -> AnswerState:
-        message = state.get("message") or ""
-        self._progress(state).stage("searching")
+    async def _research(self, state: AnswerState) -> AnswerState:
         # Retrieval is scoped by workspace, not by uploader. Without this an
         # invited staff member matched zero chunks, because the documents
         # belong to the owner who uploaded them.
         accessible = None
         if state.get("workspace_id") is None:
             accessible = await self._store.workspace_repo.accessible_workspace_ids(state["user_id"])
-
-        # With no conversation history the rewrite step returns the question
-        # unchanged (query_processor.process), so the main search does not
-        # need to wait for the related terms, a model call of about a second.
-        # Started now, used only if the question really did come back as-is.
-        main: Optional[asyncio.Task] = None
-        if not state.get("formatted_history"):
-            main = asyncio.create_task(
-                self._search({**state, "accessible_ids": accessible}, message, RETRIEVAL_TOP_K)
-            )
-        try:
-            rewritten, expanded = await asyncio.wait_for(
-                query_processor.process(message, state.get("formatted_history")),
-                timeout=TERMS_DEADLINE,
-            )
-        except asyncio.TimeoutError:
-            logger.warning({"event": "answer_agent.terms_deadline", "seconds": TERMS_DEADLINE})
-            rewritten, expanded = message, []
-        except BaseException:
-            if main:
-                main.cancel()
-            raise
-        main_results = None
-        if main is not None:
-            if rewritten == message:
-                main_results = await main
-            else:
-                main.cancel()
-        logger.info({
-            "event": "answer_agent.process_query",
-            "rewritten_query": safe_text(rewritten, "r"),
-            "expanded_terms_count": len(expanded or []),
-            "search_started_early": main_results is not None,
-        })
-        return {"rewritten_query": rewritten, "expanded_terms": expanded or [],
-                "accessible_ids": accessible, "main_results": main_results}
-
-    async def _search(self, state: AnswerState, query: str, top_k: int) -> List[Dict[str, Any]]:
-        emb = await get_text_embedding(query)
-        return await self._store.file_repo.hybrid_search(
+        scope = Scope(
+            store=self._store,
             user_id=state["user_id"],
-            query=query,
-            query_embedding=emb,
             workspace_id=state.get("workspace_id"),
+            accessible_ids=accessible,
             file_id=state.get("file_id"),
-            top_k=top_k,
-            accessible_workspace_ids=state.get("accessible_ids"),
-        ) or []
-
-    async def _retrieve(self, state: AnswerState) -> AnswerState:
-        """One broad search across everything the asker can see.
-
-        Plus a small search per expanded term, APPENDED after the main results
-        and ranked as one list, exactly as the pipeline before this did. Adding
-        each term search to the evidence set as its own retrieval looks
-        equivalent and is not: rank fusion gives a term search's first hit the
-        same weight as the main search's first hit, so five loosely related
-        passages per term jumped ahead of the main search's ranks 6 to 25.
-        That was measured, by accident, on 2026-09-22: every HVAC question
-        that regressed took this single-document path (error codes, charging
-        charts), and nothing else on the path had changed.
-        """
-        query = state.get("rewritten_query") or state.get("message") or ""
-
-        async def term_search(term: str) -> List[Dict[str, Any]]:
-            try:
-                return await self._search(state, term, 5)
-            except Exception as e:
-                logger.warning({"event": "answer_agent.expansion_term_error", "error": str(e)[:200]})
-                return []
-
-        async def main_search() -> List[Dict[str, Any]]:
-            early = state.get("main_results")
-            return list(early) if early is not None else await self._search(state, query, RETRIEVAL_TOP_K)
-
-        # All at once; they were run one after another. gather keeps the
-        # order it was given, so the list is still the main results first and
-        # then each term's, which is what the ranking below depends on.
-        found = await asyncio.gather(
-            main_search(), *(term_search(t) for t in (state.get("expanded_terms") or [])[:3])
         )
-        results = [r for batch in found for r in batch]
-
-        # Dedupe by (file, segment) keeping the first, highest-ranked copy,
-        # as the old pipeline did before handing one list to the evidence set.
-        seen, unique = set(), []
-        for r in results:
-            key = (r.get("file_id"), r.get("segment_id") if r.get("segment_id") is not None else r.get("chunk_id"))
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(r)
-
-        evidence = EvidenceSet()
-        evidence.add(unique, query)
-        logger.info({"event": "answer_agent.retrieve", "results": len(results), "evidence": len(evidence)})
-        return {"evidence": evidence}
-
-    async def _plan(self, state: AnswerState) -> AnswerState:
-        """Decide the path, and write the single-document answer meanwhile.
-
-        The draft does not depend on the decision, only on the evidence, so
-        it starts at the same moment as the coordinator instead of after it.
-        When the coordinator chooses several documents the draft is thrown
-        away; on gpt-oss-20b that costs a fraction of a cent, against about
-        two seconds saved on every question that takes the single path.
-        """
-        evidence: EvidenceSet = state["evidence"]
-        context = (await self._select_context(state))["context_chunks"]
-        # The draft's text is held until this decision is made: if the answer
-        # turns out to need several documents, the reader never sees it.
-        held = Deferred()
-        draft_task = asyncio.create_task(self._compose(state, context, sink=held))
-        try:
-            plan = await asyncio.wait_for(
-                coordinator.plan(
-                    state.get("message") or "",
-                    evidence.as_chunks(),
-                    scoped=state.get("file_id") is not None,
-                ),
-                timeout=COORDINATOR_DEADLINE,
-            )
-        except asyncio.TimeoutError:
-            logger.warning({"event": "answer_agent.coordinator_deadline", "seconds": COORDINATOR_DEADLINE})
-            plan = coordinator.Plan(reason="deadline")
-        except BaseException:
-            draft_task.cancel()
-            raise
-        progress = self._progress(state)
-        if plan.is_multi:
-            held.discard()
-            progress.stage("reading", documents=len(plan.assignments))
-            draft_task.cancel()
-            try:
-                await draft_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            return {"plan": plan}
-        progress.stage("writing")
-        held.release(progress)
-        return {"plan": plan, "draft": await draft_task,
-                "context_chunks": context, "mode": "single"}
+        plan = await coordinator.plan(
+            scope,
+            state.get("message") or "",
+            state.get("formatted_history") or "",
+            progress=self._progress(state),
+        )
+        return {"scope": scope, "plan": plan}
 
     def _route(self, state: AnswerState):
         plan = state["plan"]
         if not plan.is_multi:
-            return "verify"
-        evidence = state["evidence"].as_chunks()
+            return "answer"
         return [
             Send("document_worker", {
                 "state": state,
                 "assignment": a,
-                "seed": [c for c in evidence if c.get("file_id") == a.file_id],
+                "seed": [p for p in plan.found.values() if p.get("file_id") == a.file_id],
             })
             for a in plan.assignments
         ]
 
+    async def _answer(self, state: AnswerState) -> AnswerState:
+        plan = state["plan"]
+        passages = plan.passages
+        if plan.reason in ("gathered", "deadline"):
+            # Everything it read, not a choice: fit it to the context.
+            passages = chunk_selector.select(
+                passages, state.get("message") or "", token_budget=CONTEXT_TOKEN_BUDGET,
+            )
+        self._progress(state).stage("writing")
+        draft = await self._compose(state, passages, sink=self._progress(state))
+        return {"draft": draft, "context_chunks": passages, "mode": "single"}
+
     async def _document_worker(self, task: Dict[str, Any]) -> AnswerState:
         state, a = task["state"], task["assignment"]
         result = await answer_from_document(
-            store=self._store,
+            scope=state["scope"],
             composer=self._composer,
-            user_id=state["user_id"],
-            workspace_id=state.get("workspace_id"),
-            accessible_workspace_ids=state.get("accessible_ids"),
             file_id=a.file_id,
             file_name=a.file_name,
             question=state.get("message") or "",
@@ -378,6 +201,7 @@ class AnswerAgent:
             language=state.get("language") or "English",
             comprehension_level=state.get("comprehension_level") or "beginner",
             seed=task["seed"],
+            progress=self._progress(state),
         )
         return {"worker_results": [result]}
 
@@ -392,26 +216,18 @@ class AnswerAgent:
         progress = self._progress(state)
         progress.stage("writing")
         if not any(r.answered for r in results):
-            # No single document answered. The broad context still might, so
-            # fall back to the single path rather than refusing.
+            # No single document answered. What the coordinator read across
+            # all of them still might, so answer from that rather than refuse.
             logger.info({"event": "answer_agent.workers_empty_fallback"})
-            fallback = await self._select_context(state)
-            state = {**state, **fallback}
-            out = await self._generate(state)
-            return {**fallback, **out, "mode": "multi_fallback"}
+            passages = chunk_selector.select(
+                list(state["plan"].found.values()), state.get("message") or "",
+                token_budget=CONTEXT_TOKEN_BUDGET,
+            )
+            draft = await self._compose(state, passages, sink=progress)
+            return {"draft": draft, "context_chunks": passages, "mode": "multi_fallback"}
 
         draft = await writer.write(state.get("message") or "", results, sink=progress)
         return {"draft": draft, "context_chunks": chunks, "mode": "multi"}
-
-    async def _select_context(self, state: AnswerState) -> AnswerState:
-        evidence: EvidenceSet = state["evidence"]
-        chunks = chunk_selector.select(
-            evidence.as_chunks(),
-            state.get("rewritten_query") or state.get("message") or "",
-            token_budget=CONTEXT_TOKEN_BUDGET,
-        )
-        logger.info({"event": "answer_agent.select_context", "selected_chunks": len(chunks)})
-        return {"context_chunks": chunks}
 
     async def _compose(self, state: AnswerState, context: List[Dict[str, Any]], sink: Any = None):
         draft = await self._composer.compose(
@@ -423,12 +239,8 @@ class AnswerAgent:
             model=WORKER_MODEL,
             sink=sink,
         )
-        logger.info({"event": "answer_agent.generate", "kind": draft.kind})
+        logger.info({"event": "answer_agent.generate", "kind": draft.kind, "passages": len(context)})
         return draft
-
-    async def _generate(self, state: AnswerState) -> AnswerState:
-        draft = await self._compose(state, state.get("context_chunks") or [], sink=self._progress(state))
-        return {"draft": draft, "mode": state.get("mode") or "single"}
 
     async def _verify(self, state: AnswerState) -> AnswerState:
         draft = state["draft"]

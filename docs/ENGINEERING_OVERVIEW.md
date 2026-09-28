@@ -24,29 +24,31 @@ and taking payments since 2026-08-03.
 
 ## How an answer is made
 
-`api/agents/answer_agent.py`, one LangGraph graph:
+`api/agents/answer_agent.py`, one LangGraph graph. Retrieval is agentic: the
+model writes every search and judges what comes back (decided 2026-09-28).
 
 ```
-process_query ─► retrieve ─► plan ─┬──────────────────────────────┬─► verify ─► render
-                                   └─► document_worker × N ─► write┘
+research ─┬─► answer ──────────────────────────────┬─► verify ─► render
+          └─► document_worker × N ─► write ─────────┘
 ```
 
-1. **process_query**: related search terms (deadline 4s). The main search
-   starts at once when there is no conversation history to rewrite with.
-2. **retrieve**: hybrid search in Postgres (`hybrid_search`: vector, keyword
-   and literal, fused by rank), plus a small search per related term, all in
-   parallel. Scoped to the asker's workspaces.
-3. **plan**: the **coordinator** (`coordinator.py`) reads the question and each
-   candidate document's best passages and decides which documents it needs
-   (deadline 6s). Meanwhile the single-document answer is already being written.
-4. One document: that draft is the answer. Several: a **document worker**
-   (`document_worker.py`) per document, in parallel, each searching and
-   answering from its own document only; the **writer** (`writer.py`) combines
-   them and keeps every citation marker.
-5. **verify**: the **verifier** (`verifier.py`) checks each cited claim against
+1. **research**: the **coordinator** (`coordinator.py`) is a LangChain
+   `create_agent` tool loop over `tools.py`: `list_documents`, `search`,
+   `search_document`, `read_page`, all scoped to the asker's workspaces in SQL.
+   It searches until it has the answer, then decides through a `ToolStrategy`
+   tool: these passages answer it, or these documents each need a worker.
+   Limits: 8 tool calls, 45s. Cut off, it answers from everything it read.
+2. One set of passages: **answer** composes from exactly those. Several
+   documents: a **document worker** (`document_worker.py`) per document, the
+   same kind of agent confined to its one file, then the **writer**
+   (`writer.py`) combines them and keeps every citation marker.
+3. Model calls for the agents go through `ChatOpenAI` (`chat_models.py`) and
+   into the same cost ledger. DeepInfra ignores "a tool call is required" for
+   gpt-oss, so middleware re-asks a turn that comes back with no tool call.
+4. **verify**: the **verifier** (`verifier.py`) checks each cited claim against
    the page it cites, in parallel batches of 6. A wrong page is moved to the
    right one; a claim nothing supports is marked "could not confirm".
-6. **render** (`services/answer_composer.py`): markers become page links, links
+5. **render** (`services/answer_composer.py`): markers become page links, links
    the model invented are stripped.
 
 While it runs, the reader sees the current step with a clock and the text as
@@ -125,10 +127,11 @@ Wait for the deploy run, then confirm the live bundle changed.
 - Search ranks are fused, never scores: a cosine and a keyword rank share no scale.
 - More passages from the same search makes answers worse (top_k 40 scored below
   25). A search aimed at a different need helps. That is why workers exist.
-- A model choosing its own searches lost to the fixed pipeline (16.2 vs 17.0).
-  Models decide which documents; code decides everything the retriever can.
-- Related-term results are appended after the main 25 and ranked once. Ranking
-  them as separate searches pushed weak passages up and cost 5 HVAC questions.
+- Retrieval is the model's (2026-09-28), although an earlier model-chosen search
+  lost to the fixed pipeline (16.2 vs 17.0). First real runs on gpt-oss-20b: it
+  repeats searches and often never decides; Qwen3-235B as coordinator decided
+  and delegated properly. Seen passages come back as ids, identical searches
+  are not rerun, and model calls exceed tool calls so the last turn can decide.
 - The verifier runs at low effort in batches: same accuracy as medium, 37s to 8s.
 - Rejected after measuring: cross-encoder reranking, contextual retrieval, a
   per-document cap on search results.
@@ -139,4 +142,5 @@ Wait for the deploy run, then confirm the live bundle changed.
   `test_every_route_is_scoped.py` guards it.
 - Rate limits (30 questions, 10 uploads per minute per IP) are a first guess.
 - `nltk` has an open advisory with no fix; the affected code is never called.
-- Multi-document answers take 30-40s, mostly the workers and the writer thinking.
+- Agentic answers take 40-55s against about 10s for the fixed pipeline: each
+  search round is a model call.

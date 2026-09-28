@@ -340,8 +340,6 @@ async def run_query_pipeline(
         return {
             "response": response,
             "context_chunks": topK_chunks,
-            "rewritten_query": message,
-            "expanded_terms": [],
             "mode": "fallback",
             "error": str(agent_error),
             # Only the fallback's own calls. Whatever the failed graph spent

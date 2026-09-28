@@ -115,6 +115,8 @@ async def main() -> None:
                 f"context_chunks={run.get('context_chunks')}"
                 + (f" cost=${cost:.4f}" if cost is not None else "")
             )
+            for q in run.get("searches") or []:
+                print(f"    searched: {q}")
             for w in run.get("workers") or []:
                 print(f"    document {w.get('file_id')}: {w.get('kind')}, {w.get('chunks')} chunks")
             if v:

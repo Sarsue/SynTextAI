@@ -235,11 +235,21 @@ def cost_ledger():
 
 
 def _record_usage(payload: Dict[str, Any], body: Dict[str, Any]) -> None:
+    if isinstance(body, dict):
+        record_usage(str(payload.get("model") or "unknown"), body.get("usage") or {})
+
+
+def record_usage(model: str, usage: Dict[str, Any]) -> None:
+    """Add one response's usage to the open ledger, if there is one.
+
+    Public because the agents' LangChain models report through here too
+    (api/agents/chat_models.py), so a question's cost is one ledger whichever
+    client made the call.
+    """
     ledger = _ledger.get()
-    if ledger is None or not isinstance(body, dict):
+    if ledger is None or not isinstance(usage, dict):
         return
-    usage = body.get("usage") or {}
-    row = ledger.setdefault(str(payload.get("model") or "unknown"), {
+    row = ledger.setdefault(model or "unknown", {
         "calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
     })
     row["calls"] += 1

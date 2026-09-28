@@ -926,6 +926,52 @@ class AsyncFileRepository(AsyncBaseRepository):
                 logger.error(f"Could not read pages for file {file_id}: {e}")
                 return []
 
+    async def read_page_for(
+        self,
+        *,
+        user_id: int,
+        file_id: int,
+        page_number: int,
+        workspace_id: Optional[int] = None,
+        accessible_workspace_ids: Optional[List[int]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """One whole page, shaped like a search result, if this reader may see it.
+
+        For the agents' read_page tool: a passage is a piece of a page, and a
+        table or a clause often runs past the piece that matched. The ids come
+        from a model, so the page is scoped exactly as hybrid_search scopes a
+        search, and a page outside the reader's workspaces is simply not found.
+        """
+        if workspace_id is not None:
+            scope = "f.workspace_id = :workspace_id"
+        elif accessible_workspace_ids:
+            scope = ("(f.workspace_id = ANY(:accessible_workspace_ids)"
+                     " OR (f.workspace_id IS NULL AND f.user_id = :user_id))")
+        else:
+            scope = "f.user_id = :user_id"
+        async with self.get_async_session() as session:
+            try:
+                row = (await session.execute(
+                    text("""SELECT s.id, s.file_id, s.page_number, s.content, s.meta_data,
+                                   f.file_name, f.file_url
+                            FROM segments s JOIN files f ON f.id = s.file_id
+                            WHERE s.file_id = :file_id AND s.page_number = :page AND """ + scope + """
+                            ORDER BY s.id LIMIT 1"""),
+                    {"file_id": int(file_id), "page": int(page_number), "user_id": user_id,
+                     "workspace_id": workspace_id,
+                     "accessible_workspace_ids": list(accessible_workspace_ids or [])},
+                )).first()
+                if row is None:
+                    return None
+                return {
+                    "segment_id": row.id, "file_id": row.file_id, "page_number": row.page_number,
+                    "content": row.content or "", "meta_data": row.meta_data or {},
+                    "file_name": row.file_name, "file_url": row.file_url,
+                }
+            except Exception as e:
+                logger.error(f"Could not read page {page_number} of file {file_id}: {e}")
+                return None
+
     async def get_page_figure(self, file_id: int, page_number: int) -> Optional[str]:
         """The stored picture of one page, if that page had one.
 

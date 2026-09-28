@@ -22,9 +22,11 @@ import './StreamingAnswer.css';
  *   which is how the final answer numbers them too.
  */
 
-const STAGES: Record<string, (info: Record<string, number>) => string> = {
-    searching: () => 'Searching your documents',
-    reading: (i) => `Reading ${i.documents ?? ''} ${i.documents === 1 ? 'document' : 'documents'}`.replace('  ', ' '),
+/** The agents choose their own searches, so the step names what they chose:
+ *  the query being searched, the document being read. */
+const STAGES: Record<string, (info: Record<string, number | string>) => string> = {
+    searching: (i) => (i.query ? `Searching \u201c${i.query}\u201d` : 'Searching your documents'),
+    reading: (i) => (i.document ? `Reading ${i.document}` : 'Reading your documents'),
     writing: () => 'Writing',
     checking: (i) => `Checking ${i.claims} ${i.claims === 1 ? 'claim' : 'claims'}`,
 };

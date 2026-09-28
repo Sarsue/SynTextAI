@@ -14,17 +14,15 @@ as plain numbers and makes nothing clickable, and the progress line says the
 citations are being checked. Decided with Osas 2026-09-23: a few seconds of
 clearly labelled, unclickable, unchecked text is worth the wait it removes.
 
-THREE PIECES
+TWO PIECES
 
   Progress        where progress goes. The worker's publisher sends it to the
                   browser; NO_PROGRESS drops it (tests, the MCP path, anything
-                  with no one watching).
+                  with no one watching). Stages carry what the agents are
+                  doing: the query being searched, the document being read.
   RefusalGate     holds back the opening of an answer until it cannot be the
                   refusal word, so a question the documents do not answer
                   never flashes "INSUFFICIENT" on screen.
-  Deferred        holds the single-document draft, which starts before the
-                  coordinator has decided, until it is known to be the answer.
-                  On the multi-document path it is discarded unseen.
 """
 from __future__ import annotations
 
@@ -91,42 +89,6 @@ class RefusalGate:
             self._sink.reset()
         self._held = ""
         self._state = "waiting"
-
-
-class Deferred:
-    """Holds text until told where it goes, or that it goes nowhere."""
-
-    def __init__(self) -> None:
-        self._pieces: List[Any] = []
-        self._target: Optional[Progress] = None
-        self._discarded = False
-
-    def text(self, piece: str) -> None:
-        if self._discarded:
-            return
-        if self._target is not None:
-            self._target.text(piece)
-        else:
-            self._pieces.append(("text", piece))
-
-    def reset(self) -> None:
-        if self._discarded:
-            return
-        if self._target is not None:
-            self._target.reset()
-        else:
-            self._pieces = []
-
-    def release(self, target: Progress) -> None:
-        for kind, piece in self._pieces:
-            if kind == "text":
-                target.text(piece)
-        self._pieces = []
-        self._target = target
-
-    def discard(self) -> None:
-        self._discarded = True
-        self._pieces = []
 
 
 Publish = Callable[[Dict[str, Any]], Awaitable[Any]]

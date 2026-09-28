@@ -356,11 +356,15 @@ def _run_record(result: Dict[str, Any]) -> Dict[str, Any]:
     # loop the coordinator replaced. Nothing writes them any more.
     keep = {
         k: result.get(k)
-        for k in ("mode", "rewritten_query", "expanded_terms",
-                  "error",
-                  # Which path the coordinator chose and why, and per document
-                  # worker whether that document answered.
+        for k in ("mode", "error",
+                  # How the coordinator decided (answer, delegate, gathered,
+                  # nothing, deadline, error), and per document worker
+                  # whether that document answered.
                   "plan", "workers",
+                  # Every query the models chose, in order. Runs before
+                  # 2026-09-28 carry rewritten_query and expanded_terms
+                  # instead, from the fixed pipeline this replaced.
+                  "searches",
                   # What the provider charged for this question, per model.
                   "cost",
                   # What the verifier found: how many cited claims held up,

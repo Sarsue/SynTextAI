@@ -305,3 +305,15 @@ def _no_real_model_calls(monkeypatch):
         return _Refusing()
 
     monkeypatch.setattr(llm_service, "get_client", _client)
+
+    # The agents' LangChain model has its own client, so it is refused here
+    # too. Tests of the agents script one (test_answer_agent.py ScriptedModel).
+    from api.agents import chat_models
+
+    def _refusing_model(*args, **kwargs):
+        raise AssertionError(
+            "This test built a real agent model. Replace chat_models.chat_model "
+            "with a scripted one. See test_answer_agent.py."
+        )
+
+    monkeypatch.setattr(chat_models, "chat_model", _refusing_model)

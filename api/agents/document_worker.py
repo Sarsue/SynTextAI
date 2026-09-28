@@ -1,45 +1,80 @@
-"""A document worker: answer the question from ONE document, and nothing else.
+"""A document worker: an agent that searches ONE document until it has what
+the coordinator sent it for, then answers from that document alone.
 
 WHY ONE DOCUMENT PER WORKER
 
 Every measurement on this model points the same way: it does worse with more
-text in one prompt and better when each prompt is aimed at one thing. top_k 40
-put two more correct sources in front of it and scored lower than top_k 25.
-A search loop aimed at a second information need scored higher. A worker is the
-same lever pushed further: its search is confined to one document, so a manual
-that is ranked twelfth across the workspace is ranked first inside itself, and
-the answer it writes is never distracted by four similar manuals.
+text in one prompt and better when each prompt is aimed at one thing. A
+worker's search is confined to one document, so a manual that is ranked
+twelfth across the workspace is ranked first inside itself, and the answer it
+writes is never distracted by four similar manuals.
+
+HOW IT SEARCHES
+
+Like the coordinator, the model controls it: it writes the queries, judges the
+passages and searches again. It starts from what the coordinator already found
+in this document, and its tools cannot leave the document: the scope is one
+file, and tools.Scope ignores any other id the model names.
 
 WHAT IT RETURNS
 
-A Draft from the same compose step the single-document path uses, so the
-grounding rules, the refusal word and the citation markers are identical and
-nothing about writing an answer exists twice. A worker whose document does not
-answer returns the refusal, and the writer leaves it out.
+A Draft from the same compose step the single path uses, so the grounding
+rules, the refusal word and the citation markers are identical and nothing
+about writing an answer exists twice. A worker whose document does not answer
+returns the refusal, and the writer leaves it out.
 """
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+import os
+from dataclasses import dataclass, field, replace
+from typing import Any, Dict, List
 
-from api.agents.evidence import EvidenceSet
+from pydantic import BaseModel, Field
+
+from api.agents import chat_models
 from api.agents.models import WORKER_MODEL
+from api.agents.progress import NO_PROGRESS, Progress
+from api.agents.tools import Scope, _listing, document_tools, found_passages, passage_id, searches_made
 from api.rag.chunk_selector import SmartChunkSelector
-from api.services.llm_service import MAX_TOKENS_CONTEXT, get_text_embedding
 from api.services.answer_composer import Draft
+from api.services.llm_service import MAX_TOKENS_CONTEXT
 
 logger = logging.getLogger(__name__)
 
-# Passages one worker searches for inside its document. Fewer than the broad
-# search's 25 because the pool is one document, not a workspace.
-WORKER_TOP_K = 12
+MAX_TOOL_CALLS = int(os.getenv("WORKER_MAX_TOOL_CALLS", "5"))
+# Always more than tool calls, so the last turn can decide (coordinator.py).
+MAX_MODEL_CALLS = MAX_TOOL_CALLS + 2
+DEADLINE = float(os.getenv("WORKER_DEADLINE", "40"))
+MAX_PASSAGES = 10
 
-# A worker's share of the context. Smaller than the single path's on purpose:
-# a small prompt aimed at one document is the whole reason the worker exists.
+# A worker's share of the context when it answers from everything it read.
+# Smaller than the single path's on purpose: a small prompt aimed at one
+# document is the whole reason the worker exists.
 WORKER_TOKEN_BUDGET = max(2000, int(MAX_TOKENS_CONTEXT * 0.1))
 
 _selector = SmartChunkSelector()
+
+
+class Passages(BaseModel):
+    """Your decision, once you have searched this document enough."""
+
+    passage_ids: List[str] = Field(
+        default_factory=list,
+        description=("Ids of the passages from this document that answer, most "
+                     "important first. Empty if this document does not answer."),
+    )
+
+
+def _prompt(file_name: str, file_id: int) -> str:
+    return f"""You find the passages in ONE document, "{file_name}" (document_id {file_id}), that answer a question. Another step writes the answer from the passages you choose.
+
+- Search this document with search_document. Phrase queries the way the document would say it. A question with several parts needs a search for each part.
+- Judge what comes back: a passage counts only if it states what is asked. When nothing answers, search again with different words, or read_page when a passage is cut off or a table continues.
+- Every passage you have read stays available by its id, so never repeat a search.
+- Stop as soon as you have what is needed. You have at most {MAX_TOOL_CALLS} tool calls; after that you must decide.
+
+Then give passage_ids, most important first, or an empty list if this document does not answer."""
 
 
 @dataclass
@@ -49,19 +84,36 @@ class WorkerResult:
     focus: str
     draft: Draft
     chunks: List[Dict[str, Any]] = field(default_factory=list)
+    searches: List[str] = field(default_factory=list)
 
     @property
     def answered(self) -> bool:
         return self.draft.kind in ("answer", "uncited")
 
 
+def _agent(scope: Scope, file_id: int, file_name: str, progress: Progress, seen: set):
+    from langchain.agents import create_agent
+    from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
+    from langchain.agents.structured_output import ToolStrategy
+
+    return create_agent(
+        chat_models.chat_model(WORKER_MODEL),
+        document_tools(scope, progress, names={file_id: file_name}, seen=seen),
+        system_prompt=_prompt(file_name, file_id),
+        response_format=ToolStrategy(Passages),
+        middleware=[
+            ToolCallLimitMiddleware(run_limit=MAX_TOOL_CALLS, exit_behavior="continue"),
+            ModelCallLimitMiddleware(run_limit=MAX_MODEL_CALLS, exit_behavior="end"),
+            chat_models.require_tool_call("Passages"),
+        ],
+        name="document_worker",
+    )
+
+
 async def answer_from_document(
     *,
-    store: Any,
+    scope: Scope,
     composer: Any,
-    user_id: int,
-    workspace_id: Optional[int],
-    accessible_workspace_ids: Optional[List[int]],
     file_id: int,
     file_name: str,
     question: str,
@@ -70,44 +122,51 @@ async def answer_from_document(
     language: str,
     comprehension_level: str,
     seed: List[Dict[str, Any]],
+    progress: Progress = NO_PROGRESS,
 ) -> WorkerResult:
-    # The passages the broad search already found in this document count as
-    # one search. The worker then searches this document for the whole
-    # question AND for its focus, and the evidence set fuses all three by rank.
-    #
-    # Both, because the focus alone narrows too far. Asked what to track "for
-    # taxes and for travel expenses", the coordinator gave IRS 334 the focus
-    # "car expenses"; a search for that found the car pages and never the
-    # meals pages the answer also needed (benchmark q19, 2026-09-22).
-    evidence = EvidenceSet()
-    evidence.add(seed, question)
-    queries = [question] + ([focus] if focus and focus != question else [])
-    for query in queries:
-        try:
-            emb = await get_text_embedding(query)
-            found = await store.file_repo.hybrid_search(
-                user_id=user_id,
-                query=query,
-                query_embedding=emb,
-                workspace_id=workspace_id,
-                file_id=file_id,
-                top_k=WORKER_TOP_K,
-                accessible_workspace_ids=accessible_workspace_ids,
-            )
-            evidence.add(found or [], query)
-        except Exception as e:
-            # Whatever was already found is still this document's evidence.
-            logger.warning({"event": "document_worker.search_failed", "file_id": file_id,
-                            "error": str(e)[:300]})
-
-    chunks = _selector.select(evidence.as_chunks(), question, token_budget=WORKER_TOKEN_BUDGET)
+    own = replace(scope, file_id=file_id)
     asked = question if not focus or focus == question else (
         f"{question}\n\n(From this document, find: {focus}. Other documents cover "
         "the rest, so answer only what this one says.)"
     )
+    opening = asked
+    seen: set = set()
+    if seed:
+        # Marked as read, so a search that finds them again says so.
+        opening += ("\n\nAlready found in this document:\n\n"
+                    + _listing(seed, "", seen))
+
+    found: Dict[str, Dict[str, Any]] = {passage_id(p): p for p in seed}
+    chosen: List[Dict[str, Any]] = []
+    decided = False
+    searches: List[str] = []
+    try:
+        state, _ = await chat_models.run_agent(
+            _agent(own, file_id, file_name, progress, seen),
+            {"messages": [{"role": "user", "content": opening}]},
+            DEADLINE,
+        )
+        messages = state.get("messages") or []
+        searches = searches_made(messages)
+        for pid, p in found_passages(messages).items():
+            found.setdefault(pid, p)
+        decision = state.get("structured_response")
+        if decision is not None:
+            decided = True
+            chosen = [found[i] for i in dict.fromkeys(decision.passage_ids) if i in found][:MAX_PASSAGES]
+    except Exception as e:
+        # Whatever the coordinator already found here is still this
+        # document's evidence.
+        logger.warning({"event": "document_worker.failed", "file_id": file_id, "error": str(e)[:300]})
+
+    if not decided:
+        # Cut off or failed before deciding: answer from everything it read.
+        # A decision that this document does not answer stands, and the
+        # empty list becomes the refusal the writer leaves out.
+        chosen = _selector.select(list(found.values()), question, token_budget=WORKER_TOKEN_BUDGET)
     draft = await composer.compose(
-        asked, formatted_history, chunks, language, comprehension_level, model=WORKER_MODEL,
+        asked, formatted_history, chosen, language, comprehension_level, model=WORKER_MODEL,
     )
-    logger.info({"event": "document_worker.done", "file_id": file_id,
-                 "kind": draft.kind, "chunks": len(chunks)})
-    return WorkerResult(file_id, file_name, focus, draft, chunks)
+    logger.info({"event": "document_worker.done", "file_id": file_id, "kind": draft.kind,
+                 "chunks": len(chosen), "searches": len(searches)})
+    return WorkerResult(file_id, file_name, focus, draft, chosen, searches)

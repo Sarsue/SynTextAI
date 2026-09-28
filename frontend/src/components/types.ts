@@ -79,7 +79,9 @@ export interface Message {
 export interface AnswerProgress {
     historyId: number;
     stage: 'searching' | 'reading' | 'writing' | 'checking' | string;
-    info: Record<string, number>;
+    /** What the step is about: the query being searched, the document being
+     *  read, how many claims are being checked. */
+    info: Record<string, number | string>;
     text: string;
     /** Seconds since the answer started, as of the latest step. */
     elapsed: number;
