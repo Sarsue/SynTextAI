@@ -56,6 +56,7 @@ from ..core.limits import assert_can_ask
 from ..core.log_safety import safe_text
 from ..core.permissions import Capability, refusal
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
+from ..repositories.async_file_repository import SearchUnavailable
 from ..repositories.repository_manager import RepositoryManager
 from ..services.llm_service import get_text_embedding
 
@@ -209,15 +210,22 @@ async def search_documents(
     logger.info("search len=%s workspace=%s", len(query), workspace_id)
 
     query_embedding = await get_text_embedding(query)
-    chunks = await store.file_repo.hybrid_search(
-        user_id=user_id,
-        query=query,
-        query_embedding=query_embedding,
-        workspace_id=workspace_id,
-        file_id=file_id,
-        top_k=RETRIEVE_CHUNKS,
-        accessible_workspace_ids=accessible_ids,
-    )
+    try:
+        chunks = await store.file_repo.hybrid_search(
+            user_id=user_id,
+            query=query,
+            query_embedding=query_embedding,
+            workspace_id=workspace_id,
+            file_id=file_id,
+            top_k=RETRIEVE_CHUNKS,
+            accessible_workspace_ids=accessible_ids,
+        )
+    except SearchUnavailable:
+        # Not "nothing matched": the search did not run. See hybrid_search.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search is unavailable right now. Try again in a minute.",
+        )
 
     # Grouped into pages, keeping the order retrieval gave us. The first chunk
     # of a page is its best-scoring one, so the snippet shown is the passage

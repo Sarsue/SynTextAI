@@ -107,6 +107,11 @@ def _serialize_file(file_orm) -> Dict[str, Any]:
     }
 
 
+
+class SearchUnavailable(RuntimeError):
+    """The search could not run. Not the same as a search that found nothing."""
+
+
 class AsyncFileRepository(AsyncBaseRepository):
     """Async repository for file operations."""
 
@@ -901,8 +906,16 @@ class AsyncFileRepository(AsyncBaseRepository):
                     })
                 return out
             except Exception as e:
+                # Raised, not swallowed. This returned [] until 2026-09-29, and
+                # [] means "nothing in your documents matches": the agent read
+                # it as "not found", searched again, and told the customer
+                # their documents did not cover the question, when the truth
+                # was that the database had failed. The search box, the Claude
+                # connector and document drafting made the same claim. A
+                # customer told "try again" retries; one told "your documents
+                # don't say this" believes it.
                 logger.error(f"Error performing hybrid_search: {e}", exc_info=True)
-                return []
+                raise SearchUnavailable("search failed") from e
 
     async def get_file_pages(self, file_id: int) -> List[Dict[str, Any]]:
         """Every page of a document, in order, as extracted.

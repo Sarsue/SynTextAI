@@ -46,6 +46,7 @@ from ..core.limits import assert_can_ask
 from ..core.permissions import Capability
 from ..core.rate_limit import limiter, CHAT_RATE_LIMIT
 from ..core.urls import public_app_url
+from ..repositories.async_file_repository import SearchUnavailable
 from ..repositories.repository_manager import RepositoryManager
 from ..services.llm_service import get_text_embedding
 
@@ -239,13 +240,17 @@ async def _search_knowledge(
     logger.info("mcp search len=%s workspaces=%s", len(query), len(reachable))
 
     embedding = await get_text_embedding(query)
-    chunks = await store.file_repo.hybrid_search(
-        user_id=principal.user_id,
-        query=query,
-        query_embedding=embedding,
-        top_k=RETRIEVE_CHUNKS,
-        accessible_workspace_ids=reachable,
-    )
+    try:
+        chunks = await store.file_repo.hybrid_search(
+            user_id=principal.user_id,
+            query=query,
+            query_embedding=embedding,
+            top_k=RETRIEVE_CHUNKS,
+            accessible_workspace_ids=reachable,
+        )
+    except SearchUnavailable:
+        # The search did not run, which is not the same as finding nothing.
+        return _tool_text("Search is unavailable right now. Try again in a minute.", is_error=True)
 
     pages: Dict[Any, Dict[str, Any]] = {}
     for chunk in chunks or []:

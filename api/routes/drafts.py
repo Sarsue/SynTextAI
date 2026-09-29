@@ -28,6 +28,7 @@ from ..core.permissions import Capability, assert_workspace_capability
 from ..core.rate_limit import limiter, UPLOAD_RATE_LIMIT
 from ..core.utils import upload_bytes_to_gcs
 from ..core.websocket_manager import websocket_manager
+from ..repositories.async_file_repository import SearchUnavailable
 from ..repositories.repository_manager import RepositoryManager
 from ..services.document_export import markdown_to_docx, markdown_to_pdf, safe_filename
 from ..services.llm_service import gradient_chat
@@ -154,13 +155,20 @@ async def generate_draft(
             detail="Could not read the request. Try again.",
         )
 
-    passages = await store.file_repo.hybrid_search(
-        user_id=user_id,
-        query=body.prompt,
-        query_embedding=embedding,
-        workspace_id=body.workspace_id,
-        top_k=DRAFT_TOP_K,
-    )
+    try:
+        passages = await store.file_repo.hybrid_search(
+            user_id=user_id,
+            query=body.prompt,
+            query_embedding=embedding,
+            workspace_id=body.workspace_id,
+            top_k=DRAFT_TOP_K,
+        )
+    except SearchUnavailable:
+        # Not "nothing matched": the search did not run. See hybrid_search.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search is unavailable right now. Try again in a minute.",
+        )
     if not passages:
         # The same refusal a question gets. Writing a document from nothing is
         # the failure this whole product is built against: it would be fluent,

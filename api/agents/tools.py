@@ -24,13 +24,14 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 
 from api.agents.progress import NO_PROGRESS, Progress
+from api.repositories.async_file_repository import SearchUnavailable
 from api.services.llm_service import get_text_embedding
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,10 @@ def _listing(passages: List[Dict[str, Any]], empty: str, seen: Optional[set] = N
     return "\n\n".join(out)
 
 
+# What a tool says when its search could not run. Told plainly, so the model
+# stops rather than concluding the documents are silent.
+SEARCH_DOWN = "Search is unavailable right now. Do not conclude the documents lack the answer; decide with what you have."
+
 # An identical search, asked again, is not run again. The model repeated
 # "Ontario minimum wage" word for word on the first real runs (2026-09-28).
 REPEATED = "You already ran exactly this search. Search for something different, or decide."
@@ -121,22 +126,38 @@ class Scope:
     accessible_ids: Optional[List[int]] = None
     # Set when the question was asked about one file: every tool stays in it.
     file_id: Optional[int] = None
+    # Every search that could not run, so an empty result is reported as an
+    # outage and never as "your documents don't cover this". A list, not a
+    # flag, because a document worker searches through a copy of this scope
+    # (dataclasses.replace) and the copy shares the list, so a failure inside
+    # a worker still reaches the answer step.
+    failures: List[str] = field(default_factory=list)
+
+    @property
+    def search_failed(self) -> bool:
+        return bool(self.failures)
 
     async def search(self, query: str, file_id: Optional[int] = None) -> List[Dict[str, Any]]:
         # A scope that is one file stays one file, whatever id the model asks
         # for: a document worker is told its document, and cannot wander.
         if self.file_id is not None:
             file_id = self.file_id
-        emb = await get_text_embedding(query)
-        found = await self.store.file_repo.hybrid_search(
-            user_id=self.user_id,
-            query=query,
-            query_embedding=emb,
-            workspace_id=self.workspace_id,
-            file_id=file_id,
-            top_k=SEARCH_TOP_K,
-            accessible_workspace_ids=self.accessible_ids,
-        ) or []
+        try:
+            emb = await get_text_embedding(query)
+            found = await self.store.file_repo.hybrid_search(
+                user_id=self.user_id,
+                query=query,
+                query_embedding=emb,
+                workspace_id=self.workspace_id,
+                file_id=file_id,
+                top_k=SEARCH_TOP_K,
+                accessible_workspace_ids=self.accessible_ids,
+            ) or []
+        except Exception as e:
+            # The embedding call failing is the same outage as the database
+            # failing: either way nothing was searched.
+            self.failures.append(type(e).__name__)
+            raise SearchUnavailable(str(e)[:200]) from e
         out = []
         for p in found:
             p = dict(p)
@@ -188,7 +209,10 @@ def research_tools(scope: Scope, progress: Progress = NO_PROGRESS) -> List[BaseT
         if _repeat(asked, None, query):
             return REPEATED, []
         progress.stage("searching", query=query)
-        found = await scope.search(query)
+        try:
+            found = await scope.search(query)
+        except SearchUnavailable:
+            return SEARCH_DOWN, []
         return _listing(found, "Nothing found. Try other words.", seen), found
 
     return [list_documents, search, *document_tools(scope, progress, seen=seen)]
@@ -206,7 +230,10 @@ def document_tools(scope: Scope, progress: Progress = NO_PROGRESS,
         """Search inside one document for passages about `query`."""
         if _repeat(asked, int(document_id), query):
             return REPEATED, []
-        found = await scope.search(query, file_id=int(document_id))
+        try:
+            found = await scope.search(query, file_id=int(document_id))
+        except SearchUnavailable:
+            return SEARCH_DOWN, []
         name = (names or {}).get(int(document_id)) or (found[0].get("file_name") if found else None)
         progress.stage("reading", document=name or "a document", query=query)
         return _listing(found, "Nothing found in that document. Try other words.", seen), found

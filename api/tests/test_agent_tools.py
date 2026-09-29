@@ -57,3 +57,16 @@ async def test_a_question_about_one_file_cannot_read_another(store, tenant):
 
     scope = Scope(store, tenant.owner, workspace_id=workspace, file_id=a)
     assert await scope.page(b, 1) is None
+
+
+async def test_a_database_error_during_search_is_raised_not_returned_as_empty(store, tenant):
+    """An empty list means "nothing matched". A failed query must not look like one."""
+    from api.repositories.async_file_repository import SearchUnavailable
+
+    workspace = await tenant.workspace("Docs")
+    with pytest.raises(SearchUnavailable):
+        # Three dimensions against a 1024-dimension column: Postgres refuses.
+        await store.file_repo.hybrid_search(
+            user_id=tenant.owner, query="anything", query_embedding=[0.1, 0.2, 0.3],
+            workspace_id=workspace, top_k=5,
+        )

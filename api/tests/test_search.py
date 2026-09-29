@@ -123,6 +123,26 @@ async def test_somebody_with_no_workspaces_gets_nothing_rather_than_an_error(
     assert response.json()["results"] == []
 
 
+async def test_a_search_that_could_not_run_says_so(
+    store, tenant, client, paying, monkeypatch
+):
+    """503, not an empty result: "nothing matched" would be a false answer."""
+    from api.repositories.async_file_repository import SearchUnavailable
+
+    async def fake_embed(_text):
+        return [0.01] * 1024
+
+    async def broken_search(**kwargs):
+        raise SearchUnavailable("connection reset")
+
+    monkeypatch.setattr(search_route, "get_text_embedding", fake_embed)
+    monkeypatch.setattr(store.file_repo, "hybrid_search", broken_search)
+
+    response = await client.as_(tenant.owner).get("/api/v1/search?q=anything")
+
+    assert response.status_code == 503
+
+
 async def test_chunks_are_grouped_into_the_pages_a_person_opens(
     store, tenant, client, paying, monkeypatch
 ):

@@ -415,3 +415,55 @@ async def test_when_the_search_budget_is_spent_only_the_decision_is_left(monkeyp
     assert out["plan"] == "answer" and composer.seen == [[1]]
     assert len(store.file_repo.calls) == coordinator.MAX_TOOL_CALLS
     assert offered[-1] == ["Findings"]
+
+
+# --- a search that could not run is not a search that found nothing -----------
+
+async def test_a_failed_search_is_reported_as_an_outage_not_as_not_found(agents, stub_models):
+    """Until 2026-09-29 a database error came back as an empty list, and the
+    customer was told their documents did not cover the question."""
+    from api.agents.answer_agent import SEARCH_UNAVAILABLE
+    from api.repositories.async_file_repository import SearchUnavailable
+
+    agents["coordinator"] = [
+        turn(("search", {"query": "vacation"})),
+        turn(("Findings", {"passage_ids": []})),
+    ]
+    store, composer = FakeStore(), FakeComposer()
+
+    async def broken(**kw):
+        raise SearchUnavailable("connection reset")
+
+    store.file_repo.hybrid_search = broken
+    out = await _ask(store, composer)
+    assert out["response"] == SEARCH_UNAVAILABLE
+    assert composer.seen == []  # never asked to write "not in your documents"
+
+
+async def test_a_failure_inside_a_worker_reaches_the_answer_step():
+    from dataclasses import replace
+    from api.agents.tools import Scope
+    from api.repositories.async_file_repository import SearchUnavailable
+
+    class Broken:
+        async def hybrid_search(self, **kw):
+            raise SearchUnavailable("down")
+
+    class S:
+        file_repo = Broken()
+
+    parent = Scope(store=S(), user_id=1, workspace_id=1)
+    worker = replace(parent, file_id=7)
+
+    async def fake_embed(text):
+        return [0.0]
+
+    import api.agents.tools as tools
+    real = tools.get_text_embedding
+    tools.get_text_embedding = fake_embed
+    try:
+        with pytest.raises(SearchUnavailable):
+            await worker.search("anything")
+    finally:
+        tools.get_text_embedding = real
+    assert parent.search_failed

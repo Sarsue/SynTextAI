@@ -36,11 +36,15 @@ from api.agents.models import WORKER_MODEL
 from api.agents.progress import NO_PROGRESS, Progress
 from api.agents.tools import Scope
 from api.rag.chunk_selector import SmartChunkSelector
+from api.services.answer_composer import Draft
 from api.services.llm_service import MAX_TOKENS_CONTEXT
 
 logger = logging.getLogger(__name__)
 
 chunk_selector = SmartChunkSelector()
+
+SEARCH_UNAVAILABLE = ("I couldn't search your documents just now, so I can't answer yet. "
+                      "Please try again in a minute.")
 
 # Room for the passages when the answer is written from everything the
 # coordinator read, because it ran out of time or calls before choosing.
@@ -230,6 +234,15 @@ class AnswerAgent:
         return {"draft": draft, "context_chunks": chunks, "mode": "multi"}
 
     async def _compose(self, state: AnswerState, context: List[Dict[str, Any]], sink: Any = None):
+        scope = state.get("scope")
+        if not context and scope is not None and scope.search_failed:
+            # Nothing to answer from because searching failed, not because the
+            # documents are silent. Saying "not in your documents" here would
+            # be false, and believed.
+            logger.warning({"event": "answer_agent.search_unavailable"})
+            if sink is not None:
+                sink.text(SEARCH_UNAVAILABLE)
+            return Draft.final(SEARCH_UNAVAILABLE)
         draft = await self._composer.compose(
             state.get("message") or "",
             state.get("formatted_history") or "",
