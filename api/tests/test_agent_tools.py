@@ -65,8 +65,10 @@ async def test_a_database_error_during_search_is_raised_not_returned_as_empty(st
 
     workspace = await tenant.workspace("Docs")
     with pytest.raises(SearchUnavailable):
-        # Three dimensions against a 1024-dimension column: Postgres refuses.
+        # An empty vector is rejected when Postgres reads the query, rows or
+        # no rows. (A wrong-length one is not: in an empty workspace nothing
+        # is ever compared, so nothing fails.)
         await store.file_repo.hybrid_search(
-            user_id=tenant.owner, query="anything", query_embedding=[0.1, 0.2, 0.3],
+            user_id=tenant.owner, query="anything", query_embedding=[],
             workspace_id=workspace, top_k=5,
         )
